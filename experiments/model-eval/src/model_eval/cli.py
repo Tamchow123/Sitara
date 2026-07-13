@@ -27,7 +27,7 @@ from .budget import BudgetError
 from .config import ConfigError, load_candidates
 from .contact_sheet import build_contact_sheet
 from .replicate_client import ProviderGateError, default_adapter_factory
-from .result_store import ResultStore
+from .result_store import ResultStore, assess_run_completeness
 from .runner import Runner, RunnerError, load_stage_bundle, plan_summary
 from .scoring import build_scoring_sheet
 from .terms import write_terms_snapshot
@@ -145,32 +145,63 @@ def cmd_run(args: argparse.Namespace) -> int:
             f"  not retried: {len(outcome.previously_failed)} previously failed "
             "(delete their result records and use a new run id to retry)"
         )
+    for model, reason in outcome.disabled_models.items():
+        print(
+            f"  DISABLED: {model} after a deterministic provider rejection — "
+            f"{reason}. Fix its input configuration before the next run."
+        )
     if outcome.halted_reason:
         print(f"  HALTED: {outcome.halted_reason}")
     print(f"Results: {runner.run_dir}")
     return 0 if not outcome.halted_reason else 1
 
 
-def _store_for(run_id: str) -> ResultStore:
-    run_dir = OUTPUTS_DIR / "runs" / run_id
+def _store_for(run_id: str, outputs_dir: str | None = None) -> ResultStore:
+    base = Path(outputs_dir) if outputs_dir else OUTPUTS_DIR
+    run_dir = base / "runs" / run_id
     if not run_dir.exists():
         raise SystemExit(f"no such run: {run_id} (looked in {run_dir})")
     return ResultStore(run_dir)
 
 
+def _check_reviewable(store: ResultStore, allow_partial: bool) -> bool:
+    """Refuse review artefacts for incomplete runs unless --allow-partial.
+
+    Returns True when the run is partial (artefacts must carry the PARTIAL
+    banner)."""
+    problems = assess_run_completeness(store.run_dir)
+    if not problems:
+        return False
+    if not allow_partial:
+        bullet = "\n  - ".join(problems)
+        raise SystemExit(
+            "REFUSED: this run is incomplete and NOT valid for model "
+            f"selection:\n  - {bullet}\n"
+            "Finish or resume the run first. For debugging artefacts only, "
+            "rerun with --allow-partial (outputs are prominently marked "
+            "PARTIAL / NOT VALID FOR MODEL SELECTION)."
+        )
+    print("WARNING: generating PARTIAL artefacts — not valid for model selection:")
+    for p in problems:
+        print(f"  - {p}")
+    return True
+
+
 def cmd_contact_sheet(args: argparse.Namespace) -> int:
-    store = _store_for(args.run_id)
+    store = _store_for(args.run_id, args.outputs_dir)
+    partial = _check_reviewable(store, args.allow_partial)
     sheet, mapping = build_contact_sheet(
-        store, args.run_id, axis=args.by, reveal=args.reveal
+        store, args.run_id, axis=args.by, reveal=args.reveal, partial=partial
     )
     print(f"Contact sheet: {sheet}")
-    print(f"Code mapping (do not open during blind scoring): {mapping}")
+    print(f"Protected mapping (do not open during blind scoring): {mapping}")
     return 0
 
 
 def cmd_scoring_sheet(args: argparse.Namespace) -> int:
-    store = _store_for(args.run_id)
-    path = build_scoring_sheet(store, args.run_id)
+    store = _store_for(args.run_id, args.outputs_dir)
+    partial = _check_reviewable(store, args.allow_partial)
+    path = build_scoring_sheet(store, args.run_id, partial=partial)
     print(f"Scoring sheet: {path}")
     return 0
 
@@ -218,14 +249,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--run-id", default=None, help="reuse a run id to resume it")
     p.set_defaults(func=cmd_run)
 
-    p = sub.add_parser("contact-sheet", help="build an HTML contact sheet for a run")
+    p = sub.add_parser("contact-sheet", help="build a blind HTML contact sheet for a run")
     p.add_argument("--run-id", required=True)
     p.add_argument("--by", choices=["model", "mode", "format", "refinement"], default="model")
     p.add_argument("--reveal", action="store_true", help="show real model names (not blind)")
+    p.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="debugging only: build artefacts for an incomplete run, "
+        "prominently marked PARTIAL / NOT VALID FOR MODEL SELECTION",
+    )
+    p.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_contact_sheet)
 
     p = sub.add_parser("scoring-sheet", help="build the blind CSV scoring template for a run")
     p.add_argument("--run-id", required=True)
+    p.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="debugging only: build artefacts for an incomplete run, "
+        "prominently marked PARTIAL / NOT VALID FOR MODEL SELECTION",
+    )
+    p.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_scoring_sheet)
 
     p = sub.add_parser("budget-status", help="show the budget ledger for a run")

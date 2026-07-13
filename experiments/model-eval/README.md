@@ -159,6 +159,57 @@ manually after the smoke test** — comparing the real charge against the
 recorded reservation is also how the FLUX.2 billing formula gets verified
 (and `formula_verified` can then be flipped in the candidates file).
 
+### Candidate schema smoke (required before the full screening)
+
+After the single-request smoke, `configs/candidate_smoke.yaml` runs ONE
+representative brief across **all five** screening candidates — exactly 5
+requests, $0.51 conservative ceiling — to verify every candidate's input
+configuration, credit and auth before committing to the 60-request round:
+
+```powershell
+.venv\Scripts\python -m model_eval.cli run `
+  --config configs/candidate_smoke.yaml `
+  --dry-run `
+  --budget-usd 0.51
+```
+
+**The candidate smoke must pass (5/5 succeeded) before restarting the full
+screening.** A deterministic rejection here identifies a broken model
+configuration at 1/12th of the screening cost.
+
+## Failure handling and recovery
+
+- **402 insufficient credit / 401 authentication:** the run HALTS
+  immediately after the first such rejection — no further provider calls,
+  the reservation is released (the request was rejected before acceptance),
+  a failed record with `provider_insufficient_credit` /
+  `provider_authentication_failed` is saved, and the CLI prints a concise
+  halt message (no traceback). Fix credit/token, then rerun with the SAME
+  run id: completed requests are never re-sent or re-charged.
+- **Deterministic rejections (400/404/422):** the same invalid model
+  configuration would fail on every brief, so after the first such
+  rejection the model is DISABLED for the rest of the run: its remaining
+  requests become visible `model_disabled_after_provider_rejection` skips,
+  other models keep running, and the disablement is reported in the run
+  summary. Fix the candidate's input configuration, then rerun.
+- **Windows ledger persistence:** every ledger write goes to a `.tmp` file
+  (flushed + fsynced) and is promoted with bounded retries for transient
+  access-denied/sharing-violation errors (antivirus/indexers). If all
+  retries fail, the run stops with a clear message and the **valid `.tmp`
+  is preserved** — on the next open of that run's ledger it is validated
+  (same budget, strict forward progression of the main state) and recovered
+  automatically; malformed or regressive temp files are quarantined with a
+  report and never promoted. No double-spend, no resurrected reservations.
+
+## Incomplete runs are not reviewable
+
+`contact-sheet` and `scoring-sheet` REFUSE runs that are incomplete: any
+failed requests, fewer successes than planned, unresolved reservations, an
+early halt, or a missing run summary (interruption). This prevents a partial
+run from quietly becoming the basis for model selection. For debugging only,
+`--allow-partial` generates artefacts that are prominently watermarked
+**PARTIAL / NOT VALID FOR MODEL SELECTION** (and remain fully blind).
+
 ## How the budget ledger works
 
 Per run, `outputs/runs/<run-id>/budget_ledger.json` enforces
@@ -225,13 +276,22 @@ python -m model_eval.cli contact-sheet --run-id <run-id> --by mode  # or format 
 python -m model_eval.cli scoring-sheet --run-id <run-id>
 ```
 
-Sheets label images with anonymised candidate codes; the code→model mapping
-is written separately to `candidate_key.json` — don't open it until scoring
-is done (`--reveal` exists for after). The scoring CSV has 1–5 rubric
-columns (garment accuracy, cultural coherence, fabric realism, embroidery,
-dupatta styling, anatomy, prompt adherence, modesty/coverage, reference
+Blind artefacts are genuinely blind: every successful output is copied into
+`blind/` under an anonymised name (`image-001.webp`, hash-ordered so the
+numbering leaks nothing), and the blind HTML and CSV contain **no** model
+keys, Replicate IDs, request IDs or original filenames anywhere — captions
+show only Candidate A/B/... codes and `item-NNN` ids. The reverse mapping
+lives solely in `candidate_key.json`; don't open it until scoring is done
+(`--reveal` regenerates a non-blind sheet for afterwards).
+
+The scoring CSV has 1–5 rubric columns (garment accuracy, cultural
+coherence, fabric realism, embroidery, dupatta styling, anatomy, prompt
+adherence, modesty/coverage, **bridal-occasion distinctiveness**, reference
 influence, refinement consistency, overall quality), yes/no hard-failure
-columns, and a reviewer-notes column. There is no automated aesthetic
+columns, and a reviewer-notes column. Bridal distinctiveness matters:
+Sitara generates bridalwear, so a structurally coherent, beautiful outfit
+that reads as ordinary formalwear scores low — and in the extreme fails
+`hf_reads_as_non_bridal_everydaywear`. There is no automated aesthetic
 scoring and no LLM judge.
 
 ## Filling in the decision record

@@ -152,6 +152,14 @@ def plan_summary(bundle: LoadedStage, budget_usd: float | None) -> dict[str, Any
     return summary
 
 
+SKIP_MODEL_DISABLED = "model_disabled_after_provider_rejection"
+
+# Deterministic request rejections: the same invalid model configuration
+# would fail identically on every brief, so the model is disabled for the
+# rest of the run after its first such rejection.
+DETERMINISTIC_REJECTION_CODES = frozenset({400, 404, 422})
+
+
 @dataclass
 class RunOutcome:
     run_id: str
@@ -160,6 +168,7 @@ class RunOutcome:
     skipped: list[str] = field(default_factory=list)
     resumed: list[str] = field(default_factory=list)
     previously_failed: list[str] = field(default_factory=list)
+    disabled_models: dict[str, str] = field(default_factory=dict)
     halted_reason: str | None = None
 
 
@@ -186,6 +195,10 @@ class Runner:
         self.poll_interval_s = poll_interval_s
         self.poll_timeout_s = poll_timeout_s
         self._git_commit = current_git_commit(outputs_dir)
+        # model_key -> short provider-error summary; set after a
+        # deterministic rejection so the same broken configuration is never
+        # resubmitted across the rest of the matrix.
+        self._disabled_models: dict[str, str] = {}
 
     # ------------------------------------------------------------------ util
 
@@ -363,6 +376,23 @@ class Runner:
                     self._execute_one(request, adapter, ledger, references_dir, outcome)
                     if outcome.halted_reason:
                         break
+                # The summary is written only when the loop finishes (or
+                # halts) cleanly — its absence marks an interrupted run,
+                # which the review commands refuse by default.
+                self.store.write_json(
+                    "run_summary.json",
+                    {
+                        "run_id": self.run_id,
+                        "succeeded": len(outcome.succeeded),
+                        "failed": len(outcome.failed),
+                        "skipped": len(outcome.skipped),
+                        "resumed": len(outcome.resumed),
+                        "previously_failed": len(outcome.previously_failed),
+                        "disabled_models": outcome.disabled_models,
+                        "halted_reason": outcome.halted_reason,
+                        "completed_at": utc_now_iso(),
+                    },
+                )
         finally:
             adapter.close()
         return outcome
@@ -394,6 +424,17 @@ class Runner:
 
         if request.skipped:
             self._save_skip(request, request.skip_reason or "skipped_by_plan", outcome)
+            return
+
+        # Circuit breaker: a model that produced a deterministic provider
+        # rejection is disabled — its remaining requests become visible
+        # skips instead of repeated invalid submissions.
+        if request.model_key in self._disabled_models:
+            self._save_skip(
+                request,
+                f"{SKIP_MODEL_DISABLED}: {self._disabled_models[request.model_key]}",
+                outcome,
+            )
             return
 
         reason = self._verify_references(request)
@@ -486,13 +527,9 @@ class Runner:
             if not budget_settled:
                 if exc.before_acceptance and prediction_id is None:
                     ledger.release(rid)
-                    category = "rejected_before_acceptance"
                 else:
                     ledger.assume_spent(rid, note=str(exc)[:300])
-                    category = "ambiguous_provider_failure"
-            else:
-                category = "ambiguous_provider_failure"
-            self._save_failure(request, category, str(exc), started_at, start, outcome)
+            self._handle_provider_error(request, exc, started_at, start, outcome)
             return
 
         if prediction.status != "succeeded":
@@ -568,6 +605,58 @@ class Runner:
         self.store.clear_attempt(rid)
         outcome.succeeded.append(rid)
         self.log(f"[ok] {rid} ({latency}s, accounted {accounted:.4f} USD [{basis}])")
+
+    def _handle_provider_error(
+        self,
+        request: PlannedRequest,
+        exc: ProviderError,
+        started_at: str,
+        start: float,
+        outcome: RunOutcome,
+    ) -> None:
+        """Classify a provider failure, record it, and decide whether the run
+        halts (402/401) or the model is circuit-broken (deterministic 4xx)."""
+        detail_parts = [p for p in (exc.provider_title, exc.provider_detail) if p]
+        detail = " — ".join(detail_parts) if detail_parts else str(exc)
+        if exc.status_code is not None:
+            detail = f"[{exc.status_code}] {detail}"
+
+        if exc.status_code == 402:
+            category = "provider_insufficient_credit"
+            outcome.halted_reason = (
+                "provider reported insufficient credit (402). Top up at "
+                "https://replicate.com/account/billing, wait a few minutes, "
+                "then rerun with the SAME run id — completed requests are "
+                "never re-sent or re-charged."
+            )
+        elif exc.status_code == 401:
+            category = "provider_authentication_failed"
+            outcome.halted_reason = (
+                "provider rejected the API token (401). Check "
+                "REPLICATE_API_TOKEN and rerun with the same run id."
+            )
+        elif exc.before_acceptance:
+            category = "rejected_before_acceptance"
+        else:
+            category = "ambiguous_provider_failure"
+
+        self._save_failure(request, category, detail, started_at, start, outcome)
+
+        if (
+            outcome.halted_reason is None
+            and exc.before_acceptance
+            and exc.status_code in DETERMINISTIC_REJECTION_CODES
+            and request.model_key not in self._disabled_models
+        ):
+            short = detail[:200]
+            self._disabled_models[request.model_key] = short
+            outcome.disabled_models[request.model_key] = short
+            self.log(
+                f"[circuit] {request.model_key} disabled for the rest of the "
+                f"run after a deterministic provider rejection: {short}"
+            )
+        if outcome.halted_reason:
+            self.log(f"[halt] {outcome.halted_reason}")
 
     def _await_terminal(self, adapter: ReplicateAdapter, prediction: Prediction) -> Prediction:
         deadline = time.monotonic() + self.poll_timeout_s

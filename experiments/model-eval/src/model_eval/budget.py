@@ -27,9 +27,17 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
+
+# Retry policy for atomic replacement. On Windows, os.replace can fail
+# transiently with access-denied / sharing-violation errors while antivirus,
+# indexing or backup tooling briefly holds the destination file open.
+_REPLACE_RETRIES = 5
+_REPLACE_BASE_DELAY_S = 0.05
+_WINDOWS_TRANSIENT_WINERRORS = {5, 32, 33}  # access denied / sharing violations
 
 
 def _pid_alive(pid: int) -> bool:
@@ -77,6 +85,93 @@ class BudgetLockError(BudgetError):
     pass
 
 
+class BudgetPersistenceError(BudgetError):
+    """The ledger could not be durably replaced on disk.
+
+    The complete intended state is preserved in the ledger's .tmp file; the
+    exception message says exactly where it is and how recovery works (it is
+    validated and promoted automatically on the next ledger open)."""
+
+
+def _is_transient_replace_error(exc: OSError) -> bool:
+    if isinstance(exc, PermissionError):
+        return True
+    return getattr(exc, "winerror", None) in _WINDOWS_TRANSIENT_WINERRORS
+
+
+def _replace_with_retries(src: Path, dst: Path) -> None:
+    """os.replace with bounded exponential backoff for transient Windows
+    access-denied/sharing-violation failures. Preserves ``src`` on failure."""
+    last_error: OSError | None = None
+    for attempt in range(_REPLACE_RETRIES):
+        try:
+            os.replace(src, dst)
+            return
+        except OSError as exc:
+            if not _is_transient_replace_error(exc):
+                raise
+            last_error = exc
+            time.sleep(_REPLACE_BASE_DELAY_S * (2**attempt))
+    # All retries failed. The source file holds the complete intended state —
+    # deliberately NOT deleted.
+    raise BudgetPersistenceError(
+        f"could not replace {dst} after {_REPLACE_RETRIES} attempts "
+        f"({last_error}). The complete intended ledger state is preserved at "
+        f"{src}; it will be validated and recovered automatically the next "
+        "time this run's ledger is opened (same run id, same budget). Do not "
+        "delete the .tmp file."
+    )
+
+
+def atomic_write_json(path: Path, payload: Any) -> None:
+    """Durably replace ``path`` with ``payload`` as JSON.
+
+    Writes the complete document to ``<path>.tmp``, flushes and fsyncs it,
+    then replaces the destination with bounded retries (see
+    _replace_with_retries). If every retry fails, the VALID .tmp file is
+    preserved and a BudgetPersistenceError explains how it is recovered."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tmp.open("w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2, sort_keys=True)
+        fh.flush()
+        try:
+            os.fsync(fh.fileno())
+        except OSError:  # pragma: no cover - fsync unsupported on exotic fs
+            pass
+    _replace_with_retries(tmp, path)
+
+
+_STATUS_RANK = {"reserved": 1, "released": 2, "reconciled": 2, "assumed_spent": 2}
+
+
+def _is_forward_progress(old: Any, new: Any) -> bool:
+    """True when ``new`` is a strict forward progression of ``old``: every
+    old entry is present, no settled (terminal) entry changed, at least one
+    reserved entry advanced or a new entry appeared."""
+    old_entries = old.get("entries", {}) if isinstance(old, dict) else {}
+    new_entries = new.get("entries", {}) if isinstance(new, dict) else {}
+    progressed = False
+    for rid, old_entry in old_entries.items():
+        new_entry = new_entries.get(rid)
+        if new_entry is None:
+            return False  # entries must never disappear
+        old_status = old_entry.get("status")
+        new_status = new_entry.get("status")
+        if old_status == new_status:
+            if old_entry != new_entry and old_status != "reserved":
+                return False  # settled entries must not mutate
+            continue
+        if old_status != "reserved":
+            return False  # terminal-to-terminal flips are not progressions
+        if _STATUS_RANK.get(new_status, 0) <= _STATUS_RANK.get(old_status, 0):
+            return False
+        progressed = True
+    if len(new_entries) > len(old_entries):
+        progressed = True
+    return progressed
+
+
 @dataclass
 class LedgerEntry:
     status: EntryStatus
@@ -108,29 +203,119 @@ class BudgetLedger:
     def open(cls, path: Path, budget_usd: float) -> "BudgetLedger":
         if budget_usd <= 0:
             raise BudgetError("budget must be a positive USD amount")
-        entries: dict[str, LedgerEntry] = {}
-        if path.exists():
-            data = json.loads(path.read_text(encoding="utf-8"))
-            stored_budget = float(data["budget_usd"])
-            if abs(stored_budget - budget_usd) > 1e-9:
-                raise BudgetError(
-                    f"ledger at {path} was created with budget "
-                    f"{stored_budget:.4f} USD but this run requested "
-                    f"{budget_usd:.4f} USD. Resume with the original budget, "
-                    "or start a new run ID for a new budget."
-                )
-            for rid, e in data["entries"].items():
-                entries[rid] = LedgerEntry(
-                    status=e["status"],
-                    reserved_usd=float(e["reserved_usd"]),
-                    final_usd=None if e["final_usd"] is None else float(e["final_usd"]),
-                    note=e.get("note", ""),
-                )
-        ledger = cls(path, budget_usd, entries)
+        ledger = cls(path, budget_usd, {})
         ledger._acquire_lock()
-        if not path.exists():
-            ledger._persist()
+        try:
+            # A crashed run may have left a complete, newer ledger state in
+            # the .tmp file (the os.replace itself failed). Recover it before
+            # reading, so reservations released/reconciled in the intended
+            # state are not resurrected — no double-spend, no stuck reserve.
+            ledger._recover_tmp_if_needed()
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                stored_budget = float(data["budget_usd"])
+                if abs(stored_budget - budget_usd) > 1e-9:
+                    raise BudgetError(
+                        f"ledger at {path} was created with budget "
+                        f"{stored_budget:.4f} USD but this run requested "
+                        f"{budget_usd:.4f} USD. Resume with the original budget, "
+                        "or start a new run ID for a new budget."
+                    )
+                for rid, e in data["entries"].items():
+                    ledger._entries[rid] = LedgerEntry(
+                        status=e["status"],
+                        reserved_usd=float(e["reserved_usd"]),
+                        final_usd=None if e["final_usd"] is None else float(e["final_usd"]),
+                        note=e.get("note", ""),
+                    )
+            else:
+                ledger._persist()
+        except BaseException:
+            ledger.close()
+            raise
         return ledger
+
+    # -- crash recovery -------------------------------------------------------
+
+    def _tmp_path(self) -> Path:
+        return self._path.with_suffix(self._path.suffix + ".tmp")
+
+    def _recover_tmp_if_needed(self) -> None:
+        """Validate and, when appropriate, promote a leftover .tmp file.
+
+        Called only while holding the exclusive run lock. Promotion happens
+        ONLY when the .tmp contains complete, valid JSON for the same budget
+        that is a strict forward progression of the current main state (or
+        the main file is missing/corrupt). Anything malformed is quarantined
+        with a clear report — never promoted, never silently discarded."""
+        tmp = self._tmp_path()
+        if not tmp.exists():
+            return
+        try:
+            candidate = json.loads(tmp.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as exc:
+            self._quarantine_tmp(tmp, f"not valid JSON ({exc})")
+            return
+        if (
+            not isinstance(candidate, dict)
+            or not isinstance(candidate.get("entries"), dict)
+            or "budget_usd" not in candidate
+        ):
+            self._quarantine_tmp(tmp, "unexpected document shape")
+            return
+        try:
+            tmp_budget = float(candidate["budget_usd"])
+        except (TypeError, ValueError):
+            self._quarantine_tmp(tmp, "non-numeric budget")
+            return
+        if abs(tmp_budget - self._budget_usd) > 1e-9:
+            self._quarantine_tmp(
+                tmp, f"budget {tmp_budget} does not match this run's {self._budget_usd}"
+            )
+            return
+
+        current: dict[str, Any] | None = None
+        if self._path.exists():
+            try:
+                current = json.loads(self._path.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                current = None  # main corrupt; the valid tmp is authoritative
+
+        if current is None:
+            self._promote_tmp(tmp)
+            return
+        if candidate == current:
+            tmp.unlink(missing_ok=True)  # stale duplicate of promoted state
+            return
+        if _is_forward_progress(current, candidate):
+            self._promote_tmp(tmp)
+        else:
+            self._quarantine_tmp(
+                tmp, "state is not a forward progression of the main ledger"
+            )
+
+    def _promote_tmp(self, tmp: Path) -> None:
+        _replace_with_retries(tmp, self._path)
+        print(
+            f"[budget] recovered ledger state from {tmp.name} left by an "
+            "interrupted run",
+            file=sys.stderr,
+        )
+
+    @staticmethod
+    def _quarantine_tmp(tmp: Path, reason: str) -> None:
+        quarantined = tmp.with_suffix(tmp.suffix + ".quarantined")
+        n = 1
+        while quarantined.exists():
+            quarantined = tmp.with_suffix(tmp.suffix + f".quarantined{n}")
+            n += 1
+        os.replace(tmp, quarantined)
+        print(
+            f"[budget] quarantined invalid ledger temp file to "
+            f"{quarantined.name}: {reason}. Review it manually; it was NOT "
+            "promoted into the ledger.",
+            file=sys.stderr,
+        )
 
     def _acquire_lock(self) -> None:
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -310,7 +495,4 @@ class BudgetLedger:
                 "remaining_usd": self.remaining_usd,
             },
         }
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-        os.replace(tmp, self._path)
+        atomic_write_json(self._path, payload)

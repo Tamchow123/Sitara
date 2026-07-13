@@ -34,16 +34,54 @@ class ProviderGateError(Exception):
     """A live run was attempted without every required gate."""
 
 
-class ProviderError(Exception):
-    """A provider interaction failed (message already token-redacted)."""
+MAX_STORED_ERROR_CHARS = 500
 
-    def __init__(self, message: str, *, before_acceptance: bool):
-        super().__init__(message)
+
+class ProviderError(Exception):
+    """A provider interaction failed (message already token-redacted).
+
+    Carries machine-readable fields parsed from Replicate's JSON error body
+    (``{"title": ..., "detail": ..., "status": ...}``) when available, so
+    the runner can react to specific conditions (402 insufficient credit,
+    401 auth, deterministic 4xx schema rejections) without string matching.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        before_acceptance: bool,
+        status_code: int | None = None,
+        provider_title: str | None = None,
+        provider_detail: str | None = None,
+    ):
+        super().__init__(message[:MAX_STORED_ERROR_CHARS])
         # True only when we are CERTAIN the provider never accepted the
         # request (e.g. local error before the HTTP request was sent, or an
         # HTTP 4xx validation rejection). Anything ambiguous must be False so
         # the budget is conservatively treated as spent.
         self.before_acceptance = before_acceptance
+        self.status_code = status_code
+        self.provider_title = provider_title[:MAX_STORED_ERROR_CHARS] if provider_title else None
+        self.provider_detail = provider_detail[:MAX_STORED_ERROR_CHARS] if provider_detail else None
+
+
+def parse_provider_error_body(resp: httpx.Response) -> tuple[str | None, str | None]:
+    """Extract safe (title, detail) from a Replicate JSON error body.
+
+    Returns (None, None) for non-JSON or unexpectedly shaped bodies."""
+    try:
+        payload = resp.json()
+    except ValueError:
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    title = payload.get("title")
+    detail = payload.get("detail")
+    return (
+        str(title) if isinstance(title, (str, int)) else None,
+        str(detail) if isinstance(detail, (str, int)) else None,
+    )
 
 
 def live_gate_failures(
@@ -158,14 +196,22 @@ class ReplicateAdapter:
             self._raise_provider_error(exc, before_acceptance=False)
         if resp.status_code in (400, 401, 402, 403, 404, 422):
             # Rejected before acceptance: safe to release the reservation.
+            title, detail = parse_provider_error_body(resp)
             raise ProviderError(
-                self._redact(f"provider rejected request ({resp.status_code}): {resp.text[:500]}"),
+                self._redact(f"provider rejected request ({resp.status_code}): {resp.text[:400]}"),
                 before_acceptance=True,
+                status_code=resp.status_code,
+                provider_title=self._redact(title) if title else None,
+                provider_detail=self._redact(detail) if detail else None,
             )
         if resp.status_code >= 300:
+            title, detail = parse_provider_error_body(resp)
             raise ProviderError(
-                self._redact(f"unexpected provider response {resp.status_code}: {resp.text[:500]}"),
+                self._redact(f"unexpected provider response {resp.status_code}: {resp.text[:400]}"),
                 before_acceptance=False,
+                status_code=resp.status_code,
+                provider_title=self._redact(title) if title else None,
+                provider_detail=self._redact(detail) if detail else None,
             )
         return self._parse(resp.json())
 

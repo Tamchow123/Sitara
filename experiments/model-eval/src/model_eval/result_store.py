@@ -227,3 +227,56 @@ class ResultStore:
 
     def clear_attempt(self, request_id: str) -> None:
         self.attempt_path(request_id).unlink(missing_ok=True)
+
+
+def assess_run_completeness(run_dir: Path) -> list[str]:
+    """Why this run is NOT complete (empty list = complete and reviewable).
+
+    A run is complete only when it finished without halting (run_summary.json
+    exists with no halted_reason), every planned runnable request succeeded,
+    nothing failed, and the budget ledger holds no active reservations.
+    Incomplete runs must not be used for model selection."""
+    problems: list[str] = []
+    store = ResultStore(run_dir)
+
+    summary_path = run_dir / "run_summary.json"
+    if not summary_path.exists():
+        problems.append(
+            "run_summary.json is missing — the run was interrupted before it finished"
+        )
+    else:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        if summary.get("halted_reason"):
+            problems.append(f"the run halted early: {summary['halted_reason']}")
+        if summary.get("disabled_models"):
+            disabled = ", ".join(sorted(summary["disabled_models"]))
+            problems.append(f"model(s) disabled after provider rejection: {disabled}")
+
+    records = store.load_all()
+    failed = sum(1 for r in records if r.status == "failed")
+    succeeded = sum(1 for r in records if r.status == "succeeded")
+    if failed:
+        problems.append(f"{failed} request(s) failed")
+
+    plan_path = run_dir / "plan.json"
+    if not plan_path.exists():
+        problems.append("plan.json is missing")
+    else:
+        planned = json.loads(plan_path.read_text(encoding="utf-8")).get("planned_requests")
+        if planned is not None and succeeded != planned:
+            problems.append(
+                f"only {succeeded} of {planned} planned requests succeeded"
+            )
+
+    ledger_path = run_dir / "budget_ledger.json"
+    if ledger_path.exists():
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+        active = [
+            rid for rid, e in ledger.get("entries", {}).items()
+            if e.get("status") == "reserved"
+        ]
+        if active:
+            problems.append(
+                f"{len(active)} unresolved active reservation(s) in the budget ledger"
+            )
+    return problems

@@ -1,0 +1,40 @@
+# Candidate schema smoke: one representative bridal brief against ALL FIVE
+# screening candidates — exactly 5 provider requests. Purpose: verify every
+# candidate's input configuration against the live provider (schema
+# acceptance, credit, auth) at minimum spend BEFORE committing to the
+# 60-request screening round. This candidate smoke must pass (5/5 succeeded)
+# before restarting the full screening.
+#
+# Dry-run first — it must report exactly 5 planned requests, 0 skips, and a
+# conservative maximum of 0.51 USD (0.01 + 0.05 + 0.08 + 0.12 + 0.25):
+#   python -m model_eval.cli run --config configs/candidate_smoke.yaml --dry-run --budget-usd 0.51
+#
+# A deterministic rejection (400/404/422) here disables that model for the
+# run and reports it — fix the candidate's input configuration before
+# screening. A 402/401 halts the run immediately.
+
+stage: screening
+candidates_file: model_candidates.yaml
+briefs_file: ../prompts/briefs.yaml
+reference_manifest: ../references/manifest.yaml
+
+models:
+  - schnell
+  - klein-4b
+  - flux-1-1-pro
+  - flux-2-pro
+  - flux-2-max
+
+brief_ids:
+  - scr-lehenga-baraat-heavy
+
+seeds: [11]
+aspect_ratio: "3:4"
+inspiration_modes: [text_only]
+prompt_formats: [editorial]
+refinement:
+  enabled: false
+
+notes: >-
+  One classic deep-red baraat lehenga brief across every candidate. This is
+  a schema/billing verification, not an evaluation sample.

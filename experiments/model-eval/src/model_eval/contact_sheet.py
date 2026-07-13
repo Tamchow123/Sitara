@@ -1,20 +1,31 @@
-"""HTML contact sheets for blind human review.
+"""Genuinely blind contact sheets for human review.
 
-Outputs are grouped by brief with candidate models side by side. By default
-each model is labelled only with an anonymised candidate code (Candidate A,
-B, ...) whose assignment is shuffled deterministically per run, so reviewers
-score blind. The code-to-model mapping is written to a SEPARATE file
-(candidate_key.json) that reviewers must not open until scoring is done.
+Blindness guarantee: the blind sheet (and everything it references) contains
+NO model keys, NO Replicate IDs, NO original request IDs and NO original
+output filenames — not in captions, not in image paths, not anywhere in the
+HTML source. Each successful output is copied into ``blind/`` under a
+deterministic anonymised filename (``image-001.webp``), captions use an
+anonymised ``item-NNN`` id plus a Candidate A/B/... code, and the ordering of
+both codes and item numbers is derived from per-run hashes so it cannot be
+mapped back to alphabetical model order.
 
-The sheet can compare along one axis at a time: models (default),
-inspiration modes, prompt formats, or refinement strategies.
+The sensitive reverse mapping (candidate code -> model, item id ->
+request/output) lives ONLY in candidate_key.json, which warns reviewers not
+to open it until scoring is complete. A revealed (non-blind) sheet can be
+generated explicitly with reveal=True for use after scoring.
+
+Sheets for incomplete runs are only produced behind an explicit
+--allow-partial flag and carry a prominent PARTIAL / NOT VALID FOR MODEL
+SELECTION banner (enforced by the CLI via assess_run_completeness).
 """
 
 from __future__ import annotations
 
 import hashlib
 import html
+import shutil
 import string
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +40,8 @@ _AXIS_ATTR: dict[CompareAxis, str] = {
     "refinement": "kind",
 }
 
+PARTIAL_BANNER_TEXT = "PARTIAL / NOT VALID FOR MODEL SELECTION"
+
 
 def candidate_codes(run_id: str, model_keys: list[str]) -> dict[str, str]:
     """Deterministic per-run anonymised codes.
@@ -39,6 +52,65 @@ def candidate_codes(run_id: str, model_keys: list[str]) -> dict[str, str]:
     ranked = sorted(model_keys, key=lambda k: hashlib.sha256(f"{run_id}:{k}".encode()).hexdigest())
     letters = string.ascii_uppercase
     return {key: f"Candidate {letters[i % 26]}{i // 26 or ''}" for i, key in enumerate(ranked)}
+
+
+@dataclass(frozen=True)
+class BlindItem:
+    record: ResultRecord
+    blind_id: str          # e.g. "item-003" — safe to show reviewers
+    image_filename: str    # e.g. "image-003.webp" — safe to show reviewers
+
+
+def prepare_blind_items(store: ResultStore, run_id: str) -> tuple[list[BlindItem], Path]:
+    """Copy every successful output into blind/ under anonymised names and
+    return the items (hash-ordered, so numbering leaks nothing) plus the
+    blind directory. Also (re)writes the protected mapping file."""
+    records = [r for r in store.load_all() if r.status == "succeeded" and r.output_path]
+    if not records:
+        raise ValueError(f"run {run_id!r} has no successful outputs")
+    ordered = sorted(
+        records,
+        key=lambda r: hashlib.sha256(f"{run_id}:{r.request_id}".encode()).hexdigest(),
+    )
+    blind_dir = store.run_dir / "blind"
+    blind_dir.mkdir(parents=True, exist_ok=True)
+    items: list[BlindItem] = []
+    for i, record in enumerate(ordered, start=1):
+        extension = Path(record.output_path or "").suffix or ".png"
+        filename = f"image-{i:03d}{extension}"
+        source = store.run_dir / (record.output_path or "")
+        dest = blind_dir / filename
+        if not dest.exists() and source.is_file():
+            shutil.copy2(source, dest)
+        items.append(BlindItem(record, f"item-{i:03d}", filename))
+
+    model_keys = sorted({r.model_key for r in records})
+    codes = candidate_codes(run_id, model_keys)
+    store.write_json(
+        "candidate_key.json",
+        {
+            "warning": (
+                "PROTECTED MAPPING — do not open during blind scoring. "
+                "This file de-anonymises candidate codes and blind item ids."
+            ),
+            "codes": {codes[k]: k for k in model_keys},
+            "models": {
+                k: next(r.replicate_id for r in records if r.model_key == k)
+                for k in model_keys
+            },
+            "items": {
+                item.blind_id: {
+                    "request_id": item.record.request_id,
+                    "model_key": item.record.model_key,
+                    "replicate_id": item.record.replicate_id,
+                    "original_output": item.record.output_path,
+                    "blind_image": item.image_filename,
+                }
+                for item in items
+            },
+        },
+    )
+    return items, blind_dir
 
 
 def _cell_label(record: ResultRecord, axis: CompareAxis, codes: dict[str, str], reveal: bool) -> str:
@@ -54,49 +126,77 @@ def _cell_label(record: ResultRecord, axis: CompareAxis, codes: dict[str, str], 
     return f"{base}" + (f" <span class='detail'>({detail.strip(' ·')})</span>" if detail else "")
 
 
+def _banner(partial: bool) -> str:
+    if not partial:
+        return ""
+    return (
+        f"<div class='partial-banner'>{PARTIAL_BANNER_TEXT} — this run is "
+        "incomplete (see run_summary/plan); use for debugging only.</div>"
+    )
+
+
+_STYLE = """
+ body { font-family: system-ui, sans-serif; margin: 2rem; }
+ .row { display: flex; flex-wrap: wrap; gap: 1rem; }
+ figure { margin: 0; max-width: 320px; }
+ img { max-width: 100%; height: auto; border: 1px solid #ccc; }
+ figcaption { font-size: 0.85rem; margin-top: .25rem; }
+ .detail { color: #666; }
+ .item { font-size: 0.75rem; color: #888; }
+ .note { background: #fff6d9; padding: .5rem 1rem; border: 1px solid #e5d692; }
+ .partial-banner { background: #b00020; color: #fff; font-weight: bold;
+   font-size: 1.2rem; padding: .75rem 1rem; margin: 1rem 0; }
+ h2 small { color: #666; font-weight: normal; }
+"""
+
+
 def build_contact_sheet(
     store: ResultStore,
     run_id: str,
     *,
     axis: CompareAxis = "model",
     reveal: bool = False,
+    partial: bool = False,
 ) -> tuple[Path, Path]:
-    """Render the sheet; returns (sheet_path, mapping_path)."""
-    records = [r for r in store.load_all() if r.status == "succeeded" and r.output_path]
-    if not records:
-        raise ValueError(f"run {run_id!r} has no successful outputs to display")
+    """Render the sheet; returns (sheet_path, mapping_path).
 
-    model_keys = sorted({r.model_key for r in records})
-    codes = candidate_codes(run_id, model_keys)
+    Blind (default): written into blind/ referencing only anonymised
+    filenames and ids. Revealed: written at the run root with real model
+    identities, for use after scoring only."""
+    items, blind_dir = prepare_blind_items(store, run_id)
+    mapping_path = store.run_dir / "candidate_key.json"
+    codes = candidate_codes(run_id, sorted({i.record.model_key for i in items}))
 
-    by_brief: dict[str, list[ResultRecord]] = {}
-    for r in records:
-        by_brief.setdefault(r.brief_id, []).append(r)
+    by_brief: dict[str, list[BlindItem]] = {}
+    for item in items:
+        by_brief.setdefault(item.record.brief_id, []).append(item)
 
     rows: list[str] = []
     for brief_id in sorted(by_brief):
         group = sorted(
             by_brief[brief_id],
-            key=lambda r: (
-                getattr(r, _AXIS_ATTR[axis]),
-                r.model_key,
-                r.prompt_format,
-                r.inspiration_mode,
-                r.kind,
-                r.seed or 0,
+            key=lambda i: (
+                _cell_label(i.record, axis, codes, reveal=False),
+                i.blind_id,
             ),
         )
         cells = []
-        for r in group:
-            label = _cell_label(r, axis, codes, reveal)
+        for item in group:
+            record = item.record
+            label = _cell_label(record, axis, codes, reveal)
+            if reveal:
+                src = f"images/{html.escape(Path(record.output_path or '').name)}"
+                sub = f"<code>{html.escape(record.request_id)}</code>"
+            else:
+                src = html.escape(item.image_filename)
+                sub = f"<span class='item'>{html.escape(item.blind_id)}</span>"
             cells.append(
                 "<figure>"
-                f"<img src='images/{html.escape(Path(r.output_path or '').name)}' "
-                f"alt='{html.escape(r.garment)} output' loading='lazy'>"
-                f"<figcaption>{label}<br><code>{html.escape(r.request_id)}</code></figcaption>"
+                f"<img src='{src}' alt='{html.escape(record.garment)} output' loading='lazy'>"
+                f"<figcaption>{label}<br>{sub}</figcaption>"
                 "</figure>"
             )
-        first = group[0]
+        first = group[0].record
         meta = f"{first.garment}" + (f" · {first.ceremony}" if first.ceremony else "")
         rows.append(
             f"<section><h2>{html.escape(brief_id)} <small>{html.escape(meta)}</small></h2>"
@@ -105,40 +205,25 @@ def build_contact_sheet(
 
     blind_note = (
         "" if reveal else
-        "<p class='note'>Blind review sheet — model identities are anonymised. "
-        "Do not open candidate_key.json until scoring is complete.</p>"
+        "<p class='note'>Blind review sheet — model identities and request "
+        "provenance are anonymised. Do not open candidate_key.json until "
+        "scoring is complete.</p>"
     )
+    title = f"Sitara model eval — {html.escape(run_id)} ({axis} comparison)"
     doc = f"""<!doctype html>
 <meta charset="utf-8">
-<title>Sitara model eval — {html.escape(run_id)} ({axis} comparison)</title>
-<style>
- body {{ font-family: system-ui, sans-serif; margin: 2rem; }}
- .row {{ display: flex; flex-wrap: wrap; gap: 1rem; }}
- figure {{ margin: 0; max-width: 320px; }}
- img {{ max-width: 100%; height: auto; border: 1px solid #ccc; }}
- figcaption {{ font-size: 0.85rem; margin-top: .25rem; }}
- .detail {{ color: #666; }}
- code {{ font-size: 0.7rem; color: #999; word-break: break-all; }}
- .note {{ background: #fff6d9; padding: .5rem 1rem; border: 1px solid #e5d692; }}
- h2 small {{ color: #666; font-weight: normal; }}
-</style>
+<title>{title}</title>
+<style>{_STYLE}</style>
+{_banner(partial)}
 <h1>Contact sheet — run {html.escape(run_id)}</h1>
 <p>Comparison axis: <strong>{axis}</strong></p>
 {blind_note}
 {''.join(rows)}
+{_banner(partial)}
 """
-    sheet_path = store.run_dir / f"contact_sheet_{axis}{'_revealed' if reveal else ''}.html"
+    if reveal:
+        sheet_path = store.run_dir / f"contact_sheet_{axis}_revealed.html"
+    else:
+        sheet_path = blind_dir / f"contact_sheet_{axis}.html"
     sheet_path.write_text(doc, encoding="utf-8")
-
-    mapping_path = store.write_json(
-        "candidate_key.json",
-        {
-            "warning": "Do not open during blind scoring.",
-            "codes": {codes[k]: k for k in model_keys},
-            "models": {
-                k: next(r.replicate_id for r in records if r.model_key == k)
-                for k in model_keys
-            },
-        },
-    )
     return sheet_path, mapping_path

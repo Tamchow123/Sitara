@@ -481,6 +481,164 @@ class TestPreflight:
         assert len(outcome.succeeded) == 1
 
 
+class TestProviderErrorParsing:
+    def _adapter_returning(self, status: int, body: str, content_type: str = "application/json"):
+        client = httpx.Client(
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(status, content=body.encode(), headers={"content-type": content_type})
+            )
+        )
+        return ReplicateAdapter("test-token", client=client)
+
+    def test_json_error_body_is_parsed_into_structured_fields(self):
+        adapter = self._adapter_returning(
+            402,
+            '{"title":"Insufficient credit","detail":"You have insufficient credit to run this model.","status":402}',
+        )
+        with pytest.raises(ProviderError) as excinfo:
+            adapter.create_prediction("owner/model", None, {"prompt": "x"})
+        exc = excinfo.value
+        assert exc.status_code == 402
+        assert exc.provider_title == "Insufficient credit"
+        assert "insufficient credit" in (exc.provider_detail or "").lower()
+        assert exc.before_acceptance is True
+
+    def test_non_json_error_body_yields_safe_fields(self):
+        adapter = self._adapter_returning(500, "<html>Bad Gateway-ish</html>", "text/html")
+        with pytest.raises(ProviderError) as excinfo:
+            adapter.create_prediction("owner/model", None, {"prompt": "x"})
+        exc = excinfo.value
+        assert exc.status_code == 500
+        assert exc.provider_title is None and exc.provider_detail is None
+        assert exc.before_acceptance is False
+
+    def test_error_fields_are_redacted_and_bounded(self):
+        token = "r8_parse_redaction"
+        long_detail = ("Bearer " + token + " ") * 100
+        body = json.dumps({"title": "Oops", "detail": long_detail, "status": 422})
+        client = httpx.Client(
+            transport=httpx.MockTransport(lambda r: httpx.Response(422, content=body.encode()))
+        )
+        adapter = ReplicateAdapter(token, client=client)
+        with pytest.raises(ProviderError) as excinfo:
+            adapter.create_prediction("owner/model", None, {"prompt": "x"})
+        exc = excinfo.value
+        assert token not in (exc.provider_detail or "")
+        assert token not in str(exc)
+        assert len(exc.provider_detail or "") <= 500
+
+
+def _provider_error(status: int, title: str, detail: str) -> ProviderError:
+    return ProviderError(
+        f"provider rejected request ({status}): {title}",
+        before_acceptance=True,
+        status_code=status,
+        provider_title=title,
+        provider_detail=detail,
+    )
+
+
+def multi_brief_bundle(candidate, count=3, extra_candidates=()):
+    from conftest import make_candidates_config as mcc
+
+    briefs = BriefsFile(briefs=[make_brief(f"brief-{i}") for i in range(1, count + 1)])
+    all_candidates = mcc(candidate, *extra_candidates)
+    models = [candidate.key] + [c.key for c in extra_candidates]
+    return make_bundle(
+        make_stage(models=models, prompt_formats=["editorial"]),
+        all_candidates,
+        briefs,
+    )
+
+
+class TestRunLevelHalts:
+    def test_402_halts_after_the_first_call(self, tmp_path, plain_candidate):
+        adapter = MockAdapter(
+            fail_with=_provider_error(
+                402, "Insufficient credit", "You have insufficient credit to run this model."
+            )
+        )
+        bundle = multi_brief_bundle(plain_candidate, count=3)
+        runner = make_runner(tmp_path, bundle, adapter)
+        outcome = runner.execute(
+            dry_run=False, confirm_live=True, budget_usd=10.0, references_dir=tmp_path
+        )
+        assert len(adapter.create_calls) == 1, "no further provider calls after a 402"
+        assert "insufficient credit" in (outcome.halted_reason or "").lower()
+        assert len(outcome.failed) == 1
+        record = runner.store.load(outcome.failed[0])
+        assert record.error_category == "provider_insufficient_credit"
+        assert "402" in (record.error_message or "")
+        # Rejected before acceptance -> reservation released, not spent.
+        ledger = json.loads((runner.run_dir / "budget_ledger.json").read_text(encoding="utf-8"))
+        assert next(iter(ledger["entries"].values()))["status"] == "released"
+        # The halt is recorded for the completeness gate.
+        summary = json.loads((runner.run_dir / "run_summary.json").read_text(encoding="utf-8"))
+        assert summary["halted_reason"]
+
+    def test_401_halts_as_authentication_failure(self, tmp_path, plain_candidate):
+        adapter = MockAdapter(
+            fail_with=_provider_error(401, "Unauthenticated", "Invalid token.")
+        )
+        runner = make_runner(tmp_path, multi_brief_bundle(plain_candidate), adapter)
+        outcome = runner.execute(
+            dry_run=False, confirm_live=True, budget_usd=10.0, references_dir=tmp_path
+        )
+        assert len(adapter.create_calls) == 1
+        assert "REPLICATE_API_TOKEN" in (outcome.halted_reason or "")
+        record = runner.store.load(outcome.failed[0])
+        assert record.error_category == "provider_authentication_failed"
+
+
+class TestCircuitBreaker:
+    def test_deterministic_rejection_disables_only_that_model(self, tmp_path, plain_candidate):
+        from conftest import make_candidate
+
+        bad = make_candidate("badschema")
+        adapter = MockAdapter(
+            fail_map={
+                "test-owner/badschema": _provider_error(
+                    422, "Input validation failed", "unexpected field 'aspect_ratio'"
+                )
+            }
+        )
+        bundle = multi_brief_bundle(plain_candidate, count=3, extra_candidates=(bad,))
+        runner = make_runner(tmp_path, bundle, adapter)
+        outcome = runner.execute(
+            dry_run=False, confirm_live=True, budget_usd=10.0, references_dir=tmp_path
+        )
+        bad_calls = [c for c in adapter.create_calls if c[0] == "test-owner/badschema"]
+        good_calls = [c for c in adapter.create_calls if c[0] == "test-owner/plain"]
+        assert len(bad_calls) == 1, "a disabled model must not be resubmitted"
+        assert len(good_calls) == 3, "other models keep running"
+        assert len(outcome.succeeded) == 3
+        assert len(outcome.failed) == 1
+        assert list(outcome.disabled_models) == ["badschema"]
+        assert "422" in outcome.disabled_models["badschema"]
+        # Remaining bad-model requests are visible skips, not silent drops.
+        skip_records = [runner.store.load(rid) for rid in outcome.skipped]
+        assert len(skip_records) == 2
+        for record in skip_records:
+            assert record.model_key == "badschema"
+            assert "model_disabled_after_provider_rejection" in (record.error_message or "")
+        # The disablement is reported in the run summary.
+        summary = json.loads((runner.run_dir / "run_summary.json").read_text(encoding="utf-8"))
+        assert summary["disabled_models"] == outcome.disabled_models
+        assert summary["halted_reason"] is None
+
+    def test_transient_failures_do_not_trip_the_breaker(self, tmp_path, plain_candidate):
+        adapter = MockAdapter(
+            fail_with=ProviderError("connection dropped", before_acceptance=False)
+        )
+        runner = make_runner(tmp_path, multi_brief_bundle(plain_candidate, count=2), adapter)
+        outcome = runner.execute(
+            dry_run=False, confirm_live=True, budget_usd=10.0, references_dir=tmp_path
+        )
+        assert len(adapter.create_calls) == 2, "ambiguous failures do not disable a model"
+        assert outcome.disabled_models == {}
+        assert outcome.halted_reason is None
+
+
 class TestSecretRedaction:
     def test_provider_errors_and_records_never_contain_the_token(self, tmp_path, plain_candidate):
         token = "r8_super_secret_value_9f2"

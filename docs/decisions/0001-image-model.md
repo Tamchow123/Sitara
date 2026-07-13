@@ -59,6 +59,22 @@ it can return later as an editor-only experiment (a candidate with
 editing disappoints. Also not selected: `flux-pro` ($0.055), superseded by
 `flux-1.1-pro` ($0.04).
 
+### Diagnostic run 2026-07-13 (NOT usable for selection)
+
+`experiments/model-eval/outputs/runs/screening-20260713-001` is an
+**incomplete diagnostic run** and **must not be used to select finalists**:
+the account ran out of Replicate credit mid-run (32 of 42 attempted requests
+failed with HTTP 402 "Insufficient credit"; only flux-1.1-pro and flux-2-pro
+produced 5 outputs each before credit ran out, and 18 of 60 planned requests
+were never attempted), and the run then crashed on a Windows
+`PermissionError` while persisting the budget ledger. The run is preserved
+as evidence; the framework has since been hardened (402/401 run-level halts,
+per-model circuit breaking, Windows ledger recovery, genuinely blind
+artefacts, and an incomplete-run review refusal that rejects exactly this
+run). Screening must be restarted from scratch — after the candidate schema
+smoke (`configs/candidate_smoke.yaml`, 5 requests, $0.51 ceiling) passes
+5/5 — with sufficient account credit (the screening ceiling is $6.12).
+
 ## Decision
 
 _To be completed after scoring._

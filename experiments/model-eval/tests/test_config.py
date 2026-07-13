@@ -156,8 +156,37 @@ class TestShippedConfigs:
         assert request.aspect_ratio == "3:4"
         assert request.kind == "base"
 
+    def test_candidate_smoke_plans_five_bounded_requests(self):
+        """One representative brief across ALL five screening candidates:
+        exactly 5 requests, 0.51 USD conservative ceiling."""
+        from model_eval.runner import load_stage_bundle, plan_summary
+
+        bundle = load_stage_bundle(EXPERIMENT_ROOT / "configs" / "candidate_smoke.yaml")
+        summary = plan_summary(bundle, 0.51)
+        assert summary["planned_requests"] == 5
+        assert summary["skipped_requests"] == 0
+        assert summary["models"] == {
+            "flux-1-1-pro": 1,
+            "flux-2-max": 1,
+            "flux-2-pro": 1,
+            "klein-4b": 1,
+            "schnell": 1,
+        }
+        assert summary["conservative_max_spend_usd"] == pytest.approx(0.51)
+        assert summary["within_budget"] is True
+        # Every screening model appears, so a schema problem in any candidate
+        # surfaces here before the 60-request screening round.
+        screening = load_stage(EXPERIMENT_ROOT / "configs" / "screening.yaml")
+        assert set(bundle.stage.models) == set(screening.models)
+
     def test_stage_configs_valid_and_consistent(self):
-        for name in ("screening.yaml", "finalists.yaml", "seed_stability.yaml", "smoke.yaml"):
+        for name in (
+            "screening.yaml",
+            "finalists.yaml",
+            "seed_stability.yaml",
+            "smoke.yaml",
+            "candidate_smoke.yaml",
+        ):
             stage = load_stage(EXPERIMENT_ROOT / "configs" / name)
             candidates = load_candidates(
                 EXPERIMENT_ROOT / "configs" / stage.candidates_file

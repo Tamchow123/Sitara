@@ -1,9 +1,19 @@
-"""Human scoring templates.
+"""Blind human scoring templates.
 
-Generates a CSV with one row per successful output, using anonymised
-candidate codes so scoring stays blind. Scores are 1-5; hard-failure columns
-are yes/no. There is deliberately no automated aesthetic scoring and no LLM
-judge: human review is authoritative for this evaluation.
+The CSV identifies each output only by its anonymised ``blind_item_id`` and
+anonymised image filename (see contact_sheet.prepare_blind_items) plus the
+Candidate A/B/... code — never by request id, model key, Replicate ID or
+original filename. The reverse mapping lives only in the protected
+candidate_key.json.
+
+Scores are 1-5; hard-failure columns are yes/no. There is deliberately no
+automated aesthetic scoring and no LLM judge: human review is authoritative.
+
+Note the bridal-distinctiveness dimension: a structurally coherent,
+beautiful outfit that reads as ordinary formalwear rather than bridalwear is
+NOT sufficient for Sitara — it scores low on
+``bridal_occasion_distinctiveness`` and, in the extreme, fails
+``hf_reads_as_non_bridal_everydaywear``.
 """
 
 from __future__ import annotations
@@ -11,7 +21,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from .contact_sheet import candidate_codes
+from .contact_sheet import PARTIAL_BANNER_TEXT, prepare_blind_items
 from .result_store import ResultStore
 
 RUBRIC_FIELDS = [
@@ -23,6 +33,7 @@ RUBRIC_FIELDS = [
     "anatomy",
     "prompt_adherence",
     "modesty_coverage_adherence",
+    "bridal_occasion_distinctiveness",
     "reference_image_influence",
     "refinement_consistency",
     "overall_visual_quality",
@@ -39,11 +50,13 @@ HARD_FAILURE_FIELDS = [
     "hf_text_logos_or_designer_marks",
     "hf_reference_copied_too_literally",
     "hf_major_unrelated_refinement_drift",
+    "hf_reads_as_non_bridal_everydaywear",
 ]
 
+# Blind context only: no request ids, no model keys, no original filenames.
 CONTEXT_FIELDS = [
     "run_id",
-    "request_id",
+    "blind_item_id",
     "brief_id",
     "garment",
     "ceremony",
@@ -57,37 +70,41 @@ CONTEXT_FIELDS = [
 ]
 
 
-def build_scoring_sheet(store: ResultStore, run_id: str) -> Path:
-    records = [r for r in store.load_all() if r.status == "succeeded" and r.output_path]
-    if not records:
-        raise ValueError(f"run {run_id!r} has no successful outputs to score")
+def build_scoring_sheet(store: ResultStore, run_id: str, *, partial: bool = False) -> Path:
+    from .contact_sheet import candidate_codes
 
-    codes = candidate_codes(run_id, sorted({r.model_key for r in records}))
+    items, blind_dir = prepare_blind_items(store, run_id)
+    codes = candidate_codes(run_id, sorted({i.record.model_key for i in items}))
 
-    path = store.run_dir / "scoring_sheet.csv"
+    path = blind_dir / "scoring_sheet.csv"
     with path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh)
+        if partial:
+            writer.writerow(
+                [f"{PARTIAL_BANNER_TEXT} — incomplete run; debugging only"]
+            )
         writer.writerow(
             CONTEXT_FIELDS
             + [f"{f} (1-5)" for f in RUBRIC_FIELDS]
             + [f"{f} (yes/no)" for f in HARD_FAILURE_FIELDS]
             + ["reviewer_notes"]
         )
-        for r in sorted(records, key=lambda r: r.request_id):
+        for item in sorted(items, key=lambda i: i.blind_id):
+            record = item.record
             writer.writerow(
                 [
-                    r.run_id,
-                    r.request_id,
-                    r.brief_id,
-                    r.garment,
-                    r.ceremony or "",
-                    codes[r.model_key],
-                    r.prompt_format,
-                    r.inspiration_mode,
-                    r.kind,
-                    r.refinement_strategy or "",
-                    "" if r.seed is None else r.seed,
-                    Path(r.output_path or "").name,
+                    record.run_id,
+                    item.blind_id,
+                    record.brief_id,
+                    record.garment,
+                    record.ceremony or "",
+                    codes[record.model_key],
+                    record.prompt_format,
+                    record.inspiration_mode,
+                    record.kind,
+                    record.refinement_strategy or "",
+                    "" if record.seed is None else record.seed,
+                    item.image_filename,
                 ]
                 + [""] * (len(RUBRIC_FIELDS) + len(HARD_FAILURE_FIELDS))
                 + [""]

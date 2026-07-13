@@ -1,15 +1,24 @@
-"""Budget ledger: reserve-before-spend, durability, and the hard ceiling."""
+"""Budget ledger: reserve-before-spend, durability, the hard ceiling, and
+Windows-hardened persistence with crash recovery."""
 
 import json
+import os
 
 import pytest
 
+import model_eval.budget as budget_module
 from model_eval.budget import (
     BudgetError,
     BudgetExceededError,
     BudgetLedger,
     BudgetLockError,
+    BudgetPersistenceError,
 )
+
+
+@pytest.fixture(autouse=True)
+def fast_retries(monkeypatch):
+    monkeypatch.setattr(budget_module, "_REPLACE_BASE_DELAY_S", 0.0)
 
 
 @pytest.fixture
@@ -135,3 +144,135 @@ class TestDurability:
     def test_positive_budget_required(self, ledger_path):
         with pytest.raises(BudgetError, match="positive"):
             BudgetLedger.open(ledger_path, 0.0)
+
+
+class TestWindowsHardenedPersistence:
+    """os.replace can fail transiently on Windows (antivirus/indexers hold
+    the destination). The ledger retries with backoff, preserves the valid
+    .tmp on total failure, and recovers it safely on the next open."""
+
+    def _flaky_replace(self, monkeypatch, fail_times: int):
+        real_replace = os.replace
+        state = {"fails": 0}
+
+        def replace(src, dst, *a, **kw):
+            if str(dst).endswith("budget_ledger.json") and state["fails"] < fail_times:
+                state["fails"] += 1
+                raise PermissionError(5, "Access is denied", str(dst))
+            return real_replace(src, dst, *a, **kw)
+
+        monkeypatch.setattr(budget_module.os, "replace", replace)
+        return state
+
+    def test_transient_permission_error_is_retried_and_succeeds(
+        self, ledger_path, monkeypatch
+    ):
+        with BudgetLedger.open(ledger_path, 1.0) as ledger:
+            state = self._flaky_replace(monkeypatch, fail_times=2)
+            ledger.reserve("req-1", 0.08)
+            assert state["fails"] == 2
+        data = json.loads(ledger_path.read_text(encoding="utf-8"))
+        assert data["entries"]["req-1"]["status"] == "reserved"
+        assert not ledger_path.with_suffix(".json.tmp").exists()
+
+    def test_exhausted_retries_preserve_the_valid_tmp_file(self, ledger_path, monkeypatch):
+        tmp = ledger_path.with_suffix(".json.tmp")
+        with BudgetLedger.open(ledger_path, 1.0) as ledger:
+            ledger.reserve("req-1", 0.08)
+            self._flaky_replace(monkeypatch, fail_times=99)
+            with pytest.raises(BudgetPersistenceError, match="preserved"):
+                ledger.release("req-1")
+        # The intended (released) state survives in the tmp file...
+        assert tmp.exists()
+        intended = json.loads(tmp.read_text(encoding="utf-8"))
+        assert intended["entries"]["req-1"]["status"] == "released"
+        # ...while the main file still shows the stale reservation.
+        stale = json.loads(ledger_path.read_text(encoding="utf-8"))
+        assert stale["entries"]["req-1"]["status"] == "reserved"
+
+
+class TestTmpRecovery:
+    def _write_incident_state(self, ledger_path):
+        """Reproduce the screening-20260713-001 condition: main holds a stale
+        $0.08 reservation; the tmp holds its newer released state."""
+        entry = {"reserved_usd": 0.08, "final_usd": None, "note": ""}
+        main = {
+            "budget_usd": 10.0,
+            "entries": {"req-stuck": {**entry, "status": "reserved"}},
+            "totals": {"spent_usd": 0.0, "reserved_usd": 0.08, "remaining_usd": 9.92},
+        }
+        newer = {
+            "budget_usd": 10.0,
+            "entries": {"req-stuck": {**entry, "status": "released", "final_usd": 0.0}},
+            "totals": {"spent_usd": 0.0, "reserved_usd": 0.0, "remaining_usd": 10.0},
+        }
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        ledger_path.write_text(json.dumps(main), encoding="utf-8")
+        ledger_path.with_suffix(".json.tmp").write_text(json.dumps(newer), encoding="utf-8")
+
+    def test_valid_newer_tmp_state_is_recovered(self, ledger_path):
+        self._write_incident_state(ledger_path)
+        with BudgetLedger.open(ledger_path, 10.0) as ledger:
+            assert ledger.status_of("req-stuck") == "released"
+            assert ledger.reserved_usd == 0.0
+            assert ledger.spent_usd == 0.0
+        assert not ledger_path.with_suffix(".json.tmp").exists()
+
+    def test_no_double_spend_or_double_reservation_after_recovery(self, ledger_path):
+        self._write_incident_state(ledger_path)
+        with BudgetLedger.open(ledger_path, 10.0) as ledger:
+            # The released request may be deliberately retried: exactly one
+            # active reservation results, and totals stay consistent.
+            ledger.ensure_reserved("req-stuck", 0.08)
+            assert ledger.reserved_usd == pytest.approx(0.08)
+            assert ledger.spent_usd == 0.0
+            ledger.ensure_reserved("req-stuck", 0.08)  # idempotent
+            assert ledger.reserved_usd == pytest.approx(0.08)
+            assert ledger.remaining_usd == pytest.approx(9.92)
+
+    def test_malformed_tmp_is_quarantined_not_promoted(self, ledger_path, capsys):
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        ledger_path.write_text(
+            json.dumps({"budget_usd": 1.0, "entries": {}, "totals": {}}), encoding="utf-8"
+        )
+        tmp = ledger_path.with_suffix(".json.tmp")
+        tmp.write_text("{ this is not json", encoding="utf-8")
+        with BudgetLedger.open(ledger_path, 1.0) as ledger:
+            assert ledger.spent_usd == 0.0
+        assert not tmp.exists()
+        quarantined = list(ledger_path.parent.glob("*.quarantined*"))
+        assert len(quarantined) == 1
+        assert "quarantined" in capsys.readouterr().err
+
+    def test_regressive_tmp_state_is_not_promoted(self, ledger_path):
+        """A tmp that would resurrect a settled entry must never win."""
+        entry = {"reserved_usd": 0.08, "note": ""}
+        main = {
+            "budget_usd": 1.0,
+            "entries": {"req-1": {**entry, "status": "reconciled", "final_usd": 0.04}},
+            "totals": {},
+        }
+        regressive = {
+            "budget_usd": 1.0,
+            "entries": {"req-1": {**entry, "status": "reserved", "final_usd": None}},
+            "totals": {},
+        }
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        ledger_path.write_text(json.dumps(main), encoding="utf-8")
+        ledger_path.with_suffix(".json.tmp").write_text(
+            json.dumps(regressive), encoding="utf-8"
+        )
+        with BudgetLedger.open(ledger_path, 1.0) as ledger:
+            assert ledger.status_of("req-1") == "reconciled"
+            assert ledger.spent_usd == pytest.approx(0.04)
+        assert list(ledger_path.parent.glob("*.quarantined*"))
+
+    def test_tmp_with_different_budget_is_quarantined(self, ledger_path):
+        self._write_incident_state(ledger_path)
+        tmp = ledger_path.with_suffix(".json.tmp")
+        payload = json.loads(tmp.read_text(encoding="utf-8"))
+        payload["budget_usd"] = 99.0
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        with BudgetLedger.open(ledger_path, 10.0) as ledger:
+            assert ledger.status_of("req-stuck") == "reserved"  # main untouched
+        assert list(ledger_path.parent.glob("*.quarantined*"))

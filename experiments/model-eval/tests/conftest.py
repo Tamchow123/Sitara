@@ -216,12 +216,14 @@ class MockAdapter:
         self,
         on_create: Callable[[str, str | None, dict[str, Any]], None] | None = None,
         fail_with: ProviderError | None = None,
+        fail_map: dict[str, ProviderError] | None = None,
     ):
         self.create_calls: list[tuple[str, str | None, dict[str, Any]]] = []
         self.download_calls: list[str] = []
         self.closed = False
         self.on_create = on_create
         self.fail_with = fail_with
+        self.fail_map = fail_map or {}
 
     def create_prediction(self, replicate_id: str, version: str | None, input_params: dict) -> Prediction:
         if self.on_create is not None:
@@ -229,6 +231,8 @@ class MockAdapter:
         self.create_calls.append((replicate_id, version, input_params))
         if self.fail_with is not None:
             raise self.fail_with
+        if replicate_id in self.fail_map:
+            raise self.fail_map[replicate_id]
         return Prediction(
             id=f"pred-{len(self.create_calls)}",
             status="succeeded",
