@@ -58,9 +58,42 @@ class TestRendering:
             for phrase in NEGATIVE_PHRASES:
                 assert phrase not in text
             # Positive presentation vocabulary instead:
-            assert "unbranded" in text
-            assert "modest full-coverage" in text
-            assert "anatomically coherent fingers" in text
+            assert "non-branded textile and embroidery design" in text
+            assert "any visible hands" in text
+
+    def test_presentation_defaults_do_not_contradict_brief_specifics(self, plain_candidate):
+        """Prompt-wide defaults must never fight the brief: no universal
+        modesty suffix, no 'plain fabric' against heavy embroidery, no
+        wording that forces hands into frame."""
+        heavy_uncovered = make_brief(
+            "heavy-brief",
+            embellishment_level="heavy",
+            embellishment_techniques=["dense zardozi", "kundan jaal"],
+            coverage="classic choli with an open back",
+            sleeves="sleeveless blouse",
+        )
+        for fmt in (FORMAT_EDITORIAL, FORMAT_SECTIONED):
+            text = (render_prompt(heavy_uncovered, fmt, "text_only", plain_candidate.capabilities).text or "").lower()
+            # No universal coverage/modesty injection beyond the brief's own words:
+            assert "modest full-coverage" not in text
+            assert "full sleeves" not in text  # brief says sleeveless
+            # No plain-fabric wording contradicting heavy embellishment:
+            assert "plain unbranded fabric" not in text
+            assert "plain fabric" not in text
+            # Hands are conditional, never demanded:
+            assert "any visible hands" in text
+            # The brief's own choices survive verbatim:
+            assert "open back" in text
+            assert "sleeveless" in text
+            assert "dense zardozi" in text
+
+    def test_coverage_wording_comes_only_from_the_brief(self, plain_candidate):
+        modest = make_brief("modest-brief", coverage="modest full-coverage silhouette")
+        other = make_brief("other-brief", coverage="fitted choli with a bare midriff kept elegant")
+        modest_text = (render_prompt(modest, FORMAT_EDITORIAL, "text_only", plain_candidate.capabilities).text or "")
+        other_text = (render_prompt(other, FORMAT_EDITORIAL, "text_only", plain_candidate.capabilities).text or "")
+        assert "modest full-coverage" in modest_text
+        assert "modest full-coverage" not in other_text
 
     def test_exclusions_only_via_dedicated_negative_param(self, negative_candidate, plain_candidate):
         brief = make_brief()

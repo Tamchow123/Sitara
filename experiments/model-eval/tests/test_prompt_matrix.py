@@ -3,8 +3,9 @@
 from conftest import (
     EXPERIMENT_ROOT,
     make_brief,
-    make_bundle,
+    make_candidate,
     make_candidates_config,
+    make_reference_entry,
     make_refinement_brief,
     make_stage,
 )
@@ -12,26 +13,23 @@ from model_eval.config import (
     REQUIRED_CEREMONIES,
     REQUIRED_GARMENTS,
     BriefsFile,
+    ReferenceManifest,
     load_briefs,
-    load_candidates,
     load_stage,
 )
 from model_eval.prompt_matrix import (
     SKIP_NO_EDIT_SUPPORT,
     SKIP_NO_REFERENCE_SUPPORT,
+    SKIP_NOT_TEXT_TO_IMAGE,
+    SKIP_UNVERIFIED_REFERENCE,
     expand,
 )
+from model_eval.runner import load_stage_bundle
 
 
 def _real_plans():
-    candidates = load_candidates(EXPERIMENT_ROOT / "configs" / "model_candidates.yaml")
-    briefs = load_briefs(EXPERIMENT_ROOT / "prompts" / "briefs.yaml")
-    screening = expand(
-        load_stage(EXPERIMENT_ROOT / "configs" / "screening.yaml"), candidates, briefs
-    )
-    finalist = expand(
-        load_stage(EXPERIMENT_ROOT / "configs" / "finalists.yaml"), candidates, briefs
-    )
+    screening = load_stage_bundle(EXPERIMENT_ROOT / "configs" / "screening.yaml").plan
+    finalist = load_stage_bundle(EXPERIMENT_ROOT / "configs" / "finalists.yaml").plan
     return screening, finalist
 
 
@@ -96,6 +94,18 @@ class TestRealMatrices:
         assert {"base", "refinement_fresh", "refinement_edit"} <= kinds
         assert {"editorial", "sectioned", "json"} <= formats
 
+    def test_shipped_reference_requests_are_plan_time_skips_until_verified(self):
+        """The repo ships an EMPTY manifest, so every reference-mode request
+        must be a visible plan-time skip excluded from counts and spend."""
+        _, finalist = _real_plans()
+        ref_requests = [r for r in finalist.requests if r.inspiration_mode == "reference_image"]
+        assert ref_requests, "briefs with reference_ids should still appear in the plan"
+        assert all(r.skipped for r in ref_requests)
+        assert all(
+            SKIP_UNVERIFIED_REFERENCE in (r.skip_reason or "") for r in ref_requests
+        )
+        assert all(r.estimated_max_cost_usd == 0.0 for r in ref_requests)
+
 
 class TestSkips:
     def test_reference_mode_without_model_support_is_skipped_clearly(
@@ -103,14 +113,70 @@ class TestSkips:
     ):
         candidates = make_candidates_config(plain_candidate, reffy_candidate)
         briefs = BriefsFile(briefs=[make_brief(reference_ids=["ref-a"])])
+        manifest = ReferenceManifest(
+            references=[make_reference_entry("ref-a", "local/ref-a.png", "verified")]
+        )
         stage = make_stage(models=["plain", "reffy"], inspiration_modes=["reference_image"])
-        plan = expand(stage, candidates, briefs)
+        plan = expand(stage, candidates, briefs, manifest)
         skipped = {r.model_key: r for r in plan.skipped}
         assert "plain" in skipped
         assert skipped["plain"].skip_reason == SKIP_NO_REFERENCE_SUPPORT
         assert all(r.model_key == "reffy" for r in plan.runnable)
         # Runnable reference request respects the model's max image count.
         assert plan.runnable[0].reference_ids == ["ref-a"]
+
+    def test_unknown_and_unverified_references_are_plan_time_skips(self, reffy_candidate):
+        candidates = make_candidates_config(reffy_candidate)
+        briefs = BriefsFile(
+            briefs=[
+                make_brief("unknown-ref", reference_ids=["nowhere"]),
+                make_brief("pending-ref", reference_ids=["ref-p"]),
+            ]
+        )
+        manifest = ReferenceManifest(
+            references=[make_reference_entry("ref-p", "local/ref-p.png", "pending")]
+        )
+        stage = make_stage(
+            models=["reffy"],
+            inspiration_modes=["reference_image"],
+            prompt_formats=["editorial"],
+        )
+        plan = expand(stage, candidates, briefs, manifest)
+        assert plan.runnable == []
+        assert len(plan.skipped) == 2
+        for r in plan.skipped:
+            assert SKIP_UNVERIFIED_REFERENCE in (r.skip_reason or "")
+        assert plan.total_max_cost_usd == 0.0
+
+    def test_missing_reference_file_is_a_plan_time_skip(self, reffy_candidate, tmp_path):
+        candidates = make_candidates_config(reffy_candidate)
+        briefs = BriefsFile(briefs=[make_brief(reference_ids=["ref-a"])])
+        manifest = ReferenceManifest(
+            references=[make_reference_entry("ref-a", "local/ref-a.png", "verified")]
+        )
+        stage = make_stage(models=["reffy"], inspiration_modes=["reference_image"])
+        # references_dir given but the file does not exist there:
+        plan = expand(stage, candidates, briefs, manifest, references_dir=tmp_path)
+        assert plan.runnable == []
+        assert "file missing" in (plan.skipped[0].skip_reason or "")
+
+    def test_editing_only_model_is_visibly_rejected_for_text_to_image(self, plain_candidate):
+        edit_only = make_candidate(
+            "editonly",
+            categories=["editing"],
+            text_to_image=False,
+            image_editing=True,
+            image_editing_param="input_image",
+        )
+        candidates = make_candidates_config(plain_candidate, edit_only)
+        briefs = BriefsFile(briefs=[make_brief()])
+        stage = make_stage(models=["plain", "editonly"])
+        plan = expand(stage, candidates, briefs)
+        assert all(r.model_key == "plain" for r in plan.runnable)
+        rejected = [r for r in plan.skipped if r.model_key == "editonly"]
+        assert len(rejected) == 1
+        assert rejected[0].skip_reason == SKIP_NOT_TEXT_TO_IMAGE
+        assert rejected[0].estimated_max_cost_usd == 0.0
 
     def test_edit_refinement_without_editing_support_is_skipped_clearly(self, plain_candidate):
         candidates = make_candidates_config(plain_candidate)

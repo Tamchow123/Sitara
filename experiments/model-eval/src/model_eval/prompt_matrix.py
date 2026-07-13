@@ -6,10 +6,15 @@ the same inputs always produce the same ordered list of PlannedRequest
 objects with the same request IDs, which is what makes interrupted runs
 resumable and budgets predictable.
 
-Combinations a MODEL cannot serve (reference images without reference
-support, image-edit refinement without editing support, an explicitly
-requested format the model lacks) are emitted as SKIPPED planned requests
-with a reason — never silently dropped and never sent.
+Combinations a MODEL cannot serve (an editing-only model asked for
+text-to-image work, reference images without reference support, image-edit
+refinement without editing support, an explicitly requested format the model
+lacks) are emitted as SKIPPED planned requests with a reason — never
+silently dropped and never sent.
+
+Reference IDs are resolved against the rights manifest AT PLAN TIME: unknown,
+unverified or file-missing references produce visible skips that are excluded
+from planned provider-request counts and spend.
 
 Combinations a BRIEF cannot express are quietly omitted instead, because
 they would only duplicate spend, not reveal a model limitation: `metadata`
@@ -19,6 +24,7 @@ to text_only) and `reference_image` mode when a brief lists no references.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -30,6 +36,7 @@ from .config import (
     ConfigError,
     InspirationMode,
     ModelCandidate,
+    ReferenceManifest,
     StageConfig,
 )
 from .prompt_formats import (
@@ -47,6 +54,32 @@ RequestKind = Literal["base", "refinement_fresh", "refinement_edit"]
 SKIP_NO_REFERENCE_SUPPORT = "model_lacks_reference_image_support"
 SKIP_NO_EDIT_SUPPORT = "model_lacks_image_editing_support"
 SKIP_FORMAT_UNSUPPORTED = "prompt_format_not_supported_by_model"
+SKIP_NOT_TEXT_TO_IMAGE = "model_is_editing_only_not_text_to_image"
+SKIP_UNVERIFIED_REFERENCE = "reference_rights_not_verified"
+
+
+def reference_problem(
+    brief: Brief,
+    manifest: ReferenceManifest,
+    references_dir: Path | None,
+) -> str | None:
+    """Why this brief's references cannot be used, or None if all usable."""
+    for ref_id in brief.reference_ids:
+        try:
+            entry = manifest.by_id(ref_id)
+        except ConfigError:
+            return f"{SKIP_UNVERIFIED_REFERENCE}: unknown reference {ref_id!r}"
+        if entry.rights_status != "verified":
+            return (
+                f"{SKIP_UNVERIFIED_REFERENCE}: reference {ref_id!r} has "
+                f"rights_status={entry.rights_status!r}"
+            )
+        if references_dir is not None and not (references_dir / entry.path).is_file():
+            return (
+                f"{SKIP_UNVERIFIED_REFERENCE}: file missing for reference "
+                f"{ref_id!r} ({entry.path})"
+            )
+    return None
 
 
 class PlannedRequest(BaseModel):
@@ -194,8 +227,19 @@ def _planned(
     )
 
 
-def expand(stage: StageConfig, candidates: CandidatesConfig, briefs: BriefsFile) -> RunPlan:
-    """Expand a stage configuration into an ordered, deterministic plan."""
+def expand(
+    stage: StageConfig,
+    candidates: CandidatesConfig,
+    briefs: BriefsFile,
+    manifest: ReferenceManifest | None = None,
+    references_dir: Path | None = None,
+) -> RunPlan:
+    """Expand a stage configuration into an ordered, deterministic plan.
+
+    ``manifest``/``references_dir`` enable plan-time reference validation;
+    without a manifest, reference-mode cells for briefs with reference_ids
+    are skipped as unverifiable."""
+    manifest = manifest or ReferenceManifest(references=[])
     selected_briefs: list[Brief]
     if stage.brief_ids == "all":
         selected_briefs = list(briefs.briefs)
@@ -207,6 +251,18 @@ def expand(stage: StageConfig, candidates: CandidatesConfig, briefs: BriefsFile)
     requests: list[PlannedRequest] = []
     for brief in selected_briefs:
         for candidate in selected_models:
+            if not candidate.capabilities.text_to_image:
+                # Editing-only model: no base text-to-image requests exist
+                # for it. One visible rejection per brief x model.
+                requests.append(
+                    _planned(
+                        stage=stage, brief=brief, candidate=candidate,
+                        fmt=FORMAT_EDITORIAL, mode=stage.inspiration_modes[0],
+                        seed=stage.seeds[0], kind="base", rendered=None,
+                        reference_ids=[], skip_reason=SKIP_NOT_TEXT_TO_IMAGE,
+                    )
+                )
+                continue
             fmts = formats_for(candidate, stage.prompt_formats)
             # Explicitly requested but unsupported formats become visible skips.
             for bad_fmt in unsupported_formats(candidate, stage.prompt_formats):
@@ -222,7 +278,10 @@ def expand(stage: StageConfig, candidates: CandidatesConfig, briefs: BriefsFile)
                 for mode in stage.inspiration_modes:
                     for seed in stage.seeds:
                         requests.extend(
-                            _expand_cell(stage, brief, candidate, fmt, mode, seed)
+                            _expand_cell(
+                                stage, brief, candidate, fmt, mode, seed,
+                                manifest, references_dir,
+                            )
                         )
     return RunPlan(stage=stage.stage, requests=requests)
 
@@ -234,6 +293,8 @@ def _expand_cell(
     fmt: str,
     mode: InspirationMode,
     seed: int | None,
+    manifest: ReferenceManifest,
+    references_dir: Path | None,
 ) -> list[PlannedRequest]:
     out: list[PlannedRequest] = []
 
@@ -251,7 +312,11 @@ def _expand_cell(
             # a visible, recorded skip — never silently ignored.
             skip_reason = SKIP_NO_REFERENCE_SUPPORT
         else:
-            reference_ids = brief.reference_ids[: candidate.capabilities.max_reference_images]
+            # Rights are validated at PLAN time: unknown/unverified/missing
+            # references become visible skips excluded from counts and spend.
+            skip_reason = reference_problem(brief, manifest, references_dir)
+            if skip_reason is None:
+                reference_ids = brief.reference_ids[: candidate.capabilities.max_reference_images]
 
     rendered = None if skip_reason else render_prompt(brief, fmt, mode, candidate.capabilities)
     base = _planned(

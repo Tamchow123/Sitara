@@ -13,9 +13,13 @@ is rendered in the formats its capabilities actually support:
                          positive prompt of other models.
 
 Positive-only presentation wording (used everywhere) describes what we DO
-want instead of listing what we don't: plain unbranded fabric, a clean
-uncluttered studio background, natural hands with anatomically coherent
-fingers, the full garment visible, and modest full-coverage bridal styling.
+want instead of listing what we don't — and it deliberately stays OUT of the
+brief's territory: coverage, sleeves and neckline come only from the
+individual brief (a universal modesty suffix would contradict briefs that
+specify their own coverage), fabric/embroidery character comes from the
+brief (a universal "plain fabric" phrase would contradict heavy zardozi),
+and hands are described conditionally so the wording never forces hands
+into frame.
 
 Rendering is a pure function of (brief, format, inspiration mode) and is
 covered by determinism tests. The exact rendered output is stored in every
@@ -42,12 +46,13 @@ ALL_FORMATS = (
 )
 
 # Positive-only presentation vocabulary. Order is fixed and meaningful.
+# Constraint: nothing here may specify coverage, sleeves, neckline,
+# embellishment density or fabric plainness — those belong to the brief.
 PRESENTATION_POSITIVE: tuple[str, ...] = (
     "full-length studio fashion photograph with the entire garment visible from head to hem",
     "clean uncluttered studio background",
-    "plain unbranded fabric",
-    "natural hands with anatomically coherent fingers",
-    "modest full-coverage bridal styling",
+    "an original, non-branded textile and embroidery design",
+    "any visible hands rendered naturally with coherent fingers",
     "soft even lighting that shows true fabric colour and embroidery detail",
 )
 
@@ -210,8 +215,7 @@ def _render_json(brief: Brief, mode: InspirationMode) -> dict[str, Any]:
         "scene": "full-length studio fashion photograph",
         "subject": {
             "description": "bride wearing the described garment",
-            "hands": "natural hands with anatomically coherent fingers",
-            "styling": "modest full-coverage bridal styling",
+            "hands": "any visible hands rendered naturally with coherent fingers",
         },
         "garment": {
             "type": f"South Asian bridal {_garment_label(brief)}",
@@ -226,7 +230,7 @@ def _render_json(brief: Brief, mode: InspirationMode) -> dict[str, Any]:
         },
         "background": "clean uncluttered studio background",
         "lighting": "soft even lighting showing true fabric colour and embroidery detail",
-        "branding": "plain unbranded fabric",
+        "branding": "an original, non-branded textile and embroidery design",
         "framing": "entire garment visible from head to hem",
     }
     if brief.extras:
@@ -288,10 +292,13 @@ def apply_refinement(brief: Brief, change: RefinementChange) -> Brief:
 
 
 def render_edit_instruction(brief: Brief, change: RefinementChange) -> str:
-    """Instruction prompt for image-editing / conditioned-refinement models."""
+    """Instruction prompt for image-editing / conditioned-refinement models.
+
+    Wording is derived from the change's field/from/to (via the derived
+    description) so it can never contradict the actual change applied."""
     return (
         f"Edit this image of a South Asian bridal {_garment_label(brief)}: "
-        f"change {change.description} (from {change.from_value} to {change.to_value}). "
+        f"change {change.description}. "
         "Preserve every unspecified detail exactly as it is: the same pose, the same "
         "composition and framing, the same face, the same fabric texture, the same "
         "embellishment placement, the same background and lighting."

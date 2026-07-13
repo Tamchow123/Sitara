@@ -28,7 +28,7 @@ from .config import ConfigError, load_candidates
 from .contact_sheet import build_contact_sheet
 from .replicate_client import ProviderGateError, default_adapter_factory
 from .result_store import ResultStore
-from .runner import Runner, load_stage_bundle, plan_summary
+from .runner import Runner, RunnerError, load_stage_bundle, plan_summary
 from .scoring import build_scoring_sheet
 from .terms import write_terms_snapshot
 
@@ -50,6 +50,8 @@ def _print_plan(summary: dict) -> None:
     if summary["budget_usd"] is not None:
         verdict = "WITHIN" if summary["within_budget"] else "EXCEEDS"
         print(f"Budget:                    {summary['budget_usd']:.2f} USD ({verdict} budget)")
+    for warning in summary.get("preflight_warnings", []):
+        print(f"PREFLIGHT WARNING: {warning}")
     if summary["skips"]:
         print("Skips:")
         for s in summary["skips"][:25]:
@@ -129,7 +131,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             budget_usd=args.budget_usd,
             references_dir=REFERENCES_DIR,
         )
-    except (ProviderGateError, BudgetError) as exc:
+    except (ProviderGateError, BudgetError, RunnerError) as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 2
 
@@ -138,6 +140,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"  failed:    {len(outcome.failed)}")
     print(f"  skipped:   {len(outcome.skipped)}")
     print(f"  resumed:   {len(outcome.resumed)} (already complete before this invocation)")
+    if outcome.previously_failed:
+        print(
+            f"  not retried: {len(outcome.previously_failed)} previously failed "
+            "(delete their result records and use a new run id to retry)"
+        )
     if outcome.halted_reason:
         print(f"  HALTED: {outcome.halted_reason}")
     print(f"Results: {runner.run_dir}")

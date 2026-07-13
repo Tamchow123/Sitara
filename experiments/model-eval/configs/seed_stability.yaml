@@ -1,0 +1,41 @@
+# Seed-stability round (companion to finalists.yaml).
+#
+# Multiple seeds on a reduced, representative brief subset — one brief per
+# garment type, spanning heavy and minimal embellishment, modest styling and
+# both fast/quality colour stories. Purpose: measure how much each finalist
+# varies across seeds for an identical prompt, which calibrates how honest
+# the application's seed-reuse continuity language must be.
+#
+# EDIT `models:` to the two screening winners (same as finalists.yaml).
+# Check the plan first:
+#   python -m model_eval.cli plan --config configs/seed_stability.yaml --budget-usd 15
+
+stage: finalist
+candidates_file: model_candidates.yaml
+briefs_file: ../prompts/briefs.yaml
+reference_manifest: ../references/manifest.yaml
+
+# PLACEHOLDERS — replace with the two screening winners before running.
+models:
+  - flux-2-pro
+  - flux-2-max
+
+brief_ids:
+  - scr-lehenga-baraat-heavy
+  - scr-saree-walima-minimal
+  - scr-gharara-nikah-heavy
+  - scr-sharara-mehndi-moderate
+  - scr-anarkali-walima-moderate
+  - scr-shalwar-kameez-nikah-modest
+
+seeds: [11, 47, 90]
+aspect_ratio: "3:4"
+inspiration_modes: [text_only]
+prompt_formats: [editorial]
+refinement:
+  enabled: false
+
+notes: >-
+  Everything is held constant except the seed. Score per-seed variation in
+  garment structure, embellishment placement and composition; high variance
+  means the refinement UX must promise even less continuity from seed reuse.

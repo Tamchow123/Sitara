@@ -11,7 +11,15 @@
 # rights_status: verified before a live run will send them).
 #
 # `refinement` entries apply exactly one constrained change and are used by
-# the refinement experiments (fresh regeneration vs image editing).
+# the refinement experiments (fresh regeneration vs image editing). Their
+# human-readable wording is DERIVED from field/from_value/to_value so
+# descriptions can never contradict the actual change.
+#
+# `cultural_review` flags briefs whose cultural framing is uncertain; treat
+# their scores as provisional until the project owner reviews the note.
+# Terminology note: "baraat" strictly names the groom's procession; it is
+# used here in the common colloquial sense of "the bride's outfit for the
+# baraat/wedding day" in Pakistani and North Indian usage.
 
 briefs:
   # ---------------------------------------------------------------- screening
@@ -43,7 +51,6 @@ briefs:
     dupatta: pallu draped over the shoulder in neat pleats
     refinement:
       id: ivory-to-deep-red
-      description: the colour palette from ivory and soft gold to deep red and antique gold
       field: palette
       from_value: ivory and soft gold
       to_value: deep red and antique gold
@@ -63,7 +70,6 @@ briefs:
     dupatta: draped over the shoulder
     refinement:
       id: shoulder-to-head-dupatta
-      description: the dupatta drape from over the shoulder to over the head
       field: dupatta
       from_value: draped over the shoulder
       to_value: draped over the head
@@ -91,7 +97,6 @@ briefs:
     dupatta: light net dupatta draped over the shoulder
     refinement:
       id: short-to-full-sleeves
-      description: the sleeves from short sleeves to full sleeves
       field: sleeves
       from_value: short sleeves
       to_value: full sleeves
@@ -147,7 +152,6 @@ briefs:
     dupatta: draped over the shoulder
     refinement:
       id: minimal-to-heavy-embroidery
-      description: the embellishment from minimal to heavy
       field: embellishment_level
       from_value: minimal
       to_value: heavy
@@ -173,6 +177,11 @@ briefs:
       fabric: Banarasi silk
       dupatta_placement: pallu plus head veil
       regional_note: Bengali bridal styling with traditional drape
+    cultural_review: >-
+      "Baraat" is a North Indian/Pakistani procession term not typical of
+      Bengali wedding vocabulary, and the head-veil-over-pallu (ghomta)
+      pairing with Banarasi silk should be confirmed as a coherent Bengali
+      bridal look by the project owner.
     tags: [screening, heavy, saree-integrity]
 
   - id: scr-gharara-walima-minimal
@@ -303,6 +312,11 @@ briefs:
       fabric: silk with net dupatta
       dupatta_placement: head-framing khada drape
       regional_note: Hyderabadi bridal tradition; distinct from a standard saree drape
+    cultural_review: >-
+      The Hyderabadi khada dupatta ensemble is traditionally worn over a
+      kurta with a farshi pajama, not over a saree base as this brief
+      currently describes. Project owner must confirm or correct the garment
+      pairing before treating scores for this brief as authoritative.
     tags: [finalist, moderate, modest, regional-specific]
 
   - id: fin-gharara-baraat-royal
@@ -398,7 +412,6 @@ briefs:
     dupatta: draped over the head
     refinement:
       id: ivory-to-deep-red
-      description: the colour palette from ivory and soft gold to deep red and antique gold
       field: palette
       from_value: ivory and soft gold
       to_value: deep red and antique gold
@@ -438,7 +451,7 @@ briefs:
     ceremony: nikah
     region: Karachi
     palette: pearl white and silver
-    fabric: organza kameex layered over silk sharara trousers
+    fabric: organza kameez layered over silk sharara trousers
     embellishment_level: moderate
     embellishment_techniques: [pearl work, silver kora]
     sleeves: full sleeves
@@ -446,8 +459,7 @@ briefs:
     coverage: fully covered modest silhouette
     dupatta: draped over the head
     refinement:
-      id: shoulder-to-head-dupatta
-      description: the dupatta drape from over the shoulder to over the head
+      id: head-to-shoulder-dupatta
       field: dupatta
       from_value: draped over the head
       to_value: draped over the shoulder
@@ -488,6 +500,11 @@ briefs:
       fabric: silk velvet
       dupatta_placement: head drape
       regional_note: Kashmiri winter bridal styling
+    cultural_review: >-
+      Traditional Kashmiri bridal dress is the pheran; a tilla-worked velvet
+      lehenga is a modern fusion rather than traditional Kashmiri attire.
+      Project owner should confirm the framing is acceptable as a
+      contemporary regional-inspired brief.
     tags: [finalist, heavy, winter, modest, full-coverage]
 
   - id: fin-sharara-reception-modern
@@ -516,6 +533,11 @@ briefs:
     neckline: round blouse neckline
     coverage: traditional madisar-inspired secure drape
     dupatta: pallu pleated over the left shoulder
+    cultural_review: >-
+      "Pheras" is North Indian terminology (the South Indian equivalent rite
+      is the saptapadi), and the madisar is a specific Tamil Brahmin nine-yard
+      drape — pairing it loosely with a generic Kanjeevaram bridal look needs
+      project-owner confirmation.
     tags: [finalist, heavy, regional-specific, saree-integrity]
 
   - id: fin-anarkali-walima-night
@@ -531,8 +553,7 @@ briefs:
     coverage: floor-length fully covered silhouette
     dupatta: draped over the shoulder
     refinement:
-      id: minimal-to-heavy-embroidery
-      description: the embellishment from moderate to heavy
+      id: moderate-to-heavy-embroidery
       field: embellishment_level
       from_value: moderate
       to_value: heavy

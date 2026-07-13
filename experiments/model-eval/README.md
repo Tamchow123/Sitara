@@ -60,9 +60,14 @@ blind contact sheet picks the top two.
 **Stage B — finalists** (`configs/finalists.yaml`): edit `models:` to the
 two screening winners, then run the full 30-brief matrix with the three
 inspiration modes, both refinement strategies, and every prompt format each
-model supports. Nothing auto-selects a winner — human scoring is
-authoritative, and hard cultural failures (e.g. a gharara rendered as a
-sharara, ignored coverage requirements) disqualify regardless of prettiness.
+model supports. A companion round, `configs/seed_stability.yaml`, runs three
+seeds over a reduced representative brief subset to measure per-seed
+variance (finalists.yaml itself is single-seed by design). Nothing
+auto-selects a winner — human scoring is authoritative, and hard cultural
+failures (e.g. a gharara rendered as a sharara, ignored coverage
+requirements) disqualify regardless of prettiness. Briefs whose cultural
+framing needs owner review carry a `cultural_review` note in
+`prompts/briefs.yaml`; treat their scores as provisional until reviewed.
 
 ## Planning and dry runs (zero cost, zero network)
 
@@ -73,10 +78,23 @@ python -m model_eval.cli run --config configs/screening.yaml --dry-run --budget-
 ```
 
 `plan` and `--dry-run` print the planned request count, models, prompt
-formats, inspiration modes, refinement experiments, visible skips, and the
-**conservative maximum spend** — a deliberately pessimistic ceiling built
-from each candidate's `max_cost_per_generation_usd`. Real spend is usually
-much lower. Dry runs make zero network calls and create no artefacts.
+formats, inspiration modes, refinement experiments, visible skips (including
+editing-only model rejections and unverified-reference exclusions, which are
+validated against the manifest at plan time and excluded from counts and
+spend), preflight warnings, and the **conservative maximum spend** — a
+deliberately pessimistic ceiling built from each candidate's
+`max_cost_per_generation_usd`. Dry runs make zero network calls and create
+no artefacts.
+
+**Cost accounting is deliberately conservative.** Where a billing formula is
+verified (`formula_verified: true`, flat per-image models), successful runs
+reconcile to an input-aware calculated cost. Where it is unresolved (the
+FLUX.2 per-run + per-MP formula, klein-4b's anomalous advertised price),
+successful runs are accounted at the FULL reserved amount — the ledger may
+overcount but can never undercount. Each result records its `cost_basis`
+(`calculated` or `reserved_conservative`); nothing is presented as a
+provider-reported charge, because Replicate does not report one per
+prediction.
 
 ## Deliberately enabling live calls
 
@@ -125,10 +143,17 @@ python -m model_eval.cli run --config configs/screening.yaml \
   --budget-usd 10 --confirm-live --run-id screening-20260713T120000Z
 ```
 
-Completed and skipped requests are detected from their result records and
-never re-sent (spend is not double-counted); failed ones are retried. If a
-crash left a stale `budget_ledger.json.lock`, delete the lock file after
-confirming no other run is active.
+Resume is crash-safe at every stage: an attempt record is persisted before
+each submission and the provider prediction id immediately after acceptance,
+so a request that was already accepted is resumed by POLLING that prediction
+— never by submitting a duplicate. Already-downloaded outputs are reused,
+completed/skipped requests are never re-sent, and settled ledger entries are
+never charged twice. Failed requests are final for their run (their spend is
+already accounted); to retry one deliberately, delete its result record and
+use a new run id. A stale lock file left by a crashed process is reclaimed
+automatically when its PID is no longer alive; if the PID cannot be read,
+delete `budget_ledger.json.lock` manually after confirming no other run is
+active.
 
 ## Reference images (rights-controlled)
 
@@ -170,9 +195,16 @@ never into code.
 
 ```
 configs/    model candidates (verified facts) + stage configs
+            (screening / finalists / seed_stability)
 prompts/    briefs.yaml — the garment/ceremony brief matrix
 references/ rights-controlled reference manifest (+ local/, gitignored)
-src/        model_eval package (config, matrix, formats, budget, runner, ...)
+src/        model_eval package (config, matrix, formats, costs, budget,
+            runner, ...)
 tests/      pytest suite — fully mocked, proves the zero-spend gates
 outputs/    run artefacts (gitignored): results, images, ledgers, sheets
 ```
+
+Security note: output images are downloaded with a separate, UNAUTHENTICATED
+HTTP client — the Replicate API token is only ever sent to the Replicate API
+itself, never to output-hosting domains, and downloads must stay on HTTPS
+through any redirect.

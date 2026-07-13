@@ -12,6 +12,7 @@ from conftest import (
     MockAdapter,
     make_brief,
     make_bundle,
+    make_candidate,
     make_candidates_config,
     make_pricing,
     make_reference_entry,
@@ -26,7 +27,7 @@ from model_eval.replicate_client import (
     ReplicateAdapter,
     live_gate_failures,
 )
-from model_eval.runner import Runner
+from model_eval.runner import Runner, RunnerError
 
 
 def make_runner(tmp_path, bundle, adapter_or_factory, env=LIVE_ENV, run_id="test-run"):
@@ -255,6 +256,142 @@ class TestResume:
         # Spend was not double-counted either.
         data = json.loads((runner2.run_dir / "budget_ledger.json").read_text(encoding="utf-8"))
         assert data["totals"]["spent_usd"] == pytest.approx(0.04)
+
+
+class TestDownloadIsolation:
+    def test_download_requests_never_carry_the_bearer_token(self, tmp_path):
+        token = "r8_download_isolation_token"
+        captured: dict = {}
+
+        def download_handler(request: httpx.Request) -> httpx.Response:
+            captured["headers"] = dict(request.headers)
+            return httpx.Response(
+                200, content=tiny_png_bytes(), headers={"content-type": "image/png"}
+            )
+
+        api_client = httpx.Client(
+            transport=httpx.MockTransport(lambda r: httpx.Response(500)),
+            headers={"Authorization": f"Bearer {token}", "Cookie": "session=abc"},
+        )
+        download_client = httpx.Client(
+            transport=httpx.MockTransport(download_handler), follow_redirects=True
+        )
+        adapter = ReplicateAdapter(token, client=api_client, download_client=download_client)
+        mime, size = adapter.download(
+            "https://delivery.example.com/out.png", tmp_path / "o.png", max_bytes=10_000_000
+        )
+        assert mime == "image/png" and size > 0
+        headers = {k.lower(): v for k, v in captured["headers"].items()}
+        assert "authorization" not in headers
+        assert "cookie" not in headers
+        assert token not in str(captured["headers"])
+
+    def test_non_https_output_url_is_refused(self, tmp_path):
+        adapter = ReplicateAdapter(
+            "t",
+            client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500))),
+            download_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200))),
+        )
+        with pytest.raises(ProviderError, match="non-HTTPS"):
+            adapter.download("http://insecure.example/out.png", tmp_path / "o.png", max_bytes=1000)
+
+    def test_redirect_to_non_https_is_refused(self, tmp_path):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.scheme == "https":
+                return httpx.Response(302, headers={"location": "http://insecure.example/o.png"})
+            return httpx.Response(200, content=b"x", headers={"content-type": "image/png"})
+
+        adapter = ReplicateAdapter(
+            "t",
+            client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500))),
+            download_client=httpx.Client(
+                transport=httpx.MockTransport(handler), follow_redirects=True
+            ),
+        )
+        with pytest.raises(ProviderError, match="non-HTTPS"):
+            adapter.download("https://delivery.example/out.png", tmp_path / "o.png", max_bytes=1000)
+
+
+class TestConservativeCosting:
+    def test_unresolved_pricing_reconciles_at_full_reservation(self, tmp_path):
+        """An unresolved billing formula must never let the ledger undercount:
+        the success is accounted at the FULL reserved amount."""
+        unresolved = make_candidate(
+            "unresolved",
+            pricing=make_pricing(expected=0.03, maximum=0.12, formula_verified=False),
+        )
+        bundle = make_bundle(
+            make_stage(models=["unresolved"], prompt_formats=["editorial"]),
+            make_candidates_config(unresolved),
+            BriefsFile(briefs=[make_brief()]),
+        )
+        adapter = MockAdapter()
+        runner = make_runner(tmp_path, bundle, adapter)
+        outcome = runner.execute(
+            dry_run=False, confirm_live=True, budget_usd=10.0, references_dir=tmp_path
+        )
+        assert len(outcome.succeeded) == 1
+        data = json.loads((runner.run_dir / "budget_ledger.json").read_text(encoding="utf-8"))
+        entry = next(iter(data["entries"].values()))
+        assert entry["final_usd"] == pytest.approx(0.12)  # full reservation
+        record = runner.store.load(outcome.succeeded[0])
+        assert record.cost_basis == "reserved_conservative"
+        assert record.reconciled_cost_usd == pytest.approx(0.12)
+
+    def test_verified_pricing_records_calculated_basis_and_dimensions(self, tmp_path, plain_candidate):
+        adapter = MockAdapter()
+        runner = make_runner(tmp_path, simple_bundle(plain_candidate), adapter)
+        outcome = runner.execute(
+            dry_run=False, confirm_live=True, budget_usd=10.0, references_dir=tmp_path
+        )
+        record = runner.store.load(outcome.succeeded[0])
+        assert record.cost_basis == "calculated"
+        assert record.reconciled_cost_usd == pytest.approx(0.04)
+        # Actual pixel dimensions read back from the downloaded file (8x8 placeholder):
+        assert (record.width, record.height) == (8, 8)
+        assert record.model_version == "v-mock"  # observed provider version preserved
+
+
+class TestPreflight:
+    def _finalist_reference_bundle(self, reffy_candidate, manifest):
+        brief = make_brief(reference_ids=["ref-a"])
+        return make_bundle(
+            make_stage(
+                stage="finalist",
+                models=["reffy"],
+                inspiration_modes=["text_only", "reference_image"],
+                prompt_formats=["editorial"],
+            ),
+            make_candidates_config(reffy_candidate),
+            BriefsFile(briefs=[brief]),
+            manifest,
+        )
+
+    def test_finalist_without_verified_references_fails_preflight(
+        self, tmp_path, reffy_candidate, forbidden_factory
+    ):
+        bundle = self._finalist_reference_bundle(reffy_candidate, ReferenceManifest(references=[]))
+        runner = make_runner(tmp_path, bundle, forbidden_factory)
+        with pytest.raises(RunnerError, match="preflight failed"):
+            runner.execute(
+                dry_run=False, confirm_live=True, budget_usd=10.0, references_dir=tmp_path
+            )
+
+    def test_plan_summary_warns_before_a_doomed_finalist_run(self, reffy_candidate):
+        from model_eval.runner import plan_summary
+
+        bundle = self._finalist_reference_bundle(reffy_candidate, ReferenceManifest(references=[]))
+        summary = plan_summary(bundle, 10.0)
+        assert summary["preflight_warnings"]
+        assert "reference_image" in summary["preflight_warnings"][0]
+
+    def test_screening_stays_usable_because_it_is_text_only(self, tmp_path, plain_candidate):
+        adapter = MockAdapter()
+        runner = make_runner(tmp_path, simple_bundle(plain_candidate), adapter)
+        outcome = runner.execute(
+            dry_run=False, confirm_live=True, budget_usd=10.0, references_dir=tmp_path
+        )
+        assert len(outcome.succeeded) == 1
 
 
 class TestSecretRedaction:

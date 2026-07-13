@@ -14,15 +14,28 @@
 # decision record are complete (docs/decisions/0001-image-model.md).
 #
 # Category coverage:
-#   fast            -> flux-schnell
+#   fast            -> flux-schnell AND flux-2-klein-4b (compared head-to-head
+#                      in screening; klein's anomalously low advertised price
+#                      is covered by a generous conservative reservation and
+#                      flagged for billed verification)
 #   balanced        -> flux-2-pro (also reference + editing), flux-1.1-pro (FLUX.1-era baseline)
 #   highest_quality -> flux-2-max (also reference + editing)
-#   reference/edit  -> flux-2-pro, flux-2-max, flux-kontext-pro
+#   reference/edit  -> flux-2-pro, flux-2-max, flux-2-klein-4b
 #
-# Considered and not selected: flux-2-klein-4b (~$0.001/MP, Apache 2.0, would
-# be the cheapest tier) — its listed pricing is 15x below its 9B sibling with
-# asymmetric units, which is flagged UNRESOLVED; revisit once a billed test
-# confirms real cost. flux-pro ($0.055) is superseded by flux-1.1-pro ($0.04).
+# Considered and removed: flux-kontext-pro — its prompt doubles as an edit
+# instruction and BFL labels the Kontext family previous-generation, pointing
+# editing users at FLUX.2 pro/flex; since FLUX.2 pro and max already cover
+# reference conditioning AND editing in this evaluation, Kontext added spend
+# without adding a decision-relevant axis. It can return later as an
+# editor-only experiment (a candidate with text_to_image: false plus a
+# separately specified base model) if FLUX.2 editing disappoints.
+# Also not selected: flux-pro ($0.055), superseded by flux-1.1-pro ($0.04).
+#
+# Cost-accounting note: `formula_verified: true` means the billing formula is
+# fully understood (flat per-image); only then may successful runs reconcile
+# to an input-aware calculated cost. Where false (FLUX.2 per-run + per-MP
+# assumed additive; klein pricing anomaly), successful runs reconcile at the
+# FULL reserved amount so the ledger can never undercount spend.
 
 requires_manual_verification: false
 
@@ -79,6 +92,7 @@ candidates:
     pricing:
       unit: per_image
       usd_per_unit: 0.003
+      formula_verified: true   # flat per-image price shown on model + pricing pages
       expected_cost_per_generation_usd: 0.003
       max_cost_per_generation_usd: 0.01
       checked_on: 2026-07-13
@@ -124,6 +138,7 @@ candidates:
     pricing:
       unit: per_image
       usd_per_unit: 0.04
+      formula_verified: true   # flat per-image price shown on model + pricing pages
       expected_cost_per_generation_usd: 0.04
       max_cost_per_generation_usd: 0.08
       checked_on: 2026-07-13
@@ -184,6 +199,13 @@ candidates:
     pricing:
       unit: per_megapixel
       usd_per_unit: 0.015
+      usd_per_run: 0.015
+      usd_per_input_megapixel: 0.015
+      usd_per_output_megapixel: 0.015
+      # The per-run + per-MP formula is ASSUMED additive but unconfirmed
+      # against a real bill, so successful runs reconcile at the full
+      # reservation until a billed test verifies the formula.
+      formula_verified: false
       # $0.015 per run + $0.015 per output MP (1 MP portrait, no inputs).
       expected_cost_per_generation_usd: 0.03
       # Headroom for runs with several ~1MP reference/edit inputs at $0.015
@@ -240,6 +262,12 @@ candidates:
     pricing:
       unit: per_megapixel
       usd_per_unit: 0.03
+      usd_per_run: 0.04
+      usd_per_input_megapixel: 0.03
+      usd_per_output_megapixel: 0.03
+      # Additive per-run + per-MP formula unconfirmed against a real bill:
+      # successful runs reconcile at the full reservation until verified.
+      formula_verified: false
       # $0.04 per run + $0.03 per output MP (1 MP portrait, no inputs).
       expected_cost_per_generation_usd: 0.07
       max_cost_per_generation_usd: 0.25
@@ -267,57 +295,68 @@ candidates:
       9c23b0aaa98765a9676dbdda58b9c9915627751300747bad54cb1c11b135d3ca.
       "The highest fidelity image model from Black Forest Labs" per Replicate.
 
-  - key: kontext-pro
-    name: FLUX.1 Kontext Pro
-    replicate_id: black-forest-labs/flux-kontext-pro
+  - key: klein-4b
+    name: FLUX.2 klein 4B
+    replicate_id: black-forest-labs/flux-2-klein-4b
     version: null
-    categories: [reference, editing]
+    categories: [fast, reference, editing]
     capabilities:
+      text_to_image: true
       seed: true
       seed_param: seed
-      aspect_ratios: ["match_input_image", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9", "9:21", "2:1", "1:2"]
-      resolution_note: "aspect defaults to match_input_image when an input image is given"
+      aspect_ratios: ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "21:9", "9:21", "match_input_image"]
+      resolution_note: "output_megapixels enum 0.25 / 0.5 / 1 / 2 / 4 (default 1)"
       negative_prompt: false
       reference_image: true
-      reference_image_param: input_image
-      max_reference_images: 1
+      reference_image_param: images
+      max_reference_images: 5
       image_editing: true
-      image_editing_param: input_image
-      image_editing_param_is_list: false
+      image_editing_param: images
+      image_editing_param_is_list: true
       json_prompting: false
       input_format_note: >-
-        prompt doubles as the edit instruction when input_image is set;
-        single input_image (jpeg/png/gif/webp); safety_tolerance 0-6 but max
-        2 when an input image is used; prompt_upsampling available;
-        output_format jpg/png.
+        prompt, seed, images (array, max 5; image-to-image / reference),
+        aspect_ratio, output_megapixels, output_format webp/jpg/png (default
+        jpg), go_fast, disable_safety_checker. JSON prompting is documented
+        for the FLUX.2 family generally but klein-specific support is
+        unverified, so it is disabled here until verified.
     pricing:
-      unit: per_image
-      usd_per_unit: 0.04
-      expected_cost_per_generation_usd: 0.04
-      max_cost_per_generation_usd: 0.08
+      unit: per_megapixel
+      usd_per_unit: 0.001
+      usd_per_run: 0.0
+      usd_per_input_megapixel: 0.001
+      usd_per_output_megapixel: 0.001
+      # Advertised "$1 per thousand output image megapixels" (~$0.001/1MP) is
+      # 15x below the 9B sibling with asymmetric units — anomalous. Until a
+      # billed prediction verifies real cost, the formula stays unverified and
+      # every successful run reconciles at the full reserved amount.
+      formula_verified: false
+      # Deliberately pessimistic (not the advertised price): planning
+      # estimate assumes 9B-level pricing, reservation adds further headroom.
+      expected_cost_per_generation_usd: 0.015
+      max_cost_per_generation_usd: 0.05
       checked_on: 2026-07-13
-      source_url: https://replicate.com/black-forest-labs/flux-kontext-pro
+      source_url: https://replicate.com/black-forest-labs/flux-2-klein-4b
     terms:
-      model_licence: "Proprietary, API-served; BFL/Replicate terms apply."
-      commercial_use: >-
-        README: free to use outputs commercially in apps, marketing, or any
-        business use.
+      model_licence: >-
+        Apache 2.0 per the Replicate README ("fully open source under Apache
+        2.0"); BFL docs confirm klein 4B = Apache 2.0.
+      commercial_use: "Apache 2.0 weights; outputs usable commercially."
       input_retention: "Not stated on the model page; see platform terms."
-      output_ownership: >-
-        BFL ToS claims no ownership of Outputs; Replicate ToS assigns Output
-        to the customer.
-      training_use: >-
-        BFL ToS train-and-improve licence (coverage of Replicate-routed
-        traffic unresolved).
+      output_ownership: "Replicate ToS assigns Output to the customer."
+      training_use: "Not stated on the model page; see platform terms."
       unresolved:
-        - BFL docs label Kontext previous-generation and point editing users
-          at FLUX.2 pro/flex; weigh longevity before selecting it.
+        - Advertised pricing ($1 per thousand output MP) is anomalously low
+          vs klein 9B ($0.015 per output MP) with asymmetric units — verify
+          against a real billed prediction before trusting any calculation.
+        - JSON prompting support for the klein variant specifically is
+          unverified.
       sources:
-        - https://replicate.com/black-forest-labs/flux-kontext-pro
+        - https://replicate.com/black-forest-labs/flux-2-klein-4b
         - https://docs.bfl.ai/flux_2/flux2_overview
       verified_on: 2026-07-13
     notes: >-
       Embedded latest version id (provenance only):
-      897a70f5a7dbd8a0611413b3b98cf417b45f266bd595c571a22947619d9ae462.
-      Best-known single-image instruction-editing UX; included to compare
-      edit-refinement continuity against FLUX.2 editing.
+      8e9c42d77b10a2a41af823ac4500f7545be6ebc4e745830fc3f3de10de200542.
+      Fast-tier challenger to Schnell: compared head-to-head in screening;
+      neither replaces the other until screening evidence is scored.

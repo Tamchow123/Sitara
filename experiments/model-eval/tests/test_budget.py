@@ -117,6 +117,21 @@ class TestDurability:
         with BudgetLedger.open(ledger_path, 1.0):
             pass
 
+    def test_stale_lock_from_dead_process_is_reclaimed(self, ledger_path):
+        lock = ledger_path.with_suffix(ledger_path.suffix + ".lock")
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("99999999", encoding="utf-8")  # PID that cannot be alive
+        with BudgetLedger.open(ledger_path, 1.0) as ledger:
+            ledger.reserve("req-1", 0.1)
+        assert not lock.exists() or lock.read_text(encoding="utf-8") != "99999999"
+
+    def test_unreadable_lock_is_not_reclaimed(self, ledger_path):
+        lock = ledger_path.with_suffix(ledger_path.suffix + ".lock")
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("not-a-pid", encoding="utf-8")
+        with pytest.raises(BudgetLockError, match="locked"):
+            BudgetLedger.open(ledger_path, 1.0)
+
     def test_positive_budget_required(self, ledger_path):
         with pytest.raises(BudgetError, match="positive"):
             BudgetLedger.open(ledger_path, 0.0)

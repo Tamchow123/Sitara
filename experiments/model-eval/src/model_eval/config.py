@@ -42,6 +42,9 @@ class StrictModel(BaseModel):
 
 
 class Capabilities(StrictModel):
+    # False for editing-only models that require an input image; such models
+    # never receive base text-to-image requests.
+    text_to_image: bool = True
     seed: bool = False
     seed_param: str = "seed"
     aspect_ratios: list[str] = Field(default_factory=list)
@@ -75,6 +78,16 @@ class Capabilities(StrictModel):
 class Pricing(StrictModel):
     unit: Literal["per_image", "per_megapixel", "per_second", "unknown"]
     usd_per_unit: float | None = None
+    # Components for the input-aware estimator (per_megapixel models).
+    usd_per_run: float = 0.0
+    usd_per_input_megapixel: float | None = None
+    usd_per_output_megapixel: float | None = None
+    # True ONLY when the billing formula is fully understood and verified.
+    # When False, successful generations are reconciled at the FULL reserved
+    # amount — the ledger must never undercount spend on unresolved pricing.
+    formula_verified: bool = False
+    # Planning-display estimate only. NEVER treated as an actual or
+    # reconciled provider cost.
     expected_cost_per_generation_usd: float = Field(gt=0)
     # Conservative ceiling used for budget reservations. Must dominate any
     # plausible real charge for a single generation at our settings.
@@ -147,6 +160,13 @@ class ModelCandidate(StrictModel):
                 f"candidate {self.key!r}: category 'editing' requires "
                 "capabilities.image_editing=true"
             )
+        for cat in ("fast", "balanced", "highest_quality"):
+            if cat in self.categories and not self.capabilities.text_to_image:
+                raise ValueError(
+                    f"candidate {self.key!r}: category {cat!r} requires "
+                    "capabilities.text_to_image=true (editing-only models "
+                    "cannot fill text-to-image categories)"
+                )
         return self
 
 
@@ -195,11 +215,24 @@ REQUIRED_GARMENTS = {
 REQUIRED_CEREMONIES = {"nikah", "mehndi", "baraat", "walima"}
 
 
+REFINEMENT_FIELD_LABELS: dict[str, str] = {
+    "palette": "colour palette",
+    "embellishment_level": "embellishment level",
+    "sleeves": "sleeves",
+    "dupatta": "dupatta drape",
+    "neckline": "neckline",
+    "coverage": "coverage",
+}
+
+
 class RefinementChange(StrictModel):
-    """Exactly one constrained attribute change, applied to a brief field."""
+    """Exactly one constrained attribute change, applied to a brief field.
+
+    The human-readable description is DERIVED from field/from/to so wording
+    can never contradict the actual change.
+    """
 
     id: str
-    description: str
     field: Literal[
         "palette",
         "embellishment_level",
@@ -211,12 +244,25 @@ class RefinementChange(StrictModel):
     from_value: str
     to_value: str
 
+    @property
+    def description(self) -> str:
+        return (
+            f"the {REFINEMENT_FIELD_LABELS[self.field]} from "
+            f"{self.from_value} to {self.to_value}"
+        )
+
     @field_validator("id")
     @classmethod
     def _id_slug(cls, v: str) -> str:
         if not _SLUG_RE.match(v):
             raise ValueError(f"refinement id {v!r} must be a lowercase slug")
         return v
+
+    @model_validator(mode="after")
+    def _change_is_real(self) -> "RefinementChange":
+        if self.from_value == self.to_value:
+            raise ValueError(f"refinement {self.id!r}: from_value equals to_value")
+        return self
 
 
 class Brief(StrictModel):
@@ -239,6 +285,9 @@ class Brief(StrictModel):
     reference_ids: list[str] = Field(default_factory=list)
     refinement: RefinementChange | None = None
     tags: list[str] = Field(default_factory=list)
+    # Non-empty when the brief's cultural framing is uncertain and needs
+    # project-owner review before its scores are treated as authoritative.
+    cultural_review: str = ""
 
     @field_validator("id")
     @classmethod

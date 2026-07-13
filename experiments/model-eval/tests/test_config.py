@@ -35,6 +35,15 @@ class TestCandidateValidation:
         with pytest.raises(ValidationError, match="editing"):
             make_candidate("bad", categories=["editing"])
 
+    def test_editing_only_model_cannot_fill_text_to_image_categories(self):
+        for category in ("fast", "balanced", "highest_quality"):
+            with pytest.raises(ValidationError, match="editing-only"):
+                make_candidate(
+                    "bad",
+                    categories=[category],
+                    text_to_image=False,
+                )
+
     def test_negative_prompt_requires_param(self):
         with pytest.raises(ValidationError, match="negative_prompt_param"):
             Capabilities(negative_prompt=True)
@@ -75,12 +84,24 @@ class TestBriefValidation:
                 palette="deep red and gold",
                 refinement=RefinementChange(
                     id="wrong",
-                    description="x",
                     field="palette",
                     from_value="ivory",
                     to_value="green",
                 ),
             )
+
+    def test_refinement_description_is_derived_from_the_change(self):
+        change = RefinementChange(
+            id="ivory-to-red",
+            field="palette",
+            from_value="ivory",
+            to_value="deep red",
+        )
+        assert change.description == "the colour palette from ivory to deep red"
+
+    def test_refinement_must_actually_change_something(self):
+        with pytest.raises(ValidationError, match="equals"):
+            RefinementChange(id="noop", field="palette", from_value="red", to_value="red")
 
     def test_brief_id_must_be_slug(self):
         with pytest.raises(ValidationError, match="slug"):
@@ -102,9 +123,20 @@ class TestShippedConfigs:
     def test_briefs_file_valid(self):
         briefs = load_briefs(EXPERIMENT_ROOT / "prompts" / "briefs.yaml")
         assert len(briefs.briefs) >= 24
+        # Culturally uncertain briefs are flagged, not presented as verified.
+        assert any(b.cultural_review for b in briefs.briefs)
+        # No typo regressions in fabric wording.
+        assert not any("kameex" in b.fabric for b in briefs.briefs)
+
+    def test_shipped_candidates_are_all_text_to_image(self):
+        config = load_candidates(EXPERIMENT_ROOT / "configs" / "model_candidates.yaml")
+        assert all(c.capabilities.text_to_image for c in config.candidates), (
+            "editing-only candidates need an editor-only experiment design, "
+            "not a place in the text-to-image evaluation"
+        )
 
     def test_stage_configs_valid_and_consistent(self):
-        for name in ("screening.yaml", "finalists.yaml"):
+        for name in ("screening.yaml", "finalists.yaml", "seed_stability.yaml"):
             stage = load_stage(EXPERIMENT_ROOT / "configs" / name)
             candidates = load_candidates(
                 EXPERIMENT_ROOT / "configs" / stage.candidates_file

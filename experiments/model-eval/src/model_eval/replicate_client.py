@@ -76,15 +76,39 @@ class Prediction:
 
 
 class ReplicateAdapter:
-    """Minimal typed wrapper over the Replicate predictions API."""
+    """Minimal typed wrapper over the Replicate predictions API.
 
-    def __init__(self, token: str, client: httpx.Client | None = None, timeout_s: float = 120.0):
+    Two strictly separated HTTP clients:
+
+    - ``_client`` carries the bearer token and talks ONLY to the Replicate
+      API endpoints.
+    - ``_download_client`` fetches output files. It is constructed with NO
+      authentication, NO cookies and NO Replicate headers, so the API token
+      can never leak to output-hosting/CDN domains. Redirects are limited
+      and the final URL must still be HTTPS.
+    """
+
+    MAX_DOWNLOAD_REDIRECTS = 3
+
+    def __init__(
+        self,
+        token: str,
+        client: httpx.Client | None = None,
+        download_client: httpx.Client | None = None,
+        timeout_s: float = 120.0,
+    ):
         if not token:
             raise ProviderGateError("adapter constructed without an API token")
         self._token = token
         self._client = client or httpx.Client(
             timeout=timeout_s,
             headers={"Authorization": f"Bearer {token}"},
+        )
+        self._download_client = download_client or httpx.Client(
+            timeout=timeout_s,
+            follow_redirects=True,
+            max_redirects=self.MAX_DOWNLOAD_REDIRECTS,
+            # Deliberately: no auth header, no cookies, no API headers.
         )
 
     # -- helpers -------------------------------------------------------------
@@ -162,7 +186,13 @@ class ReplicateAdapter:
     ) -> tuple[str, int]:
         """Stream an output file to dest after validating MIME type and size.
 
-        Refuses to overwrite an existing file. Returns (mime_type, size)."""
+        Uses the UNAUTHENTICATED download client — never the API client — so
+        the bearer token cannot reach output-hosting domains. Refuses to
+        overwrite an existing file. Returns (mime_type, size)."""
+        if not url.startswith("https://"):
+            raise ProviderError(
+                f"refusing non-HTTPS output URL {url!r}", before_acceptance=False
+            )
         if dest.exists():
             raise ProviderError(
                 f"refusing to overwrite existing output file {dest}", before_acceptance=False
@@ -170,8 +200,14 @@ class ReplicateAdapter:
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_suffix(dest.suffix + ".part")
         try:
-            with self._client.stream("GET", url) as resp:
+            with self._download_client.stream("GET", url) as resp:
                 resp.raise_for_status()
+                if resp.url.scheme != "https":
+                    raise ProviderError(
+                        f"output download redirected to non-HTTPS URL "
+                        f"{str(resp.url)[:200]!r}",
+                        before_acceptance=False,
+                    )
                 mime = resp.headers.get("content-type", "").split(";")[0].strip()
                 if not any(mime.startswith(p) for p in allowed_mime_prefixes):
                     raise ProviderError(
@@ -198,6 +234,7 @@ class ReplicateAdapter:
 
     def close(self) -> None:
         self._client.close()
+        self._download_client.close()
 
 
 def default_adapter_factory(env: Mapping[str, str]) -> ReplicateAdapter:

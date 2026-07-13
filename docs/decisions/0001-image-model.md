@@ -31,15 +31,24 @@ before any live run.**
 | Category | Candidate | Replicate ID | ~Cost/gen (2026-07-13) |
 |---|---|---|---|
 | fast | FLUX Schnell | `black-forest-labs/flux-schnell` | $0.003 |
+| fast + reference + editing | FLUX.2 klein 4B | `black-forest-labs/flux-2-klein-4b` | advertised ~$0.001/MP — anomalous, reserved at $0.05 |
 | balanced (FLUX.1-era baseline) | FLUX 1.1 Pro | `black-forest-labs/flux-1.1-pro` | $0.04 |
 | balanced + reference + editing | FLUX.2 Pro | `black-forest-labs/flux-2-pro` | ~$0.03 |
 | highest quality + reference + editing | FLUX.2 Max | `black-forest-labs/flux-2-max` | ~$0.07 |
-| reference + editing (single image) | FLUX.1 Kontext Pro | `black-forest-labs/flux-kontext-pro` | $0.04 |
 
-Considered, not selected as candidates: `flux-2-klein-4b` (listed at
-~$0.001/MP, Apache 2.0 — pricing 15× below its 9B sibling with asymmetric
-units; revisit if a billed test confirms the price), `flux-pro`
-(superseded by flux-1.1-pro at lower cost).
+The two fast-tier candidates (Schnell, klein 4B) are compared head-to-head
+in screening; neither replaces the other before scored evidence exists.
+klein 4B's advertised price is 15× below its 9B sibling with asymmetric
+units, so it runs under a generous conservative reservation and its billing
+is flagged for verification against a real billed prediction.
+
+Considered and removed: `flux-kontext-pro` — BFL labels the Kontext family
+previous-generation and points editing users at FLUX.2 pro/flex, and FLUX.2
+Pro/Max already cover reference conditioning and editing in this evaluation;
+it can return later as an editor-only experiment (a candidate with
+`text_to_image: false` plus a separately specified base model) if FLUX.2
+editing disappoints. Also not selected: `flux-pro` ($0.055), superseded by
+`flux-1.1-pro` ($0.04).
 
 ## Decision
 

@@ -26,9 +26,41 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+
+def _pid_alive(pid: int) -> bool:
+    """Best-effort liveness check for a PID (never signals/kills anything).
+
+    Note: on Windows os.kill(pid, 0) would TERMINATE the process, so a
+    query-only OpenProcess is used instead."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            return bool(ok) and code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 EntryStatus = Literal["reserved", "reconciled", "released", "assumed_spent"]
 
@@ -102,17 +134,33 @@ class BudgetLedger:
 
     def _acquire_lock(self) -> None:
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        for attempt in (1, 2):
+            try:
+                fd = os.open(self._lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                holder_pid = self._read_lock_pid()
+                if attempt == 1 and holder_pid is not None and not _pid_alive(holder_pid):
+                    # Stale lock from a crashed run: reclaim it safely.
+                    try:
+                        self._lock_path.unlink()
+                    except FileNotFoundError:
+                        pass
+                    continue
+                raise BudgetLockError(
+                    f"budget ledger is locked by process {holder_pid} (lock "
+                    f"file {self._lock_path}). If you are certain no other "
+                    "run is active, delete the lock file and retry."
+                ) from None
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(str(os.getpid()))
+            self._locked = True
+            return
+
+    def _read_lock_pid(self) -> int | None:
         try:
-            fd = os.open(self._lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            raise BudgetLockError(
-                f"budget ledger is locked by another process (lock file "
-                f"{self._lock_path}). If you are certain no other run is "
-                "active, delete the lock file and retry."
-            ) from None
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(str(os.getpid()))
-        self._locked = True
+            return int(self._lock_path.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return None
 
     def close(self) -> None:
         if self._locked:
@@ -158,9 +206,22 @@ class BudgetLedger:
     def entry(self, request_id: str) -> LedgerEntry | None:
         return self._entries.get(request_id)
 
+    def status_of(self, request_id: str) -> EntryStatus | None:
+        e = self._entries.get(request_id)
+        return None if e is None else e.status
+
     def has_reservation(self, request_id: str) -> bool:
         e = self._entries.get(request_id)
         return e is not None and e.status == "reserved"
+
+    def ensure_reserved(self, request_id: str, max_cost_usd: float) -> None:
+        """Reserve unless an active reservation already exists (resume path).
+
+        A settled entry (reconciled/assumed_spent) is an error here — callers
+        must check status_of first and skip budget ops for settled requests."""
+        if self.has_reservation(request_id):
+            return
+        self.reserve(request_id, max_cost_usd)
 
     # -- mutations (each persists before returning) --------------------------
 

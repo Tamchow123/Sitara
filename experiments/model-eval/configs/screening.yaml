@@ -6,8 +6,10 @@
 # and full provenance are recorded per output.
 #
 # Conservative max spend at current reservations (12 briefs x 5 models):
-# 12 x (0.01 + 0.08 + 0.12 + 0.25 + 0.08) = ~6.5 USD ceiling
-# (expected actuals roughly 2.2 USD). Verify with:
+# 12 x (0.01 + 0.05 + 0.08 + 0.12 + 0.25) = ~6.1 USD ceiling.
+# Note: FLUX.2 models and klein-4b have unresolved billing formulas, so their
+# successful generations are accounted at the FULL reserved amount — the
+# ledger total will read close to the ceiling by design. Verify with:
 #   python -m model_eval.cli plan --config configs/screening.yaml --budget-usd 10
 
 stage: screening
@@ -15,12 +17,14 @@ candidates_file: model_candidates.yaml
 briefs_file: ../prompts/briefs.yaml
 reference_manifest: ../references/manifest.yaml
 
+# Two fast-tier candidates (schnell vs klein-4b) are compared head-to-head;
+# neither replaces the other before screening evidence is scored.
 models:
   - schnell
+  - klein-4b
   - flux-1-1-pro
   - flux-2-pro
   - flux-2-max
-  - kontext-pro
 
 brief_ids:
   - scr-lehenga-baraat-heavy

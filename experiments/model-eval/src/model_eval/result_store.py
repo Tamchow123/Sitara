@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,6 +57,7 @@ REQUIRED_PROVENANCE_FIELDS = frozenset(
         "error_message",
         "estimated_max_cost_usd",
         "reconciled_cost_usd",
+        "cost_basis",
         "output_path",
         "output_mime_type",
         "output_sha256",
@@ -101,7 +103,12 @@ class ResultRecord(BaseModel):
     error_category: str | None
     error_message: str | None
     estimated_max_cost_usd: float
+    # The ledger-accounted figure. NOT a provider-reported charge; see
+    # cost_basis for how it was derived.
     reconciled_cost_usd: float | None
+    # provider_reported | calculated | reserved_conservative (None for
+    # skips/pre-spend failures where nothing was accounted).
+    cost_basis: str | None
     output_path: str | None
     output_mime_type: str | None
     output_sha256: str | None
@@ -146,6 +153,7 @@ class ResultStore:
         self.run_dir = run_dir
         self.results_dir = run_dir / "results"
         self.images_dir = run_dir / "images"
+        self.attempts_dir = run_dir / "attempts"
 
     def record_path(self, request_id: str) -> Path:
         return self.results_dir / f"{request_id}.json"
@@ -191,3 +199,29 @@ class ResultStore:
         path = self.run_dir / name
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         return path
+
+    # -- attempt journal (crash-safe resume) ---------------------------------
+    # An attempt record is persisted BEFORE submission ({"state": "reserved"})
+    # and updated with the provider prediction id IMMEDIATELY after Replicate
+    # accepts the request ({"state": "submitted", "prediction_id": ...}), so
+    # a crashed run resumes by polling the accepted prediction instead of
+    # submitting a duplicate.
+
+    def attempt_path(self, request_id: str) -> Path:
+        return self.attempts_dir / f"{request_id}.json"
+
+    def save_attempt(self, request_id: str, payload: dict[str, Any]) -> None:
+        self.attempts_dir.mkdir(parents=True, exist_ok=True)
+        path = self.attempt_path(request_id)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, path)
+
+    def load_attempt(self, request_id: str) -> dict[str, Any] | None:
+        path = self.attempt_path(request_id)
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def clear_attempt(self, request_id: str) -> None:
+        self.attempt_path(request_id).unlink(missing_ok=True)

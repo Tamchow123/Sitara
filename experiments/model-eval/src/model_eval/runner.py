@@ -1,4 +1,5 @@
-"""Run orchestration: dry runs, gated live runs, resume, and provenance.
+"""Run orchestration: dry runs, gated live runs, crash-safe resume, and
+provenance.
 
 Execution order guarantees:
 
@@ -6,14 +7,25 @@ Execution order guarantees:
   adapter — zero network activity, by construction.
 - A live run first checks every gate (ALLOW_PROVIDER_CALLS, token,
   --budget-usd, --confirm-live). If any gate fails, ProviderGateError is
-  raised before the adapter factory is ever invoked.
-- For each request: verify references -> reserve budget -> call provider ->
-  poll -> download & validate output -> write result record -> reconcile.
+  raised before the adapter factory is ever invoked. A finalist config that
+  requests reference_image evaluation with no verified usable references
+  fails preflight before any provider work.
+- Per request: verify references -> reserve budget -> persist an attempt
+  record -> submit -> persist the provider prediction id immediately after
+  acceptance -> poll -> download & validate output -> write result record ->
+  reconcile.
+- Crash-safe resume: a request with a completed result record is never
+  re-sent; a request whose attempt record holds an accepted prediction id is
+  resumed by POLLING that prediction, never by submitting another one; an
+  already-downloaded output file is reused; ledger entries are reconciled
+  with attempt state (settled entries are not touched again).
 - Failures provably before provider acceptance release the reservation;
-  ambiguous failures conservatively convert it to spend.
-- Resume: a request whose result record already exists (succeeded or
-  skipped) is not re-sent. Failed attempts are retried and their record
-  replaced explicitly.
+  ambiguous failures conservatively convert it to spend. Failed requests are
+  FINAL for their run (their spend is already accounted); delete the failed
+  result record and use a new run id to retry deliberately.
+- Cost accounting is conservative: verified pricing formulas get an
+  input-aware calculation (capped at the reservation); unresolved pricing
+  reconciles at the FULL reserved amount. See model_eval.costs.
 """
 
 from __future__ import annotations
@@ -24,6 +36,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
+
+from PIL import Image
 
 from .budget import BudgetExceededError, BudgetLedger
 from .config import (
@@ -37,7 +51,13 @@ from .config import (
     load_reference_manifest,
     load_stage,
 )
-from .prompt_matrix import PlannedRequest, RunPlan, expand
+from .costs import final_cost
+from .prompt_matrix import (
+    SKIP_UNVERIFIED_REFERENCE,
+    PlannedRequest,
+    RunPlan,
+    expand,
+)
 from .replicate_client import (
     Prediction,
     ProviderError,
@@ -57,7 +77,6 @@ MAX_OUTPUT_BYTES = 50 * 1024 * 1024
 POLL_INTERVAL_S = 2.0
 POLL_TIMEOUT_S = 600.0
 
-SKIP_UNVERIFIED_REFERENCE = "reference_rights_not_verified"
 SKIP_MISSING_BASE_IMAGE = "base_image_unavailable_for_edit"
 
 AdapterFactory = Callable[[Mapping[str, str]], ReplicateAdapter]
@@ -74,6 +93,7 @@ class LoadedStage:
     briefs: BriefsFile
     manifest: ReferenceManifest
     plan: RunPlan
+    references_dir: Path | None = None
 
 
 def load_stage_bundle(config_path: Path) -> LoadedStage:
@@ -81,16 +101,31 @@ def load_stage_bundle(config_path: Path) -> LoadedStage:
     base = config_path.parent
     candidates = load_candidates((base / stage.candidates_file).resolve())
     briefs = load_briefs((base / stage.briefs_file).resolve())
+    references_dir: Path | None = None
     if stage.reference_manifest:
-        manifest = load_reference_manifest((base / stage.reference_manifest).resolve())
+        manifest_path = (base / stage.reference_manifest).resolve()
+        manifest = load_reference_manifest(manifest_path)
+        references_dir = manifest_path.parent
     else:
         manifest = ReferenceManifest(references=[])
-    plan = expand(stage, candidates, briefs)
-    return LoadedStage(stage, candidates, briefs, manifest, plan)
+    plan = expand(stage, candidates, briefs, manifest, references_dir)
+    return LoadedStage(stage, candidates, briefs, manifest, plan, references_dir)
 
 
 def plan_summary(bundle: LoadedStage, budget_usd: float | None) -> dict[str, Any]:
     plan = bundle.plan
+    warnings: list[str] = []
+    if "reference_image" in bundle.stage.inspiration_modes:
+        runnable_refs = sum(
+            1 for r in plan.runnable if r.inspiration_mode == "reference_image"
+        )
+        if runnable_refs == 0:
+            warnings.append(
+                "reference_image mode is requested but 0 runnable reference "
+                "requests exist (no verified, usable references in the "
+                "manifest). A live finalist run will FAIL preflight until "
+                "references are verified; see references/README.md."
+            )
     summary: dict[str, Any] = {
         "stage": plan.stage,
         "planned_requests": len(plan.runnable),
@@ -102,6 +137,7 @@ def plan_summary(bundle: LoadedStage, budget_usd: float | None) -> dict[str, Any
         "conservative_max_spend_usd": plan.total_max_cost_usd,
         "budget_usd": budget_usd,
         "within_budget": (budget_usd is None or plan.total_max_cost_usd <= budget_usd),
+        "preflight_warnings": warnings,
         "skips": [
             {"request_id": r.request_id, "reason": r.skip_reason} for r in plan.skipped
         ],
@@ -116,6 +152,7 @@ class RunOutcome:
     failed: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     resumed: list[str] = field(default_factory=list)
+    previously_failed: list[str] = field(default_factory=list)
     halted_reason: str | None = None
 
 
@@ -170,6 +207,7 @@ class Runner:
         error_category: str | None = None,
         error_message: str | None = None,
         reconciled_cost_usd: float | None = None,
+        cost_basis: str | None = None,
         output_path: str | None = None,
         output_mime_type: str | None = None,
         output_sha256: str | None = None,
@@ -212,6 +250,7 @@ class Runner:
             error_message=error_message,
             estimated_max_cost_usd=request.estimated_max_cost_usd,
             reconciled_cost_usd=reconciled_cost_usd,
+            cost_basis=cost_basis,
             output_path=output_path,
             output_mime_type=output_mime_type,
             output_sha256=output_sha256,
@@ -222,7 +261,8 @@ class Runner:
     # ------------------------------------------------------------- references
 
     def _verify_references(self, request: PlannedRequest) -> str | None:
-        """Return a skip/fail reason if any reference is unusable."""
+        """Runtime double-check of the plan-time validation (defence in
+        depth): return a skip reason if any reference is unusable."""
         for ref_id in request.reference_ids:
             try:
                 entry = self.bundle.manifest.by_id(ref_id)
@@ -235,8 +275,17 @@ class Runner:
                 )
         return None
 
-    def _reference_data_uris(self, request: PlannedRequest, base_dir: Path) -> list[str]:
+    @staticmethod
+    def _image_megapixels(path: Path) -> float:
+        with Image.open(path) as img:
+            w, h = img.size
+        return (w * h) / 1_000_000
+
+    def _reference_data_uris(
+        self, request: PlannedRequest, base_dir: Path
+    ) -> tuple[list[str], float]:
         uris: list[str] = []
+        megapixels = 0.0
         for ref_id in request.reference_ids:
             entry = self.bundle.manifest.by_id(ref_id)
             path = (base_dir / entry.path).resolve()
@@ -245,7 +294,8 @@ class Runner:
             mime = mimetypes.guess_type(path.name)[0] or "image/png"
             encoded = base64.b64encode(path.read_bytes()).decode("ascii")
             uris.append(f"data:{mime};base64,{encoded}")
-        return uris
+            megapixels += self._image_megapixels(path)
+        return uris, megapixels
 
     def _file_data_uri(self, path: Path) -> str:
         mime = mimetypes.guess_type(path.name)[0] or "image/png"
@@ -274,6 +324,25 @@ class Runner:
             )
         assert budget_usd is not None
 
+        # Preflight: a finalist run whose config requests reference_image
+        # evaluation must actually have usable references.
+        if (
+            self.bundle.stage.stage == "finalist"
+            and "reference_image" in self.bundle.stage.inspiration_modes
+        ):
+            runnable_refs = [
+                r for r in self.bundle.plan.runnable
+                if r.inspiration_mode == "reference_image"
+            ]
+            if not runnable_refs:
+                raise RunnerError(
+                    "preflight failed: this finalist config requests "
+                    "reference_image evaluation but no verified, usable "
+                    "references are available (see references/README.md). "
+                    "Verify references in references/manifest.yaml, or remove "
+                    "reference_image from inspiration_modes."
+                )
+
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.store.write_json(
             "plan.json",
@@ -301,13 +370,20 @@ class Runner:
     ) -> None:
         rid = request.request_id
 
-        # Resume: never re-send anything that already completed or was skipped.
+        # Resume: completed/skipped results are never re-sent. Failed results
+        # are FINAL for this run — their spend is already accounted; delete
+        # the failed record and use a new run id to retry deliberately.
         if self.store.exists(rid):
             existing = self.store.load(rid)
             if existing.status in ("succeeded", "skipped"):
                 outcome.resumed.append(rid)
                 return
-            # A failed record will be retried and explicitly replaced.
+            outcome.previously_failed.append(rid)
+            self.log(
+                f"[resume] {rid}: previously failed; not retried "
+                "(delete its result record and use a new run id to retry)"
+            )
+            return
 
         if request.skipped:
             self._save_skip(request, request.skip_reason or "skipped_by_plan", outcome)
@@ -319,12 +395,13 @@ class Runner:
             return
 
         input_params = dict(request.input_params)
+        input_megapixels = 0.0
 
         if request.reference_ids:
             candidate = self._candidate(request)
             param = candidate.capabilities.reference_image_param
             assert param is not None
-            uris = self._reference_data_uris(request, references_dir)
+            uris, input_megapixels = self._reference_data_uris(request, references_dir)
             input_params[param] = uris if candidate.capabilities.max_reference_images > 1 else uris[0]
 
         if request.kind == "refinement_edit":
@@ -339,38 +416,73 @@ class Runner:
             candidate = self._candidate(request)
             edit_param = candidate.capabilities.image_editing_param
             assert edit_param is not None
-            base_uri = self._file_data_uri(self.run_dir / base_record.output_path)
+            base_image = self.run_dir / base_record.output_path
+            base_uri = self._file_data_uri(base_image)
             input_params[edit_param] = (
                 [base_uri] if candidate.capabilities.image_editing_param_is_list else base_uri
             )
+            input_megapixels += self._image_megapixels(base_image)
 
-        # ---- hard budget: conservative reservation BEFORE the provider call.
-        try:
-            ledger.reserve(rid, request.estimated_max_cost_usd)
-        except BudgetExceededError as exc:
-            self.log(f"[budget] {exc}")
-            outcome.halted_reason = str(exc)
-            return
+        # ---- budget: conservative reservation BEFORE the provider call.
+        # Resume-aware: an entry already settled by a previous crashed run
+        # (reconciled/assumed_spent) is left untouched.
+        budget_settled = ledger.status_of(rid) in ("reconciled", "assumed_spent")
+        if not budget_settled:
+            try:
+                ledger.ensure_reserved(rid, request.estimated_max_cost_usd)
+            except BudgetExceededError as exc:
+                self.log(f"[budget] {exc}")
+                outcome.halted_reason = str(exc)
+                return
+
+        attempt = self.store.load_attempt(rid) or {}
+        prediction_id: str | None = attempt.get("prediction_id")
 
         started_at = utc_now_iso()
         start = time.monotonic()
         try:
-            prediction = adapter.create_prediction(
-                request.replicate_id, request.model_version, input_params
-            )
+            if prediction_id:
+                # Crash-safe resume: the provider already accepted this
+                # request. Poll the existing prediction; never resubmit.
+                self.log(f"[resume] {rid}: polling accepted prediction {prediction_id}")
+                prediction = adapter.get_prediction(prediction_id)
+            else:
+                # Attempt record persisted BEFORE submission...
+                self.store.save_attempt(
+                    rid,
+                    {"request_id": rid, "state": "reserved", "created_at": started_at},
+                )
+                prediction = adapter.create_prediction(
+                    request.replicate_id, request.model_version, input_params
+                )
+                # ...and the prediction id persisted IMMEDIATELY after
+                # provider acceptance.
+                self.store.save_attempt(
+                    rid,
+                    {
+                        "request_id": rid,
+                        "state": "submitted",
+                        "prediction_id": prediction.id,
+                        "submitted_at": utc_now_iso(),
+                    },
+                )
             prediction = self._await_terminal(adapter, prediction)
         except ProviderError as exc:
-            if exc.before_acceptance:
-                ledger.release(rid)
-                category = "rejected_before_acceptance"
+            if not budget_settled:
+                if exc.before_acceptance and prediction_id is None:
+                    ledger.release(rid)
+                    category = "rejected_before_acceptance"
+                else:
+                    ledger.assume_spent(rid, note=str(exc)[:300])
+                    category = "ambiguous_provider_failure"
             else:
-                ledger.assume_spent(rid, note=str(exc)[:300])
                 category = "ambiguous_provider_failure"
             self._save_failure(request, category, str(exc), started_at, start, outcome)
             return
 
         if prediction.status != "succeeded":
-            ledger.assume_spent(rid, note=f"terminal status {prediction.status}")
+            if not budget_settled:
+                ledger.assume_spent(rid, note=f"terminal status {prediction.status}")
             self._save_failure(
                 request,
                 f"prediction_{prediction.status}",
@@ -384,10 +496,13 @@ class Runner:
             return
 
         try:
-            output_rel, mime, digest, size = self._download_output(request, adapter, prediction)
+            output_rel, mime, digest, width, height = self._download_output(
+                request, adapter, prediction
+            )
         except (ProviderError, RunnerError) as exc:
             # The generation itself succeeded, so the spend stands.
-            ledger.assume_spent(rid, note=f"output download failed: {str(exc)[:200]}")
+            if not budget_settled:
+                ledger.assume_spent(rid, note=f"output download failed: {str(exc)[:200]}")
             self._save_failure(
                 request,
                 "output_download_failed",
@@ -401,11 +516,20 @@ class Runner:
             return
 
         candidate = self._candidate(request)
-        actual = min(
-            candidate.pricing.expected_cost_per_generation_usd,
-            request.estimated_max_cost_usd,
+        output_megapixels = (width * height) / 1_000_000 if width and height else 1.0
+        accounted, basis = final_cost(
+            candidate.pricing,
+            reserved_usd=request.estimated_max_cost_usd,
+            output_megapixels=output_megapixels,
+            input_megapixels=input_megapixels,
         )
-        ledger.reconcile(rid, actual)
+        if not budget_settled:
+            ledger.reconcile(rid, accounted)
+        else:
+            # Crash happened after reconciliation: trust the settled ledger.
+            entry = ledger.entry(rid)
+            if entry is not None and entry.final_usd is not None:
+                accounted = entry.final_usd
 
         completed_at = utc_now_iso()
         latency = round(time.monotonic() - start, 3)
@@ -417,14 +541,18 @@ class Runner:
             started_at=started_at,
             completed_at=completed_at,
             latency_seconds=latency,
-            reconciled_cost_usd=actual,
+            reconciled_cost_usd=accounted,
+            cost_basis=basis,
             output_path=output_rel,
             output_mime_type=mime,
             output_sha256=digest,
+            width=width,
+            height=height,
         )
-        self.store.save(record, allow_replace_failed=True)
+        self.store.save(record)
+        self.store.clear_attempt(rid)
         outcome.succeeded.append(rid)
-        self.log(f"[ok] {rid} ({latency}s, ~{actual:.4f} USD)")
+        self.log(f"[ok] {rid} ({latency}s, accounted {accounted:.4f} USD [{basis}])")
 
     def _await_terminal(self, adapter: ReplicateAdapter, prediction: Prediction) -> Prediction:
         deadline = time.monotonic() + self.poll_timeout_s
@@ -445,7 +573,7 @@ class Runner:
         request: PlannedRequest,
         adapter: ReplicateAdapter,
         prediction: Prediction,
-    ) -> tuple[str, str, str, int]:
+    ) -> tuple[str, str, str, int, int]:
         output = prediction.output
         url: str | None = None
         if isinstance(output, str):
@@ -458,9 +586,17 @@ class Runner:
             )
         extension = Path(url.split("?")[0]).suffix or ".png"
         dest = self.store.image_path(request.request_id, extension)
-        mime, size = adapter.download(url, dest, max_bytes=MAX_OUTPUT_BYTES)
+        if dest.exists():
+            # Crash-safe resume: the output was already downloaded before the
+            # crash; reuse it rather than re-downloading or failing.
+            self.log(f"[resume] {request.request_id}: reusing downloaded output")
+            mime = mimetypes.guess_type(dest.name)[0] or "image/png"
+        else:
+            mime, _size = adapter.download(url, dest, max_bytes=MAX_OUTPUT_BYTES)
         digest = sha256_of(dest)
-        return str(dest.relative_to(self.run_dir)), mime, digest, size
+        with Image.open(dest) as img:
+            width, height = img.size
+        return str(dest.relative_to(self.run_dir)), mime, digest, width, height
 
     # ---------------------------------------------------------------- records
 
@@ -500,5 +636,6 @@ class Runner:
             error_message=message[:1000],
         )
         self.store.save(record, allow_replace_failed=True)
+        self.store.clear_attempt(request.request_id)
         outcome.failed.append(request.request_id)
         self.log(f"[fail] {request.request_id}: {category}")

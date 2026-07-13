@@ -53,14 +53,21 @@ def make_terms() -> TermsRecord:
     )
 
 
-def make_pricing(expected: float = 0.04, maximum: float = 0.1) -> Pricing:
+def make_pricing(
+    expected: float = 0.04,
+    maximum: float = 0.1,
+    formula_verified: bool = True,
+    **extra: Any,
+) -> Pricing:
     return Pricing(
-        unit="per_image",
+        unit=extra.pop("unit", "per_image"),
         usd_per_unit=expected,
+        formula_verified=formula_verified,
         expected_cost_per_generation_usd=expected,
         max_cost_per_generation_usd=maximum,
         checked_on=TODAY,
         source_url="https://example.com/pricing",
+        **extra,
     )
 
 
@@ -149,7 +156,6 @@ def make_refinement_brief(brief_id: str = "test-refine") -> Brief:
         palette="ivory and soft gold",
         refinement=RefinementChange(
             id="ivory-to-red",
-            description="the palette from ivory to deep red",
             field="palette",
             from_value="ivory and soft gold",
             to_value="deep red and gold",
@@ -178,9 +184,11 @@ def make_bundle(
     candidates: CandidatesConfig,
     briefs: BriefsFile,
     manifest: ReferenceManifest | None = None,
+    references_dir: Path | None = None,
 ) -> LoadedStage:
     manifest = manifest or ReferenceManifest(references=[])
-    return LoadedStage(stage, candidates, briefs, manifest, expand(stage, candidates, briefs))
+    plan = expand(stage, candidates, briefs, manifest, references_dir)
+    return LoadedStage(stage, candidates, briefs, manifest, plan, references_dir)
 
 
 def make_reference_entry(

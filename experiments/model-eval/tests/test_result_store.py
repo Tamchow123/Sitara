@@ -49,6 +49,7 @@ def make_record(request_id="screening--b--m--editorial--text_only--s11--base", s
         error_message=None,
         estimated_max_cost_usd=0.1,
         reconciled_cost_usd=0.04,
+        cost_basis="calculated",
         output_path="images/out.png",
         output_mime_type="image/png",
         output_sha256="abc123",
@@ -97,3 +98,20 @@ class TestHashing:
         f = tmp_path / "img.png"
         f.write_bytes(payload)
         assert sha256_of(f) == hashlib.sha256(payload).hexdigest()
+
+
+class TestAttemptJournal:
+    def test_attempt_round_trip_and_clear(self, tmp_path):
+        store = ResultStore(tmp_path)
+        assert store.load_attempt("req-1") is None
+        store.save_attempt("req-1", {"request_id": "req-1", "state": "reserved"})
+        assert store.load_attempt("req-1") == {"request_id": "req-1", "state": "reserved"}
+        # State transitions overwrite atomically:
+        store.save_attempt(
+            "req-1",
+            {"request_id": "req-1", "state": "submitted", "prediction_id": "pred-9"},
+        )
+        assert store.load_attempt("req-1")["prediction_id"] == "pred-9"
+        store.clear_attempt("req-1")
+        assert store.load_attempt("req-1") is None
+        store.clear_attempt("req-1")  # idempotent

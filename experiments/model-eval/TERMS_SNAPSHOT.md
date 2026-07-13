@@ -81,17 +81,18 @@
   - Additive per-run + per-MP billing formula assumed; confirm with a billed test run.
   - JSON prompting documented for FLUX.2 generally; per-variant behaviour unverified.
 
-## FLUX.1 Kontext Pro (`black-forest-labs/flux-kontext-pro`)
+## FLUX.2 klein 4B (`black-forest-labs/flux-2-klein-4b`)
 
-- Model licence: Proprietary, API-served; BFL/Replicate terms apply.
-- Commercial use: README: free to use outputs commercially in apps, marketing, or any business use.
+- Model licence: Apache 2.0 per the Replicate README ("fully open source under Apache 2.0"); BFL docs confirm klein 4B = Apache 2.0.
+- Commercial use: Apache 2.0 weights; outputs usable commercially.
 - Input retention: Not stated on the model page; see platform terms.
-- Output ownership: BFL ToS claims no ownership of Outputs; Replicate ToS assigns Output to the customer.
-- Training on submitted data: BFL ToS train-and-improve licence (coverage of Replicate-routed traffic unresolved).
-- Pricing checked on: 2026-07-13 (https://replicate.com/black-forest-labs/flux-kontext-pro)
+- Output ownership: Replicate ToS assigns Output to the customer.
+- Training on submitted data: Not stated on the model page; see platform terms.
+- Pricing checked on: 2026-07-13 (https://replicate.com/black-forest-labs/flux-2-klein-4b)
 - Terms verified on: 2026-07-13
 - Sources:
-  - https://replicate.com/black-forest-labs/flux-kontext-pro
+  - https://replicate.com/black-forest-labs/flux-2-klein-4b
   - https://docs.bfl.ai/flux_2/flux2_overview
 - **Unresolved (human review required):**
-  - BFL docs label Kontext previous-generation and point editing users at FLUX.2 pro/flex; weigh longevity before selecting it.
+  - Advertised pricing ($1 per thousand output MP) is anomalously low vs klein 9B ($0.015 per output MP) with asymmetric units — verify against a real billed prediction before trusting any calculation.
+  - JSON prompting support for the klein variant specifically is unverified.
