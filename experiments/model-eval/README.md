@@ -115,6 +115,50 @@ Missing any of the four → the provider adapter is never constructed. Review
 the current official provider terms before your first live run; see
 `TERMS_SNAPSHOT.md` for what was recorded and what remains unresolved.
 
+## The smoke test (run this before the full screening)
+
+`configs/smoke.yaml` plans exactly **one** provider request (flux-2-pro,
+one modest nikah brief, seed 11, editorial prompt, text-only, 3:4) with a
+conservative ceiling of **$0.12**. Dry-run it first (PowerShell):
+
+```powershell
+.venv\Scripts\python -m model_eval.cli run `
+  --config configs/smoke.yaml `
+  --dry-run `
+  --budget-usd 0.12
+```
+
+Confirm it reports exactly 1 planned request, 0 skips, and a 0.12 USD
+conservative maximum. Then run it live, deliberately:
+
+```powershell
+$env:ALLOW_PROVIDER_CALLS="true"
+$env:REPLICATE_API_TOKEN="<your token>"
+
+.venv\Scripts\python -m model_eval.cli run `
+  --config configs/smoke.yaml `
+  --budget-usd 0.12 `
+  --confirm-live `
+  --run-id smoke-flux2-pro-001
+```
+
+Afterwards, check the ledger and clear the environment:
+
+```powershell
+.venv\Scripts\python -m model_eval.cli budget-status `
+  --run-id smoke-flux2-pro-001
+
+Remove-Item Env:REPLICATE_API_TOKEN
+Remove-Item Env:ALLOW_PROVIDER_CALLS
+```
+
+Because flux-2-pro's billing formula is unresolved, the ledger will
+conservatively account the **full $0.12 reservation** even though the real
+charge is expected to be ~$0.03. **Check the actual Replicate billing page
+manually after the smoke test** — comparing the real charge against the
+recorded reservation is also how the FLUX.2 billing formula gets verified
+(and `formula_verified` can then be flipped in the candidates file).
+
 ## How the budget ledger works
 
 Per run, `outputs/runs/<run-id>/budget_ledger.json` enforces
@@ -143,17 +187,26 @@ python -m model_eval.cli run --config configs/screening.yaml \
   --budget-usd 10 --confirm-live --run-id screening-20260713T120000Z
 ```
 
-Resume is crash-safe at every stage: an attempt record is persisted before
-each submission and the provider prediction id immediately after acceptance,
-so a request that was already accepted is resumed by POLLING that prediction
-— never by submitting a duplicate. Already-downloaded outputs are reused,
-completed/skipped requests are never re-sent, and settled ledger entries are
-never charged twice. Failed requests are final for their run (their spend is
-already accounted); to retry one deliberately, delete its result record and
-use a new run id. A stale lock file left by a crashed process is reclaimed
-automatically when its PID is no longer alive; if the PID cannot be read,
-delete `budget_ledger.json.lock` manually after confirming no other run is
-active.
+Resume is crash-safe **after the prediction id has been persisted**: an
+attempt record is written before each submission and the provider prediction
+id immediately after acceptance, so a request whose id is on disk is resumed
+by POLLING that prediction rather than submitting a duplicate.
+Already-downloaded outputs are reused, completed/skipped requests are never
+re-sent, and settled ledger entries are never charged twice.
+
+Around the provider-acceptance boundary itself, duplicate prevention is
+**best-effort, not a strict exactly-once guarantee**: there is an
+unavoidable small window between Replicate accepting a request and the
+prediction id being written locally, and Replicate provides no idempotency
+mechanism this implementation could use to close it. A crash inside that
+window can produce one duplicate submission on resume; the budget stays
+conservative regardless.
+
+Failed requests are final for their run (their spend is already accounted);
+to retry one deliberately, delete its result record and use a new run id. A
+stale lock file left by a crashed process is reclaimed automatically when
+its PID is no longer alive; if the PID cannot be read, delete
+`budget_ledger.json.lock` manually after confirming no other run is active.
 
 ## Reference images (rights-controlled)
 
@@ -195,7 +248,7 @@ never into code.
 
 ```
 configs/    model candidates (verified facts) + stage configs
-            (screening / finalists / seed_stability)
+            (smoke / screening / finalists / seed_stability)
 prompts/    briefs.yaml — the garment/ceremony brief matrix
 references/ rights-controlled reference manifest (+ local/, gitignored)
 src/        model_eval package (config, matrix, formats, costs, budget,

@@ -19,6 +19,15 @@ fast/demo tier, an evidence-based answer on inspiration influence
 a refinement strategy (fresh regeneration vs image editing). The evaluation
 framework lives in `experiments/model-eval/`.
 
+Execution-safety note: the framework's resume is crash-safe after a
+provider prediction id has been persisted locally; around the
+provider-acceptance boundary itself, duplicate prevention is best-effort
+rather than exactly-once, because Replicate exposes no idempotency
+mechanism for prediction creation. Budgets are enforced conservatively
+(reserve-before-call; unresolved billing formulas account the full
+reservation), so run ledgers may overstate — never understate — spend.
+Actual charges must be confirmed on the Replicate billing page.
+
 ### Candidates identified from the live catalogue (verified 2026-07-13)
 
 Full capability, pricing and terms detail (with sources) lives in

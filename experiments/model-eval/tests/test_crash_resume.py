@@ -1,7 +1,10 @@
 """Crash-safe resume: a run may die at any point; resuming must never
-resubmit an accepted prediction, never double-reserve, and never lose or
-double-count spend. Crashes are simulated with raw RuntimeErrors (which the
-runner deliberately does not catch) at four points:
+resubmit a prediction whose id was PERSISTED, never double-reserve, and
+never lose or double-count spend. (Around the acceptance boundary itself —
+between Replicate accepting a request and the id write — duplicate
+prevention is best-effort, not exactly-once; that window has no local
+evidence to test against.) Crashes are simulated with raw RuntimeErrors
+(which the runner deliberately does not catch) at four points:
 
 1. after reservation, before submission
 2. after provider acceptance (prediction id persisted)

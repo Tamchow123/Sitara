@@ -203,9 +203,11 @@ class ResultStore:
     # -- attempt journal (crash-safe resume) ---------------------------------
     # An attempt record is persisted BEFORE submission ({"state": "reserved"})
     # and updated with the provider prediction id IMMEDIATELY after Replicate
-    # accepts the request ({"state": "submitted", "prediction_id": ...}), so
-    # a crashed run resumes by polling the accepted prediction instead of
-    # submitting a duplicate.
+    # accepts the request ({"state": "submitted", "prediction_id": ...}).
+    # Once the id is persisted, resume polls the accepted prediction instead
+    # of submitting a duplicate. Around the acceptance boundary itself this
+    # is best-effort, not exactly-once: a crash between acceptance and the
+    # id write leaves no local evidence of the accepted prediction.
 
     def attempt_path(self, request_id: str) -> Path:
         return self.attempts_dir / f"{request_id}.json"

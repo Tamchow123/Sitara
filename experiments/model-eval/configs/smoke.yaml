@@ -1,0 +1,36 @@
+# Single-request smoke test: exactly ONE provider request against ONE model,
+# to verify the live pipeline end-to-end (gates, budget ledger, submission,
+# polling, download, provenance) at the smallest possible spend before the
+# full screening round.
+#
+# Dry-run first — it must report exactly 1 planned request, 0 skips, and a
+# conservative maximum spend of 0.12 USD:
+#   python -m model_eval.cli run --config configs/smoke.yaml --dry-run --budget-usd 0.12
+#
+# Note: flux-2-pro's billing formula is unresolved, so on success the ledger
+# conservatively accounts the FULL 0.12 USD reservation (the real charge is
+# expected to be ~0.03 USD). Check the actual Replicate billing page after
+# the smoke test — that comparison is also how the FLUX.2 billing formula
+# gets verified.
+
+stage: screening
+candidates_file: model_candidates.yaml
+briefs_file: ../prompts/briefs.yaml
+reference_manifest: ../references/manifest.yaml
+
+models:
+  - flux-2-pro
+
+brief_ids:
+  - scr-shalwar-kameez-nikah-modest
+
+seeds: [11]
+aspect_ratio: "3:4"
+inspiration_modes: [text_only]
+prompt_formats: [editorial]
+refinement:
+  enabled: false
+
+notes: >-
+  One modest full-sleeve nikah brief on the balanced FLUX.2 Pro candidate.
+  This is a pipeline verification, not an evaluation sample.

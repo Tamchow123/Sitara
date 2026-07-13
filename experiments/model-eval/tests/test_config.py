@@ -135,8 +135,29 @@ class TestShippedConfigs:
             "not a place in the text-to-image evaluation"
         )
 
+    def test_smoke_config_plans_exactly_one_bounded_request(self):
+        """The smoke config must be a genuine single-request live test:
+        1 runnable request, 0 skips, flux-2-pro only, $0.12 ceiling."""
+        from model_eval.runner import load_stage_bundle, plan_summary
+
+        bundle = load_stage_bundle(EXPERIMENT_ROOT / "configs" / "smoke.yaml")
+        summary = plan_summary(bundle, 0.12)
+        assert summary["planned_requests"] == 1
+        assert summary["skipped_requests"] == 0
+        assert summary["models"] == {"flux-2-pro": 1}
+        assert summary["conservative_max_spend_usd"] == pytest.approx(0.12)
+        assert summary["within_budget"] is True
+        assert summary["preflight_warnings"] == []
+        request = bundle.plan.runnable[0]
+        assert request.brief_id == "scr-shalwar-kameez-nikah-modest"
+        assert request.prompt_format == "editorial"
+        assert request.inspiration_mode == "text_only"
+        assert request.seed == 11
+        assert request.aspect_ratio == "3:4"
+        assert request.kind == "base"
+
     def test_stage_configs_valid_and_consistent(self):
-        for name in ("screening.yaml", "finalists.yaml", "seed_stability.yaml"):
+        for name in ("screening.yaml", "finalists.yaml", "seed_stability.yaml", "smoke.yaml"):
             stage = load_stage(EXPERIMENT_ROOT / "configs" / name)
             candidates = load_candidates(
                 EXPERIMENT_ROOT / "configs" / stage.candidates_file

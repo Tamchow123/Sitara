@@ -259,57 +259,144 @@ class TestResume:
 
 
 class TestDownloadIsolation:
-    def test_download_requests_never_carry_the_bearer_token(self, tmp_path):
-        token = "r8_download_isolation_token"
-        captured: dict = {}
+    """Output downloads: unauthenticated client, manual HTTPS-only redirect
+    handling, and zero token/cookie exposure on every hop."""
 
-        def download_handler(request: httpx.Request) -> httpx.Response:
-            captured["headers"] = dict(request.headers)
-            return httpx.Response(
-                200, content=tiny_png_bytes(), headers={"content-type": "image/png"}
-            )
+    TOKEN = "r8_download_isolation_token"
+
+    def _adapter(self, handler):
+        """Adapter whose API client carries the token (and would even leak a
+        cookie if misused) while the download client sees only `handler`."""
+        seen: list[httpx.Request] = []
+
+        def recording_handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return handler(request)
 
         api_client = httpx.Client(
             transport=httpx.MockTransport(lambda r: httpx.Response(500)),
-            headers={"Authorization": f"Bearer {token}", "Cookie": "session=abc"},
+            headers={"Authorization": f"Bearer {self.TOKEN}", "Cookie": "session=abc"},
         )
-        download_client = httpx.Client(
-            transport=httpx.MockTransport(download_handler), follow_redirects=True
+        download_client = httpx.Client(transport=httpx.MockTransport(recording_handler))
+        adapter = ReplicateAdapter(self.TOKEN, client=api_client, download_client=download_client)
+        return adapter, seen
+
+    def _assert_no_credentials(self, requests: list[httpx.Request]):
+        for request in requests:
+            headers = {k.lower(): v for k, v in request.headers.items()}
+            assert "authorization" not in headers, f"auth header sent to {request.url}"
+            assert "cookie" not in headers, f"cookie sent to {request.url}"
+            assert self.TOKEN not in str(dict(request.headers))
+
+    @staticmethod
+    def _png_response() -> httpx.Response:
+        return httpx.Response(
+            200, content=tiny_png_bytes(), headers={"content-type": "image/png"}
         )
-        adapter = ReplicateAdapter(token, client=api_client, download_client=download_client)
+
+    def test_direct_https_download(self, tmp_path):
+        adapter, seen = self._adapter(lambda r: self._png_response())
         mime, size = adapter.download(
             "https://delivery.example.com/out.png", tmp_path / "o.png", max_bytes=10_000_000
         )
         assert mime == "image/png" and size > 0
-        headers = {k.lower(): v for k, v in captured["headers"].items()}
-        assert "authorization" not in headers
-        assert "cookie" not in headers
-        assert token not in str(captured["headers"])
+        assert (tmp_path / "o.png").exists()
+        assert len(seen) == 1
+        self._assert_no_credentials(seen)
+
+    def test_single_valid_https_redirect(self, tmp_path):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/start":
+                return httpx.Response(
+                    302, headers={"location": "https://cdn.example.com/final.png"}
+                )
+            return self._png_response()
+
+        adapter, seen = self._adapter(handler)
+        mime, _ = adapter.download(
+            "https://delivery.example.com/start", tmp_path / "o.png", max_bytes=10_000_000
+        )
+        assert mime == "image/png"
+        assert [str(r.url) for r in seen] == [
+            "https://delivery.example.com/start",
+            "https://cdn.example.com/final.png",
+        ]
+        self._assert_no_credentials(seen)
+
+    def test_multiple_https_redirects_within_limit(self, tmp_path):
+        def handler(request: httpx.Request) -> httpx.Response:
+            hops = {
+                "/a": "https://delivery.example.com/b",
+                "/b": "https://delivery.example.com/c",
+                "/c": "https://cdn.example.com/final.png",
+            }
+            if request.url.path in hops:
+                return httpx.Response(307, headers={"location": hops[request.url.path]})
+            return self._png_response()
+
+        adapter, seen = self._adapter(handler)
+        mime, _ = adapter.download(
+            "https://delivery.example.com/a", tmp_path / "o.png", max_bytes=10_000_000
+        )
+        assert mime == "image/png"
+        assert len(seen) == 4  # 3 redirects (the limit) + the final fetch
+        self._assert_no_credentials(seen)
+
+    def test_redirect_limit_exceeded(self, tmp_path):
+        def endless(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                302, headers={"location": str(request.url) + "x"}
+            )
+
+        adapter, seen = self._adapter(endless)
+        with pytest.raises(ProviderError, match="redirect limit"):
+            adapter.download(
+                "https://delivery.example.com/loop", tmp_path / "o.png", max_bytes=1000
+            )
+        assert len(seen) == ReplicateAdapter.MAX_DOWNLOAD_REDIRECTS + 1
+        assert not (tmp_path / "o.png").exists()
+        self._assert_no_credentials(seen)
+
+    def test_https_to_http_redirect_rejected_before_following(self, tmp_path):
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.scheme == "https", "the http URL must never be requested"
+            return httpx.Response(302, headers={"location": "http://insecure.example/o.png"})
+
+        adapter, seen = self._adapter(handler)
+        with pytest.raises(ProviderError, match="non-HTTPS"):
+            adapter.download(
+                "https://delivery.example.com/out.png", tmp_path / "o.png", max_bytes=1000
+            )
+        assert len(seen) == 1, "rejection must happen before the redirect is followed"
+
+    def test_missing_location_rejected(self, tmp_path):
+        adapter, seen = self._adapter(lambda r: httpx.Response(302))
+        with pytest.raises(ProviderError, match="no Location"):
+            adapter.download(
+                "https://delivery.example.com/out.png", tmp_path / "o.png", max_bytes=1000
+            )
+        assert len(seen) == 1
+
+    def test_relative_redirect_resolves_against_https_origin(self, tmp_path):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/files/start":
+                return httpx.Response(302, headers={"location": "../final/out.png"})
+            return self._png_response()
+
+        adapter, seen = self._adapter(handler)
+        mime, _ = adapter.download(
+            "https://delivery.example.com/files/start", tmp_path / "o.png", max_bytes=10_000_000
+        )
+        assert mime == "image/png"
+        assert str(seen[-1].url) == "https://delivery.example.com/final/out.png"
+        assert seen[-1].url.scheme == "https"
+        self._assert_no_credentials(seen)
 
     def test_non_https_output_url_is_refused(self, tmp_path):
-        adapter = ReplicateAdapter(
-            "t",
-            client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500))),
-            download_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200))),
-        )
+        adapter, seen = self._adapter(lambda r: self._png_response())
         with pytest.raises(ProviderError, match="non-HTTPS"):
             adapter.download("http://insecure.example/out.png", tmp_path / "o.png", max_bytes=1000)
-
-    def test_redirect_to_non_https_is_refused(self, tmp_path):
-        def handler(request: httpx.Request) -> httpx.Response:
-            if request.url.scheme == "https":
-                return httpx.Response(302, headers={"location": "http://insecure.example/o.png"})
-            return httpx.Response(200, content=b"x", headers={"content-type": "image/png"})
-
-        adapter = ReplicateAdapter(
-            "t",
-            client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500))),
-            download_client=httpx.Client(
-                transport=httpx.MockTransport(handler), follow_redirects=True
-            ),
-        )
-        with pytest.raises(ProviderError, match="non-HTTPS"):
-            adapter.download("https://delivery.example/out.png", tmp_path / "o.png", max_bytes=1000)
+        assert seen == [], "the non-HTTPS URL must never be requested at all"
 
 
 class TestConservativeCosting:

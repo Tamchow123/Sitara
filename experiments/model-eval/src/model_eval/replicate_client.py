@@ -84,11 +84,13 @@ class ReplicateAdapter:
       API endpoints.
     - ``_download_client`` fetches output files. It is constructed with NO
       authentication, NO cookies and NO Replicate headers, so the API token
-      can never leak to output-hosting/CDN domains. Redirects are limited
-      and the final URL must still be HTTPS.
+      can never leak to output-hosting/CDN domains. Redirects are followed
+      MANUALLY (follow_redirects=False): each Location is resolved and must
+      be HTTPS before it is requested, and at most three hops are allowed.
     """
 
     MAX_DOWNLOAD_REDIRECTS = 3
+    _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
     def __init__(
         self,
@@ -106,8 +108,7 @@ class ReplicateAdapter:
         )
         self._download_client = download_client or httpx.Client(
             timeout=timeout_s,
-            follow_redirects=True,
-            max_redirects=self.MAX_DOWNLOAD_REDIRECTS,
+            follow_redirects=False,
             # Deliberately: no auth header, no cookies, no API headers.
         )
 
@@ -187,8 +188,10 @@ class ReplicateAdapter:
         """Stream an output file to dest after validating MIME type and size.
 
         Uses the UNAUTHENTICATED download client — never the API client — so
-        the bearer token cannot reach output-hosting domains. Refuses to
-        overwrite an existing file. Returns (mime_type, size)."""
+        the bearer token cannot reach output-hosting domains. Redirects are
+        followed manually: at most MAX_DOWNLOAD_REDIRECTS hops, and every
+        Location is resolved and required to be HTTPS BEFORE it is requested.
+        Refuses to overwrite an existing file. Returns (mime_type, size)."""
         if not url.startswith("https://"):
             raise ProviderError(
                 f"refusing non-HTTPS output URL {url!r}", before_acceptance=False
@@ -199,38 +202,65 @@ class ReplicateAdapter:
             )
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_suffix(dest.suffix + ".part")
+        current_url = url
         try:
-            with self._download_client.stream("GET", url) as resp:
-                resp.raise_for_status()
-                if resp.url.scheme != "https":
-                    raise ProviderError(
-                        f"output download redirected to non-HTTPS URL "
-                        f"{str(resp.url)[:200]!r}",
-                        before_acceptance=False,
-                    )
-                mime = resp.headers.get("content-type", "").split(";")[0].strip()
-                if not any(mime.startswith(p) for p in allowed_mime_prefixes):
-                    raise ProviderError(
-                        f"unexpected output MIME type {mime!r} from provider",
-                        before_acceptance=False,
-                    )
-                size = 0
-                with tmp.open("wb") as fh:
-                    for chunk in resp.iter_bytes():
-                        size += len(chunk)
-                        if size > max_bytes:
-                            raise ProviderError(
-                                f"output exceeded size limit ({max_bytes} bytes)",
-                                before_acceptance=False,
-                            )
-                        fh.write(chunk)
-            os.replace(tmp, dest)
-            return mime, size
+            for _hop in range(self.MAX_DOWNLOAD_REDIRECTS + 1):
+                with self._download_client.stream("GET", current_url) as resp:
+                    if resp.status_code in self._REDIRECT_STATUSES:
+                        current_url = self._resolve_redirect(current_url, resp)
+                        continue
+                    resp.raise_for_status()
+                    mime = resp.headers.get("content-type", "").split(";")[0].strip()
+                    if not any(mime.startswith(p) for p in allowed_mime_prefixes):
+                        raise ProviderError(
+                            f"unexpected output MIME type {mime!r} from provider",
+                            before_acceptance=False,
+                        )
+                    size = 0
+                    with tmp.open("wb") as fh:
+                        for chunk in resp.iter_bytes():
+                            size += len(chunk)
+                            if size > max_bytes:
+                                raise ProviderError(
+                                    f"output exceeded size limit ({max_bytes} bytes)",
+                                    before_acceptance=False,
+                                )
+                            fh.write(chunk)
+                os.replace(tmp, dest)
+                return mime, size
+            raise ProviderError(
+                f"output download exceeded the redirect limit "
+                f"({self.MAX_DOWNLOAD_REDIRECTS})",
+                before_acceptance=False,
+            )
         except httpx.HTTPError as exc:
             self._raise_provider_error(exc, before_acceptance=False)
             raise AssertionError("unreachable")  # pragma: no cover
         finally:
             tmp.unlink(missing_ok=True)
+
+    def _resolve_redirect(self, current_url: str, resp: httpx.Response) -> str:
+        """Resolve a redirect Location and require an HTTPS destination
+        BEFORE it is ever requested."""
+        location = resp.headers.get("location")
+        if not location:
+            raise ProviderError(
+                "output download redirect carried no Location header",
+                before_acceptance=False,
+            )
+        try:
+            resolved = httpx.URL(current_url).join(location)
+        except httpx.InvalidURL:
+            raise ProviderError(
+                f"output download redirect Location is invalid: {location[:200]!r}",
+                before_acceptance=False,
+            ) from None
+        if resolved.scheme != "https":
+            raise ProviderError(
+                f"refusing redirect to non-HTTPS URL {str(resolved)[:200]!r}",
+                before_acceptance=False,
+            )
+        return str(resolved)
 
     def close(self) -> None:
         self._client.close()

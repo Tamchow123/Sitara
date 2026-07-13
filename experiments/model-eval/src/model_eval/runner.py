@@ -14,11 +14,18 @@ Execution order guarantees:
   record -> submit -> persist the provider prediction id immediately after
   acceptance -> poll -> download & validate output -> write result record ->
   reconcile.
-- Crash-safe resume: a request with a completed result record is never
-  re-sent; a request whose attempt record holds an accepted prediction id is
-  resumed by POLLING that prediction, never by submitting another one; an
-  already-downloaded output file is reused; ledger entries are reconciled
-  with attempt state (settled entries are not touched again).
+- Crash-safe resume AFTER the prediction id has been persisted: a request
+  with a completed result record is never re-sent; a request whose attempt
+  record holds an accepted prediction id is resumed by POLLING that
+  prediction; an already-downloaded output file is reused; ledger entries
+  are reconciled with attempt state (settled entries are not touched again).
+  Duplicate prevention around the provider-acceptance boundary itself is
+  BEST-EFFORT, not exactly-once: there is an unavoidable window between
+  Replicate accepting a request and the prediction id being written locally,
+  and Replicate offers no idempotency mechanism this implementation could
+  use to close it. A crash inside that window can, on resume, produce one
+  duplicate submission (the budget stays safe: the ambiguous first attempt
+  was already conservatively accounted or reserved).
 - Failures provably before provider acceptance release the reservation;
   ambiguous failures conservatively convert it to spend. Failed requests are
   FINAL for their run (their spend is already accounted); delete the failed
@@ -452,11 +459,19 @@ class Runner:
                     rid,
                     {"request_id": rid, "state": "reserved", "created_at": started_at},
                 )
+                # Acceptance boundary: between the provider accepting this
+                # request and the save_attempt below persisting its id there
+                # is an unavoidable window. A crash inside it leaves an
+                # attempt record with no prediction id, and resume will
+                # submit again — duplicate prevention here is BEST-EFFORT,
+                # not exactly-once (Replicate exposes no idempotency key for
+                # prediction creation). The budget remains conservative
+                # either way.
                 prediction = adapter.create_prediction(
                     request.replicate_id, request.model_version, input_params
                 )
-                # ...and the prediction id persisted IMMEDIATELY after
-                # provider acceptance.
+                # Persist the prediction id as soon as we hold it, closing
+                # the boundary window for every later crash point.
                 self.store.save_attempt(
                     rid,
                     {
