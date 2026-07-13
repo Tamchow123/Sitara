@@ -1,0 +1,55 @@
+# Stage B: finalist round.
+#
+# EDIT `models:` after screening — it must list the top TWO models chosen by
+# human review of the screening contact sheets. The values shipped here are
+# placeholders, not a pre-judged outcome.
+#
+# This stage exercises the full 30-brief matrix with multiple seeds,
+# production portrait framing, all three inspiration modes (text-only vs
+# curated metadata vs actual reference images, where briefs define them),
+# both refinement strategies (fresh regeneration vs image editing), and
+# every prompt format each model supports (editorial, sectioned, JSON where
+# officially supported).
+#
+# ALWAYS check the plan before running:
+#   python -m model_eval.cli plan --config configs/finalists.yaml --budget-usd 60
+# As shipped (1 seed, all formats/modes) the plan is ~270 requests with a
+# conservative reservation ceiling around 50 USD (expected actuals are much
+# lower — reservations are deliberately pessimistic). Trim brief_ids, seeds
+# or prompt_formats if that exceeds what you are prepared to pay; add a
+# second seed (e.g. 47) for seed-stability comparisons on a trimmed brief
+# set. Human review remains authoritative: nothing in this config
+# auto-selects a winner.
+
+stage: finalist
+candidates_file: model_candidates.yaml
+briefs_file: ../prompts/briefs.yaml
+reference_manifest: ../references/manifest.yaml
+
+# PLACEHOLDERS — replace with the two screening winners before running.
+models:
+  - flux-2-pro
+  - flux-2-max
+
+brief_ids: all
+seeds: [11]
+aspect_ratio: "3:4"
+inspiration_modes: [text_only, metadata, reference_image]
+prompt_formats: auto
+refinement:
+  enabled: true
+  strategies: [fresh_regeneration, image_edit]
+
+# Optional per-model input overrides, e.g. higher-quality settings:
+# model_params:
+#   flux-2-max:
+#     resolution: "2 MP"
+model_params: {}
+
+notes: >-
+  metadata mode only runs on briefs that define inspiration_metadata;
+  reference_image mode only on briefs that list reference_ids AND only
+  against manifest entries whose rights_status is verified. Refinement
+  experiments anchor to the editorial/text_only cell per (brief, model,
+  seed). Seed reuse in fresh regeneration is a continuity aid only — it does
+  not guarantee the garment is preserved.

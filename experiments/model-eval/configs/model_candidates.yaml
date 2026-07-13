@@ -1,0 +1,323 @@
+# Candidate FLUX models for the Sitara Phase 2 evaluation.
+#
+# All facts below were verified against LIVE official pages on 2026-07-13
+# (replicate.com model pages incl. embedded API schemas, replicate.com/pricing,
+# docs.bfl.ai, bfl.ai/legal/terms-of-service). Pricing and terms are
+# TIME-SENSITIVE: re-verify official pages immediately before any live run.
+#
+# Official BFL models on Replicate are versionless (invoked as owner/model);
+# the "embedded latest version id" recorded in notes is provenance only and
+# may rotate silently.
+#
+# NO production model is selected by this file. The application will
+# configure its model through environment variables after the evaluation and
+# decision record are complete (docs/decisions/0001-image-model.md).
+#
+# Category coverage:
+#   fast            -> flux-schnell
+#   balanced        -> flux-2-pro (also reference + editing), flux-1.1-pro (FLUX.1-era baseline)
+#   highest_quality -> flux-2-max (also reference + editing)
+#   reference/edit  -> flux-2-pro, flux-2-max, flux-kontext-pro
+#
+# Considered and not selected: flux-2-klein-4b (~$0.001/MP, Apache 2.0, would
+# be the cheapest tier) — its listed pricing is 15x below its 9B sibling with
+# asymmetric units, which is flagged UNRESOLVED; revisit once a billed test
+# confirms real cost. flux-pro ($0.055) is superseded by flux-1.1-pro ($0.04).
+
+requires_manual_verification: false
+
+platform_terms:
+  summary: >-
+    Replicate assigns all right, title and interest in Output to the
+    customer; outputs are usable commercially subject to third-party (BFL)
+    terms. BFL-routed models additionally require the Flux Model API
+    Agreement and BFL ToS, which prohibit military/surveillance/biometric
+    uses. BFL ToS claims no ownership of outputs but takes a perpetual,
+    irrevocable licence to use Inputs and Outputs to provide, develop, train
+    and improve BFL technologies.
+  commercial_use: >-
+    Replicate ToS: Output usable for commercial purposes such as sale or
+    publication, subject to any Third Party Terms.
+  input_retention: >-
+    Replicate privacy policy states retention "for as long as necessary to
+    provide our Services"; no explicit prediction input/output retention
+    window is published.
+  training_use: >-
+    Replicate creates anonymised/aggregated Resultant Data for service
+    improvement. BFL ToS (bfl.ai) grants BFL a perpetual, irrevocable licence
+    to use Input and Output to train and improve its technologies; whether
+    this clause covers Replicate-routed API traffic is unresolved.
+  unresolved:
+    - Replicate publishes no explicit retention window for prediction inputs/outputs.
+    - The separate "Flux Model API Agreement" referenced by Replicate was not
+      fetched; confirm whether BFL's train-and-improve licence covers
+      Replicate-routed requests.
+  sources:
+    - https://replicate.com/terms
+    - https://replicate.com/privacy
+    - https://bfl.ai/legal/terms-of-service
+  verified_on: 2026-07-13
+
+candidates:
+  - key: schnell
+    name: FLUX Schnell
+    replicate_id: black-forest-labs/flux-schnell
+    version: null
+    categories: [fast]
+    capabilities:
+      seed: true
+      seed_param: seed
+      aspect_ratios: ["1:1", "16:9", "21:9", "3:2", "2:3", "4:5", "5:4", "3:4", "4:3", "9:16", "9:21"]
+      resolution_note: "megapixels param: 1 or 0.25; num_inference_steps 1-4"
+      negative_prompt: false
+      reference_image: false
+      image_editing: false
+      json_prompting: false
+      input_format_note: >-
+        prompt, seed, aspect_ratio, megapixels, num_outputs 1-4,
+        output_format webp/jpg/png, go_fast. No image inputs of any kind.
+    pricing:
+      unit: per_image
+      usd_per_unit: 0.003
+      expected_cost_per_generation_usd: 0.003
+      max_cost_per_generation_usd: 0.01
+      checked_on: 2026-07-13
+      source_url: https://replicate.com/black-forest-labs/flux-schnell
+    terms:
+      model_licence: "Apache 2.0 (per model README)"
+      commercial_use: >-
+        README: released under apache-2.0; usable for personal, scientific
+        and commercial purposes.
+      input_retention: "Not stated on the model page; see platform terms."
+      output_ownership: "Replicate ToS assigns Output to the customer."
+      training_use: "Not stated on the model page; see platform terms."
+      unresolved: []
+      sources:
+        - https://replicate.com/black-forest-labs/flux-schnell
+        - https://replicate.com/pricing
+      verified_on: 2026-07-13
+    notes: >-
+      Embedded latest version id (provenance only, invoked versionless):
+      c846a69991daf4c0e5d016514849d14ee5b2e6846ce6b9d6f21369e564cfe51e.
+      4-step distilled model; quality ceiling expected to be the lowest here.
+
+  - key: flux-1-1-pro
+    name: FLUX 1.1 Pro (FLUX.1-era baseline)
+    replicate_id: black-forest-labs/flux-1.1-pro
+    version: null
+    categories: [balanced]
+    capabilities:
+      seed: true
+      seed_param: seed
+      aspect_ratios: ["custom", "1:1", "16:9", "3:2", "2:3", "4:5", "5:4", "9:16", "3:4", "4:3"]
+      resolution_note: "width/height 256-1440 (multiples of 32) with aspect_ratio=custom"
+      negative_prompt: false
+      reference_image: true
+      reference_image_param: image_prompt
+      max_reference_images: 1
+      image_editing: false
+      json_prompting: false
+      input_format_note: >-
+        prompt, seed, aspect_ratio, image_prompt (single image; Redux-style
+        composition guidance, NOT identity/editing), prompt_upsampling,
+        safety_tolerance 1-6, output_format webp/jpg/png.
+    pricing:
+      unit: per_image
+      usd_per_unit: 0.04
+      expected_cost_per_generation_usd: 0.04
+      max_cost_per_generation_usd: 0.08
+      checked_on: 2026-07-13
+      source_url: https://replicate.com/black-forest-labs/flux-1.1-pro
+    terms:
+      model_licence: >-
+        Proprietary, API-served via BFL; requires the Black Forest Labs API
+        agreement and BFL Terms of Service.
+      commercial_use: "Governed by BFL ToS + Replicate ToS (see platform terms)."
+      input_retention: "Not stated on the model page; see platform terms."
+      output_ownership: >-
+        BFL ToS claims no ownership of Outputs; Replicate ToS assigns Output
+        to the customer.
+      training_use: >-
+        BFL ToS grants BFL a perpetual licence to use Input/Output to train
+        and improve its technologies (coverage of Replicate-routed traffic
+        unresolved).
+      unresolved:
+        - Whether BFL's train-and-improve clause applies to Replicate-routed requests.
+      sources:
+        - https://replicate.com/black-forest-labs/flux-1.1-pro
+        - https://bfl.ai/legal/terms-of-service
+      verified_on: 2026-07-13
+    notes: >-
+      Embedded latest version id (provenance only):
+      609793a667ed94b210242837d3c3c9fc9a64ae93685f15d75002ba0ed9a97f2b.
+      Kept as a mature FLUX.1-era baseline; image_prompt guides composition
+      only, so score reference influence accordingly.
+
+  - key: flux-2-pro
+    name: FLUX.2 Pro
+    replicate_id: black-forest-labs/flux-2-pro
+    version: null
+    categories: [balanced, reference, editing]
+    capabilities:
+      seed: true
+      seed_param: seed
+      aspect_ratios: ["match_input_image", "custom", "1:1", "16:9", "3:2", "2:3", "4:5", "5:4", "9:16", "3:4", "4:3"]
+      resolution_note: >-
+        resolution enum match_input_image / 0.5 MP / 1 MP / 2 MP / 4 MP
+        (default 1 MP; 2 MP or below recommended); custom width/height
+        256-2048 in multiples of 16.
+      negative_prompt: false
+      reference_image: true
+      reference_image_param: input_images
+      max_reference_images: 8
+      image_editing: true
+      image_editing_param: input_images
+      image_editing_param_is_list: true
+      json_prompting: true
+      input_format_note: >-
+        prompt, seed, input_images (array, max 8; used for both reference
+        conditioning and editing), resolution, aspect_ratio,
+        safety_tolerance 1-5, output_format webp/jpg/png. README explicitly:
+        the model does not understand negative prompts. JSON structured
+        prompting officially documented for FLUX.2
+        (docs.bfl.ai/guides/usecases_t2i_json_prompting).
+    pricing:
+      unit: per_megapixel
+      usd_per_unit: 0.015
+      # $0.015 per run + $0.015 per output MP (1 MP portrait, no inputs).
+      expected_cost_per_generation_usd: 0.03
+      # Headroom for runs with several ~1MP reference/edit inputs at $0.015
+      # per input MP, and for the additive billing formula being unresolved.
+      max_cost_per_generation_usd: 0.12
+      checked_on: 2026-07-13
+      source_url: https://replicate.com/black-forest-labs/flux-2-pro
+    terms:
+      model_licence: "Proprietary, API-served; BFL/Replicate terms apply."
+      commercial_use: "Governed by BFL ToS + Replicate ToS (see platform terms)."
+      input_retention: "Not stated on the model page; see platform terms."
+      output_ownership: >-
+        BFL ToS claims no ownership of Outputs; Replicate ToS assigns Output
+        to the customer.
+      training_use: >-
+        BFL ToS train-and-improve licence (coverage of Replicate-routed
+        traffic unresolved).
+      unresolved:
+        - Additive per-run + per-MP billing formula assumed; confirm with a billed test run.
+        - JSON prompting documented for FLUX.2 generally; per-variant behaviour unverified.
+      sources:
+        - https://replicate.com/black-forest-labs/flux-2-pro
+        - https://docs.bfl.ai/flux_2/flux2_overview
+      verified_on: 2026-07-13
+    notes: >-
+      Embedded latest version id (provenance only):
+      ccb5e33141097816e6fab8c895e702fe4c619e4e07500885b71214e9f6382a5c.
+      BFL docs call FLUX.2 pro the recommended default for generation and
+      editing; Kontext pages now point editing users at FLUX.2 pro/flex.
+
+  - key: flux-2-max
+    name: FLUX.2 Max
+    replicate_id: black-forest-labs/flux-2-max
+    version: null
+    categories: [highest_quality, reference, editing]
+    capabilities:
+      seed: true
+      seed_param: seed
+      aspect_ratios: ["match_input_image", "custom", "1:1", "16:9", "3:2", "2:3", "4:5", "5:4", "9:16", "3:4", "4:3"]
+      resolution_note: "resolution enum up to 4 MP (default 1 MP); custom width/height 256-2048"
+      negative_prompt: false
+      reference_image: true
+      reference_image_param: input_images
+      max_reference_images: 8
+      image_editing: true
+      image_editing_param: input_images
+      image_editing_param_is_list: true
+      json_prompting: true
+      input_format_note: >-
+        Same schema shape as flux-2-pro (input_images max 8, resolution,
+        safety_tolerance 1-5, no negative prompts, no prompt_upsampling).
+        Supports hex-colour prompting; "grounding search" is a Max-only
+        feature per BFL docs.
+    pricing:
+      unit: per_megapixel
+      usd_per_unit: 0.03
+      # $0.04 per run + $0.03 per output MP (1 MP portrait, no inputs).
+      expected_cost_per_generation_usd: 0.07
+      max_cost_per_generation_usd: 0.25
+      checked_on: 2026-07-13
+      source_url: https://replicate.com/black-forest-labs/flux-2-max
+    terms:
+      model_licence: "Proprietary, API-served; BFL/Replicate terms apply."
+      commercial_use: "Governed by BFL ToS + Replicate ToS (see platform terms)."
+      input_retention: "Not stated on the model page; see platform terms."
+      output_ownership: >-
+        BFL ToS claims no ownership of Outputs; Replicate ToS assigns Output
+        to the customer.
+      training_use: >-
+        BFL ToS train-and-improve licence (coverage of Replicate-routed
+        traffic unresolved).
+      unresolved:
+        - Additive per-run + per-MP billing formula assumed; confirm with a billed test run.
+        - JSON prompting documented for FLUX.2 generally; per-variant behaviour unverified.
+      sources:
+        - https://replicate.com/black-forest-labs/flux-2-max
+        - https://docs.bfl.ai/flux_2/flux2_overview
+      verified_on: 2026-07-13
+    notes: >-
+      Embedded latest version id (provenance only):
+      9c23b0aaa98765a9676dbdda58b9c9915627751300747bad54cb1c11b135d3ca.
+      "The highest fidelity image model from Black Forest Labs" per Replicate.
+
+  - key: kontext-pro
+    name: FLUX.1 Kontext Pro
+    replicate_id: black-forest-labs/flux-kontext-pro
+    version: null
+    categories: [reference, editing]
+    capabilities:
+      seed: true
+      seed_param: seed
+      aspect_ratios: ["match_input_image", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9", "9:21", "2:1", "1:2"]
+      resolution_note: "aspect defaults to match_input_image when an input image is given"
+      negative_prompt: false
+      reference_image: true
+      reference_image_param: input_image
+      max_reference_images: 1
+      image_editing: true
+      image_editing_param: input_image
+      image_editing_param_is_list: false
+      json_prompting: false
+      input_format_note: >-
+        prompt doubles as the edit instruction when input_image is set;
+        single input_image (jpeg/png/gif/webp); safety_tolerance 0-6 but max
+        2 when an input image is used; prompt_upsampling available;
+        output_format jpg/png.
+    pricing:
+      unit: per_image
+      usd_per_unit: 0.04
+      expected_cost_per_generation_usd: 0.04
+      max_cost_per_generation_usd: 0.08
+      checked_on: 2026-07-13
+      source_url: https://replicate.com/black-forest-labs/flux-kontext-pro
+    terms:
+      model_licence: "Proprietary, API-served; BFL/Replicate terms apply."
+      commercial_use: >-
+        README: free to use outputs commercially in apps, marketing, or any
+        business use.
+      input_retention: "Not stated on the model page; see platform terms."
+      output_ownership: >-
+        BFL ToS claims no ownership of Outputs; Replicate ToS assigns Output
+        to the customer.
+      training_use: >-
+        BFL ToS train-and-improve licence (coverage of Replicate-routed
+        traffic unresolved).
+      unresolved:
+        - BFL docs label Kontext previous-generation and point editing users
+          at FLUX.2 pro/flex; weigh longevity before selecting it.
+      sources:
+        - https://replicate.com/black-forest-labs/flux-kontext-pro
+        - https://docs.bfl.ai/flux_2/flux2_overview
+      verified_on: 2026-07-13
+    notes: >-
+      Embedded latest version id (provenance only):
+      897a70f5a7dbd8a0611413b3b98cf417b45f266bd595c571a22947619d9ae462.
+      Best-known single-image instruction-editing UX; included to compare
+      edit-refinement continuity against FLUX.2 editing.

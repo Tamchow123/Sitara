@@ -1,0 +1,49 @@
+# Stage A: screening round.
+#
+# Every candidate model runs every screening brief once (one seed, one
+# prompt format, text-only inspiration). Purpose: remove clearly unsuitable
+# models cheaply before the larger finalist round. Latency, estimated cost
+# and full provenance are recorded per output.
+#
+# Conservative max spend at current reservations (12 briefs x 5 models):
+# 12 x (0.01 + 0.08 + 0.12 + 0.25 + 0.08) = ~6.5 USD ceiling
+# (expected actuals roughly 2.2 USD). Verify with:
+#   python -m model_eval.cli plan --config configs/screening.yaml --budget-usd 10
+
+stage: screening
+candidates_file: model_candidates.yaml
+briefs_file: ../prompts/briefs.yaml
+reference_manifest: ../references/manifest.yaml
+
+models:
+  - schnell
+  - flux-1-1-pro
+  - flux-2-pro
+  - flux-2-max
+  - kontext-pro
+
+brief_ids:
+  - scr-lehenga-baraat-heavy
+  - scr-saree-walima-minimal
+  - scr-gharara-nikah-heavy
+  - scr-sharara-mehndi-moderate
+  - scr-anarkali-walima-moderate
+  - scr-shalwar-kameez-nikah-modest
+  - scr-lehenga-mehndi-minimal
+  - scr-saree-baraat-heavy
+  - scr-gharara-walima-minimal
+  - scr-sharara-baraat-heavy
+  - scr-anarkali-nikah-modest
+  - scr-lehenga-walima-pastel
+
+seeds: [11]
+aspect_ratio: "3:4"
+inspiration_modes: [text_only]
+prompt_formats: [editorial]
+refinement:
+  enabled: false
+
+notes: >-
+  Screening deliberately holds format, mode and seed constant so the only
+  variable is the model. Score with the standard rubric plus hard-failure
+  checks; pick the top two models for configs/finalists.yaml.

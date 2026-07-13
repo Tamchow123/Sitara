@@ -1,0 +1,16 @@
+# Never commit secrets
+.env
+
+# Generated evaluation outputs (images, ledgers, result records, sheets)
+outputs/*
+!outputs/.gitkeep
+
+# Local rights-approved reference images live here and are NOT committed
+# unless their licence explicitly permits repository storage (see references/README.md)
+references/local/
+
+# Local tooling
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/

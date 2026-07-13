@@ -1,0 +1,539 @@
+# South Asian bridalwear evaluation briefs.
+#
+# Screening subset (ids prefixed scr-) covers every required garment
+# (lehenga, saree, gharara, sharara, anarkali, shalwar kameez), every
+# required ceremony (nikah, mehndi, baraat, walima), modest full-sleeve
+# styling, and both heavy and minimal embellishment.
+#
+# `inspiration_metadata` is present only on briefs used for the metadata
+# inspiration mode; `reference_ids` only on briefs used for the
+# reference_image mode (ids must exist in references/manifest.yaml with
+# rights_status: verified before a live run will send them).
+#
+# `refinement` entries apply exactly one constrained change and are used by
+# the refinement experiments (fresh regeneration vs image editing).
+
+briefs:
+  # ---------------------------------------------------------------- screening
+  - id: scr-lehenga-baraat-heavy
+    garment: lehenga
+    ceremony: baraat
+    region: Punjabi
+    palette: deep red and antique gold
+    fabric: raw silk with a heavily flared kalidar skirt
+    embellishment_level: heavy
+    embellishment_techniques: [zardozi, dabka, sequin highlights]
+    sleeves: elbow-length fitted sleeves
+    neckline: sweetheart neckline with an embroidered edge
+    coverage: fitted choli with a modest midriff covered by the dupatta drape
+    dupatta: heavily bordered dupatta draped over the shoulder
+    tags: [screening, heavy, classic-red]
+
+  - id: scr-saree-walima-minimal
+    garment: saree
+    ceremony: walima
+    region: Pakistani
+    palette: ivory and soft gold
+    fabric: chiffon saree with a satin-finish border
+    embellishment_level: minimal
+    embellishment_techniques: [fine pearl edging]
+    sleeves: full sleeves on the blouse
+    neckline: high round neckline
+    coverage: fully covered torso with a pallu pinned across the chest
+    dupatta: pallu draped over the shoulder in neat pleats
+    refinement:
+      id: ivory-to-deep-red
+      description: the colour palette from ivory and soft gold to deep red and antique gold
+      field: palette
+      from_value: ivory and soft gold
+      to_value: deep red and antique gold
+    tags: [screening, minimal, modest]
+
+  - id: scr-gharara-nikah-heavy
+    garment: gharara
+    ceremony: nikah
+    region: Lucknowi
+    palette: pale rose gold and ivory
+    fabric: pure silk kameez with wide-flared gharara legs gathered at the knee
+    embellishment_level: heavy
+    embellishment_techniques: [kamdani, zardozi, gota lace on the knee joint]
+    sleeves: full sleeves
+    neckline: boat neckline with a fine embroidered border
+    coverage: knee-length kameez fully covering the torso
+    dupatta: draped over the shoulder
+    refinement:
+      id: shoulder-to-head-dupatta
+      description: the dupatta drape from over the shoulder to over the head
+      field: dupatta
+      from_value: draped over the shoulder
+      to_value: draped over the head
+    inspiration_metadata:
+      garment_type: traditional Lucknowi gharara
+      silhouette: fitted kameez with dramatic knee-flare legs
+      colour_palette: rose gold, ivory, hints of pistachio
+      embroidery: kamdani and fine zardozi
+      fabric: pure silk with brocade knee panels
+      dupatta_placement: single dupatta, shoulder drape
+      regional_note: Awadhi bridal tradition
+    tags: [screening, heavy, gharara-vs-sharara]
+
+  - id: scr-sharara-mehndi-moderate
+    garment: sharara
+    ceremony: mehndi
+    region: Pakistani
+    palette: bright yellow and parrot green
+    fabric: cotton silk kameez over straight-from-waist flared sharara trousers
+    embellishment_level: moderate
+    embellishment_techniques: [mirror work, gota patti, tassel details]
+    sleeves: short sleeves
+    neckline: round neckline with a small keyhole
+    coverage: hip-length kameez with full trouser coverage
+    dupatta: light net dupatta draped over the shoulder
+    refinement:
+      id: short-to-full-sleeves
+      description: the sleeves from short sleeves to full sleeves
+      field: sleeves
+      from_value: short sleeves
+      to_value: full sleeves
+    tags: [screening, moderate, gharara-vs-sharara, festive]
+
+  - id: scr-anarkali-walima-moderate
+    garment: anarkali
+    ceremony: walima
+    region: Hyderabadi
+    palette: pistachio green and champagne
+    fabric: floor-length flowing georgette anarkali with a churidar
+    embellishment_level: moderate
+    embellishment_techniques: [resham thread work, subtle stone scatter]
+    sleeves: three-quarter sleeves
+    neckline: round neckline with a delicate collar-line embroidery
+    coverage: floor-length silhouette with full leg coverage
+    dupatta: soft dupatta draped across one shoulder
+    inspiration_metadata:
+      garment_type: floor-length anarkali
+      silhouette: high-waisted flare from the empire line
+      colour_palette: pistachio, champagne, muted gold
+      embroidery: tonal resham with sparse stones
+      fabric: layered georgette
+      dupatta_placement: single-shoulder drape
+      regional_note: Hyderabadi evening styling
+    tags: [screening, moderate, pastel]
+
+  - id: scr-shalwar-kameez-nikah-modest
+    garment: shalwar_kameez
+    ceremony: nikah
+    region: Pakistani
+    palette: white and silver
+    fabric: heavy cotton silk kameez with a straight shalwar
+    embellishment_level: minimal
+    embellishment_techniques: [fine silver threadwork on cuffs and hem]
+    sleeves: full sleeves
+    neckline: high closed neckline
+    coverage: fully covered modest silhouette from neck to ankle
+    dupatta: large dupatta draped over the head
+    tags: [screening, minimal, modest, full-coverage]
+
+  - id: scr-lehenga-mehndi-minimal
+    garment: lehenga
+    ceremony: mehndi
+    region: Rajasthani
+    palette: leaf green and marigold yellow
+    fabric: light cotton silk lehenga with a breezy flare
+    embellishment_level: minimal
+    embellishment_techniques: [thin gota patti lines]
+    sleeves: short sleeves
+    neckline: square neckline
+    coverage: choli with a comfortably modest cut for a daytime function
+    dupatta: draped over the shoulder
+    refinement:
+      id: minimal-to-heavy-embroidery
+      description: the embellishment from minimal to heavy
+      field: embellishment_level
+      from_value: minimal
+      to_value: heavy
+    tags: [screening, minimal, festive]
+
+  - id: scr-saree-baraat-heavy
+    garment: saree
+    ceremony: baraat
+    region: Bengali
+    palette: crimson red and gold
+    fabric: Banarasi silk saree with a broad zari border
+    embellishment_level: heavy
+    embellishment_techniques: [woven zari brocade, kundan blouse detail]
+    sleeves: elbow-length blouse sleeves
+    neckline: round blouse neckline
+    coverage: traditional pleated drape with the pallu over the left shoulder
+    dupatta: pallu worn over the shoulder with a veil-style second drape over the head
+    inspiration_metadata:
+      garment_type: Banarasi bridal saree
+      silhouette: classic pleated drape
+      colour_palette: crimson, gold
+      embroidery: woven zari, kundan accents
+      fabric: Banarasi silk
+      dupatta_placement: pallu plus head veil
+      regional_note: Bengali bridal styling with traditional drape
+    tags: [screening, heavy, saree-integrity]
+
+  - id: scr-gharara-walima-minimal
+    garment: gharara
+    ceremony: walima
+    region: Lucknowi
+    palette: powder blue and pearl white
+    fabric: organza kameez with silk gharara legs
+    embellishment_level: minimal
+    embellishment_techniques: [pearl buttons, fine white chikankari]
+    sleeves: full sleeves
+    neckline: collared neckline with a short placket
+    coverage: fully covered modest silhouette
+    dupatta: sheer dupatta draped over the head
+    tags: [screening, minimal, modest, gharara-vs-sharara]
+
+  - id: scr-sharara-baraat-heavy
+    garment: sharara
+    ceremony: baraat
+    region: Pakistani
+    palette: deep maroon and burnished gold
+    fabric: velvet kameez with silk sharara trousers flaring from the waist
+    embellishment_level: heavy
+    embellishment_techniques: [zardozi, dabka, kora work]
+    sleeves: full sleeves
+    neckline: V-neckline with a dense embroidered yoke
+    coverage: long kameez with full coverage
+    dupatta: double dupatta with one over the head and one across the arms
+    tags: [screening, heavy, gharara-vs-sharara, winter]
+
+  - id: scr-anarkali-nikah-modest
+    garment: anarkali
+    ceremony: nikah
+    region: Delhi
+    palette: soft ivory and blush pink
+    fabric: silk-georgette anarkali with a full-circle hem
+    embellishment_level: moderate
+    embellishment_techniques: [pearl work, tonal resham]
+    sleeves: full sleeves
+    neckline: high round neckline
+    coverage: fully covered modest silhouette to the floor
+    dupatta: draped over the head
+    tags: [screening, moderate, modest, full-coverage]
+
+  - id: scr-lehenga-walima-pastel
+    garment: lehenga
+    ceremony: walima
+    region: Pakistani
+    palette: mint green and silver
+    fabric: net lehenga over a silk lining
+    embellishment_level: moderate
+    embellishment_techniques: [sequin scatter, silver naqshi]
+    sleeves: full sleeves
+    neckline: scoop neckline with an embroidered trim
+    coverage: long-line choli meeting the lehenga waist with no midriff exposure
+    dupatta: draped over the shoulder
+    inspiration_metadata:
+      garment_type: contemporary pastel bridal lehenga
+      silhouette: A-line with a long-line blouse
+      colour_palette: mint, silver, touches of white
+      embroidery: sequin and naqshi
+      fabric: layered net
+      dupatta_placement: single shoulder drape
+      regional_note: modern Pakistani walima styling
+    tags: [screening, moderate, pastel, modest]
+
+  # ---------------------------------------------------------------- finalist
+  - id: fin-lehenga-pheras-classic
+    garment: lehenga
+    ceremony: pheras
+    region: Punjabi
+    palette: scarlet red and gold
+    fabric: heavy silk lehenga with dense kalis
+    embellishment_level: heavy
+    embellishment_techniques: [zardozi, kundan, stone jaal]
+    sleeves: elbow-length sleeves
+    neckline: deep round neckline with an inner modesty panel
+    coverage: classic bridal choli with dupatta covering the shoulders
+    dupatta: double dupatta with one draped over the head
+    reference_ids: [ref-lehenga-red]
+    tags: [finalist, heavy, classic-red]
+
+  - id: fin-lehenga-reception-jewel
+    garment: lehenga
+    ceremony: reception
+    region: Delhi
+    palette: emerald green and gold
+    fabric: velvet lehenga with silk panels
+    embellishment_level: moderate
+    embellishment_techniques: [zardozi borders, sequin gradient]
+    sleeves: sleeveless blouse with a matching cape layer
+    neckline: high cape neckline
+    coverage: cape layer providing full shoulder and arm coverage
+    dupatta: no separate dupatta; the cape replaces it
+    tags: [finalist, moderate, jewel-tone, contemporary]
+
+  - id: fin-saree-mehndi-lightweight
+    garment: saree
+    ceremony: mehndi
+    region: South Indian
+    palette: mango yellow and leaf green
+    fabric: soft silk saree with a thin woven border
+    embellishment_level: minimal
+    embellishment_techniques: [woven border only]
+    sleeves: elbow-length blouse sleeves
+    neckline: boat blouse neckline
+    coverage: traditional drape with a neatly pinned pallu
+    dupatta: pallu over the left shoulder
+    tags: [finalist, minimal, festive, saree-integrity]
+
+  - id: fin-saree-nikah-modest
+    garment: saree
+    ceremony: nikah
+    region: Hyderabadi
+    palette: deep teal and silver
+    fabric: khada dupatta styled ensemble over a silk saree base
+    embellishment_level: moderate
+    embellishment_techniques: [silver zari, pearl fringe]
+    sleeves: full sleeves on the blouse
+    neckline: high blouse neckline
+    coverage: fully covered torso with the khada dupatta framing the head
+    dupatta: khada dupatta draped over the head in the Hyderabadi style
+    inspiration_metadata:
+      garment_type: Hyderabadi khada dupatta ensemble
+      silhouette: saree base with a structured four-sided dupatta drape
+      colour_palette: teal, silver
+      embroidery: silver zari and pearls
+      fabric: silk with net dupatta
+      dupatta_placement: head-framing khada drape
+      regional_note: Hyderabadi bridal tradition; distinct from a standard saree drape
+    tags: [finalist, moderate, modest, regional-specific]
+
+  - id: fin-gharara-baraat-royal
+    garment: gharara
+    ceremony: baraat
+    region: Lucknowi
+    palette: deep wine and antique gold
+    fabric: brocade gharara with a silk kameez
+    embellishment_level: heavy
+    embellishment_techniques: [zardozi, kamdani, gota on the knee joint]
+    sleeves: full sleeves
+    neckline: round neckline with a jewelled edge
+    coverage: fully covered classic silhouette
+    dupatta: heavily fringed dupatta draped over the head
+    reference_ids: [ref-gharara-gold]
+    tags: [finalist, heavy, gharara-vs-sharara, modest]
+
+  - id: fin-sharara-walima-soft
+    garment: sharara
+    ceremony: walima
+    region: Karachi
+    palette: dusty lavender and silver
+    fabric: chiffon kameez with crushed-silk sharara trousers
+    embellishment_level: moderate
+    embellishment_techniques: [silver sitara, fine resham]
+    sleeves: full sleeves
+    neckline: sweetheart neckline with a sheer high yoke
+    coverage: sheer yoke providing full upper coverage
+    dupatta: draped over the shoulder
+    tags: [finalist, moderate, pastel, gharara-vs-sharara]
+
+  - id: fin-anarkali-mehndi-bright
+    garment: anarkali
+    ceremony: mehndi
+    region: Punjabi
+    palette: fuchsia pink and orange
+    fabric: georgette anarkali with a contrast border
+    embellishment_level: moderate
+    embellishment_techniques: [mirror work, tassels, gota patti]
+    sleeves: three-quarter sleeves
+    neckline: round neckline
+    coverage: floor-length flare with full leg coverage
+    dupatta: contrast dupatta draped over the shoulder
+    tags: [finalist, moderate, festive]
+
+  - id: fin-shalwar-kameez-walima-elegant
+    garment: shalwar_kameez
+    ceremony: walima
+    region: Lahori
+    palette: champagne and rose gold
+    fabric: raw silk kameez with a straight-cut shalwar
+    embellishment_level: moderate
+    embellishment_techniques: [rose-gold tilla, pearl detailing]
+    sleeves: full sleeves
+    neckline: boat neckline
+    coverage: long straight kameez with a modest side slit
+    dupatta: draped over the shoulder
+    inspiration_metadata:
+      garment_type: formal shalwar kameez
+      silhouette: long straight kameez, tapered shalwar
+      colour_palette: champagne, rose gold
+      embroidery: tilla and pearls
+      fabric: raw silk
+      dupatta_placement: shoulder drape
+      regional_note: Lahori formalwear sensibility
+    tags: [finalist, moderate, modest]
+
+  - id: fin-shalwar-kameez-mehndi-casual
+    garment: shalwar_kameez
+    ceremony: mehndi
+    region: Pakistani
+    palette: kelly green and hot pink
+    fabric: lawn cotton kameez with a patiala-style shalwar
+    embellishment_level: minimal
+    embellishment_techniques: [contrast piping, small pom-pom trim]
+    sleeves: full sleeves
+    neckline: round neckline
+    coverage: relaxed full-coverage daytime silhouette
+    dupatta: draped loosely over both shoulders
+    tags: [finalist, minimal, festive, modest]
+
+  - id: fin-lehenga-nikah-ivory
+    garment: lehenga
+    ceremony: nikah
+    region: Pakistani
+    palette: ivory and soft gold
+    fabric: silk lehenga with a subtly flared cut
+    embellishment_level: minimal
+    embellishment_techniques: [tonal ivory threadwork]
+    sleeves: full sleeves
+    neckline: high round neckline
+    coverage: fully covered modest silhouette
+    dupatta: draped over the head
+    refinement:
+      id: ivory-to-deep-red
+      description: the colour palette from ivory and soft gold to deep red and antique gold
+      field: palette
+      from_value: ivory and soft gold
+      to_value: deep red and antique gold
+    reference_ids: [ref-lehenga-ivory]
+    tags: [finalist, minimal, modest, full-coverage]
+
+  - id: fin-saree-reception-glamour
+    garment: saree
+    ceremony: reception
+    region: Mumbai
+    palette: midnight blue and silver
+    fabric: sequinned georgette saree
+    embellishment_level: heavy
+    embellishment_techniques: [all-over sequins, crystal border]
+    sleeves: elbow-length blouse sleeves
+    neckline: round blouse neckline
+    coverage: classic drape with a securely pinned pallu
+    dupatta: pallu over the shoulder
+    tags: [finalist, heavy, contemporary, saree-integrity]
+
+  - id: fin-gharara-mehndi-playful
+    garment: gharara
+    ceremony: mehndi
+    region: Lucknowi
+    palette: sunshine yellow and ivory
+    fabric: cotton silk kameez with printed gharara legs
+    embellishment_level: minimal
+    embellishment_techniques: [gota lace edging]
+    sleeves: three-quarter sleeves
+    neckline: square neckline
+    coverage: knee-length kameez with full coverage
+    dupatta: light dupatta draped over the shoulder
+    tags: [finalist, minimal, festive, gharara-vs-sharara]
+
+  - id: fin-sharara-nikah-pearl
+    garment: sharara
+    ceremony: nikah
+    region: Karachi
+    palette: pearl white and silver
+    fabric: organza kameex layered over silk sharara trousers
+    embellishment_level: moderate
+    embellishment_techniques: [pearl work, silver kora]
+    sleeves: full sleeves
+    neckline: high neckline with a pearl-buttoned placket
+    coverage: fully covered modest silhouette
+    dupatta: draped over the head
+    refinement:
+      id: shoulder-to-head-dupatta
+      description: the dupatta drape from over the shoulder to over the head
+      field: dupatta
+      from_value: draped over the head
+      to_value: draped over the shoulder
+    tags: [finalist, moderate, modest, gharara-vs-sharara]
+
+  - id: fin-anarkali-baraat-regal
+    garment: anarkali
+    ceremony: baraat
+    region: Hyderabadi
+    palette: royal purple and gold
+    fabric: silk anarkali with a heavy gold border and churidar
+    embellishment_level: heavy
+    embellishment_techniques: [zardozi jaal, kundan buttons]
+    sleeves: full sleeves
+    neckline: round neckline with a dense gold yoke
+    coverage: floor-length fully covered silhouette
+    dupatta: draped over the head with a jewelled border
+    reference_ids: [ref-anarkali-purple]
+    tags: [finalist, heavy, modest, jewel-tone]
+
+  - id: fin-lehenga-winter-velvet
+    garment: lehenga
+    ceremony: baraat
+    region: Kashmiri
+    palette: deep emerald and gold
+    fabric: velvet lehenga with tilla-worked panels
+    embellishment_level: heavy
+    embellishment_techniques: [tilla embroidery, zardozi, aari work]
+    sleeves: full sleeves
+    neckline: high round neckline
+    coverage: fully covered winter silhouette with a velvet choli
+    dupatta: heavy velvet-bordered dupatta over the head
+    inspiration_metadata:
+      garment_type: winter velvet bridal lehenga
+      silhouette: structured A-line
+      colour_palette: emerald, gold
+      embroidery: Kashmiri tilla and aari
+      fabric: silk velvet
+      dupatta_placement: head drape
+      regional_note: Kashmiri winter bridal styling
+    tags: [finalist, heavy, winter, modest, full-coverage]
+
+  - id: fin-sharara-reception-modern
+    garment: sharara
+    ceremony: reception
+    region: Karachi
+    palette: blush pink and gunmetal
+    fabric: crepe kameez with satin sharara trousers
+    embellishment_level: minimal
+    embellishment_techniques: [gunmetal beadwork on cuffs]
+    sleeves: full sleeves
+    neckline: high neckline
+    coverage: sleek fully covered contemporary silhouette
+    dupatta: no dupatta; a beaded stole rests over one arm
+    tags: [finalist, minimal, contemporary, gharara-vs-sharara]
+
+  - id: fin-saree-pheras-kanjeevaram
+    garment: saree
+    ceremony: pheras
+    region: South Indian
+    palette: temple red and deep gold
+    fabric: Kanjeevaram silk saree with a broad contrast border
+    embellishment_level: heavy
+    embellishment_techniques: [woven gold zari, temple border motifs]
+    sleeves: elbow-length blouse sleeves
+    neckline: round blouse neckline
+    coverage: traditional madisar-inspired secure drape
+    dupatta: pallu pleated over the left shoulder
+    tags: [finalist, heavy, regional-specific, saree-integrity]
+
+  - id: fin-anarkali-walima-night
+    garment: anarkali
+    ceremony: walima
+    region: Delhi
+    palette: navy blue and silver
+    fabric: velvet-trimmed georgette anarkali
+    embellishment_level: moderate
+    embellishment_techniques: [silver sitara scatter, velvet appliqué]
+    sleeves: full sleeves
+    neckline: round neckline
+    coverage: floor-length fully covered silhouette
+    dupatta: draped over the shoulder
+    refinement:
+      id: minimal-to-heavy-embroidery
+      description: the embellishment from moderate to heavy
+      field: embellishment_level
+      from_value: moderate
+      to_value: heavy
+    tags: [finalist, moderate, modest, jewel-tone]

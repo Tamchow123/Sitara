@@ -1,0 +1,245 @@
+"""Command-line interface for the Phase 2 model evaluation.
+
+Run from experiments/model-eval:
+
+    python -m model_eval.cli inspect
+    python -m model_eval.cli plan --config configs/screening.yaml
+    python -m model_eval.cli run --config configs/screening.yaml --dry-run --budget-usd 10
+    python -m model_eval.cli contact-sheet --run-id <run-id>
+    python -m model_eval.cli scoring-sheet --run-id <run-id>
+    python -m model_eval.cli budget-status --run-id <run-id>
+    python -m model_eval.cli terms
+
+A LIVE run additionally requires ALL of:
+    ALLOW_PROVIDER_CALLS=true  REPLICATE_API_TOKEN=...  --budget-usd N  --confirm-live
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .budget import BudgetError
+from .config import ConfigError, load_candidates
+from .contact_sheet import build_contact_sheet
+from .replicate_client import ProviderGateError, default_adapter_factory
+from .result_store import ResultStore
+from .runner import Runner, load_stage_bundle, plan_summary
+from .scoring import build_scoring_sheet
+from .terms import write_terms_snapshot
+
+EXPERIMENT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CANDIDATES = EXPERIMENT_ROOT / "configs" / "model_candidates.yaml"
+OUTPUTS_DIR = EXPERIMENT_ROOT / "outputs"
+REFERENCES_DIR = EXPERIMENT_ROOT / "references"
+
+
+def _print_plan(summary: dict) -> None:
+    print(f"Stage:                    {summary['stage']}")
+    print(f"Planned provider requests: {summary['planned_requests']}")
+    print(f"Skipped combinations:      {summary['skipped_requests']}")
+    print(f"By model:                  {summary['models']}")
+    print(f"By prompt format:          {summary['prompt_formats']}")
+    print(f"By inspiration mode:       {summary['inspiration_modes']}")
+    print(f"By request kind:           {summary['request_kinds']}")
+    print(f"Conservative max spend:    {summary['conservative_max_spend_usd']:.4f} USD")
+    if summary["budget_usd"] is not None:
+        verdict = "WITHIN" if summary["within_budget"] else "EXCEEDS"
+        print(f"Budget:                    {summary['budget_usd']:.2f} USD ({verdict} budget)")
+    if summary["skips"]:
+        print("Skips:")
+        for s in summary["skips"][:25]:
+            print(f"  - {s['request_id']}: {s['reason']}")
+        remaining = len(summary["skips"]) - 25
+        if remaining > 0:
+            print(f"  ... and {remaining} more (see plan.json for the full list)")
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    config = load_candidates(Path(args.candidates))
+    if config.requires_manual_verification:
+        print("!! This candidates file contains UNVERIFIED placeholder data.\n")
+    for c in config.candidates:
+        caps = c.capabilities
+        print(f"{c.key}: {c.name}")
+        print(f"  replicate_id:   {c.replicate_id}" + (f" @ {c.version}" if c.version else " (latest)"))
+        print(f"  categories:     {', '.join(c.categories)}")
+        print(
+            "  capabilities:   "
+            f"seed={caps.seed} negative_prompt={caps.negative_prompt} "
+            f"reference_image={caps.reference_image} image_editing={caps.image_editing} "
+            f"json_prompting={caps.json_prompting}"
+        )
+        if caps.aspect_ratios:
+            print(f"  aspect ratios:  {', '.join(caps.aspect_ratios)}")
+        print(
+            f"  pricing:        ~{c.pricing.expected_cost_per_generation_usd:.4f} USD/gen "
+            f"(reserve {c.pricing.max_cost_per_generation_usd:.4f}), "
+            f"checked {c.pricing.checked_on}"
+        )
+        print(f"  terms verified: {c.terms.verified_on}")
+        if c.terms.unresolved:
+            print(f"  UNRESOLVED:     {'; '.join(c.terms.unresolved)}")
+        print()
+    print(
+        "Reminder: pricing and terms are time-sensitive. Re-verify official\n"
+        "provider pages immediately before any live run."
+    )
+    return 0
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    bundle = load_stage_bundle(Path(args.config))
+    _print_plan(plan_summary(bundle, args.budget_usd))
+    return 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    bundle = load_stage_bundle(Path(args.config))
+    summary = plan_summary(bundle, args.budget_usd)
+
+    run_id = args.run_id or (
+        f"{bundle.stage.stage}-"
+        f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    )
+
+    if args.dry_run:
+        print(f"DRY RUN - no network calls will be made. (run id would be: {run_id})\n")
+        _print_plan(summary)
+        if summary["budget_usd"] is not None and not summary["within_budget"]:
+            print("\nWARNING: conservative max spend exceeds the given budget; a live")
+            print("run would halt at the budget ceiling rather than exceed it.")
+        return 0
+
+    runner = Runner(
+        bundle,
+        run_id,
+        OUTPUTS_DIR,
+        adapter_factory=default_adapter_factory,
+        env=os.environ,
+    )
+    try:
+        outcome = runner.execute(
+            dry_run=False,
+            confirm_live=args.confirm_live,
+            budget_usd=args.budget_usd,
+            references_dir=REFERENCES_DIR,
+        )
+    except (ProviderGateError, BudgetError) as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"\nRun {outcome.run_id} finished.")
+    print(f"  succeeded: {len(outcome.succeeded)}")
+    print(f"  failed:    {len(outcome.failed)}")
+    print(f"  skipped:   {len(outcome.skipped)}")
+    print(f"  resumed:   {len(outcome.resumed)} (already complete before this invocation)")
+    if outcome.halted_reason:
+        print(f"  HALTED: {outcome.halted_reason}")
+    print(f"Results: {runner.run_dir}")
+    return 0 if not outcome.halted_reason else 1
+
+
+def _store_for(run_id: str) -> ResultStore:
+    run_dir = OUTPUTS_DIR / "runs" / run_id
+    if not run_dir.exists():
+        raise SystemExit(f"no such run: {run_id} (looked in {run_dir})")
+    return ResultStore(run_dir)
+
+
+def cmd_contact_sheet(args: argparse.Namespace) -> int:
+    store = _store_for(args.run_id)
+    sheet, mapping = build_contact_sheet(
+        store, args.run_id, axis=args.by, reveal=args.reveal
+    )
+    print(f"Contact sheet: {sheet}")
+    print(f"Code mapping (do not open during blind scoring): {mapping}")
+    return 0
+
+
+def cmd_scoring_sheet(args: argparse.Namespace) -> int:
+    store = _store_for(args.run_id)
+    path = build_scoring_sheet(store, args.run_id)
+    print(f"Scoring sheet: {path}")
+    return 0
+
+
+def cmd_budget_status(args: argparse.Namespace) -> int:
+    ledger_path = OUTPUTS_DIR / "runs" / args.run_id / "budget_ledger.json"
+    if not ledger_path.exists():
+        raise SystemExit(f"no budget ledger for run {args.run_id}")
+    data = json.loads(ledger_path.read_text(encoding="utf-8"))
+    totals = data.get("totals", {})
+    print(f"Run:        {args.run_id}")
+    print(f"Budget:     {data['budget_usd']:.4f} USD")
+    print(f"Spent:      {totals.get('spent_usd', 0):.4f} USD")
+    print(f"Reserved:   {totals.get('reserved_usd', 0):.4f} USD")
+    print(f"Remaining:  {totals.get('remaining_usd', 0):.4f} USD")
+    print(f"Entries:    {len(data.get('entries', {}))}")
+    return 0
+
+
+def cmd_terms(args: argparse.Namespace) -> int:
+    config = load_candidates(Path(args.candidates))
+    dest = write_terms_snapshot(config, EXPERIMENT_ROOT / "TERMS_SNAPSHOT.md")
+    print(f"Terms snapshot written: {dest}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="model_eval", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("inspect", help="show validated candidate models and their facts")
+    p.add_argument("--candidates", default=str(DEFAULT_CANDIDATES))
+    p.set_defaults(func=cmd_inspect)
+
+    p = sub.add_parser("plan", help="expand a stage config and show the planned matrix")
+    p.add_argument("--config", required=True)
+    p.add_argument("--budget-usd", type=float, default=None)
+    p.set_defaults(func=cmd_plan)
+
+    p = sub.add_parser("run", help="execute a stage (dry-run by default refuses live)")
+    p.add_argument("--config", required=True)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--budget-usd", type=float, default=None)
+    p.add_argument("--confirm-live", action="store_true")
+    p.add_argument("--run-id", default=None, help="reuse a run id to resume it")
+    p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("contact-sheet", help="build an HTML contact sheet for a run")
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--by", choices=["model", "mode", "format", "refinement"], default="model")
+    p.add_argument("--reveal", action="store_true", help="show real model names (not blind)")
+    p.set_defaults(func=cmd_contact_sheet)
+
+    p = sub.add_parser("scoring-sheet", help="build the blind CSV scoring template for a run")
+    p.add_argument("--run-id", required=True)
+    p.set_defaults(func=cmd_scoring_sheet)
+
+    p = sub.add_parser("budget-status", help="show the budget ledger for a run")
+    p.add_argument("--run-id", required=True)
+    p.set_defaults(func=cmd_budget_status)
+
+    p = sub.add_parser("terms", help="regenerate TERMS_SNAPSHOT.md from the candidates config")
+    p.add_argument("--candidates", default=str(DEFAULT_CANDIDATES))
+    p.set_defaults(func=cmd_terms)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        return args.func(args)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,207 @@
+"""Replicate HTTP adapter and the live-run gate.
+
+This module is the ONLY place that talks to the provider. The adapter is
+never even constructed unless every live gate passes:
+
+    ALLOW_PROVIDER_CALLS=true      (environment, exactly "true")
+    REPLICATE_API_TOKEN=<token>    (environment, non-empty)
+    --budget-usd <positive amount> (CLI)
+    --confirm-live                 (CLI)
+
+``--dry-run`` never reaches this module's network paths at all.
+
+The API token is held privately and redacted from every exception message
+and log line this module produces. Never print it.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Mapping
+
+import httpx
+
+REPLICATE_API_BASE = "https://api.replicate.com/v1"
+ENV_ALLOW = "ALLOW_PROVIDER_CALLS"
+ENV_TOKEN = "REPLICATE_API_TOKEN"
+
+TERMINAL_STATUSES = {"succeeded", "failed", "canceled"}
+
+
+class ProviderGateError(Exception):
+    """A live run was attempted without every required gate."""
+
+
+class ProviderError(Exception):
+    """A provider interaction failed (message already token-redacted)."""
+
+    def __init__(self, message: str, *, before_acceptance: bool):
+        super().__init__(message)
+        # True only when we are CERTAIN the provider never accepted the
+        # request (e.g. local error before the HTTP request was sent, or an
+        # HTTP 4xx validation rejection). Anything ambiguous must be False so
+        # the budget is conservatively treated as spent.
+        self.before_acceptance = before_acceptance
+
+
+def live_gate_failures(
+    env: Mapping[str, str],
+    *,
+    confirm_live: bool,
+    budget_usd: float | None,
+) -> list[str]:
+    """Return the list of unmet live-run requirements (empty = all gates met)."""
+    failures: list[str] = []
+    if env.get(ENV_ALLOW) != "true":
+        failures.append(f"{ENV_ALLOW} is not set to 'true'")
+    if not env.get(ENV_TOKEN):
+        failures.append(f"{ENV_TOKEN} is not set")
+    if budget_usd is None or budget_usd <= 0:
+        failures.append("--budget-usd must be a positive amount")
+    if not confirm_live:
+        failures.append("--confirm-live was not passed")
+    return failures
+
+
+@dataclass(frozen=True)
+class Prediction:
+    id: str
+    status: str
+    output: Any
+    error: str | None
+    model_version: str | None
+    raw: dict[str, Any]
+
+
+class ReplicateAdapter:
+    """Minimal typed wrapper over the Replicate predictions API."""
+
+    def __init__(self, token: str, client: httpx.Client | None = None, timeout_s: float = 120.0):
+        if not token:
+            raise ProviderGateError("adapter constructed without an API token")
+        self._token = token
+        self._client = client or httpx.Client(
+            timeout=timeout_s,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    # -- helpers -------------------------------------------------------------
+
+    def _redact(self, text: str) -> str:
+        return text.replace(self._token, "***REDACTED***") if self._token else text
+
+    def _raise_provider_error(self, exc: Exception, *, before_acceptance: bool) -> None:
+        raise ProviderError(self._redact(str(exc)), before_acceptance=before_acceptance) from None
+
+    @staticmethod
+    def _parse(payload: dict[str, Any]) -> Prediction:
+        return Prediction(
+            id=str(payload.get("id", "")),
+            status=str(payload.get("status", "unknown")),
+            output=payload.get("output"),
+            error=payload.get("error"),
+            model_version=payload.get("version"),
+            raw=payload,
+        )
+
+    # -- API calls -----------------------------------------------------------
+
+    def create_prediction(
+        self,
+        replicate_id: str,
+        version: str | None,
+        input_params: dict[str, Any],
+    ) -> Prediction:
+        """Create a prediction. Official models (no pinned version) use the
+        models/{owner}/{name}/predictions endpoint; pinned versions use the
+        generic predictions endpoint."""
+        try:
+            if version:
+                resp = self._client.post(
+                    f"{REPLICATE_API_BASE}/predictions",
+                    json={"version": version, "input": input_params},
+                )
+            else:
+                resp = self._client.post(
+                    f"{REPLICATE_API_BASE}/models/{replicate_id}/predictions",
+                    json={"input": input_params},
+                )
+        except httpx.RequestError as exc:
+            # The request may or may not have reached the provider: ambiguous.
+            self._raise_provider_error(exc, before_acceptance=False)
+        if resp.status_code in (400, 401, 402, 403, 404, 422):
+            # Rejected before acceptance: safe to release the reservation.
+            raise ProviderError(
+                self._redact(f"provider rejected request ({resp.status_code}): {resp.text[:500]}"),
+                before_acceptance=True,
+            )
+        if resp.status_code >= 300:
+            raise ProviderError(
+                self._redact(f"unexpected provider response {resp.status_code}: {resp.text[:500]}"),
+                before_acceptance=False,
+            )
+        return self._parse(resp.json())
+
+    def get_prediction(self, prediction_id: str) -> Prediction:
+        try:
+            resp = self._client.get(f"{REPLICATE_API_BASE}/predictions/{prediction_id}")
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            self._raise_provider_error(exc, before_acceptance=False)
+        return self._parse(resp.json())
+
+    def download(
+        self,
+        url: str,
+        dest: Path,
+        *,
+        max_bytes: int,
+        allowed_mime_prefixes: tuple[str, ...] = ("image/",),
+    ) -> tuple[str, int]:
+        """Stream an output file to dest after validating MIME type and size.
+
+        Refuses to overwrite an existing file. Returns (mime_type, size)."""
+        if dest.exists():
+            raise ProviderError(
+                f"refusing to overwrite existing output file {dest}", before_acceptance=False
+            )
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_suffix(dest.suffix + ".part")
+        try:
+            with self._client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                mime = resp.headers.get("content-type", "").split(";")[0].strip()
+                if not any(mime.startswith(p) for p in allowed_mime_prefixes):
+                    raise ProviderError(
+                        f"unexpected output MIME type {mime!r} from provider",
+                        before_acceptance=False,
+                    )
+                size = 0
+                with tmp.open("wb") as fh:
+                    for chunk in resp.iter_bytes():
+                        size += len(chunk)
+                        if size > max_bytes:
+                            raise ProviderError(
+                                f"output exceeded size limit ({max_bytes} bytes)",
+                                before_acceptance=False,
+                            )
+                        fh.write(chunk)
+            os.replace(tmp, dest)
+            return mime, size
+        except httpx.HTTPError as exc:
+            self._raise_provider_error(exc, before_acceptance=False)
+            raise AssertionError("unreachable")  # pragma: no cover
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    def close(self) -> None:
+        self._client.close()
+
+
+def default_adapter_factory(env: Mapping[str, str]) -> ReplicateAdapter:
+    """Construct the real adapter. Callers must have checked the gates; this
+    re-checks the token so the adapter can never exist without one."""
+    token = env.get(ENV_TOKEN, "")
+    return ReplicateAdapter(token)

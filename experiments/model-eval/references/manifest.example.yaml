@@ -1,0 +1,52 @@
+# EXAMPLE ONLY — copy entries into manifest.yaml after verifying rights.
+# Paths are relative to this references/ directory; put local image files in
+# references/local/ (gitignored) unless may_be_committed is true.
+#
+# The ids below match the reference_ids used by briefs in
+# prompts/briefs.yaml, so filling in verified entries with these ids
+# activates reference_image mode for those briefs.
+
+references:
+  - id: ref-lehenga-red
+    path: local/ref-lehenga-red.jpg
+    rights_status: pending          # runner refuses anything except "verified"
+    source_name: (who owns/licensed this image)
+    source_url: https://example.com/where-it-came-from
+    licence: (e.g. owned by project, CC BY 4.0, licensed from photographer)
+    attribution: (required attribution text, if any)
+    may_be_committed: false         # true ONLY if the licence explicitly permits repo storage
+    verified_by: (your name)
+    verified_on: 2026-07-13
+
+  - id: ref-lehenga-ivory
+    path: local/ref-lehenga-ivory.jpg
+    rights_status: pending
+    source_name: (who owns/licensed this image)
+    source_url: ""
+    licence: (licence)
+    attribution: ""
+    may_be_committed: false
+    verified_by: ""
+    verified_on: null
+
+  - id: ref-gharara-gold
+    path: local/ref-gharara-gold.jpg
+    rights_status: pending
+    source_name: (who owns/licensed this image)
+    source_url: ""
+    licence: (licence)
+    attribution: ""
+    may_be_committed: false
+    verified_by: ""
+    verified_on: null
+
+  - id: ref-anarkali-purple
+    path: local/ref-anarkali-purple.jpg
+    rights_status: pending
+    source_name: (who owns/licensed this image)
+    source_url: ""
+    licence: (licence)
+    attribution: ""
+    may_be_committed: false
+    verified_by: ""
+    verified_on: null

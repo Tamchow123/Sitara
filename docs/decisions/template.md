@@ -20,3 +20,19 @@ What becomes easier, what becomes harder, what is deferred, and what would trigg
 ## Alternatives considered
 
 Each alternative with the reason it was not chosen.
+
+## Model-evaluation fields (optional — include for model/provider decisions)
+
+- **Exact identifiers and versions tested:** `owner/model` plus version/digest
+  where the provider exposes one (note when models are versionless/latest).
+- **Pricing verification date:** when each price was checked, and the source URL.
+- **Provider terms verification date:** when licence/retention/training terms
+  were checked, and what remains unresolved.
+- **API input schema:** the input parameters relied upon (seed, aspect ratio,
+  reference/edit params, prompt format support) as verified on that date.
+- **Experiment commit hash:** the git commit of the experiment code that
+  produced the results.
+- **Total experiment spend:** reconciled totals from the budget ledger(s),
+  per run.
+- **Output and scoring artefact locations:** run IDs, result/record paths,
+  contact sheets, completed scoring sheets.

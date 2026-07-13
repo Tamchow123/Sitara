@@ -1,0 +1,11 @@
+# Rights-approved reference images available to the reference_image
+# inspiration mode. Ships EMPTY: no reference image is used until a human
+# adds an entry here with rights_status: verified, and no image file is
+# committed unless its licence explicitly permits repository storage
+# (may_be_committed: true). See README.md in this directory and
+# manifest.example.yaml for the entry format.
+#
+# The runner REJECTS any reference whose rights_status is not exactly
+# "verified".
+
+references: []
