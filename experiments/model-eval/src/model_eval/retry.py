@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from .budget import BudgetLedger
+from .budget import BudgetLedger, atomic_write_json
 from .config import CandidatesConfig, ReferenceManifest
 from .prompt_matrix import PlannedRequest
 from .replicate_client import ProviderGateError, ReplicateAdapter, live_gate_failures
@@ -329,7 +329,17 @@ def execute_retries(
                     break
     finally:
         adapter.close()
-    write_logical_summary(runner.run_dir)
+        # The canonical summary is refreshed after EVERY pass outcome —
+        # partial recovery, full recovery, halt, or an interruption
+        # propagating through this frame — so run_summary.json never lies.
+        try:
+            refresh_run_summary(
+                runner.run_dir,
+                halted_reason=outcome.halted_reason,
+                disabled_models=outcome.disabled_models,
+            )
+        except Exception as exc:  # pragma: no cover - never mask the cause
+            log(f"[summary] failed to refresh run summary: {exc}")
     return outcome
 
 
@@ -363,18 +373,27 @@ def select_logical_outputs(store: ResultStore) -> list[ResultRecord]:
 
 
 def compute_logical_summary(run_dir: Path) -> dict[str, Any]:
-    """Item-level truth that never rewrites history: first-attempt outcomes
-    stay first-attempt outcomes, recoveries are counted separately."""
+    """Item-level truth derived ONLY from stored artefacts (original plan,
+    first-attempt records, retry records, budget ledger) — never from stale
+    legacy summary fields. First-attempt outcomes stay first-attempt
+    outcomes: recoveries are counted separately and never rewrite history.
+    Pure read; writes nothing."""
     originals = ResultStore(run_dir).load_all()
     retries = RetryStore(run_dir).load_all()
     first_succeeded = sum(1 for r in originals if r.status == "succeeded")
     first_failed = sum(1 for r in originals if r.status == "failed")
+    retry_succeeded = sum(1 for r in retries if r.status == "succeeded")
+    retry_failed = sum(1 for r in retries if r.status == "failed")
     recovered_ids = {
         r.logical_request_id for r in retries if r.status == "succeeded" and r.logical_request_id
     }
-    recovered = sum(
-        1 for r in originals if r.status == "failed" and r.request_id in recovered_ids
-    )
+    unresolved_records = [
+        r for r in originals if r.status == "failed" and r.request_id not in recovered_ids
+    ]
+    unresolved_by_model: dict[str, int] = {}
+    for r in unresolved_records:
+        unresolved_by_model[r.model_key] = unresolved_by_model.get(r.model_key, 0) + 1
+    recovered = first_failed - len(unresolved_records)
     plan_path = run_dir / "plan.json"
     planned = None
     if plan_path.exists():
@@ -388,8 +407,11 @@ def compute_logical_summary(run_dir: Path) -> dict[str, Any]:
         "first_attempt_succeeded": first_succeeded,
         "first_attempt_failed": first_failed,
         "retry_attempts": len(retries),
+        "retry_succeeded": retry_succeeded,
+        "retry_failed": retry_failed,
         "recovered_by_retry": recovered,
-        "unresolved_logical_requests": first_failed - recovered,
+        "unresolved_logical_requests": len(unresolved_records),
+        "unresolved_by_model": dict(sorted(unresolved_by_model.items())),
         "logical_requests_with_output": first_succeeded + recovered,
         "total_provider_attempts": attempted_first + len(retries),
         "first_attempt_failure_rate": (
@@ -403,13 +425,49 @@ def compute_logical_summary(run_dir: Path) -> dict[str, Any]:
     return summary
 
 
-def write_logical_summary(run_dir: Path) -> Path:
-    path = run_dir / "logical_summary.json"
-    path.write_text(
-        json.dumps(compute_logical_summary(run_dir), indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+_UNSET = object()
+
+
+def refresh_run_summary(
+    run_dir: Path,
+    *,
+    halted_reason: Any = _UNSET,
+    disabled_models: Any = _UNSET,
+) -> Path:
+    """Atomically refresh run_summary.json (the CANONICAL run state) from
+    stored artefacts. Called after every retry pass — partial success, full
+    recovery, provider/rate-limit/budget halt, or an interruption handled by
+    the CLI — so the summary never goes stale. Legacy operational keys from
+    the original screening pass are preserved; halted_reason/disabled_models
+    reflect the most recent pass when provided, otherwise keep their
+    existing values. logical_summary.json is refreshed alongside."""
+    summary = compute_logical_summary(run_dir)
+    path = run_dir / "run_summary.json"
+    existing: dict[str, Any] = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            existing = {}
+    merged = {**existing, **summary}
+    if halted_reason is not _UNSET:
+        merged["halted_reason"] = halted_reason
+    else:
+        merged.setdefault("halted_reason", None)
+    if disabled_models is not _UNSET:
+        merged["disabled_models"] = disabled_models
+    else:
+        merged.setdefault("disabled_models", {})
+    merged["updated_at"] = utc_now_iso()
+    atomic_write_json(path, merged)
+    atomic_write_json(run_dir / "logical_summary.json", summary)
     return path
+
+
+def write_logical_summary(run_dir: Path) -> Path:
+    """Backward-compatible alias: refresh both summaries."""
+    refresh_run_summary(run_dir)
+    return run_dir / "logical_summary.json"
 
 
 def _spend_split(
@@ -437,6 +495,72 @@ def _spend_split(
         if rid not in original_ids and "--retry-" in rid
     )
     return round(first, 6), round(retry, 6)
+
+
+# ---------------------------------------------------------------------------
+# Read-only status
+# ---------------------------------------------------------------------------
+
+
+def compute_retry_status(run_dir: Path, candidates: CandidatesConfig) -> dict[str, Any]:
+    """Everything retry-status displays, derived purely from stored
+    artefacts. Zero network, zero writes."""
+    summary = compute_logical_summary(run_dir)
+    originals = ResultStore(run_dir).load_all()
+    retries = RetryStore(run_dir).load_all()
+    prior: dict[str, list[ResultRecord]] = {}
+    for r in retries:
+        if r.logical_request_id:
+            prior.setdefault(r.logical_request_id, []).append(r)
+    recovered_ids = {
+        r.logical_request_id for r in retries if r.status == "succeeded" and r.logical_request_id
+    }
+    unresolved: list[dict[str, Any]] = []
+    next_pass_reservation = 0.0
+    for record in originals:
+        if record.status != "failed" or record.request_id in recovered_ids:
+            continue
+        used = len(prior.get(record.request_id, []))
+        eligible = (
+            record.error_category == "prediction_failed"
+            and bool(record.provider_prediction_id)
+            and not record.reference_ids
+            and record.kind != "refinement_edit"
+            and transient_match(record.error_message) is not None
+        )
+        cost = (
+            candidates.by_key(record.model_key).pricing.max_cost_per_generation_usd
+            if eligible
+            else 0.0
+        )
+        if eligible:
+            next_pass_reservation += cost
+        unresolved.append(
+            {
+                "logical_request_id": record.request_id,
+                "model_key": record.model_key,
+                "brief_id": record.brief_id,
+                "retries_used": used,
+                "next_attempt": f"retry-{used + 1}",
+                "allowlist_eligible": eligible,
+                "next_reservation_usd": cost,
+            }
+        )
+
+    ledger_path = run_dir / "budget_ledger.json"
+    ledger_totals: dict[str, Any] = {}
+    budget = None
+    if ledger_path.exists():
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+        ledger_totals = ledger.get("totals", {})
+        budget = ledger.get("budget_usd")
+    return {
+        "summary": summary,
+        "unresolved": unresolved,
+        "next_pass_max_reservation_usd": round(next_pass_reservation, 6),
+        "budget_usd": budget,
+        "ledger_totals": ledger_totals,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -502,6 +626,75 @@ def build_reliability_report(run_dir: Path) -> Path:
             f"| {median_latency} | {max_latency} "
             f"| {first_spend:.4f} | {retry_spend:.4f} |"
         )
+    # Per-round retry breakdown: retry-1 / retry-2 attempts, successes and
+    # failures per model — the eventual-recovery story without ever touching
+    # the first-attempt numbers above.
+    rounds = sorted({r.attempt_index for r in retries if r.attempt_index})
+    if rounds:
+        lines += [
+            "",
+            "## Retry rounds",
+            "",
+            "| Model | Round | Attempts | Succeeded | Failed |",
+            "|---|---|---|---|---|",
+        ]
+        for model in models:
+            for round_index in rounds:
+                batch = [
+                    r for r in retries
+                    if r.model_key == model and r.attempt_index == round_index
+                ]
+                if not batch:
+                    continue
+                ok_n = sum(1 for r in batch if r.status == "succeeded")
+                lines.append(
+                    f"| {model} | retry-{round_index} | {len(batch)} | {ok_n} "
+                    f"| {len(batch) - ok_n} |"
+                )
+
+    # Attempts required per successful logical request (1 = first attempt).
+    lines += ["", "Attempts required per successful logical request:", ""]
+    for model in models:
+        first = [r for r in originals if r.model_key == model]
+        attempts_used: list[int] = []
+        for record in first:
+            if record.status == "succeeded":
+                attempts_used.append(1)
+            elif record.status == "failed":
+                recoveries = sorted(
+                    (
+                        r for r in retries
+                        if r.logical_request_id == record.request_id
+                        and r.status == "succeeded"
+                    ),
+                    key=lambda r: r.attempt_index or 0,
+                )
+                if recoveries:
+                    attempts_used.append(1 + (recoveries[0].attempt_index or 1))
+        if attempts_used:
+            lines.append(
+                f"- {model}: {statistics.mean(attempts_used):.2f} "
+                f"(over {len(attempts_used)} successful logical requests)"
+            )
+        else:
+            lines.append(f"- {model}: n/a (no successful logical requests)")
+
+    unresolved_lines = []
+    recovered_ids = {
+        r.logical_request_id for r in retries if r.status == "succeeded"
+    }
+    for r in originals:
+        if r.status == "failed" and r.request_id not in recovered_ids:
+            used = sum(
+                1 for a in retries if a.logical_request_id == r.request_id
+            )
+            unresolved_lines.append(
+                f"- `{r.model_key}` / `{r.brief_id}`: UNRESOLVED after {used} "
+                "retry attempt(s)"
+            )
+    if unresolved_lines:
+        lines += ["", "Unresolved logical requests:", ""] + unresolved_lines
+
     lines += [
         "",
         "First-attempt failure messages:",

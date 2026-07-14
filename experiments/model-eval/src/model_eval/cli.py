@@ -31,6 +31,7 @@ from .result_store import ResultStore, assess_run_completeness
 from .retry import (
     build_reliability_report,
     compute_logical_summary,
+    compute_retry_status,
     execute_retries,
     plan_retries,
 )
@@ -237,7 +238,8 @@ def cmd_retry_failures(args: argparse.Namespace) -> int:
         f"Original results: {report.succeeded_originals} succeeded, "
         f"{report.failed_originals} failed"
     )
-    print(f"Successful requests selected for regeneration: 0 (never permitted)")
+    print("Successful requests selected for regeneration: 0 (never permitted)")
+    print("Recovered retry requests selected again: 0 (never permitted)")
     print(f"Eligible transient failures: {len(report.eligible)}")
     for c in report.eligible:
         print(
@@ -305,6 +307,47 @@ def cmd_retry_failures(args: argparse.Namespace) -> int:
         f"{summary['combined_conservative_spend_usd']:.4f} USD)"
     )
     return 0 if not outcome.halted_reason else 1
+
+
+def cmd_retry_status(args: argparse.Namespace) -> int:
+    """Read-only: zero network calls, zero writes."""
+    store = _store_for(args.run_id, args.outputs_dir)
+    candidates = load_candidates(Path(args.candidates))
+    status = compute_retry_status(store.run_dir, candidates)
+    s = status["summary"]
+    print(f"Run: {s['run_id']}")
+    print(f"Planned logical requests:   {s['planned_logical_requests']}")
+    print(f"First-attempt succeeded:    {s['first_attempt_succeeded']}")
+    print(f"First-attempt failed:       {s['first_attempt_failed']}")
+    print(f"Retry attempts:             {s['retry_attempts']} "
+          f"(succeeded {s['retry_succeeded']}, failed {s['retry_failed']})")
+    print(f"Recovered by retry:         {s['recovered_by_retry']}")
+    print(f"Unresolved logical requests: {s['unresolved_logical_requests']}")
+    if s["unresolved_by_model"]:
+        print(f"Unresolved by model:        {s['unresolved_by_model']}")
+    print(f"Logical requests w/ output: {s['logical_requests_with_output']}")
+    print(f"Total provider attempts:    {s['total_provider_attempts']}")
+    for item in status["unresolved"]:
+        eligibility = "eligible" if item["allowlist_eligible"] else "NOT allowlist-eligible"
+        print(
+            f"  - {item['logical_request_id']}\n"
+            f"      retries used: {item['retries_used']}; next attempt: "
+            f"{item['next_attempt']}; {eligibility}; next reservation "
+            f"{item['next_reservation_usd']:.4f} USD"
+        )
+    print(
+        f"Additional max reservation for one further retry pass: "
+        f"{status['next_pass_max_reservation_usd']:.4f} USD"
+    )
+    totals = status["ledger_totals"]
+    if status["budget_usd"] is not None:
+        print(
+            f"Ledger: budget {status['budget_usd']:.2f} USD; spent "
+            f"{totals.get('spent_usd', 0):.4f}; reserved "
+            f"{totals.get('reserved_usd', 0):.4f}; remaining "
+            f"{totals.get('remaining_usd', 0):.4f}"
+        )
+    return 0
 
 
 def cmd_reliability_report(args: argparse.Namespace) -> int:
@@ -387,6 +430,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--candidates", default=str(DEFAULT_CANDIDATES))
     p.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_retry_failures)
+
+    p = sub.add_parser(
+        "retry-status",
+        help="read-only logical/retry state of a run (no network, no writes)",
+    )
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--candidates", default=str(DEFAULT_CANDIDATES))
+    p.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_retry_status)
 
     p = sub.add_parser(
         "reliability-report",

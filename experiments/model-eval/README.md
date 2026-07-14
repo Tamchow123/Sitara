@@ -252,9 +252,26 @@ reserve-before-call guarantees. Retry artefacts live in `retry-results/`,
 retry, and a failed retry is only re-attempted when you deliberately raise
 `--max-retries-per-request`.
 
-`logical_summary.json` reports the honest split (first-attempt successes /
-failures, recoveries, unresolved cells, total provider attempts, and
-first-attempt vs retry spend). Blind artefacts show exactly ONE image per
+After every retry pass — partial recovery, full recovery, halt, or an
+interruption — `run_summary.json` is atomically refreshed as the CANONICAL
+logical state (first-attempt successes/failures, retry attempts/successes/
+failures, recoveries, unresolved cells by model, total provider attempts,
+first-attempt vs retry spend), and the review gate derives completeness from
+the stored records, never from stale summary fields. Check state any time,
+read-only, with:
+
+```powershell
+.venv\Scripts\python -m model_eval.cli retry-status --run-id <run-id>
+```
+
+**Stop after retry-2.** Each additional attempt requires deliberately
+raising `--max-retries-per-request`; do not chase cells beyond retry-2. If
+any cell remains unresolved after two retries, record it as unresolved —
+repeated infrastructure failures (e.g. Schnell's E9828) are themselves
+strong evidence of a model's operational unreliability and must not be
+hidden behind unlimited retries.
+
+Blind artefacts show exactly ONE image per
 logical cell (the original success, else the earliest successful retry) and
 **never reveal whether an image required a retry** — that could bias visual
 scoring; the lineage lives only in the protected mapping. The separate
