@@ -190,6 +190,22 @@ configuration at 1/12th of the screening cost.
   accepted and nothing was spent), and the run continues from where it
   stopped. On success the superseded failure record is replaced, so the
   final run summary and completeness check reflect the true final state.
+- **429 rate limits:** **low-credit accounts get sharply reduced Replicate
+  limits** (observed: 6 prediction creations/minute with a burst of 1 while
+  under $5 credit) — keeping sufficient credit on the account avoids the
+  reduced low-balance limits entirely. A 429 on prediction *creation* is
+  rejected **before acceptance** (no prediction exists, nothing can be
+  charged): the runner keeps the reservation, honours the provider's
+  `Retry-After` header or "resets in ~Ns" hint (bounded backoff otherwise,
+  plus a small safety margin), and retries up to 5 times within capped
+  individual/total waits. Successful results record the creation retry
+  count and total rate-limit wait. If retries are exhausted, the
+  reservation is **released** (never assumed spend), a
+  `provider_rate_limited` failure is recorded, and the run halts (rate
+  limits are account-wide) — rerun with the SAME run id once the limit
+  resets and it resumes safely, exactly like 402/401. A 429 while *polling*
+  an already accepted prediction retains the prediction id, waits, and
+  retries polling — it never releases the reservation and never resubmits.
 - **Deterministic rejections (400/404/422):** the same invalid model
   configuration would fail on every brief, so after the first such
   rejection the model is DISABLED for the rest of the run: its remaining
@@ -258,12 +274,12 @@ window can produce one duplicate submission on resume; the budget stays
 conservative regardless.
 
 Failed requests are final for their run (their spend is already accounted),
-with one exception: **402 insufficient-credit and 401 authentication
-failures are retried automatically** when you rerun with the same run id,
-because they were rejected before provider acceptance — their reservation
-was released, no prediction exists, and no spend occurred. Every other
-failure category stays final; to retry one deliberately, delete its result
-record and use a new run id. A stale lock file left by a crashed process is
+with one exception: **402 insufficient-credit, 401 authentication and 429
+exhausted-rate-limit failures are retried automatically** when you rerun
+with the same run id, because they were rejected before provider acceptance
+— their reservation was released, no prediction exists, and no spend
+occurred. Every other failure category stays final; to retry one
+deliberately, delete its result record and use a new run id. A stale lock file left by a crashed process is
 reclaimed automatically when its PID is no longer alive; if the PID cannot
 be read, delete `budget_ledger.json.lock` manually after confirming no
 other run is active.

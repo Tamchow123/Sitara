@@ -17,7 +17,10 @@ and log line this module produces. Never print it.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -54,16 +57,58 @@ class ProviderError(Exception):
         status_code: int | None = None,
         provider_title: str | None = None,
         provider_detail: str | None = None,
+        retry_after_s: float | None = None,
     ):
         super().__init__(message[:MAX_STORED_ERROR_CHARS])
         # True only when we are CERTAIN the provider never accepted the
         # request (e.g. local error before the HTTP request was sent, or an
-        # HTTP 4xx validation rejection). Anything ambiguous must be False so
-        # the budget is conservatively treated as spent.
+        # HTTP 4xx validation rejection — including a confirmed 429 throttle
+        # from prediction CREATION, which by definition accepted nothing).
+        # Anything ambiguous must be False so the budget is conservatively
+        # treated as spent.
         self.before_acceptance = before_acceptance
         self.status_code = status_code
         self.provider_title = provider_title[:MAX_STORED_ERROR_CHARS] if provider_title else None
         self.provider_detail = provider_detail[:MAX_STORED_ERROR_CHARS] if provider_detail else None
+        # Provider-suggested wait (Retry-After header or a "resets in ~5s"
+        # detail hint), in seconds. None when no usable hint exists.
+        self.retry_after_s = retry_after_s
+
+
+_RESET_HINT_RE = re.compile(r"resets? in ~?(\d+(?:\.\d+)?)\s*s", re.IGNORECASE)
+
+
+def parse_retry_after_header(resp: httpx.Response) -> float | None:
+    """Retry-After as non-negative seconds; supports both the delta-seconds
+    and HTTP-date forms. None when absent or malformed."""
+    value = resp.headers.get("retry-after")
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+
+
+def parse_reset_hint(detail: str | None) -> float | None:
+    """Extract a wait from a provider hint like 'Your rate limit resets in
+    ~5s'. None when no safe numeric hint is present."""
+    if not detail:
+        return None
+    match = _RESET_HINT_RE.search(detail)
+    if not match:
+        return None
+    try:
+        return max(0.0, float(match.group(1)))
+    except ValueError:  # pragma: no cover - regex guarantees a number
+        return None
 
 
 def parse_provider_error_body(resp: httpx.Response) -> tuple[str | None, str | None]:
@@ -194,6 +239,23 @@ class ReplicateAdapter:
         except httpx.RequestError as exc:
             # The request may or may not have reached the provider: ambiguous.
             self._raise_provider_error(exc, before_acceptance=False)
+        if resp.status_code == 429:
+            # A confirmed throttle on prediction CREATION: the request was
+            # rejected before any prediction was accepted, so it is
+            # conclusively pre-acceptance (this classification is specific to
+            # this endpoint — a polling 429 is handled separately below).
+            title, detail = parse_provider_error_body(resp)
+            retry_after = parse_retry_after_header(resp)
+            if retry_after is None:
+                retry_after = parse_reset_hint(detail)
+            raise ProviderError(
+                self._redact(f"provider throttled request (429): {resp.text[:400]}"),
+                before_acceptance=True,
+                status_code=429,
+                provider_title=self._redact(title) if title else None,
+                provider_detail=self._redact(detail) if detail else None,
+                retry_after_s=retry_after,
+            )
         if resp.status_code in (400, 401, 402, 403, 404, 422):
             # Rejected before acceptance: safe to release the reservation.
             title, detail = parse_provider_error_body(resp)
@@ -218,8 +280,27 @@ class ReplicateAdapter:
     def get_prediction(self, prediction_id: str) -> Prediction:
         try:
             resp = self._client.get(f"{REPLICATE_API_BASE}/predictions/{prediction_id}")
+        except httpx.RequestError as exc:
+            self._raise_provider_error(exc, before_acceptance=False)
+        if resp.status_code == 429:
+            # Throttled while POLLING an already accepted prediction: the
+            # prediction exists and may still be charged, so this is NOT
+            # pre-acceptance — the caller retries polling, never resubmits.
+            title, detail = parse_provider_error_body(resp)
+            retry_after = parse_retry_after_header(resp)
+            if retry_after is None:
+                retry_after = parse_reset_hint(detail)
+            raise ProviderError(
+                self._redact(f"provider throttled polling (429): {resp.text[:400]}"),
+                before_acceptance=False,
+                status_code=429,
+                provider_title=self._redact(title) if title else None,
+                provider_detail=self._redact(detail) if detail else None,
+                retry_after_s=retry_after,
+            )
+        try:
             resp.raise_for_status()
-        except httpx.HTTPError as exc:
+        except httpx.HTTPStatusError as exc:
             self._raise_provider_error(exc, before_acceptance=False)
         return self._parse(resp.json())
 

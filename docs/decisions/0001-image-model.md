@@ -75,6 +75,23 @@ run). Screening must be restarted from scratch — after the candidate schema
 smoke (`configs/candidate_smoke.yaml`, 5 requests, $0.51 ceiling) passes
 5/5 — with sufficient account credit (the screening ceiling is $6.12).
 
+### Diagnostic run 2026-07-14 (candidate smoke — diagnostic only)
+
+`experiments/model-eval/outputs/runs/candidate-smoke-20260714-001` is
+**diagnostic only**. Three of five candidates succeeded (schnell, klein-4b,
+flux-1.1-pro — confirming their input schemas are accepted); flux-2-pro and
+flux-2-max received HTTP 429 throttles ("rate limit … reduced to 6 requests
+per minute with a burst of 1 … while you have less than $5.0 in credit")
+**before any prediction was created**. Those two 429s were produced before
+the rate-limit fix and were conservatively misclassified as
+`ambiguous_provider_failure`, so the ledger assumed their full reservations
+($0.12 + $0.25) as spend even though Replicate accepted nothing — its spend
+totals overstate reality by $0.37. The run is preserved as evidence. The
+framework now classifies creation-throttles as pre-acceptance, retries them
+with the provider's hint, and halts/resumes safely when they persist.
+Re-run the candidate smoke (ideally with more than $5 account credit, which
+avoids the reduced low-balance limits) before the full screening.
+
 ## Decision
 
 _To be completed after scoring._

@@ -89,6 +89,16 @@ MAX_OUTPUT_BYTES = 50 * 1024 * 1024
 POLL_INTERVAL_S = 2.0
 POLL_TIMEOUT_S = 600.0
 
+# Rate-limit (429) retry policy. Low-credit Replicate accounts get sharply
+# reduced prediction-creation limits (e.g. 6/min, burst 1, under $5 credit),
+# so throttles are expected and retried with the provider's own hint where
+# available, bounded in count and in individual/total wait.
+RATE_LIMIT_MAX_RETRIES = 5
+RATE_LIMIT_BASE_BACKOFF_S = 2.0
+RATE_LIMIT_SAFETY_MARGIN_S = 1.0
+RATE_LIMIT_MAX_SINGLE_WAIT_S = 60.0
+RATE_LIMIT_MAX_TOTAL_WAIT_S = 180.0
+
 SKIP_MISSING_BASE_IMAGE = "base_image_unavailable_for_edit"
 
 AdapterFactory = Callable[[Mapping[str, str]], ReplicateAdapter]
@@ -164,13 +174,20 @@ SKIP_MODEL_DISABLED = "model_disabled_after_provider_rejection"
 # rest of the run after its first such rejection.
 DETERMINISTIC_REJECTION_CODES = frozenset({400, 404, 422})
 
-# Failure categories that are safe to retry within the SAME run: both are
+# Failure categories that are safe to retry within the SAME run: all are
 # run-level halts rejected conclusively BEFORE provider acceptance, so the
 # reservation was released and no provider-side work or spend exists. The
-# halt message tells the user to fix credit/token and rerun with the same
-# run id — this set is what makes that instruction true.
+# halt message tells the user to fix credit/token or wait out the rate
+# limit and rerun with the same run id — this set is what makes that
+# instruction true. (_is_safely_retryable additionally requires a released
+# ledger entry and the absence of any provider prediction id, which keeps a
+# polling-side 429 — where a prediction exists — final.)
 RETRYABLE_FAILURE_CATEGORIES = frozenset(
-    {"provider_insufficient_credit", "provider_authentication_failed"}
+    {
+        "provider_insufficient_credit",
+        "provider_authentication_failed",
+        "provider_rate_limited",
+    }
 )
 
 
@@ -198,6 +215,7 @@ class Runner:
         log: Callable[[str], None] = print,
         poll_interval_s: float = POLL_INTERVAL_S,
         poll_timeout_s: float = POLL_TIMEOUT_S,
+        sleep: Callable[[float], None] = time.sleep,
     ):
         self.bundle = bundle
         self.run_id = run_id
@@ -208,6 +226,7 @@ class Runner:
         self.log = log
         self.poll_interval_s = poll_interval_s
         self.poll_timeout_s = poll_timeout_s
+        self._sleep = sleep
         self._git_commit = current_git_commit(outputs_dir)
         # model_key -> short provider-error summary; set after a
         # deterministic rejection so the same broken configuration is never
@@ -247,6 +266,8 @@ class Runner:
         output_sha256: str | None = None,
         width: int | None = None,
         height: int | None = None,
+        provider_create_retries: int | None = None,
+        rate_limit_wait_seconds: float | None = None,
     ) -> ResultRecord:
         candidate = self._candidate(request)
         return ResultRecord(
@@ -288,6 +309,8 @@ class Runner:
             output_path=output_path,
             output_mime_type=output_mime_type,
             output_sha256=output_sha256,
+            provider_create_retries=provider_create_retries,
+            rate_limit_wait_seconds=rate_limit_wait_seconds,
             pricing_checked_on=str(candidate.pricing.checked_on),
             git_commit=self._git_commit,
         )
@@ -512,6 +535,8 @@ class Runner:
 
         started_at = utc_now_iso()
         start = time.monotonic()
+        create_retries = 0
+        rate_limit_wait_s = 0.0
         try:
             if prediction_id:
                 # Crash-safe resume: the provider already accepted this
@@ -531,9 +556,11 @@ class Runner:
                 # submit again — duplicate prevention here is BEST-EFFORT,
                 # not exactly-once (Replicate exposes no idempotency key for
                 # prediction creation). The budget remains conservative
-                # either way.
-                prediction = adapter.create_prediction(
-                    request.replicate_id, request.model_version, input_params
+                # either way. Throttled (429) creation attempts are retried
+                # inside the helper while the same reservation and the same
+                # pre-submission attempt record stay in place.
+                prediction, create_retries, rate_limit_wait_s = (
+                    self._create_with_rate_limit_retries(adapter, request, input_params)
                 )
                 # Persist the prediction id as soon as we hold it, closing
                 # the boundary window for every later crash point.
@@ -624,6 +651,8 @@ class Runner:
             output_sha256=digest,
             width=width,
             height=height,
+            provider_create_retries=create_retries,
+            rate_limit_wait_seconds=rate_limit_wait_s,
         )
         # allow_replace_failed: a successful retry of a pre-acceptance halt
         # supersedes its failed record (succeeded records stay protected).
@@ -647,6 +676,53 @@ class Runner:
             return False
         return ledger.status_of(existing.request_id) == "released"
 
+    def _rate_limit_wait_s(self, exc: ProviderError, attempt: int) -> float:
+        """Wait before a 429 retry: the provider's hint when present,
+        otherwise bounded exponential backoff — plus a safety margin, capped
+        per-wait."""
+        hint = exc.retry_after_s
+        if hint is not None and hint >= 0:
+            wait = hint
+        else:
+            wait = RATE_LIMIT_BASE_BACKOFF_S * (2**attempt)
+        return min(wait + RATE_LIMIT_SAFETY_MARGIN_S, RATE_LIMIT_MAX_SINGLE_WAIT_S)
+
+    def _create_with_rate_limit_retries(
+        self,
+        adapter: ReplicateAdapter,
+        request: PlannedRequest,
+        input_params: dict[str, Any],
+    ) -> tuple[Prediction, int, float]:
+        """Create a prediction, retrying confirmed pre-acceptance throttles
+        (429) with bounded waits. The budget reservation and the single
+        pre-submission attempt record stay in place across retries; no
+        prediction id exists until creation actually succeeds. Returns
+        (prediction, retry_count, total_rate_limit_wait_seconds)."""
+        retries = 0
+        total_wait = 0.0
+        while True:
+            try:
+                prediction = adapter.create_prediction(
+                    request.replicate_id, request.model_version, input_params
+                )
+                return prediction, retries, round(total_wait, 3)
+            except ProviderError as exc:
+                if exc.status_code != 429:
+                    raise
+                if retries >= RATE_LIMIT_MAX_RETRIES:
+                    raise
+                wait = self._rate_limit_wait_s(exc, retries)
+                if total_wait + wait > RATE_LIMIT_MAX_TOTAL_WAIT_S:
+                    raise
+                retries += 1
+                total_wait += wait
+                self.log(
+                    f"[rate-limit] {request.request_id}: throttled before "
+                    f"acceptance; retrying in {wait:.1f}s "
+                    f"(attempt {retries}/{RATE_LIMIT_MAX_RETRIES})"
+                )
+                self._sleep(wait)
+
     def _handle_provider_error(
         self,
         request: PlannedRequest,
@@ -656,13 +732,25 @@ class Runner:
         outcome: RunOutcome,
     ) -> None:
         """Classify a provider failure, record it, and decide whether the run
-        halts (402/401) or the model is circuit-broken (deterministic 4xx)."""
+        halts (429/402/401) or the model is circuit-broken (deterministic
+        4xx)."""
         detail_parts = [p for p in (exc.provider_title, exc.provider_detail) if p]
         detail = " — ".join(detail_parts) if detail_parts else str(exc)
         if exc.status_code is not None:
             detail = f"[{exc.status_code}] {detail}"
 
-        if exc.status_code == 402:
+        if exc.status_code == 429:
+            category = "provider_rate_limited"
+            outcome.halted_reason = (
+                "provider rate limit persisted after "
+                f"{RATE_LIMIT_MAX_RETRIES} bounded retries (429). Rate limits "
+                "apply account-wide, so continuing would only burn more "
+                "attempts. Low-credit accounts get sharply reduced limits — "
+                "add credit or wait for the limit to reset, then rerun with "
+                "the SAME run id: completed requests are never re-sent, and "
+                "the throttled request is retried safely."
+            )
+        elif exc.status_code == 402:
             category = "provider_insufficient_credit"
             outcome.halted_reason = (
                 "provider reported insufficient credit (402). Top up at "
@@ -700,8 +788,12 @@ class Runner:
             self.log(f"[halt] {outcome.halted_reason}")
 
     def _await_terminal(self, adapter: ReplicateAdapter, prediction: Prediction) -> Prediction:
+        """Poll to a terminal state. A 429 while polling never releases the
+        reservation and never resubmits creation — the accepted prediction id
+        is retained and polling simply waits and retries, bounded in count."""
         deadline = time.monotonic() + self.poll_timeout_s
         current = prediction
+        throttle_attempts = 0
         while current.status not in ("succeeded", "failed", "canceled"):
             if time.monotonic() > deadline:
                 raise ProviderError(
@@ -709,8 +801,22 @@ class Runner:
                     f"{self.poll_timeout_s}s",
                     before_acceptance=False,
                 )
-            time.sleep(self.poll_interval_s)
-            current = adapter.get_prediction(current.id)
+            self._sleep(self.poll_interval_s)
+            try:
+                current = adapter.get_prediction(current.id)
+                throttle_attempts = 0
+            except ProviderError as exc:
+                if exc.status_code != 429:
+                    raise
+                if throttle_attempts >= RATE_LIMIT_MAX_RETRIES:
+                    raise
+                wait = self._rate_limit_wait_s(exc, throttle_attempts)
+                throttle_attempts += 1
+                self.log(
+                    f"[rate-limit] polling {current.id} throttled; retrying "
+                    f"in {wait:.1f}s (attempt {throttle_attempts}/{RATE_LIMIT_MAX_RETRIES})"
+                )
+                self._sleep(wait)
         return current
 
     def _download_output(

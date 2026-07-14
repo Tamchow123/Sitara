@@ -58,6 +58,8 @@ REQUIRED_PROVENANCE_FIELDS = frozenset(
         "estimated_max_cost_usd",
         "reconciled_cost_usd",
         "cost_basis",
+        "provider_create_retries",
+        "rate_limit_wait_seconds",
         "output_path",
         "output_mime_type",
         "output_sha256",
@@ -109,6 +111,11 @@ class ResultRecord(BaseModel):
     # provider_reported | calculated | reserved_conservative (None for
     # skips/pre-spend failures where nothing was accounted).
     cost_basis: str | None
+    # 429 retry metadata: how many creation retries the provider throttling
+    # forced, and the total seconds spent waiting on rate limits (both None
+    # on skips and on failures where creation never succeeded).
+    provider_create_retries: int | None
+    rate_limit_wait_seconds: float | None
     output_path: str | None
     output_mime_type: str | None
     output_sha256: str | None
