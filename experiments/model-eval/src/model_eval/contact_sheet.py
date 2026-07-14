@@ -61,25 +61,39 @@ class BlindItem:
     image_filename: str    # e.g. "image-003.webp" — safe to show reviewers
 
 
-def prepare_blind_items(store: ResultStore, run_id: str) -> tuple[list[BlindItem], Path]:
-    """Copy the selected output of every LOGICAL evaluation cell into blind/
-    under anonymised names and return the items (hash-ordered, so numbering
-    leaks nothing) plus the blind directory. Exactly one image per logical
-    cell: the original success, or — where the first attempt failed — its
-    earliest successful targeted retry. Whether an image came from a retry
-    is never exposed in blind artefacts (it could bias visual scoring); the
-    lineage lives only in the protected mapping file. Also (re)writes that
-    mapping file."""
-    from .retry import select_logical_outputs
+def prepare_blind_items(
+    store: ResultStore,
+    run_id: str,
+    scope: dict | None = None,
+) -> tuple[list[BlindItem], Path]:
+    """Copy the selected output of every LOGICAL evaluation cell into the
+    blind directory under anonymised names and return the items
+    (hash-ordered, so numbering leaks nothing) plus that directory. Exactly
+    one image per logical cell: the original success, or — where the first
+    attempt failed — its earliest successful targeted retry. Whether an
+    image came from a retry is never exposed in blind artefacts (it could
+    bias visual scoring); the lineage lives only in the protected mapping.
 
-    records = select_logical_outputs(store)
+    With a validated review ``scope``, only the scope's included models'
+    selected cells are used: artefacts land in ``blind-scoped/`` with their
+    own protected mapping (``candidate_key_scoped.json``) that names ONLY
+    included models — an excluded model appears nowhere in scoped
+    artefacts, not even in the mapping."""
+    if scope is not None:
+        from .review_scope import scoped_logical_outputs
+
+        records = scoped_logical_outputs(store, scope)
+    else:
+        from .retry import select_logical_outputs
+
+        records = select_logical_outputs(store)
     if not records:
         raise ValueError(f"run {run_id!r} has no successful outputs")
     ordered = sorted(
         records,
         key=lambda r: hashlib.sha256(f"{run_id}:{r.request_id}".encode()).hexdigest(),
     )
-    blind_dir = store.run_dir / "blind"
+    blind_dir = store.run_dir / ("blind-scoped" if scope else "blind")
     blind_dir.mkdir(parents=True, exist_ok=True)
     items: list[BlindItem] = []
     for i, record in enumerate(ordered, start=1):
@@ -94,7 +108,7 @@ def prepare_blind_items(store: ResultStore, run_id: str) -> tuple[list[BlindItem
     model_keys = sorted({r.model_key for r in records})
     codes = candidate_codes(run_id, model_keys)
     store.write_json(
-        "candidate_key.json",
+        "candidate_key_scoped.json" if scope else "candidate_key.json",
         {
             "warning": (
                 "PROTECTED MAPPING — do not open during blind scoring. "
@@ -168,14 +182,18 @@ def build_contact_sheet(
     axis: CompareAxis = "model",
     reveal: bool = False,
     partial: bool = False,
+    scope: dict | None = None,
 ) -> tuple[Path, Path]:
     """Render the sheet; returns (sheet_path, mapping_path).
 
-    Blind (default): written into blind/ referencing only anonymised
-    filenames and ids. Revealed: written at the run root with real model
-    identities, for use after scoring only."""
-    items, blind_dir = prepare_blind_items(store, run_id)
-    mapping_path = store.run_dir / "candidate_key.json"
+    Blind (default): written into the blind directory referencing only
+    anonymised filenames and ids. Revealed: written at the run root with
+    real model identities, for use after scoring only. With a validated
+    review scope, only included models' cells are rendered."""
+    items, blind_dir = prepare_blind_items(store, run_id, scope=scope)
+    mapping_path = store.run_dir / (
+        "candidate_key_scoped.json" if scope else "candidate_key.json"
+    )
     codes = candidate_codes(run_id, sorted({i.record.model_key for i in items}))
 
     by_brief: dict[str, list[BlindItem]] = {}
@@ -233,7 +251,8 @@ def build_contact_sheet(
 {_banner(partial)}
 """
     if reveal:
-        sheet_path = store.run_dir / f"contact_sheet_{axis}_revealed.html"
+        suffix = "_scoped" if scope else ""
+        sheet_path = store.run_dir / f"contact_sheet_{axis}_revealed{suffix}.html"
     else:
         sheet_path = blind_dir / f"contact_sheet_{axis}.html"
     sheet_path.write_text(doc, encoding="utf-8")

@@ -70,10 +70,16 @@ CONTEXT_FIELDS = [
 ]
 
 
-def build_scoring_sheet(store: ResultStore, run_id: str, *, partial: bool = False) -> Path:
+def build_scoring_sheet(
+    store: ResultStore,
+    run_id: str,
+    *,
+    partial: bool = False,
+    scope: dict | None = None,
+) -> Path:
     from .contact_sheet import candidate_codes
 
-    items, blind_dir = prepare_blind_items(store, run_id)
+    items, blind_dir = prepare_blind_items(store, run_id, scope=scope)
     codes = candidate_codes(run_id, sorted({i.record.model_key for i in items}))
 
     path = blind_dir / "scoring_sheet.csv"

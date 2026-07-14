@@ -110,12 +110,36 @@ status — visual scoring and operational reliability are assessed
 separately, via the blind artefacts and the non-blind `reliability-report`
 respectively (the latter examined only after visual scoring).
 
+### Schnell operationally disqualified (2026-07-14, before blind visual scoring)
+
+FLUX Schnell reached the screening but is **operationally disqualified from
+the blind visual-selection stage** — a reliability decision, not a visual
+one. Across its 12 planned logical cells it produced 8 first-attempt
+successes and 4 first-attempt failures (66.7% first-attempt success rate),
+all failures being Replicate-side `Director: unexpected error handling
+prediction (E9828)` runtime faults. Targeted retries recovered only 2 of
+the 4 cells (retry-1: 4 attempts, 1 success; retry-2: 3 attempts, 1
+success), leaving `scr-gharara-nikah-heavy` and `scr-sharara-mehndi-moderate`
+unresolved after the screening's stop-after-retry-2 limit — 10/12 cells
+with output from 19 provider attempts (10 successful, 9 failed). Its very
+low generation cost ($0.003/image) does not compensate for an operational
+reliability that cannot dependably produce a complete evaluation set, let
+alone serve production traffic. No conclusion about Schnell's visual
+quality is drawn, and the evaluation record honestly retains that it was
+planned, run and disqualified. The remaining blind visual screening
+compares FOUR candidates on a balanced 4 x 12 = 48-image matrix: klein-4b,
+flux-1.1-pro, flux-2-pro, flux-2-max — **Klein 4B remains the fast-model
+candidate.** The formal scope and disposition live in the run's
+`review_scope.json` / `review_scope_report.md`.
+
 ## Decision
 
 _To be completed after scoring._
 
 - **Default production model:** NOT YET SELECTED
-- **Fast/demo-development model:** NOT YET SELECTED
+- **Fast/demo-development model:** NOT YET SELECTED (Klein 4B is the
+  remaining fast-tier candidate after Schnell's operational
+  disqualification)
 - **Inspiration influence recommendation** (text-only / metadata /
   reference-image; whether the MVP text-only limitation should remain):
   NOT YET DETERMINED

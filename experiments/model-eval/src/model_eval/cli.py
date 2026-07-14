@@ -35,6 +35,13 @@ from .retry import (
     execute_retries,
     plan_retries,
 )
+from .review_scope import (
+    ReviewScopeError,
+    build_review_scope,
+    build_review_scope_report,
+    load_and_validate_review_scope,
+    write_review_scope,
+)
 from .runner import Runner, RunnerError, load_stage_bundle, plan_summary
 from .scoring import build_scoring_sheet
 from .terms import write_terms_snapshot
@@ -194,12 +201,37 @@ def _check_reviewable(store: ResultStore, allow_partial: bool) -> bool:
     return True
 
 
+def _load_scope(store: ResultStore, scope_arg: str | None) -> dict | None:
+    """Load and re-validate a review scope. A VALID scope is itself the
+    completeness gate for the scoped evaluation: unresolved cells are proven
+    to belong only to formally excluded models and every included model is
+    complete and balanced. The ordinary unscoped gate is untouched."""
+    if not scope_arg:
+        return None
+    scope_path = Path(scope_arg)
+    if not scope_path.is_absolute():
+        scope_path = store.run_dir / scope_path
+    try:
+        return load_and_validate_review_scope(store.run_dir, scope_path)
+    except ReviewScopeError as exc:
+        raise SystemExit(f"REFUSED: invalid review scope: {exc}")
+
+
 def cmd_contact_sheet(args: argparse.Namespace) -> int:
     store = _store_for(args.run_id, args.outputs_dir)
-    partial = _check_reviewable(store, args.allow_partial)
+    scope = _load_scope(store, args.review_scope)
+    partial = False if scope else _check_reviewable(store, args.allow_partial)
     sheet, mapping = build_contact_sheet(
-        store, args.run_id, axis=args.by, reveal=args.reveal, partial=partial
+        store, args.run_id, axis=args.by, reveal=args.reveal, partial=partial,
+        scope=scope,
     )
+    if scope:
+        print(
+            f"Scoped review: {len(scope['included_models'])} models x "
+            f"{list(scope['planned_cells_per_included_model'].values())[0]} cells "
+            f"= {len(scope['selected_logical_cells'])} images "
+            f"(excluded: {', '.join(scope['excluded_models']) or 'none'})"
+        )
     print(f"Contact sheet: {sheet}")
     print(f"Protected mapping (do not open during blind scoring): {mapping}")
     return 0
@@ -207,9 +239,37 @@ def cmd_contact_sheet(args: argparse.Namespace) -> int:
 
 def cmd_scoring_sheet(args: argparse.Namespace) -> int:
     store = _store_for(args.run_id, args.outputs_dir)
-    partial = _check_reviewable(store, args.allow_partial)
-    path = build_scoring_sheet(store, args.run_id, partial=partial)
+    scope = _load_scope(store, args.review_scope)
+    partial = False if scope else _check_reviewable(store, args.allow_partial)
+    path = build_scoring_sheet(store, args.run_id, partial=partial, scope=scope)
     print(f"Scoring sheet: {path}")
+    return 0
+
+
+def cmd_create_review_scope(args: argparse.Namespace) -> int:
+    store = _store_for(args.run_id, args.outputs_dir)
+    try:
+        scope = build_review_scope(
+            store.run_dir,
+            args.include_model or [],
+            args.exclude_model or [],
+            args.exclusion_reason or "",
+        )
+    except ReviewScopeError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+    scope_path = write_review_scope(store.run_dir, scope)
+    report_path = build_review_scope_report(store.run_dir, scope)
+    per_model = scope["planned_cells_per_included_model"]
+    print(f"Review scope: {scope_path}")
+    print(f"Included models ({len(scope['included_models'])}): {scope['included_models']}")
+    print(f"Cells per included model: {per_model}")
+    print(f"Selected logical cells: {len(scope['selected_logical_cells'])}")
+    print(f"Excluded models: {scope['excluded_models'] or 'none'}")
+    if scope["excluded_models"]:
+        print(f"Exclusion reason: {scope['exclusion_reason']}")
+        print(f"Unresolved excluded cells: {len(scope['unresolved_excluded_cells'])}")
+    print(f"Disposition report (non-blind, keep away from reviewers): {report_path}")
     return 0
 
 
@@ -399,6 +459,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="debugging only: build artefacts for an incomplete run, "
         "prominently marked PARTIAL / NOT VALID FOR MODEL SELECTION",
     )
+    p.add_argument(
+        "--review-scope",
+        default=None,
+        help="validated review-scope file (relative to the run directory); "
+        "renders only the scope's included models as a balanced matrix",
+    )
     p.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_contact_sheet)
 
@@ -410,8 +476,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="debugging only: build artefacts for an incomplete run, "
         "prominently marked PARTIAL / NOT VALID FOR MODEL SELECTION",
     )
+    p.add_argument(
+        "--review-scope",
+        default=None,
+        help="validated review-scope file (relative to the run directory)",
+    )
     p.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_scoring_sheet)
+
+    p = sub.add_parser(
+        "create-review-scope",
+        help="create an auditable, balanced review scope (which models "
+        "progress to blind visual scoring; exclusions need a reason)",
+    )
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--include-model", action="append", default=[])
+    p.add_argument("--exclude-model", action="append", default=[])
+    p.add_argument("--exclusion-reason", default="")
+    p.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_create_review_scope)
 
     p = sub.add_parser("budget-status", help="show the budget ledger for a run")
     p.add_argument("--run-id", required=True)

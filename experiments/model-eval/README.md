@@ -280,6 +280,34 @@ report (first-attempt success rates, recoveries, latencies, spend split) —
 **visual scoring and operational reliability are assessed separately**;
 examine the reliability report only after visual scoring is complete.
 
+## Scoped review after an operational disqualification
+
+When a model cannot reliably complete its cells within the retry limit, it
+is formally disqualified rather than silently dropped:
+
+```powershell
+.venv\Scripts\python -m model_eval.cli create-review-scope `
+  --run-id <run-id> `
+  --include-model klein-4b --include-model flux-1-1-pro `
+  --include-model flux-2-pro --include-model flux-2-max `
+  --exclude-model schnell `
+  --exclusion-reason "Operationally disqualified after ..."
+```
+
+This writes an auditable `review_scope.json` (validated against the stored
+records: every evaluated model must be explicitly included or excluded,
+exclusions need a reason, and the included matrix must be BALANCED — same
+brief set, one usable output per cell, no unresolved included cells, equal
+outputs per model) plus a non-blind `review_scope_report.md` preserving the
+excluded model's reliability facts (never open it during blind scoring).
+`contact-sheet`/`scoring-sheet --review-scope review_scope.json` then
+produce balanced blind artefacts in `blind-scoped/`: only included models,
+one image per logical cell, and no trace of the excluded model — its
+successful images stay out of the formal comparison because an uneven
+candidate matrix would bias scoring. A valid scope is the completeness gate
+for the scoped review; the ordinary unscoped gate still refuses the
+incomplete full run.
+
 ## Incomplete runs are not reviewable
 
 `contact-sheet` and `scoring-sheet` REFUSE runs that are incomplete: any
