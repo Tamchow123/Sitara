@@ -221,14 +221,59 @@ configuration at 1/12th of the screening cost.
   automatically; malformed or regressive temp files are quarantined with a
   report and never promoted. No double-spend, no resurrected reservations.
 
+## Targeted retries for transient terminal failures
+
+Some predictions are accepted, charged and then die inside Replicate's
+infrastructure (e.g. `Prediction interrupted; please retry (code: PA)`,
+`Director: unexpected error handling prediction (E9828)`). **First-attempt
+failures are retained as model-reliability evidence** — the original result
+records and their settled ledger entries are never modified, and a
+successful retry never converts the original request into a first-attempt
+success or erases a model's observed failure rate. Targeted retries exist
+only to recover the missing comparison image for a logical evaluation cell.
+
+```powershell
+.venv\Scripts\python -m model_eval.cli retry-failures `
+  --run-id <run-id> --budget-usd <original run budget> `
+  --max-retries-per-request 1 --dry-run
+```
+
+The dry run lists eligible failures (only errors on the explicit transient
+allowlist in `retry.py`; never safety/moderation, invalid-input, auth,
+credit, schema or unknown failures), the per-model counts, and the
+additional conservative reservation against the run's remaining budget. A
+live invocation additionally needs the usual gates (`ALLOW_PROVIDER_CALLS`,
+token, `--confirm-live`). Each retry is a new auditable attempt
+(`<request-id>--retry-N`) with its own ledger key and full lineage
+provenance, submitted with EXACTLY the original model, prompt, format, mode,
+parameters, aspect ratio and seed, under the same crash-recovery, 429 and
+reserve-before-call guarantees. Retry artefacts live in `retry-results/`,
+`retry-images/` and `retry-attempts/`; a rerun never repeats a successful
+retry, and a failed retry is only re-attempted when you deliberately raise
+`--max-retries-per-request`.
+
+`logical_summary.json` reports the honest split (first-attempt successes /
+failures, recoveries, unresolved cells, total provider attempts, and
+first-attempt vs retry spend). Blind artefacts show exactly ONE image per
+logical cell (the original success, else the earliest successful retry) and
+**never reveal whether an image required a retry** — that could bias visual
+scoring; the lineage lives only in the protected mapping. The separate
+`reliability-report` command produces a non-blind per-model operational
+report (first-attempt success rates, recoveries, latencies, spend split) —
+**visual scoring and operational reliability are assessed separately**;
+examine the reliability report only after visual scoring is complete.
+
 ## Incomplete runs are not reviewable
 
 `contact-sheet` and `scoring-sheet` REFUSE runs that are incomplete: any
-failed requests, fewer successes than planned, unresolved reservations, an
-early halt, or a missing run summary (interruption). This prevents a partial
-run from quietly becoming the basis for model selection. For debugging only,
-`--allow-partial` generates artefacts that are prominently watermarked
-**PARTIAL / NOT VALID FOR MODEL SELECTION** (and remain fully blind).
+failed logical cell without a successful retry recovery, fewer logical
+outputs than planned, unresolved reservations, an early halt, or a missing
+run summary (interruption). This prevents a partial run from quietly
+becoming the basis for model selection. A run becomes image-complete when
+every logical cell has one successful output, including successful retry
+outputs. For debugging only, `--allow-partial` generates artefacts that are
+prominently watermarked **PARTIAL / NOT VALID FOR MODEL SELECTION** (and
+remain fully blind).
 
 ## How the budget ledger works
 

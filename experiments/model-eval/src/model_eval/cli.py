@@ -28,6 +28,12 @@ from .config import ConfigError, load_candidates
 from .contact_sheet import build_contact_sheet
 from .replicate_client import ProviderGateError, default_adapter_factory
 from .result_store import ResultStore, assess_run_completeness
+from .retry import (
+    build_reliability_report,
+    compute_logical_summary,
+    execute_retries,
+    plan_retries,
+)
 from .runner import Runner, RunnerError, load_stage_bundle, plan_summary
 from .scoring import build_scoring_sheet
 from .terms import write_terms_snapshot
@@ -221,6 +227,97 @@ def cmd_budget_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_retry_failures(args: argparse.Namespace) -> int:
+    store = _store_for(args.run_id, args.outputs_dir)
+    candidates = load_candidates(Path(args.candidates))
+    report = plan_retries(store.run_dir, candidates, args.max_retries_per_request)
+
+    print(f"Run: {args.run_id}")
+    print(
+        f"Original results: {report.succeeded_originals} succeeded, "
+        f"{report.failed_originals} failed"
+    )
+    print(f"Successful requests selected for regeneration: 0 (never permitted)")
+    print(f"Eligible transient failures: {len(report.eligible)}")
+    for c in report.eligible:
+        print(
+            f"  - {c.attempt_id}  ({c.original.model_key}, reserve "
+            f"{c.max_cost_usd:.4f} USD)"
+        )
+    if report.eligible:
+        print(f"  By model: {report.counts_by_model()}")
+    if report.ineligible:
+        print(f"Ineligible failed requests: {len(report.ineligible)}")
+        for i in report.ineligible:
+            print(f"  - {i.request_id}: {i.reason}")
+    print(
+        f"Additional maximum reservation: "
+        f"{report.additional_max_reservation_usd:.4f} USD"
+    )
+    ledger_path = store.run_dir / "budget_ledger.json"
+    if ledger_path.exists():
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+        totals = ledger.get("totals", {})
+        remaining = totals.get("remaining_usd", 0.0)
+        verdict = "FITS" if report.additional_max_reservation_usd <= remaining else "EXCEEDS"
+        print(
+            f"Run budget {ledger['budget_usd']:.2f} USD; spent "
+            f"{totals.get('spent_usd', 0):.4f}; remaining {remaining:.4f} "
+            f"({verdict} remaining budget)"
+        )
+
+    if args.dry_run:
+        print("\nDRY RUN - no provider calls were made and nothing was written.")
+        return 0
+    if not report.eligible:
+        print("\nNothing to retry.")
+        return 0
+
+    try:
+        outcome = execute_retries(
+            Path(args.outputs_dir) if args.outputs_dir else OUTPUTS_DIR,
+            args.run_id,
+            candidates,
+            report,
+            budget_usd=args.budget_usd,
+            env=os.environ,
+            confirm_live=args.confirm_live,
+            adapter_factory=default_adapter_factory,
+        )
+    except (ProviderGateError, BudgetError, RunnerError) as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+    print(f"\nRetry pass finished for {args.run_id}.")
+    print(f"  recovered: {len(outcome.succeeded)}")
+    print(f"  failed again: {len(outcome.failed)}")
+    if outcome.halted_reason:
+        print(f"  HALTED: {outcome.halted_reason}")
+    summary = compute_logical_summary(store.run_dir)
+    print(
+        f"  logical requests with output: "
+        f"{summary['logical_requests_with_output']} of "
+        f"{summary['planned_logical_requests']}"
+    )
+    print(
+        f"  first-attempt failures preserved: {summary['first_attempt_failed']} "
+        f"(spend: first {summary['first_attempt_spend_usd']:.4f} + retries "
+        f"{summary['retry_spend_usd']:.4f} = "
+        f"{summary['combined_conservative_spend_usd']:.4f} USD)"
+    )
+    return 0 if not outcome.halted_reason else 1
+
+
+def cmd_reliability_report(args: argparse.Namespace) -> int:
+    store = _store_for(args.run_id, args.outputs_dir)
+    path = build_reliability_report(store.run_dir)
+    print(f"Reliability report: {path}")
+    print(
+        "NOTE: operational report — do NOT consult it during blind visual "
+        "scoring; retry status could bias scores."
+    )
+    return 0
+
+
 def cmd_terms(args: argparse.Namespace) -> int:
     config = load_candidates(Path(args.candidates))
     dest = write_terms_snapshot(config, EXPERIMENT_ROOT / "TERMS_SNAPSHOT.md")
@@ -276,6 +373,29 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("budget-status", help="show the budget ledger for a run")
     p.add_argument("--run-id", required=True)
     p.set_defaults(func=cmd_budget_status)
+
+    p = sub.add_parser(
+        "retry-failures",
+        help="retry allowlisted transient terminal failures of an existing run "
+        "(original records and ledger entries are preserved as evidence)",
+    )
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--budget-usd", type=float, default=None, help="the ORIGINAL run budget")
+    p.add_argument("--max-retries-per-request", type=int, default=1)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--confirm-live", action="store_true")
+    p.add_argument("--candidates", default=str(DEFAULT_CANDIDATES))
+    p.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_retry_failures)
+
+    p = sub.add_parser(
+        "reliability-report",
+        help="per-model first-attempt reliability (non-blind; read only after "
+        "visual scoring)",
+    )
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_reliability_report)
 
     p = sub.add_parser("terms", help="regenerate TERMS_SNAPSHOT.md from the candidates config")
     p.add_argument("--candidates", default=str(DEFAULT_CANDIDATES))

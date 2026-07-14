@@ -232,6 +232,10 @@ class Runner:
         # deterministic rejection so the same broken configuration is never
         # resubmitted across the rest of the matrix.
         self._disabled_models: dict[str, str] = {}
+        # request_id -> extra ResultRecord fields (retry lineage). Populated
+        # by the targeted-retry executor so retry attempts carry full
+        # provenance while first-attempt records stay unchanged.
+        self.retry_contexts: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------ util
 
@@ -313,6 +317,7 @@ class Runner:
             rate_limit_wait_seconds=rate_limit_wait_seconds,
             pricing_checked_on=str(candidate.pricing.checked_on),
             git_commit=self._git_commit,
+            **self.retry_contexts.get(request.request_id, {}),
         )
 
     # ------------------------------------------------------------- references

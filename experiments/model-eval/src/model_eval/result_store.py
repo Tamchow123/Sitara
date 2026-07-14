@@ -65,6 +65,16 @@ REQUIRED_PROVENANCE_FIELDS = frozenset(
         "output_sha256",
         "pricing_checked_on",
         "git_commit",
+        # Retry lineage (None on ordinary first-attempt records — older
+        # records without these fields parse via the defaults).
+        "logical_request_id",
+        "attempt_id",
+        "attempt_index",
+        "retry_of_request_id",
+        "retry_reason",
+        "original_error_category",
+        "original_error_message",
+        "original_provider_prediction_id",
     }
 )
 
@@ -121,6 +131,18 @@ class ResultRecord(BaseModel):
     output_sha256: str | None
     pricing_checked_on: str
     git_commit: str | None
+    # Retry-attempt lineage. All None for first-attempt records (and for all
+    # records written before retries existed — the defaults keep old JSON
+    # loading unchanged). For a retry attempt, request_id == attempt_id and
+    # logical_request_id/retry_of_request_id point at the original request.
+    logical_request_id: str | None = None
+    attempt_id: str | None = None
+    attempt_index: int | None = None
+    retry_of_request_id: str | None = None
+    retry_reason: str | None = None
+    original_error_category: str | None = None
+    original_error_message: str | None = None
+    original_provider_prediction_id: str | None = None
 
 
 class ResultStoreError(Exception):
@@ -239,10 +261,13 @@ class ResultStore:
 def assess_run_completeness(run_dir: Path) -> list[str]:
     """Why this run is NOT complete (empty list = complete and reviewable).
 
-    A run is complete only when it finished without halting (run_summary.json
-    exists with no halted_reason), every planned runnable request succeeded,
-    nothing failed, and the budget ledger holds no active reservations.
-    Incomplete runs must not be used for model selection."""
+    A run is reviewable only when it finished without halting
+    (run_summary.json exists with no halted_reason), every planned logical
+    request has a successful output (a first-attempt success or a successful
+    targeted retry), and the budget ledger holds no active reservations.
+    First-attempt failures that were recovered by an auditable retry do not
+    block review — the recovery gives the cell its comparison image while
+    the original failure record remains as reliability evidence."""
     problems: list[str] = []
     store = ResultStore(run_dir)
 
@@ -260,19 +285,36 @@ def assess_run_completeness(run_dir: Path) -> list[str]:
             problems.append(f"model(s) disabled after provider rejection: {disabled}")
 
     records = store.load_all()
-    failed = sum(1 for r in records if r.status == "failed")
     succeeded = sum(1 for r in records if r.status == "succeeded")
-    if failed:
-        problems.append(f"{failed} request(s) failed")
+
+    # Successful targeted retries recover otherwise-failed logical cells.
+    from .retry import RetryStore  # local import to avoid a module cycle
+
+    recovered_ids = {
+        r.logical_request_id
+        for r in RetryStore(run_dir).load_all()
+        if r.status == "succeeded" and r.logical_request_id
+    }
+    unresolved_failed = [
+        r for r in records if r.status == "failed" and r.request_id not in recovered_ids
+    ]
+    if unresolved_failed:
+        problems.append(
+            f"{len(unresolved_failed)} request(s) failed without a successful retry"
+        )
+    logical_with_output = succeeded + sum(
+        1 for r in records if r.status == "failed" and r.request_id in recovered_ids
+    )
 
     plan_path = run_dir / "plan.json"
     if not plan_path.exists():
         problems.append("plan.json is missing")
     else:
         planned = json.loads(plan_path.read_text(encoding="utf-8")).get("planned_requests")
-        if planned is not None and succeeded != planned:
+        if planned is not None and logical_with_output != planned:
             problems.append(
-                f"only {succeeded} of {planned} planned requests succeeded"
+                f"only {logical_with_output} of {planned} planned logical "
+                "requests have a successful output"
             )
 
     ledger_path = run_dir / "budget_ledger.json"

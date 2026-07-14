@@ -62,10 +62,17 @@ class BlindItem:
 
 
 def prepare_blind_items(store: ResultStore, run_id: str) -> tuple[list[BlindItem], Path]:
-    """Copy every successful output into blind/ under anonymised names and
-    return the items (hash-ordered, so numbering leaks nothing) plus the
-    blind directory. Also (re)writes the protected mapping file."""
-    records = [r for r in store.load_all() if r.status == "succeeded" and r.output_path]
+    """Copy the selected output of every LOGICAL evaluation cell into blind/
+    under anonymised names and return the items (hash-ordered, so numbering
+    leaks nothing) plus the blind directory. Exactly one image per logical
+    cell: the original success, or — where the first attempt failed — its
+    earliest successful targeted retry. Whether an image came from a retry
+    is never exposed in blind artefacts (it could bias visual scoring); the
+    lineage lives only in the protected mapping file. Also (re)writes that
+    mapping file."""
+    from .retry import select_logical_outputs
+
+    records = select_logical_outputs(store)
     if not records:
         raise ValueError(f"run {run_id!r} has no successful outputs")
     ordered = sorted(
@@ -105,6 +112,10 @@ def prepare_blind_items(store: ResultStore, run_id: str) -> tuple[list[BlindItem
                     "replicate_id": item.record.replicate_id,
                     "original_output": item.record.output_path,
                     "blind_image": item.image_filename,
+                    # Retry lineage (protected — never in blind artefacts):
+                    "is_retry_recovery": item.record.retry_of_request_id is not None,
+                    "retry_of_request_id": item.record.retry_of_request_id,
+                    "attempt_index": item.record.attempt_index,
                 }
                 for item in items
             },

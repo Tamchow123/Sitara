@@ -92,6 +92,24 @@ with the provider's hint, and halts/resumes safely when they persist.
 Re-run the candidate smoke (ideally with more than $5 account credit, which
 avoids the reduced low-balance limits) before the full screening.
 
+### Screening run 2026-07-14 (screening-20260714-001) and retry policy
+
+The full 60-request screening completed without halting: **55 first-attempt
+successes and 5 accepted predictions that died inside Replicate's
+infrastructure** — Schnell 4/12 first-attempt failures (`Director:
+unexpected error handling prediction (E9828)`), FLUX.2 Pro 1/12
+(`Prediction interrupted; please retry (code: PA)`). These first-attempt
+failure rates are retained as reliability evidence and feed the model
+decision alongside visual scores: the original failure records and their
+conservatively settled ledger entries are never modified. Targeted retries
+(allowlisted transient errors only, identical inputs, separate auditable
+attempt records and ledger keys) exist solely to recover the missing
+comparison images so every logical cell can be scored; a recovered retry
+does not erase the original failure. Blind reviewers never see retry
+status — visual scoring and operational reliability are assessed
+separately, via the blind artefacts and the non-blind `reliability-report`
+respectively (the latter examined only after visual scoring).
+
 ## Decision
 
 _To be completed after scoring._
