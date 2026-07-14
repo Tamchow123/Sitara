@@ -28,8 +28,13 @@ Execution order guarantees:
   was already conservatively accounted or reserved).
 - Failures provably before provider acceptance release the reservation;
   ambiguous failures conservatively convert it to spend. Failed requests are
-  FINAL for their run (their spend is already accounted); delete the failed
-  result record and use a new run id to retry deliberately.
+  FINAL for their run (their spend is already accounted), with ONE
+  exception: run-level pre-acceptance halts (402 insufficient credit, 401
+  authentication) are safely retryable on a rerun with the same run id —
+  their reservation was released, nothing was accepted by the provider, and
+  no spend occurred — provided the record carries no provider prediction id
+  and no submitted attempt record exists. Every other failure category
+  requires deleting the failed record and using a new run id.
 - Cost accounting is conservative: verified pricing formulas get an
   input-aware calculation (capped at the reservation); unresolved pricing
   reconciles at the FULL reserved amount. See model_eval.costs.
@@ -158,6 +163,15 @@ SKIP_MODEL_DISABLED = "model_disabled_after_provider_rejection"
 # would fail identically on every brief, so the model is disabled for the
 # rest of the run after its first such rejection.
 DETERMINISTIC_REJECTION_CODES = frozenset({400, 404, 422})
+
+# Failure categories that are safe to retry within the SAME run: both are
+# run-level halts rejected conclusively BEFORE provider acceptance, so the
+# reservation was released and no provider-side work or spend exists. The
+# halt message tells the user to fix credit/token and rerun with the same
+# run id — this set is what makes that instruction true.
+RETRYABLE_FAILURE_CATEGORIES = frozenset(
+    {"provider_insufficient_credit", "provider_authentication_failed"}
+)
 
 
 @dataclass
@@ -408,19 +422,29 @@ class Runner:
         rid = request.request_id
 
         # Resume: completed/skipped results are never re-sent. Failed results
-        # are FINAL for this run — their spend is already accounted; delete
-        # the failed record and use a new run id to retry deliberately.
+        # are FINAL for this run — their spend is already accounted — except
+        # for pre-acceptance run-level halts (402/401), which are safely
+        # retryable under strict conditions (see _is_safely_retryable).
         if self.store.exists(rid):
             existing = self.store.load(rid)
             if existing.status in ("succeeded", "skipped"):
                 outcome.resumed.append(rid)
                 return
-            outcome.previously_failed.append(rid)
+            if not self._is_safely_retryable(existing, ledger):
+                outcome.previously_failed.append(rid)
+                self.log(
+                    f"[resume] {rid}: previously failed "
+                    f"({existing.error_category}); not retried "
+                    "(delete its result record and use a new run id to retry)"
+                )
+                return
             self.log(
-                f"[resume] {rid}: previously failed; not retried "
-                "(delete its result record and use a new run id to retry)"
+                f"[retry] {rid}: retrying after {existing.error_category} — "
+                "the request was rejected before acceptance and its "
+                "reservation was released"
             )
-            return
+            # Fall through to normal execution; a success replaces the failed
+            # record, and a repeated halt replaces it and halts again.
 
         if request.skipped:
             self._save_skip(request, request.skip_reason or "skipped_by_plan", outcome)
@@ -601,10 +625,27 @@ class Runner:
             width=width,
             height=height,
         )
-        self.store.save(record)
+        # allow_replace_failed: a successful retry of a pre-acceptance halt
+        # supersedes its failed record (succeeded records stay protected).
+        self.store.save(record, allow_replace_failed=True)
         self.store.clear_attempt(rid)
         outcome.succeeded.append(rid)
         self.log(f"[ok] {rid} ({latency}s, accounted {accounted:.4f} USD [{basis}])")
+
+    def _is_safely_retryable(self, existing: ResultRecord, ledger: BudgetLedger) -> bool:
+        """A failed result may be retried in the same run ONLY when the
+        original failure was a pre-acceptance run-level halt (402/401), the
+        provider never accepted anything (no prediction id on the record and
+        no submitted attempt record), and its ledger entry is released —
+        i.e. retrying cannot duplicate provider-side work or spend."""
+        if existing.error_category not in RETRYABLE_FAILURE_CATEGORIES:
+            return False
+        if existing.provider_prediction_id:
+            return False
+        attempt = self.store.load_attempt(existing.request_id)
+        if attempt and attempt.get("prediction_id"):
+            return False
+        return ledger.status_of(existing.request_id) == "released"
 
     def _handle_provider_error(
         self,

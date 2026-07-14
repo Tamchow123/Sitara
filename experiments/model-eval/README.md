@@ -185,7 +185,11 @@ configuration at 1/12th of the screening cost.
   a failed record with `provider_insufficient_credit` /
   `provider_authentication_failed` is saved, and the CLI prints a concise
   halt message (no traceback). Fix credit/token, then rerun with the SAME
-  run id: completed requests are never re-sent or re-charged.
+  run id: completed requests are never re-sent or re-charged, the halted
+  request itself is retried automatically (it is safe — nothing was
+  accepted and nothing was spent), and the run continues from where it
+  stopped. On success the superseded failure record is replaced, so the
+  final run summary and completeness check reflect the true final state.
 - **Deterministic rejections (400/404/422):** the same invalid model
   configuration would fail on every brief, so after the first such
   rejection the model is DISABLED for the rest of the run: its remaining
@@ -253,11 +257,16 @@ mechanism this implementation could use to close it. A crash inside that
 window can produce one duplicate submission on resume; the budget stays
 conservative regardless.
 
-Failed requests are final for their run (their spend is already accounted);
-to retry one deliberately, delete its result record and use a new run id. A
-stale lock file left by a crashed process is reclaimed automatically when
-its PID is no longer alive; if the PID cannot be read, delete
-`budget_ledger.json.lock` manually after confirming no other run is active.
+Failed requests are final for their run (their spend is already accounted),
+with one exception: **402 insufficient-credit and 401 authentication
+failures are retried automatically** when you rerun with the same run id,
+because they were rejected before provider acceptance — their reservation
+was released, no prediction exists, and no spend occurred. Every other
+failure category stays final; to retry one deliberately, delete its result
+record and use a new run id. A stale lock file left by a crashed process is
+reclaimed automatically when its PID is no longer alive; if the PID cannot
+be read, delete `budget_ledger.json.lock` manually after confirming no
+other run is active.
 
 ## Reference images (rights-controlled)
 

@@ -115,6 +115,149 @@ def assert_single_clean_success(runner, outcome, expected_spend=0.04):
     assert record.output_sha256
 
 
+def _out_of_credit_error() -> ProviderError:
+    return ProviderError(
+        "provider rejected request (402): insufficient credit",
+        before_acceptance=True,
+        status_code=402,
+        provider_title="Insufficient credit",
+        provider_detail="You have insufficient credit to run this model.",
+    )
+
+
+class SucceedThenOutOfCredit(MockAdapter):
+    """First request succeeds; every later one is a 402."""
+
+    def create_prediction(self, replicate_id, version, input_params):
+        if self.create_calls:
+            self.create_calls.append((replicate_id, version, input_params))
+            raise _out_of_credit_error()
+        return super().create_prediction(replicate_id, version, input_params)
+
+
+def three_brief_bundle(candidate):
+    from model_eval.config import BriefsFile as BF
+
+    return make_bundle(
+        make_stage(prompt_formats=["editorial"]),
+        make_candidates_config(candidate),
+        BF(briefs=[make_brief(f"brief-{i}") for i in (1, 2, 3)]),
+    )
+
+
+class TestRetryablePreAcceptanceHalts:
+    """The 402/401 halt message promises 'rerun with the same run id' — these
+    tests make that promise true, and prove its safety limits."""
+
+    def test_full_402_halt_and_resume_cycle(self, tmp_path, plain_candidate):
+        # Phase 1: request 1 succeeds, request 2 gets a 402, request 3 is
+        # never attempted.
+        first = SucceedThenOutOfCredit()
+        crashed = build_runner(tmp_path, three_brief_bundle(plain_candidate), first, run_id="retry-run")
+        outcome1 = run(crashed, tmp_path)
+        assert len(outcome1.succeeded) == 1
+        assert len(outcome1.failed) == 1
+        assert outcome1.halted_reason and "insufficient credit" in outcome1.halted_reason.lower()
+        assert len(first.create_calls) == 2, "request 3 must never be attempted"
+        succeeded_rid = outcome1.succeeded[0]
+        failed_rid = outcome1.failed[0]
+        assert "brief-3" not in succeeded_rid + failed_rid
+
+        # Phase 2: credit conceptually restored — rerun with the SAME run id.
+        good = MockAdapter()
+        resumed = build_runner(tmp_path, three_brief_bundle(plain_candidate), good, run_id="retry-run")
+        outcome2 = run(resumed, tmp_path)
+
+        # Request 1 was not re-sent; requests 2 and 3 ran and succeeded.
+        assert len(good.create_calls) == 2
+        assert outcome2.resumed == [succeeded_rid]
+        assert failed_rid in outcome2.succeeded
+        assert outcome2.failed == [] and outcome2.previously_failed == []
+        assert outcome2.halted_reason is None
+
+        # Final state: three successes, no failures, spend counted once.
+        records = resumed.store.load_all()
+        assert sorted(r.status for r in records) == ["succeeded"] * 3
+        entries, totals = ledger_entries(resumed)
+        assert len(entries) == 3
+        assert all(e["status"] == "reconciled" for e in entries.values())
+        assert totals["spent_usd"] == pytest.approx(3 * 0.04)
+        assert totals["reserved_usd"] == 0
+        # The run summary reflects the final state (no superseded failure).
+        summary = json.loads(
+            (resumed.run_dir / "run_summary.json").read_text(encoding="utf-8")
+        )
+        assert summary["failed"] == 0 and summary["halted_reason"] is None
+        from model_eval.result_store import assess_run_completeness
+
+        assert assess_run_completeness(resumed.run_dir) == []
+
+    def test_repeated_402_replaces_the_failure_and_halts_again(self, tmp_path, plain_candidate):
+        first = SucceedThenOutOfCredit()
+        run(build_runner(tmp_path, three_brief_bundle(plain_candidate), first, run_id="retry-run"), tmp_path)
+
+        still_broke = MockAdapter(fail_with=_out_of_credit_error())
+        resumed = build_runner(tmp_path, three_brief_bundle(plain_candidate), still_broke, run_id="retry-run")
+        outcome = run(resumed, tmp_path)
+        assert len(still_broke.create_calls) == 1, "halts again after one call"
+        assert outcome.halted_reason
+        assert len(outcome.failed) == 1
+        entries, totals = ledger_entries(resumed)
+        failed_entry = entries[outcome.failed[0]]
+        assert failed_entry["status"] == "released", "the new reservation was released again"
+        assert totals["spent_usd"] == pytest.approx(0.04)  # only request 1, once
+        record = resumed.store.load(outcome.failed[0])
+        assert record.error_category == "provider_insufficient_credit"
+
+    def test_ambiguous_failure_is_still_not_retried(self, tmp_path, plain_candidate):
+        ambiguous = MockAdapter(
+            fail_with=ProviderError("connection dropped mid-flight", before_acceptance=False)
+        )
+        run(build_runner(tmp_path, crashy_bundle(plain_candidate), ambiguous, run_id="amb-run"), tmp_path)
+
+        good = MockAdapter()
+        resumed = build_runner(tmp_path, crashy_bundle(plain_candidate), good, run_id="amb-run")
+        outcome = run(resumed, tmp_path)
+        assert good.create_calls == [], "ambiguous failures must stay final"
+        assert len(outcome.previously_failed) == 1
+        _, totals = ledger_entries(resumed)
+        assert totals["spent_usd"] == pytest.approx(0.1)  # conservatively assumed spent, once
+
+    def test_retryable_category_with_accepted_prediction_id_is_never_resubmitted(
+        self, tmp_path, plain_candidate
+    ):
+        first = MockAdapter(fail_with=_out_of_credit_error())
+        crashed = build_runner(tmp_path, crashy_bundle(plain_candidate), first, run_id="zombie-run")
+        outcome1 = run(crashed, tmp_path)
+        rid = outcome1.failed[0]
+        # Fabricate the unsafe condition: a retryable category whose record
+        # somehow carries an accepted prediction id.
+        record = crashed.store.load(rid)
+        tainted = record.model_copy(update={"provider_prediction_id": "pred-zombie"})
+        crashed.store.record_path(rid).write_text(tainted.model_dump_json(indent=2), encoding="utf-8")
+
+        good = MockAdapter()
+        resumed = build_runner(tmp_path, crashy_bundle(plain_candidate), good, run_id="zombie-run")
+        outcome2 = run(resumed, tmp_path)
+        assert good.create_calls == [], "an accepted prediction id forbids resubmission"
+        assert outcome2.previously_failed == [rid]
+
+    def test_submitted_attempt_record_forbids_retry(self, tmp_path, plain_candidate):
+        first = MockAdapter(fail_with=_out_of_credit_error())
+        crashed = build_runner(tmp_path, crashy_bundle(plain_candidate), first, run_id="attempt-run")
+        outcome1 = run(crashed, tmp_path)
+        rid = outcome1.failed[0]
+        crashed.store.save_attempt(
+            rid, {"request_id": rid, "state": "submitted", "prediction_id": "pred-left"}
+        )
+
+        good = MockAdapter()
+        resumed = build_runner(tmp_path, crashy_bundle(plain_candidate), good, run_id="attempt-run")
+        outcome2 = run(resumed, tmp_path)
+        assert good.create_calls == []
+        assert outcome2.previously_failed == [rid]
+
+
 class TestCrashAfterReservationBeforeSubmission:
     def test_resume_submits_exactly_once(self, tmp_path, plain_candidate):
         class CrashBeforeSubmit(MockAdapter):
