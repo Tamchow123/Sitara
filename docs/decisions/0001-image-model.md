@@ -1,15 +1,15 @@
 # 0001 — Production and fast-tier image model selection
 
-- **Status:** proposed
-- **Date:** 2026-07-13 (candidates identified; evaluation not yet run)
-- **Deciders:** project owner (human scoring is authoritative)
+- **Status:** accepted
+- **Date:** 2026-07-16 (decided; candidates identified 2026-07-13, screening run and blind-scored 2026-07-14/15)
+- **Deciders:** project owner (blind human scoring is authoritative)
 - **Phase:** Phase 2 (see ../PHASES.md)
 
-> **No production model has been selected.** This record is a placeholder
-> that will be completed only after both evaluation stages have been run and
-> blind-scored by a human. Application model selection will be configured
-> through environment variables (`REPLICATE_IMAGE_MODEL`, optional
-> `REPLICATE_IMAGE_MODEL_FAST`) — never hard-coded.
+> **Decision: `black-forest-labs/flux-1.1-pro`** is Sitara's default MVP
+> production image model AND its paid fast/development model. Demo mode
+> makes **zero paid model calls** and serves pre-generated private fixtures
+> only. Application model selection remains configured through environment
+> variables — never hard-coded.
 
 ## Context
 
@@ -134,30 +134,110 @@ candidate.** The formal scope and disposition live in the run's
 
 ## Decision
 
-_To be completed after scoring._
+Blind visual scoring of the balanced 4 × 12 scoped matrix (locked scoring
+sheet SHA-256
+`ac0355030709c192f56371e1780628870dfe001a4c72ce1693961c4b9842dec7`;
+unblinded via the protected mapping) produced:
 
-- **Default production model:** NOT YET SELECTED
-- **Fast/demo-development model:** NOT YET SELECTED (Klein 4B is the
-  remaining fast-tier candidate after Schnell's operational
-  disqualification)
-- **Inspiration influence recommendation** (text-only / metadata /
-  reference-image; whether the MVP text-only limitation should remain):
-  NOT YET DETERMINED
-- **Refinement strategy recommendation** (fresh regeneration /
-  image editing): NOT YET DETERMINED
-- **Best prompt format per selected model:** NOT YET DETERMINED
+| Model | Pooled mean (1–5) | Hard-failure flags |
+|---|---|---|
+| flux-2-pro | 4.2917 | 1 |
+| flux-2-max | 4.2833 | 0 |
+| flux-1-1-pro | 4.2667 | 0 |
+| klein-4b | 3.9333 | 4 |
+
+- **Default MVP production model:** `black-forest-labs/flux-1.1-pro`
+- **Paid fast/development model:** `black-forest-labs/flux-1.1-pro` (one
+  model for both roles in the MVP)
+- **Demo mode:** no paid model call — pre-generated private fixtures only
+- **Retained challenger (not the default):** `black-forest-labs/flux-2-pro`
+- **Retained research / potential future premium benchmark:**
+  `black-forest-labs/flux-2-max`
+- **Rejected for MVP use:** `black-forest-labs/flux-2-klein-4b` (visual
+  hard failures — see below)
+- **Operationally disqualified:** `black-forest-labs/flux-schnell` (see the
+  2026-07-14 section above)
+- **Inspiration influence / constrained refinement:** NO CONCLUSION YET —
+  those evaluation stages have not been run; the MVP text-only limitation
+  stands on its original rationale, not on new evidence.
+
+**Rationale — utility winner, not the absolute numerical visual winner.**
+FLUX 1.1 Pro's pooled mean sits 0.0250 below FLUX.2 Pro and 0.0166 below
+FLUX.2 Max — differences with no meaning in a single-rater, 12-brief
+screening — while it alone combines perfect 12/12 first-attempt reliability,
+zero hard failures, ~4.8 s median successful latency (5.2 s max), the lowest
+cost of the viable candidates ($0.040/generation observed, $0.480 across the
+screening), strong cultural coherence, and strong bridal-occasion
+distinctiveness. Compared with FLUX.2 Max it is ~5.9× faster by median
+latency and ~6.25× cheaper per screening generation; compared with FLUX.2
+Pro it is ~2.4× faster and ~3× cheaper per configured screening attempt
+(and FLUX.2 Pro also carried one hard-failure flag and one transient
+first-attempt failure recovered on retry-1).
+
+**Klein 4B is NOT the fast model.** Its 0.5-second median-latency advantage
+(4.3 s vs 4.8 s) does not justify: the lowest visual score (3.9333), four
+hard-failure flags including garment silhouette substitutions, slightly
+higher observed screening cost ($0.050 vs $0.040 per cell), and an
+anomalous 502.9-second maximum successful latency.
+
+**Configuration, not coupling.** The chosen model is a configuration
+default behind the application's provider/model abstraction — the backend
+(Phase 3+) must support environment-based override and never hard-code
+Replicate model ids in application logic:
+
+```text
+DEFAULT_IMAGE_MODEL=black-forest-labs/flux-1.1-pro
+FAST_IMAGE_MODEL=black-forest-labs/flux-1.1-pro
+DEMO_MODE=true
+```
+
+The machine-readable decision artefact (referencing the locked score hash
+and all evidence files) is
+`experiments/model-eval/outputs/runs/screening-20260714-001/model_decision.json`.
+
+## Limitations (decision is an MVP baseline, revisable)
+
+This screening involved: one visual evaluator; one seed per cell; 12
+text-only briefs; base generation only; no direct inspiration-image
+(reference-conditioning) evaluation; no refinement evaluation; and no real
+bridal customer or cultural-expert panel. The decision is appropriate for
+the MVP baseline and must remain revisable as later stages produce
+evidence.
+
+## Next evaluation stages
+
+1. FLUX 1.1 Pro prompt-hardening for minimal/moderate embroidery briefs.
+2. Rights-approved inspiration influence testing (text-only vs metadata vs
+   reference image).
+3. One constrained refinement test (fresh regeneration vs image editing).
+4. Privacy and image-retention verification against current provider terms.
+5. Small human / cultural-expert validation set.
+6. Production integration and monitoring thresholds (latency, failure rate,
+   spend).
 
 ## Consequences
 
-_To be completed after scoring._ Must cover: observed refinement drift and
-what the refinement UX can honestly promise; cultural hard-failure rates per
-model; cost implications at expected MVP volume; any terms issues that
-constrain deployment.
+The MVP builds on a single, fast, cheap, operationally reliable model for
+both production and paid development use, simplifying budgeting
+(~$0.04/generation) and latency expectations (Full generation UX can
+honestly promise seconds, not half-minutes). FLUX.2 Pro remains available
+as a challenger if 1.1 Pro's visual ceiling proves limiting, and FLUX.2 Max
+as a premium benchmark for future tiers. Refinement-continuity and
+inspiration-influence promises remain UNDECIDED until their stages run —
+nothing in the application may assume them yet.
 
 ## Alternatives considered
 
-_To be completed after scoring — screening losers and why, plus the
-runner-up finalist._
+- **flux-2-pro** — numerically best pooled mean, but one hard-failure flag,
+  one transient first-attempt failure, ~2.4× slower and ~3× costlier;
+  retained as challenger.
+- **flux-2-max** — clean and highest-fidelity, but ~5.9× slower and ~6.25×
+  costlier; retained as research/premium benchmark.
+- **klein-4b** — rejected for MVP: lowest score, four hard failures
+  (including garment silhouette substitutions), latency outlier, no real
+  cost advantage.
+- **schnell** — operationally disqualified before visual scoring (repeated
+  E9828 runtime failures; two cells unresolved after retry-2).
 
 ## Model-evaluation fields
 
@@ -174,8 +254,20 @@ runner-up finalist._
 - **API input schema:** per-candidate `capabilities` in
   `configs/model_candidates.yaml`, extracted from each model page's embedded
   OpenAPI schema on 2026-07-13.
-- **Experiment commit hash:** _record when the live runs execute (also
-  stamped into every result record)._
-- **Total experiment spend:** _from `budget_ledger.json` per run — pending._
-- **Output and scoring artefact locations:** _run IDs and completed scoring
-  sheets — pending._
+- **Experiment commit hash:** results produced across commits up to
+  `163a590d40762fc665685bea5bc5f3736557c17e` (the commit current when the
+  decision was recorded; each result record carries the exact commit that
+  produced it).
+- **Total experiment spend (conservative, ledger-accounted):** $7.02 —
+  screening-20260713-001 diagnostic $0.80 (overstated by $0.37 by the
+  pre-fix 429 misclassification), candidate-smoke-20260714-001 $0.46
+  (overstated by $0.37 for the same reason), screening-20260714-001 $5.76
+  (including $0.176 retry spend).
+- **Output and scoring artefact locations:** run
+  `experiments/model-eval/outputs/runs/screening-20260714-001/` — locked
+  blind scores `blind-scoped/scoring_sheet_locked.csv` (SHA-256
+  `ac0355030709c192f56371e1780628870dfe001a4c72ce1693961c4b9842dec7`),
+  protected mapping `candidate_key_scoped.json`, scope
+  `review_scope.json` + `review_scope_report.md`, operational
+  `reliability_report.md`, machine-readable decision
+  `model_decision.json`.
