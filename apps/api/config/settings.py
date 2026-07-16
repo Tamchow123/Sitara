@@ -1,0 +1,251 @@
+"""Sitara API settings — environment-driven, fail-closed.
+
+Committed defaults keep the application safe by construction:
+
+    DEFAULT_IMAGE_MODEL = black-forest-labs/flux-1.1-pro   (Phase 2 decision)
+    FAST_IMAGE_MODEL    = black-forest-labs/flux-1.1-pro
+    DEMO_MODE           = true    (no Anthropic / Replicate calls)
+    ALLOW_PAID_AI_CALLS = false   (a present token never enables paid calls)
+
+Production (`APP_ENV=production`) fails startup unless genuinely required
+settings are provided; local development gets documented safe defaults via
+Docker Compose.
+"""
+
+import os
+from pathlib import Path
+
+import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_list(name: str, default: str = "") -> list[str]:
+    return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+
+
+# ---------------------------------------------------------------------------
+# Environment / core
+# ---------------------------------------------------------------------------
+
+APP_ENV = os.getenv("APP_ENV", "development")
+IS_PRODUCTION = APP_ENV == "production"
+
+DEBUG = env_bool("DEBUG", default=not IS_PRODUCTION)
+
+_DEV_ONLY_SECRET = "dev-only-insecure-secret-key-do-not-use-in-production"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "" if IS_PRODUCTION else _DEV_ONLY_SECRET)
+
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,api")
+
+# Fail startup for genuinely required production settings.
+if IS_PRODUCTION:
+    _problems: list[str] = []
+    if not SECRET_KEY or SECRET_KEY == _DEV_ONLY_SECRET:
+        _problems.append("DJANGO_SECRET_KEY must be set to a real secret")
+    if DEBUG:
+        _problems.append("DEBUG must be false")
+    if not os.getenv("DJANGO_ALLOWED_HOSTS"):
+        _problems.append("DJANGO_ALLOWED_HOSTS must be set")
+    for _required in (
+        "DATABASE_URL",
+        "REDIS_URL",
+        "S3_ENDPOINT_URL",
+        "S3_ACCESS_KEY_ID",
+        "S3_SECRET_ACCESS_KEY",
+        "S3_BUCKET_NAME",
+    ):
+        if not os.getenv(_required):
+            _problems.append(f"{_required} must be set")
+    if _problems:
+        raise ImproperlyConfigured("invalid production configuration: " + "; ".join(_problems))
+
+# ---------------------------------------------------------------------------
+# Applications
+# ---------------------------------------------------------------------------
+
+INSTALLED_APPS = [
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "rest_framework",
+    "corsheaders",
+    "sitara.accounts",
+    "sitara.health",
+    "sitara.ai_gateway",
+]
+
+AUTH_USER_MODEL = "accounts.User"
+
+MIDDLEWARE = [
+    "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+]
+
+ROOT_URLCONF = "config.urls"
+WSGI_APPLICATION = "config.wsgi.application"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+# ---------------------------------------------------------------------------
+# Database / Redis / Celery
+# ---------------------------------------------------------------------------
+
+DATABASES = {
+    "default": dj_database_url.parse(
+        os.getenv(
+            "DATABASE_URL",
+            # Local-development default only; Compose provides the real value.
+            "postgres://sitara:sitara-dev-password@localhost:5432/sitara",
+        ),
+        conn_max_age=60,
+    )
+}
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
+CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", default=False)
+
+# ---------------------------------------------------------------------------
+# REST framework — authenticated by default; JSON only.
+# ---------------------------------------------------------------------------
+
+REST_FRAMEWORK = {
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+}
+
+# ---------------------------------------------------------------------------
+# CORS / CSRF — explicit allowlists, never wildcards.
+# ---------------------------------------------------------------------------
+
+CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "http://localhost:3000")
+
+# ---------------------------------------------------------------------------
+# Private S3-compatible object storage (MinIO locally).
+# Buckets are private; no public ACLs; downloads will use signed URLs or
+# authenticated streaming in a later phase.
+# ---------------------------------------------------------------------------
+
+S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "http://localhost:9000")
+S3_ACCESS_KEY_ID = os.getenv("S3_ACCESS_KEY_ID", "sitara-minio")
+S3_SECRET_ACCESS_KEY = os.getenv("S3_SECRET_ACCESS_KEY", "sitara-minio-dev-password")
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "sitara-media")
+S3_REGION_NAME = os.getenv("S3_REGION_NAME", "us-east-1")
+
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": {
+            "endpoint_url": S3_ENDPOINT_URL,
+            "access_key": S3_ACCESS_KEY_ID,
+            "secret_key": S3_SECRET_ACCESS_KEY,
+            "bucket_name": S3_BUCKET_NAME,
+            "region_name": S3_REGION_NAME,
+            # Private by default: no public-read ACL, signed query auth.
+            "default_acl": None,
+            "querystring_auth": True,
+            "file_overwrite": False,
+            "signature_version": "s3v4",
+        },
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
+# ---------------------------------------------------------------------------
+# AI provider gates — fail closed.
+# ---------------------------------------------------------------------------
+
+DEMO_MODE = env_bool("DEMO_MODE", default=True)
+ALLOW_PAID_AI_CALLS = env_bool("ALLOW_PAID_AI_CALLS", default=False)
+
+DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro")
+FAST_IMAGE_MODEL = os.getenv("FAST_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro")
+
+# Tokens may be present in the environment; their presence NEVER enables
+# provider calls (see sitara.ai_gateway.policy). Never log or return them.
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
+
+# Product limits surfaced via /api/v1/config/public.
+MAX_INSPIRATION_IMAGES = 3
+MAX_REFINEMENTS = 1
+
+# ---------------------------------------------------------------------------
+# Security hardening
+# ---------------------------------------------------------------------------
+
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+X_FRAME_OPTIONS = "DENY"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", default=IS_PRODUCTION)
+    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "3600" if IS_PRODUCTION else "0"))
+
+# Behind a TLS-terminating proxy in production, enable via environment.
+if env_bool("USE_X_FORWARDED_PROTO", default=False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# ---------------------------------------------------------------------------
+# I18n / misc
+# ---------------------------------------------------------------------------
+
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "UTC"
+USE_I18N = True
+USE_TZ = True
+
+STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "root": {"handlers": ["console"], "level": os.getenv("LOG_LEVEL", "INFO")},
+}

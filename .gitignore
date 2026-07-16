@@ -1,0 +1,22 @@
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+apps/api/staticfiles/
+
+# Node / Next.js
+node_modules/
+apps/web/.next/
+apps/web/out/
+*.tsbuildinfo
+
+# OS noise
+Thumbs.db
+.DS_Store

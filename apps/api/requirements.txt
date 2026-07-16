@@ -1,0 +1,19 @@
+# Pinned runtime + development dependencies for the Sitara API.
+# One file keeps the Phase 3A foundation reproducible and simple; a
+# prod/dev split can come later if image size ever matters.
+
+Django==5.2.4
+djangorestframework==3.16.0
+django-cors-headers==4.6.0
+django-storages[s3]==1.14.4
+boto3==1.35.99
+psycopg[binary]==3.2.4
+dj-database-url==2.3.0
+redis==5.2.1
+celery==5.4.0
+gunicorn==23.0.0
+
+# Development / CI
+pytest==8.3.4
+pytest-django==4.9.0
+ruff==0.8.4

@@ -1,0 +1,25 @@
+[project]
+name = "sitara-api"
+version = "0.1.0"
+description = "Sitara API — AI-assisted South Asian bridalwear concept design (backend)"
+requires-python = ">=3.12"
+
+# Runtime dependencies are pinned in requirements.txt (the reproducible
+# dependency metadata installed by Docker and CI).
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "DJ"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "sitara"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["tests.py", "test_*.py"]
+testpaths = ["sitara"]
+addopts = "-q"

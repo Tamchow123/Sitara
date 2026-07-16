@@ -1,0 +1,142 @@
+# Sitara local development stack (Phase 3A).
+#
+# Credentials below are LOCAL-DEVELOPMENT-ONLY values; real deployments take
+# everything from the environment (see .env.example). No real secrets live
+# in this file.
+#
+# Local ports: web 3001 (3000 is occupied by another local project on this
+#              machine; override with WEB_PORT), api 8000, postgres 5432,
+#              redis 6379, minio API 9000, minio console 9001.
+
+name: sitara
+
+x-api-environment: &api-environment
+  APP_ENV: development
+  DEBUG: "true"
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,api
+  DATABASE_URL: postgres://sitara:sitara-dev-password@postgres:5432/sitara
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  CORS_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001
+  CSRF_TRUSTED_ORIGINS: http://localhost:3000,http://localhost:3001
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_ACCESS_KEY_ID: sitara-minio
+  S3_SECRET_ACCESS_KEY: sitara-minio-dev-password
+  S3_BUCKET_NAME: sitara-media
+  S3_REGION_NAME: us-east-1
+  # Fail-closed AI gates (Phase 2 decision defaults):
+  DEFAULT_IMAGE_MODEL: black-forest-labs/flux-1.1-pro
+  FAST_IMAGE_MODEL: black-forest-labs/flux-1.1-pro
+  DEMO_MODE: ${DEMO_MODE:-true}
+  ALLOW_PAID_AI_CALLS: ${ALLOW_PAID_AI_CALLS:-false}
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_USER: sitara
+      POSTGRES_PASSWORD: sitara-dev-password
+      POSTGRES_DB: sitara
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sitara -d sitara"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7.4.1-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  minio:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: sitara-minio
+      MINIO_ROOT_PASSWORD: sitara-minio-dev-password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  minio-init:
+    build: apps/api
+    command: ["python", "/init/create_bucket.py"]
+    environment: *api-environment
+    volumes:
+      - ./infra/minio:/init:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  migrate:
+    build: apps/api
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    environment: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: apps/api
+    ports:
+      - "8000:8000"
+    environment: *api-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/live', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  celery:
+    build: apps/api
+    command: ["celery", "-A", "config", "worker", "--loglevel=info"]
+    environment: *api-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  web:
+    build: apps/web
+    ports:
+      - "${WEB_PORT:-3001}:3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  pgdata:
+  miniodata:
