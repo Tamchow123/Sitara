@@ -17,7 +17,8 @@ import uuid
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
-from django.db.models.functions import Lower
+from django.db.models import Q
+from django.db.models.functions import Lower, Trim
 
 
 def canonicalize_email(email: str) -> str:
@@ -71,7 +72,18 @@ class User(AbstractUser):
 
     class Meta(AbstractUser.Meta):
         constraints = [
-            models.UniqueConstraint(Lower("email"), name="accounts_user_email_ci_unique"),
+            # Canonical identity at the DATABASE layer: uniqueness over
+            # Lower(Trim(email)) collapses case AND whitespace variants...
+            models.UniqueConstraint(
+                Lower(Trim("email")), name="accounts_user_email_canonical_unique"
+            ),
+            # ...and stored values must already BE canonical, so paths that
+            # skip save() (bulk_create, QuerySet.update) cannot persist
+            # ' Bride@Example.com ' even when it would be unique.
+            models.CheckConstraint(
+                condition=Q(email=Lower(Trim("email"))),
+                name="accounts_user_email_is_canonical",
+            ),
         ]
 
     def save(self, *args, **kwargs):

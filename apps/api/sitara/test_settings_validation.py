@@ -133,3 +133,92 @@ class TestProductionValidation:
         env["SAME_ORIGIN_DEPLOYMENT"] = "true"
         result = load_settings(env)
         assert result.returncode == 0, result.stderr
+
+    def test_empty_origin_strings_do_not_count_as_configured(self):
+        result = load_settings({**VALID_PRODUCTION_ENV, "CORS_ALLOWED_ORIGINS": ""})
+        assert result.returncode != 0
+        assert "CORS_ALLOWED_ORIGINS" in result.stderr
+        result = load_settings({**VALID_PRODUCTION_ENV, "CSRF_TRUSTED_ORIGINS": "  , "})
+        assert result.returncode != 0
+        assert "CSRF_TRUSTED_ORIGINS" in result.stderr
+
+    def test_non_scheme_origins_are_rejected(self):
+        result = load_settings(
+            {**VALID_PRODUCTION_ENV, "CORS_ALLOWED_ORIGINS": "app.sitara.example"}
+        )
+        assert result.returncode != 0
+        assert "scheme-qualified" in result.stderr
+
+
+class TestProductionHostValidation:
+    def test_local_django_hosts_are_rejected_in_production(self):
+        for hosts in (
+            "localhost",
+            "127.0.0.1",
+            "api",
+            "localhost,127.0.0.1,api",
+            "api.sitara.example,localhost",  # hides inside a list
+        ):
+            result = load_settings({**VALID_PRODUCTION_ENV, "DJANGO_ALLOWED_HOSTS": hosts})
+            assert result.returncode != 0, f"hosts {hosts!r} must be rejected"
+            assert "DJANGO_ALLOWED_HOSTS" in result.stderr
+            assert "development-only host" in result.stderr
+            # The entries themselves are not echoed back.
+            assert hosts not in result.stderr
+
+    def test_legitimate_production_hosts_are_accepted(self):
+        # 'api.sitara.example' contains the substring 'api' — entry-level
+        # matching must not reject it.
+        result = load_settings(
+            {
+                **VALID_PRODUCTION_ENV,
+                "DJANGO_ALLOWED_HOSTS": "api.sitara.example,app.sitara.example",
+            }
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_internal_hostname_policy_flag_is_available_but_explicit(self):
+        result = load_settings(
+            {
+                **VALID_PRODUCTION_ENV,
+                "DJANGO_ALLOWED_HOSTS": "api",
+                "ALLOW_INTERNAL_HOSTNAMES_IN_PRODUCTION": "true",
+            }
+        )
+        assert result.returncode == 0, result.stderr
+
+
+class TestStrictBooleanParsing:
+    def test_boolean_typos_refuse_startup(self):
+        cases = [
+            ({"DEMO_MODE": "tru"}, "DEMO_MODE"),
+            ({"ALLOW_PAID_AI_CALLS": "enable"}, "ALLOW_PAID_AI_CALLS"),
+            ({"DEBUG": "fasle"}, "DEBUG"),
+            (
+                {**VALID_PRODUCTION_ENV, "SAME_ORIGIN_DEPLOYMENT": "perhaps"},
+                "SAME_ORIGIN_DEPLOYMENT",
+            ),
+        ]
+        for overrides, variable in cases:
+            result = load_settings(overrides)
+            assert result.returncode != 0, f"{variable} typo must refuse startup"
+            assert variable in result.stderr
+            assert "must be a boolean" in result.stderr
+
+    def test_boolean_typos_are_not_echoed(self):
+        for overrides, marker in [
+            ({"ALLOW_PAID_AI_CALLS": "enable"}, "enable"),
+            ({"DEBUG": "fasle"}, "fasle"),
+            ({**VALID_PRODUCTION_ENV, "SAME_ORIGIN_DEPLOYMENT": "perhaps"}, "perhaps"),
+        ]:
+            result = load_settings(overrides)
+            assert result.returncode != 0
+            assert marker not in result.stderr
+
+    def test_documented_boolean_spellings_work(self):
+        for value in ("1", "true", "YES", " On "):
+            result = load_settings({"DEMO_MODE": value})
+            assert result.returncode == 0, f"true spelling {value!r}: {result.stderr}"
+        for value in ("0", "false", "No", " OFF "):
+            result = load_settings({"DEMO_MODE": value, "ALLOW_PAID_AI_CALLS": value})
+            assert result.returncode == 0, f"false spelling {value!r}: {result.stderr}"

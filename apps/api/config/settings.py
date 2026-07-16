@@ -21,11 +21,27 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+# Strict boolean parsing: safety gates must never be silently mis-set by a
+# typo like DEMO_MODE=tru (which permissive parsing would read as False).
+_BOOL_TRUE = frozenset({"1", "true", "yes", "on"})
+_BOOL_FALSE = frozenset({"0", "false", "no", "off"})
+
+
 def env_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
+    raw = os.getenv(name)
+    if raw is None:
         return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    value = raw.strip().lower()
+    if value in _BOOL_TRUE:
+        return True
+    if value in _BOOL_FALSE:
+        return False
+    # Identify only the variable and the accepted format — never echo the
+    # supplied value.
+    raise ImproperlyConfigured(
+        f"{name} must be a boolean: one of 1/true/yes/on or 0/false/no/off "
+        "(case-insensitive); the supplied value is not recognised"
+    )
 
 
 def env_list(name: str, default: str = "") -> list[str]:
@@ -79,6 +95,14 @@ _KNOWN_DEV_VALUES: dict[str, set[str]] = {
 }
 
 
+# Host ENTRIES (matched exactly per comma-separated entry, never by
+# substring — api.sitara.example is fine) that must not appear in a
+# production DJANGO_ALLOWED_HOSTS unless the narrowly-scoped
+# ALLOW_INTERNAL_HOSTNAMES_IN_PRODUCTION flag is deliberately set (e.g. a
+# reverse proxy reaching Django via an internal Docker hostname).
+_DEV_ONLY_HOST_ENTRIES = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", "api"})
+
+
 def _production_value_problem(name: str) -> str | None:
     """Why this environment variable is unacceptable in production, or None.
 
@@ -92,6 +116,37 @@ def _production_value_problem(name: str) -> str | None:
         return f"{name} contains a placeholder value"
     if value in _KNOWN_DEV_VALUES.get(name, set()):
         return f"{name} is a known development-only value"
+    return None
+
+
+def _production_hosts_problem() -> str | None:
+    """DJANGO_ALLOWED_HOSTS entries are validated individually so a
+    development-only host cannot hide inside a comma-separated list."""
+    if env_bool("ALLOW_INTERNAL_HOSTNAMES_IN_PRODUCTION", default=False):
+        return None
+    entries = env_list("DJANGO_ALLOWED_HOSTS")
+    for entry in entries:
+        if entry.lower() in _DEV_ONLY_HOST_ENTRIES:
+            return (
+                "DJANGO_ALLOWED_HOSTS contains a development-only host entry "
+                "(set ALLOW_INTERNAL_HOSTNAMES_IN_PRODUCTION=true only for a "
+                "documented internal reverse-proxy deployment)"
+            )
+    return None
+
+
+def _production_origins_problem(name: str) -> str | None:
+    """CORS/CSRF origin lists must contain at least one scheme-qualified
+    origin in production; an empty string does not count as configured."""
+    origins = env_list(name)
+    if not origins:
+        return (
+            f"{name} must contain at least one origin "
+            "(or set SAME_ORIGIN_DEPLOYMENT=true for a same-origin deployment)"
+        )
+    for origin in origins:
+        if not origin.startswith(("http://", "https://")):
+            return f"{name} contains an entry that is not a scheme-qualified origin"
     return None
 
 
@@ -112,17 +167,19 @@ if IS_PRODUCTION:
         _problem = _production_value_problem(_name)
         if _problem:
             _problems.append(_problem)
-    # Browser origins must be explicit in production. A deliberately empty
-    # allowlist (single-origin deployment where the frontend is served from
-    # the API origin) requires the documented SAME_ORIGIN_DEPLOYMENT flag —
-    # production never silently inherits localhost development origins.
+    _hosts_problem = _production_hosts_problem()
+    if _hosts_problem:
+        _problems.append(_hosts_problem)
+    # Browser origins must be explicit and non-empty in production. A
+    # deliberately same-origin deployment (frontend served from the API
+    # origin) requires the documented SAME_ORIGIN_DEPLOYMENT flag —
+    # production never silently inherits localhost development origins, and
+    # an empty string never counts as configured.
     if not env_bool("SAME_ORIGIN_DEPLOYMENT", default=False):
         for _name in ("CORS_ALLOWED_ORIGINS", "CSRF_TRUSTED_ORIGINS"):
-            if os.getenv(_name) is None:
-                _problems.append(
-                    f"{_name} must be set explicitly "
-                    "(or set SAME_ORIGIN_DEPLOYMENT=true for a same-origin deployment)"
-                )
+            _problem = _production_origins_problem(_name)
+            if _problem:
+                _problems.append(_problem)
     if _problems:
         raise ImproperlyConfigured("invalid production configuration: " + "; ".join(_problems))
 

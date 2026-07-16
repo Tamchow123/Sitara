@@ -105,6 +105,19 @@ Applied before authentication/questionnaire work begins:
   with pinned pip-tools into a hash-verified `requirements.txt`; Docker and
   CI install with `--require-hashes`, and CI fails on a stale lock.
 
+Edge-case follow-up (same day): email identity is enforced at the DATABASE
+layer as `Lower(Trim(email))` uniqueness PLUS a check constraint that stored
+values are already canonical (migration `accounts.0003`, with a count-only
+collision preflight that names no addresses), closing
+`bulk_create`/`QuerySet.update` bypasses; boolean environment variables are
+parsed STRICTLY (unrecognised spellings like `DEMO_MODE=tru` refuse startup
+rather than silently meaning false); production `DJANGO_ALLOWED_HOSTS` is
+validated per entry against development-only hosts (exact-entry matching, so
+`api.sitara.example` is fine; `ALLOW_INTERNAL_HOSTNAMES_IN_PRODUCTION=true`
+exists for documented internal reverse-proxy deployments); and production
+CORS/CSRF origin lists must be non-empty and scheme-qualified unless
+`SAME_ORIGIN_DEPLOYMENT=true`.
+
 ## Alternatives considered
 
 - Single Next.js full-stack app — rejected: the Python evaluation/provider
