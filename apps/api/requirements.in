@@ -1,9 +1,10 @@
 # Direct dependencies for the Sitara API (runtime + development in one
 # understandable list). The installable lock is requirements.txt, generated
-# from this file with pinned pip-tools — regenerate on Windows with:
+# from this file with the PINNED toolchain (pip==26.0.1, pip-tools==7.5.3 on
+# python:3.12.7) — regenerate on Windows with:
 #
 #   docker run --rm -v "${PWD}\apps\api:/app" -w /app python:3.12.7-slim-bookworm `
-#     sh -c "pip install pip-tools==7.4.1 && pip-compile --generate-hashes --output-file requirements.txt requirements.in"
+#     sh -c "python -m pip install --upgrade pip==26.0.1 && python -m pip install pip-tools==7.5.3 && python -m piptools compile --generate-hashes --output-file requirements.txt requirements.in"
 #
 # CI fails if requirements.txt is stale relative to this file.
 

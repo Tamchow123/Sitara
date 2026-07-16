@@ -54,16 +54,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          # Pinned to match the backend Docker image (python:3.12.7-slim-bookworm).
+          python-version: "3.12.7"
           cache: pip
           cache-dependency-path: apps/api/requirements.txt
       - name: Install dependencies (hash-verified lock)
         run: pip install --require-hashes -r requirements.txt
       - name: Dependency lock freshness
         run: |
-          pip install pip-tools==7.4.1
-          pip-compile --generate-hashes --output-file requirements.txt requirements.in
-          git diff --exit-code requirements.txt
+          python -m pip install --upgrade "pip==26.0.1"
+          python -m pip install "pip-tools==7.5.3"
+          python -m piptools compile \
+            --generate-hashes \
+            --output-file requirements.txt \
+            requirements.in
+          git diff --exit-code -- requirements.txt
       - name: Ruff lint
         run: ruff check .
       - name: Ruff format check

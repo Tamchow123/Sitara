@@ -107,8 +107,12 @@ is the fully-pinned, hash-verified lock installed by Docker and CI
 
 ```powershell
 docker run --rm -v "${PWD}\apps\api:/app" -w /app python:3.12.7-slim-bookworm `
-  sh -c "pip install pip-tools==7.4.1 && pip-compile --generate-hashes --output-file requirements.txt requirements.in"
+  sh -c "python -m pip install --upgrade pip==26.0.1 && python -m pip install pip-tools==7.5.3 && python -m piptools compile --generate-hashes --output-file requirements.txt requirements.in"
 ```
+
+The toolchain is pinned (pip 26.0.1 + pip-tools 7.5.3 on Python 3.12.7)
+because pip-tools relies on pip internals and mismatched versions break the
+CI freshness check.
 
 CI fails if the lock is stale.
 
