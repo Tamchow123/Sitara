@@ -4,7 +4,7 @@ import Home from "./page";
 
 const READY_BODY = {
   status: "ok",
-  checks: { database: "ok", redis: "ok", storage: "ok" },
+  checks: { database: "ok", redis: "ok", auth_cache: "ok", storage: "ok" },
 };
 const CONFIG_BODY = {
   demo_mode: true,
@@ -46,8 +46,9 @@ describe("Sitara foundation page", () => {
     );
     expect(screen.getByText("Database")).toBeInTheDocument();
     expect(screen.getByText("Queue (Redis)")).toBeInTheDocument();
+    expect(screen.getByText("Authentication protection")).toBeInTheDocument();
     expect(screen.getByText("Private storage")).toBeInTheDocument();
-    expect(screen.getAllByText("ok")).toHaveLength(3);
+    expect(screen.getAllByText("ok")).toHaveLength(4);
     expect(screen.getByText(/paid generation/i)).toBeInTheDocument();
     expect(screen.getByText("disabled")).toBeInTheDocument();
   });

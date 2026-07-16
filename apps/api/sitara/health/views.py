@@ -27,10 +27,12 @@ def live(request):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def ready(request):
-    """Readiness: PostgreSQL, Redis and private object storage."""
+    """Readiness: PostgreSQL, Redis broker, the Django auth-rate-limit
+    cache, and private object storage."""
     results = {
         "database": "ok" if checks.check_database() else "unavailable",
         "redis": "ok" if checks.check_redis() else "unavailable",
+        "auth_cache": "ok" if checks.check_auth_cache() else "unavailable",
         "storage": "ok" if checks.check_storage() else "unavailable",
     }
     all_ok = all(value == "ok" for value in results.values())

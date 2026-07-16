@@ -22,6 +22,7 @@ import {
   fetchMe,
   type AuthResult,
   type AuthUser,
+  type LogoutResult,
 } from "@/lib/api";
 
 export type AuthStatus = "loading" | "authenticated" | "anonymous" | "unavailable";
@@ -35,7 +36,7 @@ type AuthContextValue = {
     password: string,
     passwordConfirm: string,
   ) => Promise<AuthResult>;
-  logout: () => Promise<void>;
+  logout: () => Promise<LogoutResult>;
   refreshUser: () => Promise<void>;
 };
 
@@ -52,7 +53,11 @@ const defaultValue: AuthContextValue = {
     code: "unavailable",
     message: "Authentication is not ready.",
   }),
-  logout: async () => {},
+  logout: async () => ({
+    ok: false,
+    code: "unavailable",
+    message: "Authentication is not ready.",
+  }),
   refreshUser: async () => {},
 };
 
@@ -104,13 +109,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const logout = useCallback(async () => {
-    try {
-      await apiLogout();
-    } finally {
+  // Local state flips to anonymous ONLY after the server confirms the
+  // session flush. On failure the user stays authenticated (the Django
+  // session may still be active) and the failure propagates to the caller
+  // — never clear state in a finally block here.
+  const logout = useCallback(async (): Promise<LogoutResult> => {
+    const result = await apiLogout();
+    if (result.ok) {
       setUser(null);
       setStatus("anonymous");
     }
+    return result;
   }, []);
 
   return (

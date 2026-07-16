@@ -105,6 +105,12 @@ _KNOWN_DEV_VALUES: dict[str, set[str]] = {
     "S3_ACCESS_KEY_ID": {"sitara-minio", "ci-placeholder"},
     "S3_SECRET_ACCESS_KEY": {"sitara-minio-dev-password", "ci-placeholder"},
     "DJANGO_ALLOWED_HOSTS": set(),
+    # Auth rate limiting fails closed without this cache, so production must
+    # not silently fall back to the committed development/CI values.
+    "REDIS_CACHE_URL": {
+        "redis://localhost:6379/1",
+        "redis://redis:6379/1",
+    },
 }
 
 
@@ -172,6 +178,7 @@ if IS_PRODUCTION:
         "DJANGO_ALLOWED_HOSTS",
         "DATABASE_URL",
         "REDIS_URL",
+        "REDIS_CACHE_URL",
         "S3_ENDPOINT_URL",
         "S3_ACCESS_KEY_ID",
         "S3_SECRET_ACCESS_KEY",

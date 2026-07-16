@@ -9,10 +9,15 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 
+const SIGN_OUT_FAILED_MESSAGE =
+  "Sign-out could not be completed. Your session may still be active. " +
+  "Please try again.";
+
 export default function AccountPage() {
   const { status, user, logout } = useAuth();
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   useEffect(() => {
     // Covers stale/expired session cookies that slipped past middleware.
@@ -21,12 +26,24 @@ export default function AccountPage() {
     }
   }, [status, router]);
 
+  // Redirect home ONLY on server-confirmed logout. On any failure the page
+  // stays put, keeps showing the (still-authenticated) account details and
+  // surfaces an accessible error — never claim a sign-out that Django did
+  // not confirm.
   async function onLogout() {
     setSigningOut(true);
+    setLogoutError(null);
     try {
-      await logout();
+      const result = await logout();
+      if (result.ok) {
+        router.push("/");
+        return;
+      }
+      setLogoutError(SIGN_OUT_FAILED_MESSAGE);
+    } catch {
+      setLogoutError(SIGN_OUT_FAILED_MESSAGE);
     } finally {
-      router.push("/");
+      setSigningOut(false);
     }
   }
 
@@ -53,6 +70,11 @@ export default function AccountPage() {
               <button type="button" onClick={onLogout} disabled={signingOut}>
                 {signingOut ? "Signing out…" : "Sign out"}
               </button>
+              {logoutError && (
+                <p role="alert" className="status-bad">
+                  {logoutError}
+                </p>
+              )}
             </>
           )}
         </div>

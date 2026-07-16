@@ -94,7 +94,8 @@ Fixed-window counters on Django's built-in Redis cache backend
 | Login per IP+email   | 5 / 5 minutes  | `AUTH_LOGIN_EMAIL_LIMIT` / `AUTH_LOGIN_EMAIL_WINDOW_SECONDS` |
 | Registration per IP  | 5 / hour       | `AUTH_REGISTER_IP_LIMIT` / `AUTH_REGISTER_IP_WINDOW_SECONDS` |
 
-- `REMOTE_ADDR` only; `X-Forwarded-For` is not trusted yet.
+- `REMOTE_ADDR` only; `X-Forwarded-For` is not trusted yet (see
+  "Proxy IP limitation" below).
 - Identifiers are HMAC-SHA256-hashed (keyed by `SECRET_KEY`) before entering
   cache keys — no raw email or IP is ever stored.
 - Limit hits return HTTP 429 + `Retry-After` + stable code
@@ -102,6 +103,29 @@ Fixed-window counters on Django's built-in Redis cache backend
 - Successful login clears the email-specific counter.
 - **Fail closed:** if the cache is unreachable, auth endpoints return 503
   (`auth_unavailable`) rather than proceeding unprotected.
+- **Production-required:** because rate limiting fails closed, an
+  unconfigured cache would take authentication down entirely. Production
+  startup therefore rejects a missing, empty, placeholder or committed
+  development/CI `REDIS_CACHE_URL` (error messages name only the variable
+  and reason — never the URL). The cache is also part of readiness: the
+  `auth_cache` check in `/api/v1/health/ready` probes the configured Django
+  cache backend with a constant non-sensitive key, a seconds-long TTL and
+  immediate cleanup, and turns readiness 503 when the cache is down.
+
+### Proxy IP limitation (recorded constraint)
+
+Phase 3B rate limiting keys on `REMOTE_ADDR` **intentionally** and does not
+read `X-Forwarded-For` — a client-controlled header that is trivially
+spoofable unless a trusted proxy chain is configured. Behind the Next.js
+rewrite (and any future reverse proxy), `REMOTE_ADDR` as seen by Django may
+be the proxy's address, which makes the per-IP limits coarser than
+per-client in that topology (the per-IP+email limiter is unaffected).
+Extracting a real client IP safely requires a documented trusted-proxy
+deployment configuration (which proxies are trusted, how many hops, and
+header sanitisation) that belongs to the deployment phase. **Public
+production registration must not launch until that deployment-specific
+decision is completed** — in addition to the email-verification and
+password-recovery prerequisites above.
 
 ### Backend is the authorization boundary
 

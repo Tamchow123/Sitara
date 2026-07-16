@@ -83,7 +83,12 @@ async function postJson<T>(
 // Platform status (unchanged behaviour, now same-origin)
 // ---------------------------------------------------------------------------
 
-export type ReadyChecks = { database: string; redis: string; storage: string };
+export type ReadyChecks = {
+  database: string;
+  redis: string;
+  auth_cache: string;
+  storage: string;
+};
 export type ReadyResponse = { status: string; checks: ReadyChecks };
 export type PublicConfig = {
   demo_mode: boolean;
@@ -132,8 +137,41 @@ function toFailure(status: number, body: ErrorBody): AuthFailure {
   };
 }
 
-export function fetchMe(): Promise<MeResponse> {
-  return getJson<MeResponse>("/api/v1/auth/me/");
+function isAuthUser(value: unknown): value is AuthUser {
+  if (typeof value !== "object" || value === null) return false;
+  const user = value as Record<string, unknown>;
+  return (
+    typeof user.id === "string" &&
+    user.id.length > 0 &&
+    typeof user.email === "string" &&
+    user.email.length > 0
+  );
+}
+
+function isMeResponse(value: unknown): value is MeResponse {
+  if (typeof value !== "object" || value === null) return false;
+  const body = value as Record<string, unknown>;
+  if (body.authenticated === false) return body.user === null;
+  if (body.authenticated === true) return isAuthUser(body.user);
+  return false;
+}
+
+// Session-state bootstrap must be STRICT: anything other than a valid 200
+// me-response (401/403/429/5xx, timeout, invalid JSON, malformed shape)
+// rejects, so the auth provider shows "unavailable" instead of silently
+// treating a broken backend as a signed-out user. A genuine HTTP 200
+// anonymous body still resolves to anonymous. (Readiness intentionally
+// stays status-agnostic — its 503 body is displayable state.)
+export async function fetchMe(): Promise<MeResponse> {
+  const response = await fetchWithTimeout("/api/v1/auth/me/");
+  if (response.status !== 200) {
+    throw new Error("session state unavailable");
+  }
+  const body: unknown = await response.json();
+  if (!isMeResponse(body)) {
+    throw new Error("session state unavailable");
+  }
+  return body;
 }
 
 export async function apiLogin(email: string, password: string): Promise<AuthResult> {
@@ -165,8 +203,38 @@ export async function apiRegister(
   return toFailure(status, data);
 }
 
-export async function apiLogout(): Promise<void> {
-  const { data } = await postJson<AuthBody>("/api/v1/auth/logout/", {});
-  // Django returns a fresh anonymous token after the session flush.
-  csrfToken = data.csrf_token ?? null;
+export type LogoutResult = { ok: true } | AuthFailure;
+
+// Logout succeeds ONLY on a confirmed server response: HTTP 200 with a
+// valid body proving the session is gone (authenticated exactly false,
+// user null, non-empty rotated anonymous token). A timeout, network error,
+// malformed body, 5xx or repeated CSRF failure returns a typed failure and
+// must never be reported as a successful sign-out — the Django session may
+// still be active. The cached CSRF token is left alone on failure (postJson
+// already refreshed it if the failure was CSRF-related).
+export async function apiLogout(): Promise<LogoutResult> {
+  let envelope: ApiEnvelope<AuthBody>;
+  try {
+    envelope = await postJson<AuthBody>("/api/v1/auth/logout/", {});
+  } catch {
+    // Timeout, network failure or invalid JSON — no confirmation exists.
+    return {
+      ok: false,
+      code: "unavailable",
+      message: "The service could not be reached.",
+    };
+  }
+  const { status, data } = envelope;
+  if (
+    status === 200 &&
+    data.authenticated === false &&
+    data.user === null &&
+    typeof data.csrf_token === "string" &&
+    data.csrf_token.length > 0
+  ) {
+    // Django flushed the session and issued a fresh anonymous token.
+    csrfToken = data.csrf_token;
+    return { ok: true };
+  }
+  return toFailure(status, data);
 }

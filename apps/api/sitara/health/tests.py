@@ -13,9 +13,10 @@ class TestLiveness:
 
 
 class TestReadiness:
-    def _patch(self, monkeypatch, database=True, redis=True, storage=True):
+    def _patch(self, monkeypatch, database=True, redis=True, auth_cache=True, storage=True):
         monkeypatch.setattr(health_checks, "check_database", lambda: database)
         monkeypatch.setattr(health_checks, "check_redis", lambda: redis)
+        monkeypatch.setattr(health_checks, "check_auth_cache", lambda: auth_cache)
         monkeypatch.setattr(health_checks, "check_storage", lambda: storage)
 
     def test_ready_ok_when_all_dependencies_ok(self, client, monkeypatch):
@@ -24,10 +25,15 @@ class TestReadiness:
         assert response.status_code == 200
         assert response.json() == {
             "status": "ok",
-            "checks": {"database": "ok", "redis": "ok", "storage": "ok"},
+            "checks": {
+                "database": "ok",
+                "redis": "ok",
+                "auth_cache": "ok",
+                "storage": "ok",
+            },
         }
 
-    @pytest.mark.parametrize("failing", ["database", "redis", "storage"])
+    @pytest.mark.parametrize("failing", ["database", "redis", "auth_cache", "storage"])
     def test_ready_503_when_a_dependency_is_unavailable(self, client, monkeypatch, failing):
         self._patch(monkeypatch, **{failing: False})
         response = client.get(reverse("health-ready"))
@@ -110,6 +116,20 @@ class TestReadinessLoggingSafety:
             assert health_checks.check_redis() is False
         self._assert_safe(caplog, "redis")
 
+    def test_auth_cache_failure_logs_only_safe_metadata(self, caplog, monkeypatch):
+        from django.core.cache import cache as django_cache
+
+        def exploding_set(*args, **kwargs):
+            raise RuntimeError(TestReadinessLoggingSafety.POISON)
+
+        monkeypatch.setattr(django_cache, "set", exploding_set)
+        with caplog.at_level("WARNING"):
+            assert health_checks.check_auth_cache() is False
+        assert self.SECRET not in caplog.text
+        assert "redis://" not in caplog.text
+        assert "readiness auth_cache check failed" in caplog.text
+        assert "exception_type=RuntimeError" in caplog.text
+
     def test_storage_failure_logs_only_safe_metadata(self, caplog, monkeypatch):
         import boto3
 
@@ -134,6 +154,15 @@ class TestReadinessLoggingSafety:
         assert response.status_code == 503
         assert self.SECRET not in response.content.decode()
         assert self.SECRET not in caplog.text
+
+
+class TestAuthCacheProbe:
+    def test_probe_round_trips_and_removes_its_key(self):
+        from django.core.cache import cache
+
+        assert health_checks.check_auth_cache() is True
+        # The probe cleans up after itself and stores no user data.
+        assert cache.get("sitara-readiness-cache-probe") is None
 
 
 class TestCeleryPing:

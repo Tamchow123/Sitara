@@ -87,6 +87,10 @@ export default function Home() {
               <dd>
                 <CheckValue value={state.readiness.checks.redis} />
               </dd>
+              <dt>Authentication protection</dt>
+              <dd>
+                <CheckValue value={state.readiness.checks.auth_cache} />
+              </dd>
               <dt>Private storage</dt>
               <dd>
                 <CheckValue value={state.readiness.checks.storage} />

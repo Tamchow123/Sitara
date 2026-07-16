@@ -103,7 +103,11 @@ host reaches the browser bundle.
 Endpoints: `auth/csrf/`, `auth/register/`, `auth/login/`, `auth/logout/`,
 `auth/me/` under `/api/v1/`. Login/registration are rate-limited per IP and
 per IP+email via the Redis cache (`REDIS_CACHE_URL`, logical DB 1) and fail
-closed (503) if the cache is down. Passwords need ≥ 12 characters and pass
+closed (503) if the cache is down. Because of that fail-closed behaviour,
+`REDIS_CACHE_URL` is **required in production** (startup rejects missing,
+placeholder and committed development values) and the cache appears in
+`/api/v1/health/ready` as the `auth_cache` check ("Authentication
+protection" on the status page). Passwords need ≥ 12 characters and pass
 Django's standard validators.
 
 Not yet implemented (see ADR 0003): email verification, password reset,

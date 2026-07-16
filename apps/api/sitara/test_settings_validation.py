@@ -22,6 +22,7 @@ VALID_PRODUCTION_ENV = {
     "DJANGO_ALLOWED_HOSTS": "api.sitara.example",
     "DATABASE_URL": "postgres://sitara_prod:s3parate-real-pass@db.internal:5432/sitara",
     "REDIS_URL": "redis://cache.internal:6379/0",
+    "REDIS_CACHE_URL": "redis://cache.internal:6379/1",
     "S3_ENDPOINT_URL": "https://storage.example.com",
     "S3_ACCESS_KEY_ID": "PRODACCESSKEY01",
     "S3_SECRET_ACCESS_KEY": "prod-storage-secret-xyz",
@@ -113,6 +114,34 @@ class TestProductionValidation:
             "S3_SECRET_ACCESS_KEY",
             "__REPLACE_ME__",
         )
+
+    def test_missing_auth_cache_url_fails_in_production(self):
+        env = {k: v for k, v in VALID_PRODUCTION_ENV.items() if k != "REDIS_CACHE_URL"}
+        result = load_settings(env)
+        assert result.returncode != 0
+        assert "REDIS_CACHE_URL must be set" in result.stderr
+
+    def test_empty_auth_cache_url_fails_in_production(self):
+        result = load_settings({**VALID_PRODUCTION_ENV, "REDIS_CACHE_URL": "   "})
+        assert result.returncode != 0
+        assert "REDIS_CACHE_URL must be set" in result.stderr
+
+    @pytest.mark.parametrize(
+        "value,secret_fragment",
+        [
+            ("redis://localhost:6379/1", "localhost:6379"),
+            ("redis://redis:6379/1", "redis:6379"),
+            ("redis://__REPLACE_ME__:6379/1", "__REPLACE_ME__"),
+        ],
+    )
+    def test_dev_or_placeholder_auth_cache_url_fails_without_echo(self, value, secret_fragment):
+        result = load_settings({**VALID_PRODUCTION_ENV, "REDIS_CACHE_URL": value})
+        assert result.returncode != 0, f"REDIS_CACHE_URL={value!r} must be rejected"
+        exception_line = result.stderr.strip().splitlines()[-1]
+        assert "REDIS_CACHE_URL" in exception_line
+        # Only the variable name and reason — never the URL itself.
+        assert secret_fragment not in result.stderr
+        assert secret_fragment not in result.stdout
 
     def test_empty_required_values_fail(self):
         result = load_settings({**VALID_PRODUCTION_ENV, "DJANGO_ALLOWED_HOSTS": "   "})

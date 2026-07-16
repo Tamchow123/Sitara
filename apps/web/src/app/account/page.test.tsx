@@ -87,6 +87,57 @@ describe("account page", () => {
     expect(document.body.textContent).not.toContain("22222222-2222");
   });
 
+  it("failed logout keeps the user authenticated, shows an error and does not redirect", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/v1/auth/me/") return json(ME_AUTHENTICATED);
+        if (url === "/api/v1/auth/csrf/") return json({ csrf_token: "t" });
+        if (url === "/api/v1/auth/logout/")
+          return json({ error: { code: "auth_unavailable", message: "down" } }, 503);
+        return json({}, 404);
+      }),
+    );
+    renderPage();
+    const button = await screen.findByRole("button", { name: /sign out/i });
+    fireEvent.click(button);
+
+    // Accessible failure message; session may still be active server-side.
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/sign-out could not be completed/i);
+    expect(alert).toHaveTextContent(/session may still be active/i);
+
+    // No redirect, account details still visible, state still authenticated.
+    expect(push).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+    expect(screen.getByText("bride@example.com")).toBeInTheDocument();
+    // The button is usable again for a retry.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /sign out/i })).toBeEnabled(),
+    );
+  });
+
+  it("network failure during logout keeps authenticated state intact", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/v1/auth/me/") return json(ME_AUTHENTICATED);
+        if (url === "/api/v1/auth/csrf/") return json({ csrf_token: "t" });
+        if (url === "/api/v1/auth/logout/") throw new TypeError("fetch failed");
+        return json({}, 404);
+      }),
+    );
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /sign out/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /sign-out could not be completed/i,
+    );
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.getByText("bride@example.com")).toBeInTheDocument();
+  });
+
   it("logout calls the API and moves auth state to anonymous", async () => {
     mockBackend(ME_AUTHENTICATED);
     renderPage();

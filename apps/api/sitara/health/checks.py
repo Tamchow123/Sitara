@@ -45,6 +45,24 @@ def check_redis() -> bool:
         return False
 
 
+def check_auth_cache() -> bool:
+    """Authentication rate limiting fails CLOSED when the Django cache is
+    down (503 on login/registration), so cache reachability is part of
+    readiness. The probe uses a constant, non-sensitive key, stores no user
+    data, expires in seconds regardless, and is removed afterwards."""
+    try:
+        from django.core.cache import cache
+
+        probe_key = "sitara-readiness-cache-probe"
+        cache.set(probe_key, "ok", timeout=5)
+        value = cache.get(probe_key)
+        cache.delete(probe_key)
+        return value == "ok"
+    except Exception as exc:
+        _log_failure("auth_cache", exc)
+        return False
+
+
 def check_storage() -> bool:
     """Confirm the private bucket is reachable with the configured
     credentials (HeadBucket; no object data is read or written)."""
