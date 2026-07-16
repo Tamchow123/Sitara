@@ -157,12 +157,67 @@ class TestReadinessLoggingSafety:
 
 
 class TestAuthCacheProbe:
-    def test_probe_round_trips_and_removes_its_key(self):
+    def _capture_probe_keys(self, monkeypatch) -> list[str]:
         from django.core.cache import cache
 
+        keys: list[str] = []
+        original_set = cache.set
+
+        def recording_set(key, value, *args, **kwargs):
+            keys.append(key)
+            return original_set(key, value, *args, **kwargs)
+
+        monkeypatch.setattr(cache, "set", recording_set)
+        return keys
+
+    def test_probe_round_trips_and_removes_its_key(self, monkeypatch):
+        from django.core.cache import cache
+
+        keys = self._capture_probe_keys(monkeypatch)
         assert health_checks.check_auth_cache() is True
         # The probe cleans up after itself and stores no user data.
-        assert cache.get("sitara-readiness-cache-probe") is None
+        assert len(keys) == 1
+        assert keys[0].startswith(health_checks.AUTH_CACHE_PROBE_PREFIX)
+        assert cache.get(keys[0]) is None
+
+    def test_probe_key_is_unique_per_invocation(self, monkeypatch):
+        """Simultaneous readiness checks must not delete or overwrite each
+        other's probe entry, so every invocation uses a fresh key."""
+        keys = self._capture_probe_keys(monkeypatch)
+        assert health_checks.check_auth_cache() is True
+        assert health_checks.check_auth_cache() is True
+        assert len(keys) == 2
+        assert keys[0] != keys[1]
+
+    def test_probe_survives_a_concurrent_check_deleting_nothing_of_its_own(self, monkeypatch):
+        """A second interleaved probe (set+get+delete of ITS key) cannot
+        break the first probe's round trip."""
+        from django.core.cache import cache
+
+        original_get = cache.get
+
+        def interleaving_get(key, *args, **kwargs):
+            # Another readiness check runs to completion in the middle of
+            # this probe's set→get window.
+            cache.get = original_get
+            try:
+                assert health_checks.check_auth_cache() is True
+            finally:
+                cache.get = interleaving_get
+            return original_get(key, *args, **kwargs)
+
+        monkeypatch.setattr(cache, "get", interleaving_get)
+        assert health_checks.check_auth_cache() is True
+
+    def test_probe_delete_failure_does_not_fail_the_check(self, monkeypatch):
+        """Deletion is best-effort cleanup; the short TTL is the backstop."""
+        from django.core.cache import cache
+
+        def exploding_delete(key, *args, **kwargs):
+            raise RuntimeError("delete refused")
+
+        monkeypatch.setattr(cache, "delete", exploding_delete)
+        assert health_checks.check_auth_cache() is True
 
 
 class TestCeleryPing:

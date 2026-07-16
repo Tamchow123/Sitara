@@ -32,6 +32,9 @@ x-api-environment: &api-environment
   FAST_IMAGE_MODEL: black-forest-labs/flux-1.1-pro
   DEMO_MODE: ${DEMO_MODE:-true}
   ALLOW_PAID_AI_CALLS: ${ALLOW_PAID_AI_CALLS:-false}
+  # Application-level cap on versions per design (initial concept + one
+  # refinement). Strict positive integer; invalid values refuse startup.
+  MAX_DESIGN_VERSIONS: ${MAX_DESIGN_VERSIONS:-2}
 
 services:
   postgres:

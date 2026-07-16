@@ -6,12 +6,12 @@ AI-assisted South Asian bridalwear **concept design**. A guided questionnaire, a
 
 ## Status
 
-**Phase 3B — session authentication.** On top of the Phase 3A foundation (Next.js frontend, Django/DRF backend, PostgreSQL, Redis + Celery, private MinIO/S3 storage, health endpoints, a fail-closed AI-provider boundary, tests and CI), Sitara now has optional accounts: Django database sessions with CSRF protection, `/login` · `/register` · `/account` pages, and a same-origin `/api/` rewrite so the browser never talks to the Django host directly — see `docs/decisions/0003-session-authentication.md`. The bridal questionnaire, design-spec generation and image generation arrive in later Phase 3 tasks. Phase 2 (image-model evaluation) selected **`black-forest-labs/flux-1.1-pro`** — see `docs/decisions/0001-image-model.md` / `.json`.
+**Phase 4 — private design ownership.** On top of the Phase 3A/3B foundation (Next.js frontend, Django/DRF backend, PostgreSQL, Redis + Celery, private MinIO/S3 storage, health endpoints, fail-closed AI-provider boundary, session authentication with optional accounts — ADR 0003), Sitara now has its core design domain: `DesignSession` / `Design` / `DesignVersion` / `GenerationAttempt` models and a private design API (`/api/v1/designs/`). Designs are owned either by the anonymous browser session or by an authenticated user; an anonymous workspace is claimed automatically after login; anything inaccessible answers 404 — see `docs/decisions/0004-private-design-ownership.md`. The bridal questionnaire, design-spec generation and image generation arrive in later phases. Phase 2 (image-model evaluation) selected **`black-forest-labs/flux-1.1-pro`** — see `docs/decisions/0001-image-model.md` / `.json`.
 
 ## Layout
 
 ```
-apps/api      Django + DRF backend (config/, sitara/{accounts,health,ai_gateway})
+apps/api      Django + DRF backend (config/, sitara/{accounts,designs,health,ai_gateway})
 apps/web      Next.js (App Router, strict TypeScript) frontend
 infra/minio   local object-storage bucket initialisation
 experiments/  Phase 2 model evaluation (frozen evidence; do not modify outputs/)
@@ -114,6 +114,19 @@ Not yet implemented (see ADR 0003): email verification, password reset,
 account deletion, OAuth/MFA — public production registration is **not**
 feature-complete until verification + recovery are designed.
 
+### 7c. Private designs (Phase 4)
+
+`GET/POST /api/v1/designs/` and `GET/PATCH /api/v1/designs/<uuid>/` manage
+private draft designs (title-only writes for now; `status=draft`,
+`answers={}` are server-controlled until the questionnaire phase). Ownership
+is dual (ADR 0004): anonymous drafts are private to the browser session —
+the Django session data holds an internal workspace UUID, never a raw
+session key — and are **claimed automatically for the user on the next
+design request after login**. Authenticated users reach their designs from
+any signed-in browser. Anything inaccessible returns 404 (never 403), and
+`MAX_DESIGN_VERSIONS` (default 2 = initial concept + one refinement) caps
+version numbering at the application level.
+
 ### 8. Celery ping test
 
 ```powershell
@@ -171,8 +184,8 @@ docker compose down --volumes
 
 `python manage.py check --deploy` under local development settings reports five expected warnings (W004 HSTS, W008 SSL redirect, W012/W016 secure cookies, W018 DEBUG) — all are governed by the `APP_ENV=production` settings branch, which enforces secure cookies, optional SSL redirect/HSTS, and fails startup when required production values (secret key, hosts, database, Redis, storage credentials) are missing.
 
-## Security & privacy foundations (Phases 3A–3B)
+## Security & privacy foundations (Phases 3A–4)
 
-Implemented now: private storage bucket with no public ACLs; CORS/CSRF explicit allowlists; DRF authenticated-by-default; JSON-only API; secrets only via environment; tokens never logged or returned; demo mode provably unable to call paid providers; session authentication with HttpOnly cookies, JSON CSRF failure handling, hashed-identifier rate limiting and `Cache-Control: no-store` on all auth responses. Django endpoint permissions are the authorization boundary — the Next.js middleware redirect on `/account` is a navigation nicety only.
+Implemented now: private storage bucket with no public ACLs; CORS/CSRF explicit allowlists; DRF authenticated-by-default; JSON-only API; secrets only via environment; tokens never logged or returned; demo mode provably unable to call paid providers; session authentication with HttpOnly cookies, JSON CSRF failure handling, hashed-identifier rate limiting and `Cache-Control: no-store` on all auth responses; private-by-construction designs (ownership filtering before every lookup, 404 for anything inaccessible, no raw session keys in domain tables, no public design URLs). Django endpoint permissions are the authorization boundary — the Next.js middleware redirect on `/account` is a navigation nicety only.
 
 Deliberately **not yet** implemented (later phases): signed image delivery, email verification and password recovery, inspiration-image uploads with rights confirmation (max 3), the single-refinement limit enforcement, retention/deletion, quotas and cost ledgers.

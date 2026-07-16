@@ -7,6 +7,7 @@ access keys, so on failure we log only safe metadata (which check failed
 and the exception TYPE), never ``str(exception)`` and never a traceback."""
 
 import logging
+import uuid
 
 import redis
 from django.conf import settings
@@ -45,19 +46,28 @@ def check_redis() -> bool:
         return False
 
 
+AUTH_CACHE_PROBE_PREFIX = "sitara-readiness-cache-probe"
+
+
 def check_auth_cache() -> bool:
     """Authentication rate limiting fails CLOSED when the Django cache is
     down (503 on login/registration), so cache reachability is part of
-    readiness. The probe uses a constant, non-sensitive key, stores no user
-    data, expires in seconds regardless, and is removed afterwards."""
+    readiness. The probe key and value are unique per invocation (random,
+    non-sensitive, no user data) so simultaneous readiness checks cannot
+    delete or overwrite one another's probe; the entry expires in seconds
+    regardless, and deletion is best-effort cleanup only."""
     try:
         from django.core.cache import cache
 
-        probe_key = "sitara-readiness-cache-probe"
-        cache.set(probe_key, "ok", timeout=5)
+        nonce = uuid.uuid4().hex
+        probe_key = f"{AUTH_CACHE_PROBE_PREFIX}:{nonce}"
+        cache.set(probe_key, nonce, timeout=5)
         value = cache.get(probe_key)
-        cache.delete(probe_key)
-        return value == "ok"
+        try:
+            cache.delete(probe_key)
+        except Exception:
+            pass  # best-effort; the short TTL removes it anyway
+        return value == nonce
     except Exception as exc:
         _log_failure("auth_cache", exc)
         return False

@@ -217,6 +217,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "sitara.accounts",
+    "sitara.designs",
     "sitara.health",
     "sitara.ai_gateway",
 ]
@@ -356,6 +357,14 @@ REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
 # Product limits surfaced via /api/v1/config/public.
 MAX_INSPIRATION_IMAGES = 3
 MAX_REFINEMENTS = 1
+
+# Application-level cap on DesignVersions per design (initial concept + one
+# refinement). Deliberately NOT a database constraint (future multi-round
+# refinement must not need a migration) and deliberately NOT in the public
+# config endpoint — max_refinements already communicates the user-facing
+# limit. Strict parsing: an invalid value refuses startup in EVERY
+# environment, production included.
+MAX_DESIGN_VERSIONS = env_positive_int("MAX_DESIGN_VERSIONS", 2)
 
 # ---------------------------------------------------------------------------
 # Authentication (Phase 3B) — Django sessions only. No JWT, no token
