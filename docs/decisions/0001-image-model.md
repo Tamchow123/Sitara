@@ -191,9 +191,15 @@ FAST_IMAGE_MODEL=black-forest-labs/flux-1.1-pro
 DEMO_MODE=true
 ```
 
-The machine-readable decision artefact (referencing the locked score hash
-and all evidence files) is
-`experiments/model-eval/outputs/runs/screening-20260714-001/model_decision.json`.
+The CANONICAL machine-readable decision is version-controlled alongside
+this record at `docs/decisions/0001-image-model.json` (validated on every
+checkout by always-running tests; it references the locked score hash and a
+repository-relative evidence manifest with expected hashes). The gitignored
+run-local file
+`experiments/model-eval/outputs/runs/screening-20260714-001/model_decision.json`
+is an evidence-run mirror only — when the run is present locally it must
+agree with the canonical JSON on every decision-critical field, but it is
+never the source of truth on a fresh clone or in CI.
 
 ## Limitations (decision is an MVP baseline, revisable)
 
@@ -269,5 +275,6 @@ nothing in the application may assume them yet.
   `ac0355030709c192f56371e1780628870dfe001a4c72ce1693961c4b9842dec7`),
   protected mapping `candidate_key_scoped.json`, scope
   `review_scope.json` + `review_scope_report.md`, operational
-  `reliability_report.md`, machine-readable decision
-  `model_decision.json`.
+  `reliability_report.md`, evidence-mirror `model_decision.json`. Canonical
+  machine-readable decision: `docs/decisions/0001-image-model.json`
+  (committed).

@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "decision_id": "0001-image-model",
+  "status": "accepted",
+  "decided_at": "2026-07-16T00:00:00+00:00",
+  "screening_run_id": "screening-20260714-001",
+  "scoring_sha256": "ac0355030709c192f56371e1780628870dfe001a4c72ce1693961c4b9842dec7",
+  "default_model_key": "flux-1-1-pro",
+  "default_provider_model": "black-forest-labs/flux-1.1-pro",
+  "fast_model_key": "flux-1-1-pro",
+  "fast_provider_model": "black-forest-labs/flux-1.1-pro",
+  "demo_mode_provider_calls": 0,
+  "demo_mode_policy": "No paid model call in demo mode. Demo serves pre-generated private fixtures only.",
+  "configuration_defaults": {
+    "DEFAULT_IMAGE_MODEL": "black-forest-labs/flux-1.1-pro",
+    "FAST_IMAGE_MODEL": "black-forest-labs/flux-1.1-pro",
+    "DEMO_MODE": "true"
+  },
+  "coupling_note": "Configuration default only: the application keeps a provider/model abstraction with environment-based override and never hard-codes Replicate model ids in application logic.",
+  "visual_results": {
+    "flux-2-pro": {"pooled_mean": 4.2917, "hard_failure_flags": 1},
+    "flux-2-max": {"pooled_mean": 4.2833, "hard_failure_flags": 0},
+    "flux-1-1-pro": {"pooled_mean": 4.2667, "hard_failure_flags": 0},
+    "klein-4b": {"pooled_mean": 3.9333, "hard_failure_flags": 4}
+  },
+  "operational_results": {
+    "flux-1-1-pro": {
+      "first_attempt_successes": "12/12",
+      "first_attempt_success_rate": 1.0,
+      "median_success_latency_s": 4.8,
+      "max_success_latency_s": 5.2,
+      "first_attempt_spend_usd": 0.48,
+      "observed_cost_per_cell_usd": 0.04
+    },
+    "flux-2-max": {
+      "first_attempt_successes": "12/12",
+      "first_attempt_success_rate": 1.0,
+      "median_success_latency_s": 28.1,
+      "max_success_latency_s": 43.9,
+      "first_attempt_spend_usd": 3.0,
+      "observed_cost_per_cell_usd": 0.25
+    },
+    "flux-2-pro": {
+      "first_attempt_successes": "11/12",
+      "first_attempt_success_rate": 0.917,
+      "transient_failures_recovered_on_retry_1": 1,
+      "median_success_latency_s": 11.5,
+      "first_attempt_spend_usd": 1.44,
+      "retry_spend_usd": 0.12,
+      "configured_cost_per_attempt_usd": 0.12
+    },
+    "klein-4b": {
+      "first_attempt_successes": "12/12",
+      "first_attempt_success_rate": 1.0,
+      "median_success_latency_s": 4.3,
+      "max_success_latency_s_anomalous": 502.9,
+      "first_attempt_spend_usd": 0.6,
+      "observed_cost_per_cell_usd": 0.05,
+      "visual_hard_failure_flags": 4
+    },
+    "schnell": {
+      "status": "operationally_disqualified",
+      "first_attempt_successes": "8/12",
+      "unresolved_cells_after_retry_2": 2,
+      "successful_logical_outputs": 10,
+      "total_provider_attempts": 19,
+      "failed_provider_attempts": 9
+    }
+  },
+  "excluded_models": {
+    "schnell": "Operationally disqualified before blind visual scoring: repeated Director E9828 runtime failures, two cells unresolved after the retry-2 limit; could not produce a complete balanced evaluation set.",
+    "klein-4b": "Rejected for MVP use after blind scoring: lowest pooled mean (3.9333), four visual hard-failure flags including garment silhouette substitutions, a 502.9s latency outlier, and slightly higher observed screening cost than FLUX 1.1 Pro. Its 0.5s median-latency advantage does not compensate."
+  },
+  "retained_challengers": {
+    "flux-2-max": "Retained as a research / potential future premium benchmark: highest-fidelity clean result (4.2833, zero hard failures) but ~5.9x slower by median latency and ~6.25x more expensive per screening generation than FLUX 1.1 Pro.",
+    "flux-2-pro": "Retained as a challenger, not the default: numerically highest pooled mean (4.2917) but one hard-failure flag, one transient first-attempt failure, ~2.4x slower by median latency and ~3x more expensive per configured screening attempt than FLUX 1.1 Pro."
+  },
+  "decision_rationale": "FLUX 1.1 Pro is the utility winner rather than the absolute numerical visual-score winner. Its pooled mean (4.2667) sits within 0.0250 of FLUX.2 Pro and 0.0166 of FLUX.2 Max - differences that are not meaningful in a single-rater, 12-brief screening - while it alone combines perfect 12/12 first-attempt reliability, zero hard failures, ~4.8s median latency, substantially lower cost ($0.040/generation observed), strong cultural coherence and strong bridal-occasion distinctiveness. Versus FLUX.2 Max it is ~5.9x faster and ~6.25x cheaper; versus FLUX.2 Pro it is ~2.4x faster and ~3x cheaper.",
+  "limitations": [
+    "one visual evaluator (project owner), no inter-rater agreement",
+    "one seed per cell",
+    "12 text-only briefs",
+    "base generation only",
+    "no direct inspiration-image (reference conditioning) evaluation",
+    "no refinement evaluation",
+    "no real bridal customer or cultural-expert panel",
+    "decision is an MVP baseline and remains revisable as later stages produce evidence"
+  ],
+  "open_questions": [
+    "reference-image / inspiration influence (text-only vs metadata vs reference conditioning) — not yet evaluated; UNDECIDED",
+    "constrained refinement strategy (fresh regeneration vs image editing) — not yet evaluated; UNDECIDED"
+  ],
+  "next_evaluation_stages": [
+    "FLUX 1.1 Pro prompt-hardening for minimal/moderate embroidery briefs",
+    "rights-approved inspiration influence testing (text-only vs metadata vs reference image)",
+    "one constrained refinement test (fresh regeneration vs image editing)",
+    "privacy and image-retention verification against current provider terms",
+    "small human / cultural-expert validation set",
+    "production integration with monitoring thresholds (latency, failure rate, spend)"
+  ],
+  "evidence_manifest": {
+    "note": "This committed JSON is the CANONICAL machine-readable decision. Paths are repository-relative. Entries with committed=false are gitignored local evidence (large, private, or protected); when the evidence run is present locally, its artefacts must match the hashes below. The run-local model_decision.json is an evidence-run mirror, not the canonical decision. Aggregate hashes are SHA-256 over the files' bytes concatenated in sorted-filename order.",
+    "entries": [
+      {
+        "path": "docs/decisions/0001-image-model.md",
+        "description": "Human-readable decision record",
+        "committed": true
+      },
+      {
+        "path": "experiments/model-eval/outputs/runs/screening-20260714-001/blind-scoped/scoring_sheet_locked.csv",
+        "description": "Locked blind scoring sheet (single evaluator, 48 rows)",
+        "committed": false,
+        "sha256": "ac0355030709c192f56371e1780628870dfe001a4c72ce1693961c4b9842dec7"
+      },
+      {
+        "path": "experiments/model-eval/outputs/runs/screening-20260714-001/results",
+        "description": "Original first-attempt result records (60)",
+        "committed": false,
+        "aggregate_sha256": "1aa60813c76a34e48beb805fa964b9082bfd70f85bf3c4d401d9cdf3ca024a6c"
+      },
+      {
+        "path": "experiments/model-eval/outputs/runs/screening-20260714-001/retry-results",
+        "description": "Targeted retry attempt records (8)",
+        "committed": false,
+        "aggregate_sha256": "b402dfea4c18afe33a2f976ab70dfa086681d70ce42e030114555efe94b3ab34"
+      },
+      {
+        "path": "experiments/model-eval/outputs/runs/screening-20260714-001/budget_ledger.json",
+        "description": "Reserve-before-spend budget ledger (68 settled entries, $5.76 spent of $10)",
+        "committed": false,
+        "sha256": "3066e2509115f182f1a5875f3cc46835dd38aa61cf624cc24b9d03a69db01a7f"
+      },
+      {
+        "path": "experiments/model-eval/outputs/runs/screening-20260714-001/run_summary.json",
+        "description": "Canonical logical run state (55/5 first-attempt, 3 recovered, 2 unresolved)",
+        "committed": false,
+        "sha256": "43db982547eb23d904b42a67aac5e9769debf39beadd708dc5123e7a7a7aaa7e"
+      },
+      {
+        "path": "experiments/model-eval/outputs/runs/screening-20260714-001/review_scope.json",
+        "description": "Balanced 4x12 review scope excluding schnell",
+        "committed": false,
+        "sha256": "ef8dc958cb085326ee0490db335cf08419fbb93f0ed24fde41217893e7d58e35"
+      },
+      {
+        "path": "experiments/model-eval/outputs/runs/screening-20260714-001/review_scope_report.md",
+        "description": "Non-blind disposition report (schnell disqualification facts)",
+        "committed": false
+      },
+      {
+        "path": "experiments/model-eval/outputs/runs/screening-20260714-001/reliability_report.md",
+        "description": "Non-blind per-model operational reliability report",
+        "committed": false
+      },
+      {
+        "path": "experiments/model-eval/outputs/runs/screening-20260714-001/candidate_key_scoped.json",
+        "description": "PROTECTED blind-review mapping (kept out of the repository by policy)",
+        "committed": false
+      },
+      {
+        "path": "experiments/model-eval/outputs/runs/screening-20260714-001/model_decision.json",
+        "description": "Evidence-run mirror of this decision (must agree on all decision-critical fields when present)",
+        "committed": false
+      }
+    ]
+  }
+}
