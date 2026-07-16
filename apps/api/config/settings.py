@@ -44,6 +44,19 @@ def env_bool(name: str, default: bool) -> bool:
     )
 
 
+def env_positive_int(name: str, default: int) -> int:
+    """Strict positive-integer parsing; never echoes the supplied value."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    if not value.isdigit() or int(value) <= 0:
+        raise ImproperlyConfigured(
+            f"{name} must be a positive integer; the supplied value is not recognised"
+        )
+    return int(value)
+
+
 def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
 
@@ -253,6 +266,16 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 
+# Django cache (rate limiting) — Redis DB 1, separate from Celery's DB 0.
+# Uses Django's built-in Redis cache backend; no extra client package.
+REDIS_CACHE_URL = os.getenv("REDIS_CACHE_URL", "redis://localhost:6379/1")
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_CACHE_URL,
+    }
+}
+
 # ---------------------------------------------------------------------------
 # REST framework — authenticated by default; JSON only.
 # ---------------------------------------------------------------------------
@@ -326,6 +349,47 @@ REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
 # Product limits surfaced via /api/v1/config/public.
 MAX_INSPIRATION_IMAGES = 3
 MAX_REFINEMENTS = 1
+
+# ---------------------------------------------------------------------------
+# Authentication (Phase 3B) — Django sessions only. No JWT, no token
+# cookies, no localStorage tokens.
+# ---------------------------------------------------------------------------
+
+# Project-specific cookie names: cookies are scoped by host (not port), and
+# other local applications also run on localhost.
+SESSION_COOKIE_NAME = "sitara_sessionid"
+CSRF_COOKIE_NAME = "sitara_csrftoken"
+
+# Failed CSRF checks return JSON, never Django's HTML error page.
+CSRF_FAILURE_VIEW = "sitara.accounts.csrf.csrf_failure"
+
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 12},
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
+    },
+]
+
+# Pathological-input guard for registration/login request bodies.
+AUTH_PASSWORD_MAX_LENGTH = 128
+
+# Fixed-window authentication rate limits (Redis-backed; identifiers are
+# HMAC-hashed before entering cache keys — never raw emails or IPs).
+AUTH_LOGIN_IP_LIMIT = env_positive_int("AUTH_LOGIN_IP_LIMIT", 20)
+AUTH_LOGIN_IP_WINDOW_SECONDS = env_positive_int("AUTH_LOGIN_IP_WINDOW_SECONDS", 300)
+AUTH_LOGIN_EMAIL_LIMIT = env_positive_int("AUTH_LOGIN_EMAIL_LIMIT", 5)
+AUTH_LOGIN_EMAIL_WINDOW_SECONDS = env_positive_int("AUTH_LOGIN_EMAIL_WINDOW_SECONDS", 300)
+AUTH_REGISTER_IP_LIMIT = env_positive_int("AUTH_REGISTER_IP_LIMIT", 5)
+AUTH_REGISTER_IP_WINDOW_SECONDS = env_positive_int("AUTH_REGISTER_IP_WINDOW_SECONDS", 3600)
 
 # ---------------------------------------------------------------------------
 # Security hardening

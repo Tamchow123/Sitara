@@ -43,6 +43,16 @@ Standing rules across all phases:
 - **Manual checkpoint:** `docker compose up` + both dev servers yield a working stub page and healthy `/readyz`.
 - **Commit:** `chore: scaffold Next.js and Django monorepo with health endpoints and CI`
 
+> **Delivered as Phase 3A** (`feat(app): add Sitara application foundation` and hardening follow-ups) with an evolved layout: `apps/web` + `apps/api`, custom UUID/email user model, MinIO private storage, Celery, fail-closed AI gates. See ADR 0002.
+
+## Phase 3B — Session authentication *(delivered; inserted, no renumbering)*
+- **Scope:** Django database sessions + `authenticate()/login()/logout()` + CSRF as the only auth mechanism; endpoints `GET /api/v1/auth/csrf/`, `POST /api/v1/auth/register/`, `POST /api/v1/auth/login/`, `POST /api/v1/auth/logout/`, `GET /api/v1/auth/me/`; project cookie names `sitara_sessionid`/`sitara_csrftoken` (HttpOnly session, SameSite=Lax, Secure in production); JSON CSRF failure view; 12-char-minimum password policy via Django validators; Redis fixed-window auth rate limits (HMAC-hashed identifiers, fail-closed 503); same-origin Next.js `/api/:path*` rewrite via server-only `API_INTERNAL_BASE_URL` (no `NEXT_PUBLIC_*` backend host); frontend `/login`, `/register`, `/account` with in-memory CSRF client and cookie-presence middleware (navigation-only). Accounts are an **optional** capability — this revises the original "no accounts" MVP non-goal (ADR 0003).
+- **Non-goals:** email verification, password reset/change, email change, account deletion, OAuth, MFA, magic links, JWT, refresh tokens, profiles, questionnaire/design models, guest design claiming, uploads, provider calls, email delivery, deployment. Public production registration is not feature-complete until email verification + password recovery are designed.
+- **Commands:** `docker compose up -d`; `docker compose exec api pytest`; `docker compose exec web npm test -- --run`; manual flow via `http://localhost:3001/api/v1/auth/...`.
+- **Automated tests:** CSRF enforcement with `enforce_csrf_checks=True`; generic invalid-credential/duplicate-registration responses; session-key rotation on login; logout session invalidation; rate-limit 429/`Retry-After`/hashed keys/503 outage; `Cache-Control: no-store`; log-safety capture; frontend CSRF bootstrap/retry-once, open-redirect rejection, storage-free credentials.
+- **Manual checkpoint:** register → me → logout through the Next.js origin; HttpOnly `sitara_sessionid` verified; no credentials in browser storage.
+- **Commit:** `feat(auth): add secure session authentication`
+
 ## Phase 4 — Minimal database and session foundation
 - **Scope:** DesignSession, Design, DesignVersion, GenerationAttempt models + migrations + admin registration; anonymous sessions via **Django's standard session framework** (DesignSession created lazily and associated with the Django session; Django-issued CSRF token validated on unsafe requests); session-scoping helpers (cross-session → 404). DesignVersion: positive-integer `version_number` with a unique `(design, version_number)` constraint; `MAX_DESIGN_VERSIONS` enforced in application validation only.
 - **Non-goals:** no questionnaire content, no catalogue, no generation logic, no retention purge, no custom auth cookie of any kind.

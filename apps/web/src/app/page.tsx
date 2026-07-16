@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   fetchPublicConfig,
@@ -7,6 +8,7 @@ import {
   type PublicConfig,
   type ReadyResponse,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 type BackendState =
   | { phase: "loading" }
@@ -19,6 +21,22 @@ function CheckValue({ value }: { value: string }) {
     <span className={ok ? "status-ok" : "status-bad"}>
       {ok ? "ok" : "unavailable"}
     </span>
+  );
+}
+
+function AuthNav() {
+  const { status, user } = useAuth();
+  return (
+    <nav aria-label="Account">
+      {status === "authenticated" && user ? (
+        <Link href="/account">Account ({user.email})</Link>
+      ) : (
+        <>
+          <Link href="/login">Sign in</Link>{" "}
+          <Link href="/register">Create account</Link>
+        </>
+      )}
+    </nav>
   );
 }
 
@@ -41,6 +59,7 @@ export default function Home() {
 
   return (
     <main>
+      <AuthNav />
       <h1>Sitara</h1>
       <p className="tagline">
         AI-assisted South Asian bridalwear concept design — from questionnaire

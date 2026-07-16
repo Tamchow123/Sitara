@@ -6,7 +6,7 @@ AI-assisted South Asian bridalwear **concept design**. A guided questionnaire, a
 
 ## Status
 
-**Phase 3A — application foundation.** The production-shaped monorepo skeleton is in place: Next.js frontend, Django/DRF backend, PostgreSQL, Redis + Celery, private MinIO/S3 storage, health endpoints, a fail-closed AI-provider boundary, tests and CI. The bridal questionnaire, design-spec generation and image generation arrive in later Phase 3 tasks. Phase 2 (image-model evaluation) selected **`black-forest-labs/flux-1.1-pro`** — see `docs/decisions/0001-image-model.md` / `.json`.
+**Phase 3B — session authentication.** On top of the Phase 3A foundation (Next.js frontend, Django/DRF backend, PostgreSQL, Redis + Celery, private MinIO/S3 storage, health endpoints, a fail-closed AI-provider boundary, tests and CI), Sitara now has optional accounts: Django database sessions with CSRF protection, `/login` · `/register` · `/account` pages, and a same-origin `/api/` rewrite so the browser never talks to the Django host directly — see `docs/decisions/0003-session-authentication.md`. The bridal questionnaire, design-spec generation and image generation arrive in later Phase 3 tasks. Phase 2 (image-model evaluation) selected **`black-forest-labs/flux-1.1-pro`** — see `docs/decisions/0001-image-model.md` / `.json`.
 
 ## Layout
 
@@ -74,15 +74,41 @@ docker compose exec api python manage.py createsuperuser
 
 ### 6. API health checks
 
+The browser path goes through the Next.js same-origin rewrite on port 3001
+(direct port-8000 access remains available for backend debugging):
+
 ```powershell
-Invoke-RestMethod http://localhost:8000/api/v1/health/live
-Invoke-RestMethod http://localhost:8000/api/v1/health/ready
-Invoke-RestMethod http://localhost:8000/api/v1/config/public
+Invoke-RestMethod http://localhost:3001/api/v1/health/live
+Invoke-RestMethod http://localhost:3001/api/v1/health/ready
+Invoke-RestMethod http://localhost:3001/api/v1/config/public
 ```
 
 ### 7. Frontend
 
-Open <http://localhost:3001> — the foundation page shows backend connection, database/Redis/storage readiness, and the demo-mode badge.
+Open <http://localhost:3001> — the foundation page shows backend connection, database/Redis/storage readiness, and the demo-mode badge, plus **Sign in** / **Create account** links (`/login`, `/register`, `/account`).
+
+### 7b. Authentication (Phase 3B)
+
+Accounts use **Django server-side sessions only** — no JWT, no tokens in
+browser storage. The session cookie `sitara_sessionid` is HttpOnly +
+SameSite=Lax (Secure in production); the CSRF token is bootstrapped from
+`GET /api/v1/auth/csrf/`, held in memory, and sent as `X-CSRFToken`.
+
+All browser API traffic uses **relative `/api/` paths** through the Next.js
+rewrite; the server-only `API_INTERNAL_BASE_URL` variable points the rewrite
+at Django (`http://api:8000` in Docker, `http://localhost:8000` for native
+`npm run dev`). `NEXT_PUBLIC_API_BASE_URL` no longer exists — no backend
+host reaches the browser bundle.
+
+Endpoints: `auth/csrf/`, `auth/register/`, `auth/login/`, `auth/logout/`,
+`auth/me/` under `/api/v1/`. Login/registration are rate-limited per IP and
+per IP+email via the Redis cache (`REDIS_CACHE_URL`, logical DB 1) and fail
+closed (503) if the cache is down. Passwords need ≥ 12 characters and pass
+Django's standard validators.
+
+Not yet implemented (see ADR 0003): email verification, password reset,
+account deletion, OAuth/MFA — public production registration is **not**
+feature-complete until verification + recovery are designed.
 
 ### 8. Celery ping test
 
@@ -141,8 +167,8 @@ docker compose down --volumes
 
 `python manage.py check --deploy` under local development settings reports five expected warnings (W004 HSTS, W008 SSL redirect, W012/W016 secure cookies, W018 DEBUG) — all are governed by the `APP_ENV=production` settings branch, which enforces secure cookies, optional SSL redirect/HSTS, and fails startup when required production values (secret key, hosts, database, Redis, storage credentials) are missing.
 
-## Security & privacy foundations (Phase 3A)
+## Security & privacy foundations (Phases 3A–3B)
 
-Implemented now: private storage bucket with no public ACLs; CORS/CSRF explicit allowlists; DRF authenticated-by-default; JSON-only API; secrets only via environment; tokens never logged or returned; demo mode provably unable to call paid providers.
+Implemented now: private storage bucket with no public ACLs; CORS/CSRF explicit allowlists; DRF authenticated-by-default; JSON-only API; secrets only via environment; tokens never logged or returned; demo mode provably unable to call paid providers; session authentication with HttpOnly cookies, JSON CSRF failure handling, hashed-identifier rate limiting and `Cache-Control: no-store` on all auth responses. Django endpoint permissions are the authorization boundary — the Next.js middleware redirect on `/account` is a navigation nicety only.
 
-Deliberately **not yet** implemented (later phases): signed image delivery, authentication endpoints, inspiration-image uploads with rights confirmation (max 3), the single-refinement limit enforcement, retention/deletion, quotas and cost ledgers.
+Deliberately **not yet** implemented (later phases): signed image delivery, email verification and password recovery, inspiration-image uploads with rights confirmation (max 3), the single-refinement limit enforcement, retention/deletion, quotas and cost ledgers.

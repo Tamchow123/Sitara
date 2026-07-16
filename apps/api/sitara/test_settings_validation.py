@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
 import pytest
 
 API_ROOT = Path(__file__).resolve().parents[1]
@@ -163,9 +164,7 @@ class TestProductionHostValidation:
         ],
     )
     def test_local_django_hosts_are_rejected_in_production(self, hosts):
-        result = load_settings(
-            {**VALID_PRODUCTION_ENV, "DJANGO_ALLOWED_HOSTS": hosts}
-        )
+        result = load_settings({**VALID_PRODUCTION_ENV, "DJANGO_ALLOWED_HOSTS": hosts})
 
         assert result.returncode != 0, f"hosts {hosts!r} must be rejected"
 
@@ -180,9 +179,7 @@ class TestProductionHostValidation:
         leak_marker = "host-leak-marker-7f3a9.invalid"
         hosts = f"{leak_marker},localhost"
 
-        result = load_settings(
-            {**VALID_PRODUCTION_ENV, "DJANGO_ALLOWED_HOSTS": hosts}
-        )
+        result = load_settings({**VALID_PRODUCTION_ENV, "DJANGO_ALLOWED_HOSTS": hosts})
 
         assert result.returncode != 0
         assert "DJANGO_ALLOWED_HOSTS" in result.stderr
@@ -227,3 +224,59 @@ class TestStrictBooleanParsing:
         for value in ("0", "false", "No", " OFF "):
             result = load_settings({"DEMO_MODE": value, "ALLOW_PAID_AI_CALLS": value})
             assert result.returncode == 0, f"false spelling {value!r}: {result.stderr}"
+
+
+class TestCookieConfiguration:
+    """Project-specific cookie names; secure flags in production; no
+    JWT/token cookie machinery anywhere in settings."""
+
+    ATTR_PROBE = (
+        "import config.settings as s; "
+        "print(s.SESSION_COOKIE_NAME, s.CSRF_COOKIE_NAME, "
+        "s.SESSION_COOKIE_HTTPONLY, "
+        "getattr(s, 'SESSION_COOKIE_SECURE', False), "
+        "getattr(s, 'CSRF_COOKIE_SECURE', False))"
+    )
+
+    def _probe(self, env: dict[str, str]) -> subprocess.CompletedProcess:
+        minimal = {"PATH": os.environ.get("PATH", "")}
+        return subprocess.run(
+            [sys.executable, "-c", self.ATTR_PROBE],
+            cwd=API_ROOT,
+            env={**minimal, **env},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    def test_sitara_cookie_names_and_httponly_in_development(self):
+        result = self._probe({})
+        assert result.returncode == 0, result.stderr
+        names = result.stdout.split()
+        assert names[0] == "sitara_sessionid"
+        assert names[1] == "sitara_csrftoken"
+        assert names[2] == "True"  # HttpOnly session cookie
+
+    def test_secure_cookie_flags_enabled_in_production(self):
+        result = self._probe(VALID_PRODUCTION_ENV)
+        assert result.returncode == 0, result.stderr
+        values = result.stdout.split()
+        assert values == ["sitara_sessionid", "sitara_csrftoken", "True", "True", "True"]
+
+    def test_no_jwt_or_token_cookie_settings_exist(self):
+        probe = (
+            "import config.settings as s; "
+            "names=[n for n in dir(s) if 'JWT' in n.upper() or 'TOKEN_COOKIE' in n.upper()]; "
+            "print(names)"
+        )
+        minimal = {"PATH": os.environ.get("PATH", "")}
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            cwd=API_ROOT,
+            env=minimal,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "[]"

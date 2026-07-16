@@ -45,7 +45,7 @@ The phased implementation roadmap (with per-phase scope, non-goals, commands, te
 
 ## 3. Functional Requirements
 
-**FR1 — Sessions.** Django's standard session framework issues the anonymous session cookie; the DesignSession row is associated with the Django session; Django issues and validates the CSRF token, and unsafe requests carry it. No accounts, no custom authentication cookie (any future exception requires a documented requirement Django sessions cannot meet).
+**FR1 — Sessions.** Django's standard session framework issues the anonymous session cookie; the DesignSession row is associated with the Django session; Django issues and validates the CSRF token, and unsafe requests carry it. No custom authentication cookie (any future exception requires a documented requirement Django sessions cannot meet). *Revised in Phase 3B (see ADR 0003):* optional **session-authenticated accounts** now exist on the same Django session framework (register/login/logout/me). Whether design creation will require an account is not yet decided; guest design claiming is not implemented (no anonymous design records exist yet to migrate).
 **FR2 — Questionnaire.** Versioned question schema served by the backend, including **machine-readable validation and compatibility constraints** per question (types, required, option sets, bounds, caps). The frontend *derives* its Zod validation from those constraints and additionally Zod-validates the stable API submission envelope; rules are not manually duplicated in Zod and DRF. **Django is the authoritative validator and always re-validates submissions against the questionnaire version, taking precedence.** Draft answers persisted per session.
 **FR3 — Inspiration catalogue.** Admin-curated images only, each with a mandatory verified usage-rights record. Public API exposes only approved images. Max 3 selections per design, enforced server-side.
 **FR4 — Concept generation (async).** Pipeline: Claude Sonnet 5 → schema-constrained **DesignSpec** (structured output) → Django-side re-validation → **deterministic versioned prompt builder** → Replicate FLUX render. Job status pollable; failures surface a friendly retryable error with a stable domain error code.
@@ -75,7 +75,7 @@ The phased implementation roadmap (with per-phase scope, non-goals, commands, te
 
 ## 5. Explicit Non-Goals (MVP)
 
-- No user accounts, authentication, or profiles.
+- ~~No user accounts, authentication, or profiles.~~ *Revised in Phase 3B:* optional session-authenticated accounts exist (email + password, Django sessions — ADR 0003). Still excluded: profiles, email verification, password reset, OAuth/MFA; public production registration is not feature-complete until email verification and password recovery are designed.
 - No payments, subscriptions, or marketplace.
 - No tailor measurements, sizing, patterns, or manufacturing output.
 - No user image uploads.
@@ -217,7 +217,7 @@ Base: `/api/v1/`, always reached same-origin (dev rewrite / prod reverse-proxy p
 
 **Security.** Every design read/write scoped to the Django session (via its DesignSession); cross-session access → 404. Session cookie `Secure`/`HttpOnly`/`SameSite=Lax`; Django-issued CSRF token required on unsafe requests. Same-origin `/api/` proxying keeps the browser off cross-origin API calls, minimising the CORS surface. Django hardening: security headers/CSP, DEBUG off, secrets via env. Provider keys only on backend/workers.
 
-**Privacy.** Designs private by default; retention purge; minimal PII (no accounts/emails); IPs stored only as salted hashes; plain-language privacy page that also documents the signed-URL shareability caveat.
+**Privacy.** Designs private by default; retention purge; minimal PII (accounts are optional as of Phase 3B and store only a canonical email — no profiles); IPs stored only as salted hashes (auth rate limiting uses HMAC-hashed identifiers, never raw IPs or emails); plain-language privacy page that also documents the signed-URL shareability caveat.
 
 **Copyright / cultural risk.** Mandatory verified UsageRights before catalogue approval; attribution rendered where required; no scraping, ever. Prompts are built deterministically from a controlled vocabulary — named-designer/brand imitation blocked at input (denylist) and never introduced by the builder. Output disclaimer: AI concepts, not any designer's work. Cultural vocabulary (garment/ceremony terms across nikah, mehndi, baraat, walima, pheras, and regional traditions) human-reviewed; Claude instructed not to conflate distinct regional traditions.
 

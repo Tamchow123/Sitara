@@ -43,6 +43,7 @@ jobs:
       DEBUG: "true"
       DATABASE_URL: postgres://sitara:sitara-ci-password@localhost:5432/sitara
       REDIS_URL: redis://localhost:6379/0
+      REDIS_CACHE_URL: redis://localhost:6379/1
       CELERY_BROKER_URL: redis://localhost:6379/0
       CELERY_RESULT_BACKEND: redis://localhost:6379/0
       # Storage checks are mocked in tests; these values point nowhere real.
@@ -86,7 +87,8 @@ jobs:
       run:
         working-directory: apps/web
     env:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      # Server-only rewrite target; never reaches browser bundles.
+      API_INTERNAL_BASE_URL: http://localhost:8000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
