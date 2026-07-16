@@ -8,8 +8,10 @@ import socket
 import pytest
 
 from sitara.ai_gateway.policy import (
+    PAID_PROVIDERS_IMPLEMENTED,
     GenerationPolicy,
     PaidGenerationDisabled,
+    generation_is_available,
     get_image_generation_provider,
     get_structured_design_provider,
 )
@@ -82,6 +84,49 @@ class TestPaidGatesFailClosed:
         with pytest.raises(PaidGenerationDisabled) as excinfo:
             get_image_generation_provider()
         assert token not in str(excinfo.value)
+
+
+class TestGenerationCapability:
+    """The capability policy combines environment authorisation with
+    implementation availability, so the public endpoint and the provider
+    factory can never contradict each other."""
+
+    ALL_GATE_COMBINATIONS = [(True, False), (True, True), (False, False), (False, True)]
+
+    def test_capability_flag_is_code_level_and_off_in_phase_3a(self):
+        assert PAID_PROVIDERS_IMPLEMENTED is False
+
+    @pytest.mark.parametrize("demo,allow", ALL_GATE_COMBINATIONS)
+    def test_generation_unavailable_for_every_gate_combination(self, settings, demo, allow):
+        settings.DEMO_MODE = demo
+        settings.ALLOW_PAID_AI_CALLS = allow
+        assert generation_is_available() is False
+
+    @pytest.mark.parametrize("demo,allow", ALL_GATE_COMBINATIONS)
+    def test_endpoint_and_provider_policy_agree(self, client, settings, demo, allow):
+        """generation_enabled=true would REQUIRE the factory to hand out a
+        paid provider without raising; while that is impossible, the
+        endpoint must say false. Checked for every gate combination."""
+        settings.DEMO_MODE = demo
+        settings.ALLOW_PAID_AI_CALLS = allow
+        reported = client.get("/api/v1/config/public").json()["generation_enabled"]
+        assert reported == generation_is_available()
+        if demo:
+            # Demo path serves fixtures; that is not "generation enabled".
+            assert isinstance(get_image_generation_provider(), DemoImageGenerationProvider)
+            assert reported is False
+        else:
+            with pytest.raises(PaidGenerationDisabled):
+                get_image_generation_provider()
+            assert reported is False
+
+    def test_both_gates_open_endpoint_still_reports_disabled(self, client, settings):
+        settings.DEMO_MODE = False
+        settings.ALLOW_PAID_AI_CALLS = True
+        body = client.get("/api/v1/config/public").json()
+        assert body["generation_enabled"] is False
+        with pytest.raises(PaidGenerationDisabled, match="not implemented"):
+            get_structured_design_provider()
 
 
 class TestDemoProvidersAreDeterministicAndLocal:

@@ -36,7 +36,17 @@ def env_list(name: str, default: str = "") -> list[str]:
 # Environment / core
 # ---------------------------------------------------------------------------
 
+# Environment classification fails closed: anything outside this exact
+# allowlist (typos like "prod", "Production", "produciton") refuses startup
+# instead of silently being treated as development.
+ALLOWED_APP_ENVS = ("development", "test", "production")
+
 APP_ENV = os.getenv("APP_ENV", "development")
+if APP_ENV not in ALLOWED_APP_ENVS:
+    raise ImproperlyConfigured(
+        f"APP_ENV must be one of {list(ALLOWED_APP_ENVS)}; got {APP_ENV!r}. "
+        "Unknown environments are never treated as development."
+    )
 IS_PRODUCTION = APP_ENV == "production"
 
 DEBUG = env_bool("DEBUG", default=not IS_PRODUCTION)
@@ -46,16 +56,52 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "" if IS_PRODUCTION else _DEV_ONLY_S
 
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,api")
 
-# Fail startup for genuinely required production settings.
+# ---------------------------------------------------------------------------
+# Production configuration validation — fail startup on missing values AND
+# on known development/placeholder values. Error messages identify only the
+# variable name and reason; rejected values are never echoed or logged.
+# ---------------------------------------------------------------------------
+
+# Case-insensitive markers that always indicate an unconfigured value.
+_PLACEHOLDER_MARKERS = ("change-me", "__replace_me__")
+
+# Exact known development/CI/example values that must never reach production.
+_KNOWN_DEV_VALUES: dict[str, set[str]] = {
+    "DJANGO_SECRET_KEY": {_DEV_ONLY_SECRET},
+    "DATABASE_URL": {
+        "postgres://sitara:sitara-dev-password@localhost:5432/sitara",
+        "postgres://sitara:sitara-dev-password@postgres:5432/sitara",
+        "postgres://sitara:sitara-ci-password@localhost:5432/sitara",
+    },
+    "S3_ACCESS_KEY_ID": {"sitara-minio", "ci-placeholder"},
+    "S3_SECRET_ACCESS_KEY": {"sitara-minio-dev-password", "ci-placeholder"},
+    "DJANGO_ALLOWED_HOSTS": set(),
+}
+
+
+def _production_value_problem(name: str) -> str | None:
+    """Why this environment variable is unacceptable in production, or None.
+
+    Deliberately returns only the variable NAME and a reason — never the
+    value, which may be a secret or connection string."""
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return f"{name} must be set"
+    lowered = value.lower()
+    if any(marker in lowered for marker in _PLACEHOLDER_MARKERS):
+        return f"{name} contains a placeholder value"
+    if value in _KNOWN_DEV_VALUES.get(name, set()):
+        return f"{name} is a known development-only value"
+    return None
+
+
 if IS_PRODUCTION:
     _problems: list[str] = []
-    if not SECRET_KEY or SECRET_KEY == _DEV_ONLY_SECRET:
-        _problems.append("DJANGO_SECRET_KEY must be set to a real secret")
     if DEBUG:
         _problems.append("DEBUG must be false")
-    if not os.getenv("DJANGO_ALLOWED_HOSTS"):
-        _problems.append("DJANGO_ALLOWED_HOSTS must be set")
-    for _required in (
+    for _name in (
+        "DJANGO_SECRET_KEY",
+        "DJANGO_ALLOWED_HOSTS",
         "DATABASE_URL",
         "REDIS_URL",
         "S3_ENDPOINT_URL",
@@ -63,8 +109,20 @@ if IS_PRODUCTION:
         "S3_SECRET_ACCESS_KEY",
         "S3_BUCKET_NAME",
     ):
-        if not os.getenv(_required):
-            _problems.append(f"{_required} must be set")
+        _problem = _production_value_problem(_name)
+        if _problem:
+            _problems.append(_problem)
+    # Browser origins must be explicit in production. A deliberately empty
+    # allowlist (single-origin deployment where the frontend is served from
+    # the API origin) requires the documented SAME_ORIGIN_DEPLOYMENT flag —
+    # production never silently inherits localhost development origins.
+    if not env_bool("SAME_ORIGIN_DEPLOYMENT", default=False):
+        for _name in ("CORS_ALLOWED_ORIGINS", "CSRF_TRUSTED_ORIGINS"):
+            if os.getenv(_name) is None:
+                _problems.append(
+                    f"{_name} must be set explicitly "
+                    "(or set SAME_ORIGIN_DEPLOYMENT=true for a same-origin deployment)"
+                )
     if _problems:
         raise ImproperlyConfigured("invalid production configuration: " + "; ".join(_problems))
 
@@ -154,8 +212,11 @@ REST_FRAMEWORK = {
 # CORS / CSRF — explicit allowlists, never wildcards.
 # ---------------------------------------------------------------------------
 
-CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
-CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "http://localhost:3000")
+# Localhost defaults apply ONLY outside production; production requires the
+# variables explicitly (validated above) or SAME_ORIGIN_DEPLOYMENT=true.
+_DEV_ORIGINS = "" if IS_PRODUCTION else "http://localhost:3000,http://localhost:3001"
+CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", _DEV_ORIGINS)
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", _DEV_ORIGINS)
 
 # ---------------------------------------------------------------------------
 # Private S3-compatible object storage (MinIO locally).

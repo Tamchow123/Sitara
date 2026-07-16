@@ -21,14 +21,26 @@ export type PublicConfig = {
   max_refinements: number;
 };
 
+export const REQUEST_TIMEOUT_MS = 5000;
+
 async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBaseUrl()}${path}`, {
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-  });
-  // Readiness intentionally returns 503 with a JSON body when a dependency
-  // is down — that is still displayable state, not a thrown error.
-  return (await response.json()) as T;
+  // Abort half-open connections so the UI can never sit on
+  // "Checking backend status…" forever; a timeout, a network error or a
+  // malformed JSON body all reject and surface as backend-unavailable.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${apiBaseUrl()}${path}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    // Readiness intentionally returns 503 with a JSON body when a dependency
+    // is down — that is still displayable state, not a thrown error.
+    return (await response.json()) as T;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function fetchReadiness(): Promise<ReadyResponse> {

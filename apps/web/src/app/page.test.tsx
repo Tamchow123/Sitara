@@ -73,6 +73,47 @@ describe("Sitara foundation page", () => {
     );
   });
 
+  it("times out half-open requests and shows the unavailable state", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("The operation was aborted.", "AbortError")),
+            );
+          }),
+      ),
+    );
+    render(<Home />);
+    expect(screen.getByText(/checking backend status/i)).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(6000);
+    vi.useRealTimers();
+    await waitFor(() =>
+      expect(screen.getByText(/backend unavailable/i)).toBeInTheDocument(),
+    );
+    // No stack trace or exception text leaks into the page.
+    expect(document.body.textContent).not.toMatch(/AbortError|stack|Error:/);
+  });
+
+  it("treats a malformed JSON response as backend unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("<html>proxy error</html>", {
+            status: 200,
+            headers: { "Content-Type": "text/html" },
+          }),
+      ),
+    );
+    render(<Home />);
+    await waitFor(() =>
+      expect(screen.getByText(/backend unavailable/i)).toBeInTheDocument(),
+    );
+  });
+
   it("has an accessible heading and a polite status region", async () => {
     mockFetchOk();
     render(<Home />);

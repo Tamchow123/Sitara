@@ -30,6 +30,13 @@ class PaidGenerationDisabled(Exception):
     (or, in Phase 3A, not implemented). Message is safe to log."""
 
 
+# CODE-LEVEL capability flag: flips to True only in the future task that
+# actually implements the paid Anthropic/Replicate providers. Deliberately
+# NOT an environment variable — an operator must never be able to claim a
+# capability the codebase does not have.
+PAID_PROVIDERS_IMPLEMENTED = False
+
+
 @dataclass(frozen=True)
 class GenerationPolicy:
     demo_mode: bool
@@ -44,7 +51,23 @@ class GenerationPolicy:
 
     @property
     def paid_calls_permitted(self) -> bool:
+        """Environment AUTHORISATION only (both gates open). Whether
+        generation is actually available also depends on implementation
+        capability — see generation_is_available()."""
         return (not self.demo_mode) and self.allow_paid_ai_calls
+
+
+def generation_is_available() -> bool:
+    """The single source of truth for whether paid generation can happen:
+    environment authorisation (both gates) AND implementation availability.
+
+    The public config endpoint and the provider factory both derive from
+    this state, so they can never contradict each other: while
+    PAID_PROVIDERS_IMPLEMENTED is False, this returns False for EVERY
+    environment combination, including DEMO_MODE=false with
+    ALLOW_PAID_AI_CALLS=true."""
+    policy = GenerationPolicy.from_settings()
+    return policy.paid_calls_permitted and PAID_PROVIDERS_IMPLEMENTED
 
 
 def _refuse_paid(policy: GenerationPolicy) -> Exception:
@@ -52,11 +75,13 @@ def _refuse_paid(policy: GenerationPolicy) -> Exception:
         reason = "demo mode is enabled (DEMO_MODE=true)"
     elif not policy.allow_paid_ai_calls:
         reason = "paid AI calls are disabled (ALLOW_PAID_AI_CALLS=false)"
-    else:
+    elif not PAID_PROVIDERS_IMPLEMENTED:
         reason = (
             "paid providers are not implemented in Phase 3A; "
             "demo mode is the only supported generation path"
         )
+    else:  # pragma: no cover - unreachable until a paid path exists
+        reason = "paid generation is unavailable"
     return PaidGenerationDisabled(f"paid generation refused: {reason}")
 
 

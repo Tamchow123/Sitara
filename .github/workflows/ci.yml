@@ -57,8 +57,13 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: apps/api/requirements.txt
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install dependencies (hash-verified lock)
+        run: pip install --require-hashes -r requirements.txt
+      - name: Dependency lock freshness
+        run: |
+          pip install pip-tools==7.4.1
+          pip-compile --generate-hashes --output-file requirements.txt requirements.in
+          git diff --exit-code requirements.txt
       - name: Ruff lint
         run: ruff check .
       - name: Ruff format check

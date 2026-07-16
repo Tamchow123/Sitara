@@ -1,8 +1,10 @@
 """Readiness dependency checks.
 
 Each check returns True/False and must never leak credentials, connection
-strings or internal exception details to callers — failures are reported
-only as a status word."""
+strings or internal exception details — neither to HTTP callers nor to
+LOGS. Connection-library exceptions routinely embed passwords, URLs and
+access keys, so on failure we log only safe metadata (which check failed
+and the exception TYPE), never ``str(exception)`` and never a traceback."""
 
 import logging
 
@@ -13,14 +15,19 @@ from django.db import connections
 logger = logging.getLogger(__name__)
 
 
+def _log_failure(check_name: str, exc: Exception) -> None:
+    """Safe operational breadcrumb: check name + exception type only."""
+    logger.warning("readiness %s check failed exception_type=%s", check_name, type(exc).__name__)
+
+
 def check_database() -> bool:
     try:
         with connections["default"].cursor() as cursor:
             cursor.execute("SELECT 1")
             cursor.fetchone()
         return True
-    except Exception:
-        logger.warning("readiness: database check failed", exc_info=True)
+    except Exception as exc:
+        _log_failure("database", exc)
         return False
 
 
@@ -33,8 +40,8 @@ def check_redis() -> bool:
             return bool(client.ping())
         finally:
             client.close()
-    except Exception:
-        logger.warning("readiness: redis check failed", exc_info=True)
+    except Exception as exc:
+        _log_failure("redis", exc)
         return False
 
 
@@ -55,6 +62,6 @@ def check_storage() -> bool:
         )
         client.head_bucket(Bucket=settings.S3_BUCKET_NAME)
         return True
-    except Exception:
-        logger.warning("readiness: storage check failed", exc_info=True)
+    except Exception as exc:
+        _log_failure("storage", exc)
         return False

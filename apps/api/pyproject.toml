@@ -4,8 +4,11 @@ version = "0.1.0"
 description = "Sitara API — AI-assisted South Asian bridalwear concept design (backend)"
 requires-python = ">=3.12"
 
-# Runtime dependencies are pinned in requirements.txt (the reproducible
-# dependency metadata installed by Docker and CI).
+# Dependency workflow: direct dependencies live in requirements.in;
+# requirements.txt is the fully-pinned, hash-verified lock compiled from it
+# with pip-tools (see requirements.in for the regeneration command). Docker
+# and CI install ONLY from the lock, with --require-hashes; CI fails when
+# the lock is stale relative to requirements.in.
 
 [tool.ruff]
 target-version = "py312"

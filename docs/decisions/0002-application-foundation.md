@@ -69,6 +69,42 @@ them), and inherit CI that always runs fail-closed. Local port 3001 is used
 for the web app on the development machine because 3000 is occupied by an
 unrelated project (`WEB_PORT` overrides).
 
+## Hardening amendments (2026-07-16, same phase)
+
+Applied before authentication/questionnaire work begins:
+
+- **Strict environment classification** — `APP_ENV` must be exactly one of
+  `development | test | production`; anything else (e.g. `prod`,
+  `Production`) refuses startup instead of silently running as development.
+- **Production placeholder rejection** — production startup rejects empty
+  values, the internal development secret, `change-me`/`__REPLACE_ME__`
+  sentinels and the committed development/CI example values for the secret
+  key, database URL, storage credentials and allowed hosts; browser-origin
+  allowlists must be set explicitly (or `SAME_ORIGIN_DEPLOYMENT=true`
+  declared). Refusal messages name only the variable, never the value.
+- **Case-insensitive email identity** — emails are trimmed and lower-cased
+  on every save, authentication lookup is canonical, and PostgreSQL
+  enforces a `Lower(email)` unique constraint (migration
+  `accounts.0002`, which fails loudly on pre-existing collisions rather
+  than merging accounts).
+- **Capability-aware generation status** — `generation_is_available()`
+  combines the two environment gates with the code-level
+  `PAID_PROVIDERS_IMPLEMENTED` flag (deliberately NOT an environment
+  variable), so `/api/v1/config/public` can never claim generation exists
+  while no paid provider is implemented — even with both gates open — and
+  can never contradict the provider factory.
+- **Credential-safe readiness logging** — dependency-check failures log
+  only the check name and exception type; never `str(exception)`,
+  connection strings or tracebacks.
+- **Loopback-only local ports** — all host-published dev services bind to
+  `${BIND_HOST:-127.0.0.1}`; the web container waits for a HEALTHY api.
+- **Frontend request timeout** — a 5s `AbortController` timeout turns
+  half-open connections, network errors and malformed JSON into the
+  explicit backend-unavailable state.
+- **Fully locked dependencies** — `requirements.in` (direct pins) compiles
+  with pinned pip-tools into a hash-verified `requirements.txt`; Docker and
+  CI install with `--require-hashes`, and CI fails on a stale lock.
+
 ## Alternatives considered
 
 - Single Next.js full-stack app — rejected: the Python evaluation/provider

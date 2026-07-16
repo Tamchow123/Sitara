@@ -28,7 +28,9 @@ DEMO_MODE           = true    -> no Anthropic / Replicate calls, fixtures only
 ALLOW_PAID_AI_CALLS = false   -> a present API token NEVER enables paid calls
 ```
 
-Paid generation will eventually require **both** `DEMO_MODE=false` **and** `ALLOW_PAID_AI_CALLS=true`; no paid provider is implemented in Phase 3A at all, and tests prove the gates hold.
+Paid generation will eventually require **both** `DEMO_MODE=false` **and** `ALLOW_PAID_AI_CALLS=true` **and** an actual paid-provider implementation: the public `generation_enabled` flag comes from a capability policy that also checks the code-level `PAID_PROVIDERS_IMPLEMENTED` constant, so the API can never advertise generation that does not exist — even with both environment gates open. Tests prove all of it.
+
+Further hardening: `APP_ENV` is validated against an exact allowlist (`development|test|production` — typos refuse startup); production startup rejects placeholder/development credentials by name without echoing values; email identity is case-insensitive and whitespace-trimmed with a PostgreSQL `Lower(email)` unique constraint; readiness-check failures log only the check name and exception type (never connection strings); local dev ports bind to loopback (`BIND_HOST=127.0.0.1`, overridable); and the frontend aborts backend requests after 5 seconds instead of hanging on "Checking backend status…".
 
 ## Local development (Windows PowerShell)
 
@@ -96,6 +98,19 @@ docker compose exec api pytest
 docker compose exec api ruff check .
 docker compose exec api ruff format --check .
 ```
+
+### 9b. Backend dependency lock
+
+Direct dependencies live in `apps/api/requirements.in`; `requirements.txt`
+is the fully-pinned, hash-verified lock installed by Docker and CI
+(`--require-hashes`). After editing `requirements.in`, regenerate:
+
+```powershell
+docker run --rm -v "${PWD}\apps\api:/app" -w /app python:3.12.7-slim-bookworm `
+  sh -c "pip install pip-tools==7.4.1 && pip-compile --generate-hashes --output-file requirements.txt requirements.in"
+```
+
+CI fails if the lock is stale.
 
 ### 10. Frontend tests & checks
 

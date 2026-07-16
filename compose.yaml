@@ -39,7 +39,7 @@ services:
       POSTGRES_PASSWORD: sitara-dev-password
       POSTGRES_DB: sitara
     ports:
-      - "5432:5432"
+      - "${BIND_HOST:-127.0.0.1}:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -51,7 +51,7 @@ services:
   redis:
     image: redis:7.4.1-alpine
     ports:
-      - "6379:6379"
+      - "${BIND_HOST:-127.0.0.1}:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -65,8 +65,8 @@ services:
       MINIO_ROOT_USER: sitara-minio
       MINIO_ROOT_PASSWORD: sitara-minio-dev-password
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${BIND_HOST:-127.0.0.1}:9000:9000"
+      - "${BIND_HOST:-127.0.0.1}:9001:9001"
     volumes:
       - miniodata:/data
     healthcheck:
@@ -96,7 +96,7 @@ services:
   api:
     build: apps/api
     ports:
-      - "8000:8000"
+      - "${BIND_HOST:-127.0.0.1}:8000:8000"
     environment: *api-environment
     depends_on:
       migrate:
@@ -130,12 +130,12 @@ services:
   web:
     build: apps/web
     ports:
-      - "${WEB_PORT:-3001}:3000"
+      - "${BIND_HOST:-127.0.0.1}:${WEB_PORT:-3001}:3000"
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
 
 volumes:
   pgdata:

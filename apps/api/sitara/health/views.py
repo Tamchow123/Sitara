@@ -12,6 +12,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from sitara.ai_gateway.policy import generation_is_available
+
 from . import checks
 
 
@@ -41,14 +43,16 @@ def ready(request):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def public_config(request):
-    """Safe public configuration for the frontend. generation_enabled is
-    False throughout Phase 3A: paid generation requires BOTH
-    DEMO_MODE=false and ALLOW_PAID_AI_CALLS=true, and no paid provider is
-    implemented yet."""
+    """Safe public configuration for the frontend.
+
+    generation_enabled comes from the central capability policy
+    (environment authorisation AND implementation availability), so this
+    endpoint can never claim generation exists when no paid provider is
+    implemented — even with both environment gates open."""
     return Response(
         {
             "demo_mode": settings.DEMO_MODE,
-            "generation_enabled": (not settings.DEMO_MODE) and settings.ALLOW_PAID_AI_CALLS,
+            "generation_enabled": generation_is_available(),
             "max_inspiration_images": settings.MAX_INSPIRATION_IMAGES,
             "max_refinements": settings.MAX_REFINEMENTS,
         }
