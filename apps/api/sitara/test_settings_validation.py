@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+import pytest
 
 API_ROOT = Path(__file__).resolve().parents[1]
 
