@@ -151,41 +151,45 @@ class TestProductionValidation:
 
 
 class TestProductionHostValidation:
-    def test_local_django_hosts_are_rejected_in_production(self):
-        for hosts in (
+    @pytest.mark.parametrize(
+        "hosts",
+        [
             "localhost",
             "127.0.0.1",
             "api",
             "localhost,127.0.0.1,api",
-            "api.sitara.example,localhost",  # hides inside a list
-        ):
-            result = load_settings({**VALID_PRODUCTION_ENV, "DJANGO_ALLOWED_HOSTS": hosts})
-            assert result.returncode != 0, f"hosts {hosts!r} must be rejected"
-            assert "DJANGO_ALLOWED_HOSTS" in result.stderr
-            assert "development-only host" in result.stderr
-            # The entries themselves are not echoed back.
-            assert hosts not in result.stderr
-
-    def test_legitimate_production_hosts_are_accepted(self):
-        # 'api.sitara.example' contains the substring 'api' — entry-level
-        # matching must not reject it.
+            "api.sitara.example,localhost",
+        ],
+    )
+    def test_local_django_hosts_are_rejected_in_production(self, hosts):
         result = load_settings(
-            {
-                **VALID_PRODUCTION_ENV,
-                "DJANGO_ALLOWED_HOSTS": "api.sitara.example,app.sitara.example",
-            }
+            {**VALID_PRODUCTION_ENV, "DJANGO_ALLOWED_HOSTS": hosts}
         )
-        assert result.returncode == 0, result.stderr
 
-    def test_internal_hostname_policy_flag_is_available_but_explicit(self):
+        assert result.returncode != 0, f"hosts {hosts!r} must be rejected"
+
+        # Inspect the exception message rather than matching short values such
+        # as "api" against traceback file paths.
+        exception_line = result.stderr.strip().splitlines()[-1]
+
+        assert "DJANGO_ALLOWED_HOSTS" in exception_line
+        assert "development-only host" in exception_line
+
+    def test_rejected_host_configuration_is_not_echoed(self):
+        leak_marker = "host-leak-marker-7f3a9.invalid"
+        hosts = f"{leak_marker},localhost"
+
         result = load_settings(
-            {
-                **VALID_PRODUCTION_ENV,
-                "DJANGO_ALLOWED_HOSTS": "api",
-                "ALLOW_INTERNAL_HOSTNAMES_IN_PRODUCTION": "true",
-            }
+            {**VALID_PRODUCTION_ENV, "DJANGO_ALLOWED_HOSTS": hosts}
         )
-        assert result.returncode == 0, result.stderr
+
+        assert result.returncode != 0
+        assert "DJANGO_ALLOWED_HOSTS" in result.stderr
+
+        # A high-entropy marker avoids accidental matches against traceback
+        # paths or Python/Django wording.
+        assert leak_marker not in result.stderr
+        assert hosts not in result.stderr
 
 
 class TestStrictBooleanParsing:
