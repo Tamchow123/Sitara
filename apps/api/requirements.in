@@ -18,6 +18,10 @@ dj-database-url==2.3.0
 redis==5.2.1
 celery==5.4.0
 gunicorn==23.0.0
+# Image sanitisation for the staff-managed inspiration catalogue (Phase 5B):
+# decode-verify, EXIF strip, resize and WebP re-encode. The ONLY image
+# dependency — no ImageMagick, no libmagic, no external processing services.
+Pillow==11.3.0
 
 # Development / CI
 pytest==8.3.4

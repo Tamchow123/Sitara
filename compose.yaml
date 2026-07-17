@@ -35,6 +35,12 @@ x-api-environment: &api-environment
   # Application-level cap on versions per design (initial concept + one
   # refinement). Strict positive integer; invalid values refuse startup.
   MAX_DESIGN_VERSIONS: ${MAX_DESIGN_VERSIONS:-2}
+  # Inspiration-catalogue ingestion bounds (Phase 5B). Strict positive
+  # integers; invalid values refuse startup.
+  INSPIRATION_MAX_UPLOAD_BYTES: ${INSPIRATION_MAX_UPLOAD_BYTES:-15000000}
+  INSPIRATION_MAX_IMAGE_PIXELS: ${INSPIRATION_MAX_IMAGE_PIXELS:-40000000}
+  INSPIRATION_OUTPUT_MAX_EDGE: ${INSPIRATION_OUTPUT_MAX_EDGE:-2048}
+  INSPIRATION_THUMBNAIL_EDGE: ${INSPIRATION_THUMBNAIL_EDGE:-512}
 
 services:
   postgres:

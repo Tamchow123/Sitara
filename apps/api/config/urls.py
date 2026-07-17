@@ -6,5 +6,6 @@ urlpatterns = [
     path("api/v1/", include("sitara.health.urls")),
     path("api/v1/", include("sitara.designs.urls")),
     path("api/v1/", include("sitara.questionnaire.urls")),
+    path("api/v1/", include("sitara.catalogue.urls")),
     path("api/v1/auth/", include("sitara.accounts.urls")),
 ]

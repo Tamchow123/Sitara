@@ -6,7 +6,7 @@ AI-assisted South Asian bridalwear **concept design**. A guided questionnaire, a
 
 ## Status
 
-**Phase 5A — versioned questionnaire taxonomy.** On top of the Phase 3A/3B/4 foundation (Next.js frontend, Django/DRF backend, PostgreSQL, Redis + Celery, private MinIO/S3 storage, health endpoints, fail-closed AI-provider boundary, session authentication with optional accounts — ADR 0003, private design ownership — ADR 0004), Sitara now has its authoritative bridal questionnaire: a versioned `QuestionnaireVersion` schema with a strict pure-Python format validator, a one-active-version lifecycle enforced by a PostgreSQL partial unique constraint, an admin activation workflow, and a public `GET /api/v1/questionnaire/active/` endpoint — see `docs/decisions/0005-versioned-questionnaire-schema.md`. The frontend wizard will *derive* its Zod validation from this schema (Phase 7); the rights-controlled inspiration catalogue is Phase 5B; design-spec and image generation arrive later. Phase 2 (image-model evaluation) selected **`black-forest-labs/flux-1.1-pro`** — see `docs/decisions/0001-image-model.md` / `.json`.
+**Phase 5B — rights-controlled inspiration catalogue.** On top of the Phase 3A/3B/4/5A foundation (Next.js frontend, Django/DRF backend, PostgreSQL, Redis + Celery, private MinIO/S3 storage, health endpoints, fail-closed AI-provider boundary, session authentication with optional accounts — ADR 0003, private design ownership — ADR 0004, versioned questionnaire taxonomy — ADR 0005), Sitara now has a staff-managed catalogue of rights-approved inspiration images: `UsageRights` records with a pending/verified/rejected lifecycle and four mandatory usage permissions, `InspirationAsset` drafts whose images are sanitised on ingestion (Pillow-only pipeline, metadata stripped, WebP derivatives, original discarded), a service-only approve/retire lifecycle, and public identity-free catalogue + image-streaming endpoints that re-check rights eligibility on every request — see `docs/decisions/0006-rights-controlled-inspiration-catalogue.md`. The frontend wizard will *derive* its Zod validation from the questionnaire schema (Phase 7); design-spec and image generation arrive later. Phase 2 (image-model evaluation) selected **`black-forest-labs/flux-1.1-pro`** — see `docs/decisions/0001-image-model.md` / `.json`.
 
 ## Layout
 
@@ -162,6 +162,36 @@ version. Once active or retired, a version's number and schema are
 immutable and active versions cannot be deleted — corrections ship as new
 versions.
 
+### 7e. Inspiration catalogue (Phase 5B)
+
+A small, staff-managed catalogue of **rights-approved** inspiration images
+(ADR 0006). Staff create a `UsageRights` record (basis, holder, evidence,
+the four usage permissions — public display, AI input, derivative
+generation, commercial use — attribution, optional expiry) and verify it
+through the "Verify selected rights record" admin action; a rejected record
+can never become verified. Images enter ONLY through the admin upload on an
+`InspirationAsset` draft: the bytes are decoded with Pillow (JPEG/PNG/WebP
+only, single-frame, strict byte/pixel bounds), EXIF orientation is applied,
+**all metadata (EXIF/GPS/XMP/ICC) is stripped**, transparency is
+composited, and only two sanitised WebP derivatives (≤2048px main, 512px
+thumbnail) are stored privately under server-generated keys — **the
+original upload is discarded**. No user uploads, no URL fetching.
+
+Approval ("Approve selected inspiration asset") requires the processed
+image, title, alt text and verified, unexpired, fully-permissive rights;
+retirement is immediate and terminal. Public, identity-free endpoints —
+
+- `GET /api/v1/inspiration-assets/` (catalogue JSON, `no-store`)
+- `GET /api/v1/inspiration-assets/<uuid>/image/`
+- `GET /api/v1/inspiration-assets/<uuid>/thumbnail/`
+
+— share one eligibility queryset (approved + verified + unexpired + all
+permissions), stream WebP through Django (never a storage URL) and answer
+an indistinguishable 404 for anything ineligible. Ingestion bounds are
+configurable via `INSPIRATION_MAX_UPLOAD_BYTES`,
+`INSPIRATION_MAX_IMAGE_PIXELS`, `INSPIRATION_OUTPUT_MAX_EDGE` and
+`INSPIRATION_THUMBNAIL_EDGE`.
+
 ### 8. Celery ping test
 
 ```powershell
@@ -219,8 +249,8 @@ docker compose down --volumes
 
 `python manage.py check --deploy` under local development settings reports five expected warnings (W004 HSTS, W008 SSL redirect, W012/W016 secure cookies, W018 DEBUG) — all are governed by the `APP_ENV=production` settings branch, which enforces secure cookies, optional SSL redirect/HSTS, and fails startup when required production values (secret key, hosts, database, Redis, storage credentials) are missing.
 
-## Security & privacy foundations (Phases 3A–5A)
+## Security & privacy foundations (Phases 3A–5B)
 
-Implemented now: private storage bucket with no public ACLs; CORS/CSRF explicit allowlists; DRF authenticated-by-default; JSON-only API; secrets only via environment; tokens never logged or returned; demo mode provably unable to call paid providers; session authentication with HttpOnly cookies, JSON CSRF failure handling, hashed-identifier rate limiting and `Cache-Control: no-store` on all auth responses; private-by-construction designs (ownership filtering before every lookup, 404 for anything inaccessible, no raw session keys in domain tables, no public design URLs). Django endpoint permissions are the authorization boundary — the Next.js middleware redirect on `/account` is a navigation nicety only.
+Implemented now: private storage bucket with no public ACLs; CORS/CSRF explicit allowlists; DRF authenticated-by-default; JSON-only API; secrets only via environment; tokens never logged or returned; demo mode provably unable to call paid providers; session authentication with HttpOnly cookies, JSON CSRF failure handling, hashed-identifier rate limiting and `Cache-Control: no-store` on all auth responses; private-by-construction designs (ownership filtering before every lookup, 404 for anything inaccessible, no raw session keys in domain tables, no public design URLs); a rights-controlled inspiration catalogue whose staff-only ingestion sanitises every image (metadata stripped, WebP re-encode, original discarded) and whose public endpoints re-check rights eligibility on every request. Django endpoint permissions are the authorization boundary — the Next.js middleware redirect on `/account` is a navigation nicety only.
 
-Deliberately **not yet** implemented (later phases): signed image delivery, email verification and password recovery, inspiration-image uploads with rights confirmation (max 3), the single-refinement limit enforcement, retention/deletion, quotas and cost ledgers.
+Deliberately **not yet** implemented (later phases): signed image delivery, email verification and password recovery, user selection of inspiration images on a design (max 3), the single-refinement limit enforcement, retention/deletion, quotas and cost ledgers.

@@ -219,6 +219,7 @@ INSTALLED_APPS = [
     "sitara.accounts",
     "sitara.designs",
     "sitara.questionnaire",
+    "sitara.catalogue",
     "sitara.health",
     "sitara.ai_gateway",
 ]
@@ -366,6 +367,19 @@ MAX_REFINEMENTS = 1
 # limit. Strict parsing: an invalid value refuses startup in EVERY
 # environment, production included.
 MAX_DESIGN_VERSIONS = env_positive_int("MAX_DESIGN_VERSIONS", 2)
+
+# ---------------------------------------------------------------------------
+# Inspiration catalogue (Phase 5B) — staff-only image ingestion bounds.
+# Strict positive integers; invalid values refuse startup in EVERY
+# environment. Uploads above INSPIRATION_MAX_UPLOAD_BYTES are rejected
+# before decoding; images above INSPIRATION_MAX_IMAGE_PIXELS are rejected
+# before full decode (decompression-bomb guard).
+# ---------------------------------------------------------------------------
+
+INSPIRATION_MAX_UPLOAD_BYTES = env_positive_int("INSPIRATION_MAX_UPLOAD_BYTES", 15_000_000)
+INSPIRATION_MAX_IMAGE_PIXELS = env_positive_int("INSPIRATION_MAX_IMAGE_PIXELS", 40_000_000)
+INSPIRATION_OUTPUT_MAX_EDGE = env_positive_int("INSPIRATION_OUTPUT_MAX_EDGE", 2048)
+INSPIRATION_THUMBNAIL_EDGE = env_positive_int("INSPIRATION_THUMBNAIL_EDGE", 512)
 
 # ---------------------------------------------------------------------------
 # Authentication (Phase 3B) — Django sessions only. No JWT, no token
