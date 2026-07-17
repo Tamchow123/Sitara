@@ -108,6 +108,28 @@ class TestActivation:
         assert bad_draft.status == QuestionnaireVersion.Status.DRAFT
         assert bad_draft.activated_at is None
 
+    @pytest.mark.parametrize("bad_operator", [{}, [], 1, True, None])
+    def test_malformed_enum_field_never_replaces_the_active_version(self, bad_operator):
+        # An enum field holding a non-string shape must fail with
+        # QuestionnaireSchemaError (not TypeError) and roll back completely.
+        current = make_version(version=1)
+        activate_questionnaire_version(current)
+        current.refresh_from_db()
+        activated_at_before = current.activated_at
+
+        poisoned = valid_schema()
+        poisoned["rules"][0]["when"]["operator"] = bad_operator
+        bad_draft = make_version(version=2, schema=poisoned)
+        with pytest.raises(QuestionnaireSchemaError):
+            activate_questionnaire_version(bad_draft)
+
+        current.refresh_from_db()
+        bad_draft.refresh_from_db()
+        assert current.status == QuestionnaireVersion.Status.ACTIVE
+        assert current.activated_at == activated_at_before
+        assert bad_draft.status == QuestionnaireVersion.Status.DRAFT
+        assert bad_draft.activated_at is None
+
     def test_activation_replaces_rather_than_mutates(self):
         # The replacement flow end to end: v1 active, v2 drafted with a
         # different schema, v2 activated. v1's schema never changed.

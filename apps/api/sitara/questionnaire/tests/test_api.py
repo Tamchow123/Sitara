@@ -153,6 +153,30 @@ class TestUnavailable:
             caplog, response, active.pk, "QuestionnaireSchemaError"
         )
 
+    def test_object_as_rule_operator_returns_safe_503(self, caplog):
+        # Enum fields were the last place a malformed shape could raise
+        # TypeError from a frozenset membership test before the type check.
+        active = _activate()
+        corrupt = active.schema
+        corrupt["rules"][0]["when"]["operator"] = {"poison_marker_key": "poison_marker_value"}
+        QuestionnaireVersion.objects.filter(pk=active.pk).update(schema=corrupt)
+        with caplog.at_level("ERROR"):
+            response = Client().get(QUESTIONNAIRE_ACTIVE_URL)
+        self._assert_only_id_and_type_logged(
+            caplog, response, active.pk, "QuestionnaireSchemaError"
+        )
+
+    def test_list_as_question_type_returns_safe_503(self, caplog):
+        active = _activate()
+        corrupt = active.schema
+        corrupt["steps"][0]["questions"][0]["type"] = ["poison_marker_list"]
+        QuestionnaireVersion.objects.filter(pk=active.pk).update(schema=corrupt)
+        with caplog.at_level("ERROR"):
+            response = Client().get(QUESTIONNAIRE_ACTIVE_URL)
+        self._assert_only_id_and_type_logged(
+            caplog, response, active.pk, "QuestionnaireSchemaError"
+        )
+
     def test_unexpected_validation_exception_returns_safe_503(self, caplog, monkeypatch):
         # Defence in depth: even if a validator gap lets some structure
         # raise something other than QuestionnaireSchemaError, the public

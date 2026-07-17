@@ -316,6 +316,50 @@ class TestRules:
             validate_questionnaire_schema(schema)
 
 
+class TestEnumFieldTypes:
+    """Enum fields (question type, rule operator, rule action) must reject
+    every JSON-compatible non-string shape with QuestionnaireSchemaError —
+    never TypeError from hashing an unhashable value against a frozenset."""
+
+    NON_STRINGS = [{}, [], 1, 1.0, True, False, None]
+
+    @pytest.mark.parametrize("bad", NON_STRINGS)
+    def test_non_string_question_type_is_rejected(self, bad):
+        schema = valid_schema()
+        _question(schema, "notes")["type"] = bad
+        with pytest.raises(QuestionnaireSchemaError):
+            validate_questionnaire_schema(schema)
+
+    @pytest.mark.parametrize("bad", NON_STRINGS)
+    def test_non_string_operator_is_rejected(self, bad):
+        schema = valid_schema()
+        schema["rules"][0]["when"]["operator"] = bad
+        with pytest.raises(QuestionnaireSchemaError):
+            validate_questionnaire_schema(schema)
+
+    @pytest.mark.parametrize("bad", NON_STRINGS)
+    def test_non_string_action_is_rejected(self, bad):
+        schema = valid_schema()
+        schema["rules"][0]["then"]["action"] = bad
+        with pytest.raises(QuestionnaireSchemaError):
+            validate_questionnaire_schema(schema)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("type", "date"), ("operator", "matches_regex"), ("action", "execute")],
+    )
+    def test_unsupported_string_enum_values_are_rejected(self, field, value):
+        schema = valid_schema()
+        if field == "type":
+            _question(schema, "notes")["type"] = value
+        elif field == "operator":
+            schema["rules"][0]["when"]["operator"] = value
+        else:
+            schema["rules"][0]["then"] = {"action": value, "question_id": "notes"}
+        with pytest.raises(QuestionnaireSchemaError, match="must be one of"):
+            validate_questionnaire_schema(schema)
+
+
 class TestRuleValueTypes:
     """The validator must be total: every JSON-compatible shape inside rule
     values raises QuestionnaireSchemaError — never TypeError from an

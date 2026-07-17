@@ -110,6 +110,18 @@ def _require_machine_id_list(
     return validated
 
 
+def _require_allowed_string(value, path: str, allowed: frozenset) -> str:
+    """An enum field: exactly a string drawn from a fixed allowlist.
+
+    The type check runs before the membership test — a dict or list here
+    would otherwise raise ``TypeError`` from the frozenset hash lookup.
+    The message names only the allowed constants, never the supplied value.
+    """
+    if not isinstance(value, str) or value not in allowed:
+        _fail(path, f"must be one of {sorted(allowed)}")
+    return value
+
+
 def _require_text(value, path: str, *, max_length: int, allow_empty: bool = False) -> str:
     if not isinstance(value, str):
         _fail(path, "must be a string")
@@ -213,9 +225,7 @@ def _validate_question(question, path: str, seen_question_ids: set[str]) -> tupl
     if question_id in seen_question_ids:
         _fail(f"{path}.id", f"duplicate question id '{question_id}'")
 
-    question_type = question.get("type")
-    if question_type not in QUESTION_TYPES:
-        _fail(f"{path}.type", f"must be one of {sorted(QUESTION_TYPES)}")
+    question_type = _require_allowed_string(question.get("type"), f"{path}.type", QUESTION_TYPES)
 
     _require_text(question.get("label"), f"{path}.label", max_length=MAX_LABEL_LENGTH)
     if "help_text" in question:
@@ -268,9 +278,9 @@ def _validate_rule(rule, path: str, questions_by_id: dict[str, dict], seen_rule_
     if condition_question["type"] == "text":
         _fail(f"{path}.when.question_id", "conditions may only reference choice questions")
 
-    operator = when.get("operator")
-    if operator not in RULE_OPERATORS:
-        _fail(f"{path}.when.operator", f"must be one of {sorted(RULE_OPERATORS)}")
+    operator = _require_allowed_string(
+        when.get("operator"), f"{path}.when.operator", RULE_OPERATORS
+    )
 
     values = _require_machine_id_list(
         when.get("values"),
@@ -287,9 +297,7 @@ def _validate_rule(rule, path: str, questions_by_id: dict[str, dict], seen_rule_
 
     then = _require_dict(rule.get("then"), f"{path}.then")
     _require_known_keys(then, _THEN_KEYS, f"{path}.then")
-    action = then.get("action")
-    if action not in RULE_ACTIONS:
-        _fail(f"{path}.then.action", f"must be one of {sorted(RULE_ACTIONS)}")
+    action = _require_allowed_string(then.get("action"), f"{path}.then.action", RULE_ACTIONS)
 
     target_question_id = _require_machine_id(then.get("question_id"), f"{path}.then.question_id")
     target_question = questions_by_id.get(target_question_id)
