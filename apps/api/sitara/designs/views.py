@@ -172,7 +172,8 @@ class DesignListCreateView(APIView):
         operation_id="designs_create",
         tags=_DESIGN_TAGS,
         parameters=[CSRF_HEADER_PARAMETER],
-        request=DesignWriteSerializer,
+        # JSON only — keep the contract honest (the view parses JSON only).
+        request={"application/json": DesignWriteSerializer},
         responses={
             201: DesignDetailResponseSerializer,
             400: ValidationErrorEnvelopeSerializer,
@@ -258,7 +259,8 @@ class DesignDetailView(APIView):
         operation_id="designs_update",
         tags=_DESIGN_TAGS,
         parameters=[CSRF_HEADER_PARAMETER],
-        request=DesignWriteSerializer,
+        # JSON only — keep the contract honest (the view parses JSON only).
+        request={"application/json": DesignWriteSerializer},
         responses={
             200: DesignDetailResponseSerializer,
             400: ValidationErrorEnvelopeSerializer,
