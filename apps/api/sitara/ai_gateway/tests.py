@@ -8,12 +8,14 @@ import socket
 import pytest
 
 from sitara.ai_gateway.policy import (
-    PAID_PROVIDERS_IMPLEMENTED,
+    IMAGE_PROVIDER_IMPLEMENTED,
+    STRUCTURED_DESIGN_PROVIDER_IMPLEMENTED,
     GenerationPolicy,
     PaidGenerationDisabled,
     generation_is_available,
     get_image_generation_provider,
     get_structured_design_provider,
+    structured_design_generation_is_available,
 )
 from sitara.ai_gateway.providers import (
     DemoImageGenerationProvider,
@@ -93,8 +95,18 @@ class TestGenerationCapability:
 
     ALL_GATE_COMBINATIONS = [(True, False), (True, True), (False, False), (False, True)]
 
-    def test_capability_flag_is_code_level_and_off_in_phase_3a(self):
-        assert PAID_PROVIDERS_IMPLEMENTED is False
+    def test_capability_flags_are_code_level(self):
+        # Structured-text generation is implemented in Phase 8; end-to-end
+        # image generation is not.
+        assert STRUCTURED_DESIGN_PROVIDER_IMPLEMENTED is True
+        assert IMAGE_PROVIDER_IMPLEMENTED is False
+
+    @pytest.mark.parametrize("demo,allow", ALL_GATE_COMBINATIONS)
+    def test_structured_generation_availability_needs_both_gates(self, settings, demo, allow):
+        settings.DEMO_MODE = demo
+        settings.ALLOW_PAID_AI_CALLS = allow
+        expected = (not demo) and allow  # structured capability is implemented
+        assert structured_design_generation_is_available() is expected
 
     @pytest.mark.parametrize("demo,allow", ALL_GATE_COMBINATIONS)
     def test_generation_unavailable_for_every_gate_combination(self, settings, demo, allow):

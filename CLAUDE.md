@@ -80,6 +80,7 @@ docs/decisions/0005-versioned-questionnaire-schema.md
 docs/decisions/0006-rights-controlled-inspiration-catalogue.md
 docs/decisions/0007-openapi-generated-client.md
 docs/decisions/0008-questionnaire-draft-and-wizard.md
+docs/decisions/0009-structured-design-spec-generation.md
 ```
 
 For a phase task stored in a separate specification file, read that file in full before editing.

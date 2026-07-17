@@ -32,6 +32,17 @@ x-api-environment: &api-environment
   FAST_IMAGE_MODEL: black-forest-labs/flux-1.1-pro
   DEMO_MODE: ${DEMO_MODE:-true}
   ALLOW_PAID_AI_CALLS: ${ALLOW_PAID_AI_CALLS:-false}
+  # Provider tokens: present or empty, their presence NEVER enables a call
+  # (fail-closed policy). Structured DesignSpec generation (Phase 8) settings:
+  # numeric values are strict positive integers; ANTHROPIC_MODEL must be
+  # non-empty. Live generation additionally requires --confirm-live and
+  # DEMO_MODE=false + ALLOW_PAID_AI_CALLS=true.
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
+  ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+  DESIGN_SPEC_MAX_INPUT_CHARS: ${DESIGN_SPEC_MAX_INPUT_CHARS:-20000}
+  DESIGN_SPEC_MAX_OUTPUT_TOKENS: ${DESIGN_SPEC_MAX_OUTPUT_TOKENS:-4096}
+  ANTHROPIC_TIMEOUT_SECONDS: ${ANTHROPIC_TIMEOUT_SECONDS:-60}
   # Application-level cap on versions per design (initial concept + one
   # refinement). Strict positive integer; invalid values refuse startup.
   MAX_DESIGN_VERSIONS: ${MAX_DESIGN_VERSIONS:-2}

@@ -3,14 +3,21 @@
 The ONLY sanctioned way to obtain an AI provider. Rules, in order:
 
 1. ``DEMO_MODE=true``  -> demo providers, always. A configured API token
-   never bypasses demo mode.
+   never bypasses demo mode and never instantiates a network client.
 2. ``ALLOW_PAID_AI_CALLS=false`` -> paid providers refused with
    PaidGenerationDisabled.
-3. Both gates open (DEMO_MODE=false AND ALLOW_PAID_AI_CALLS=true) -> still
-   refused in Phase 3A, because no paid provider is implemented yet. The
-   paid path will be added, behind these same gates, in a later phase.
+3. Both gates open (DEMO_MODE=false AND ALLOW_PAID_AI_CALLS=true) -> a paid
+   provider is handed out ONLY for a capability the codebase actually
+   implements (see the code-level capability flags below).
 
-Error messages never include API tokens, and this module never logs them.
+Capabilities are explicit CODE-LEVEL flags, never environment variables, so an
+operator can never claim a capability the codebase does not have. Phase 8
+implements structured-TEXT generation only; image generation and the full
+end-to-end pipeline remain unimplemented, so the PUBLIC
+``generation_is_available()`` stays False.
+
+Error messages never include API tokens or model names, and this module never
+logs them.
 """
 
 from dataclasses import dataclass
@@ -24,17 +31,20 @@ from .providers import (
     StructuredDesignProvider,
 )
 
+# ---------------------------------------------------------------------------
+# CODE-LEVEL capability flags — deliberately NOT environment variables.
+# ---------------------------------------------------------------------------
+
+# Phase 8: the gated Anthropic structured-TEXT (DesignSpec) provider exists.
+STRUCTURED_DESIGN_PROVIDER_IMPLEMENTED = True
+
+# The paid IMAGE-generation provider does not exist yet (a later phase).
+IMAGE_PROVIDER_IMPLEMENTED = False
+
 
 class PaidGenerationDisabled(Exception):
     """Raised whenever a paid provider would be required but is not allowed
-    (or, in Phase 3A, not implemented). Message is safe to log."""
-
-
-# CODE-LEVEL capability flag: flips to True only in the future task that
-# actually implements the paid Anthropic/Replicate providers. Deliberately
-# NOT an environment variable — an operator must never be able to claim a
-# capability the codebase does not have.
-PAID_PROVIDERS_IMPLEMENTED = False
+    (or not implemented). Message is safe to log."""
 
 
 @dataclass(frozen=True)
@@ -51,49 +61,70 @@ class GenerationPolicy:
 
     @property
     def paid_calls_permitted(self) -> bool:
-        """Environment AUTHORISATION only (both gates open). Whether
-        generation is actually available also depends on implementation
-        capability — see generation_is_available()."""
+        """Environment AUTHORISATION only (both gates open). Whether a given
+        capability is actually available also depends on implementation — see
+        the *_is_available() helpers."""
         return (not self.demo_mode) and self.allow_paid_ai_calls
 
 
 def generation_is_available() -> bool:
-    """The single source of truth for whether paid generation can happen:
-    environment authorisation (both gates) AND implementation availability.
-
-    The public config endpoint and the provider factory both derive from
-    this state, so they can never contradict each other: while
-    PAID_PROVIDERS_IMPLEMENTED is False, this returns False for EVERY
-    environment combination, including DEMO_MODE=false with
-    ALLOW_PAID_AI_CALLS=true."""
+    """The single source of truth for whether END-TO-END (image) generation
+    can happen: environment authorisation AND the image provider AND the full
+    pipeline. While IMAGE_PROVIDER_IMPLEMENTED is False this returns False for
+    EVERY environment combination, so the public config endpoint never claims
+    concept generation is available in Phase 8."""
     policy = GenerationPolicy.from_settings()
-    return policy.paid_calls_permitted and PAID_PROVIDERS_IMPLEMENTED
+    return policy.paid_calls_permitted and IMAGE_PROVIDER_IMPLEMENTED
 
 
-def _refuse_paid(policy: GenerationPolicy) -> Exception:
+def structured_design_generation_is_available() -> bool:
+    """INTERNAL: whether the gated Anthropic structured-TEXT (DesignSpec)
+    generation may run — environment authorisation AND the code-level
+    structured-design capability. Not surfaced to the public config."""
+    policy = GenerationPolicy.from_settings()
+    return policy.paid_calls_permitted and STRUCTURED_DESIGN_PROVIDER_IMPLEMENTED
+
+
+def _refuse(policy: GenerationPolicy, implemented: bool, capability_label: str) -> Exception:
     if policy.demo_mode:  # pragma: no cover - callers check demo first
         reason = "demo mode is enabled (DEMO_MODE=true)"
     elif not policy.allow_paid_ai_calls:
         reason = "paid AI calls are disabled (ALLOW_PAID_AI_CALLS=false)"
-    elif not PAID_PROVIDERS_IMPLEMENTED:
-        reason = (
-            "paid providers are not implemented in Phase 3A; "
-            "demo mode is the only supported generation path"
-        )
-    else:  # pragma: no cover - unreachable until a paid path exists
+    elif not implemented:
+        reason = f"the {capability_label} provider is not implemented yet"
+    else:  # pragma: no cover - unreachable when the capability is implemented
         reason = "paid generation is unavailable"
     return PaidGenerationDisabled(f"paid generation refused: {reason}")
 
 
 def get_structured_design_provider() -> StructuredDesignProvider:
+    """Legacy Phase 3A demo scaffolding (brief -> dict). Demo mode only; the
+    gated Phase 8 structured-text path is
+    ``get_structured_design_generation_provider``."""
     policy = GenerationPolicy.from_settings()
     if policy.demo_mode:
         return DemoStructuredDesignProvider()
-    raise _refuse_paid(policy)
+    raise _refuse(policy, implemented=False, capability_label="demo structured-design")
 
 
 def get_image_generation_provider() -> ImageGenerationProvider:
     policy = GenerationPolicy.from_settings()
     if policy.demo_mode:
         return DemoImageGenerationProvider()
-    raise _refuse_paid(policy)
+    raise _refuse(policy, IMAGE_PROVIDER_IMPLEMENTED, "image generation")
+
+
+def get_structured_design_generation_provider():
+    """The Phase 8 gated Anthropic structured-text generation provider.
+
+    NEVER returned in demo mode or when paid calls are disabled; a configured
+    key alone is never enough. The provider creates its network client lazily,
+    only when ``generate`` is invoked (i.e. after every gate has passed)."""
+    policy = GenerationPolicy.from_settings()
+    if not structured_design_generation_is_available():
+        raise _refuse(
+            policy, STRUCTURED_DESIGN_PROVIDER_IMPLEMENTED, "structured design generation"
+        )
+    from .anthropic_provider import AnthropicStructuredDesignProvider
+
+    return AnthropicStructuredDesignProvider()

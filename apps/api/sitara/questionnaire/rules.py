@@ -48,6 +48,25 @@ def declared_option_values(question: dict) -> list[str]:
     return [option["value"] for option in question.get("options", [])]
 
 
+def build_selected(schema: dict, answers: dict) -> dict[str, set[str]]:
+    """The selected-values view rule evaluation needs, from validated answers.
+
+    A single-choice answer becomes a one-value set; a multi-choice answer the
+    set of its values; text and empty answers contribute nothing."""
+    selected: dict[str, set[str]] = {}
+    for question in questions_by_id(schema).values():
+        if question.get("type") == "text":
+            continue
+        value = (answers or {}).get(question["id"])
+        if isinstance(value, str) and value:
+            selected[question["id"]] = {value}
+        elif isinstance(value, list) and value:
+            chosen = {item for item in value if isinstance(item, str)}
+            if chosen:
+                selected[question["id"]] = chosen
+    return selected
+
+
 def _condition_met(when: dict, selected: dict[str, set[str]]) -> bool:
     question_id = when["question_id"]
     chosen = selected.get(question_id)

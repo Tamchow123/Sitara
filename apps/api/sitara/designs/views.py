@@ -30,11 +30,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from sitara.catalogue.models import InspirationAsset
-from sitara.questionnaire.answer_validation import (
-    QuestionnaireAnswerError,
-    validate_questionnaire_answers,
-)
+from sitara.questionnaire.answer_validation import QuestionnaireAnswerError
 from sitara.schema import (
     CSRF_HEADER_PARAMETER,
     ErrorEnvelopeSerializer,
@@ -56,6 +52,7 @@ from .serializers import (
 from .services import (
     DraftUpdateError,
     WorkspaceCoordinationError,
+    design_completion_errors,
     resolve_current_design_session,
     update_design_draft,
 )
@@ -336,39 +333,9 @@ class DesignValidateView(APIView):
         design = accessible_designs(request).filter(pk=design_id).first()
         if design is None:
             return _not_found()
-        if design.questionnaire_version_id is None:
-            return _validation_failed(
-                {"questionnaire_version_id": ["Select a questionnaire before validating."]}
-            )
-        errors: dict = {}
-        try:
-            validate_questionnaire_answers(
-                design.questionnaire_version.schema, design.answers, require_complete=True
-            )
-        except QuestionnaireAnswerError as exc:
-            errors.update(exc.errors)
-
-        selection_errors = _revalidate_inspirations(design)
-        if selection_errors:
-            errors["inspiration_asset_ids"] = selection_errors
-
+        # One shared definition of completeness (see services) so the endpoint
+        # and the generation pre-spend check can never drift.
+        errors = design_completion_errors(design)
         if errors:
             return _validation_failed(errors)
         return Response({"valid": True}, headers=NO_STORE)
-
-
-def _revalidate_inspirations(design: Design) -> list[str]:
-    """Complete validation must fail while any selected inspiration is no
-    longer publicly eligible. The message never reveals which one or why."""
-    selections = list(design.inspiration_selections.all())
-    if not selections:
-        return []
-    selected_ids = [selection.inspiration_asset_id for selection in selections]
-    eligible = set(
-        InspirationAsset.objects.publicly_eligible()
-        .filter(pk__in=selected_ids)
-        .values_list("pk", flat=True)
-    )
-    if any(asset_id not in eligible for asset_id in selected_ids):
-        return ["Remove or replace inspirations that are no longer available."]
-    return []

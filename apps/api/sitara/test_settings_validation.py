@@ -309,3 +309,24 @@ class TestCookieConfiguration:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "[]"
+
+
+class TestGenerationSettings:
+    """Phase 8 structured-generation settings parse strictly and never echo
+    the supplied value."""
+
+    def test_empty_anthropic_model_refuses_startup(self):
+        result = load_settings({"ANTHROPIC_MODEL": "   "})
+        assert result.returncode != 0
+        assert "ANTHROPIC_MODEL" in result.stderr
+        assert "ImproperlyConfigured" in result.stderr
+
+    def test_non_empty_anthropic_model_loads(self):
+        result = load_settings({"ANTHROPIC_MODEL": "claude-sonnet-4-6"})
+        assert result.returncode == 0, result.stderr
+
+    def test_malformed_numeric_setting_refuses_startup(self):
+        result = load_settings({"DESIGN_SPEC_MAX_OUTPUT_TOKENS": "not-a-number"})
+        assert result.returncode != 0
+        assert "DESIGN_SPEC_MAX_OUTPUT_TOKENS" in result.stderr
+        assert "not-a-number" not in result.stderr

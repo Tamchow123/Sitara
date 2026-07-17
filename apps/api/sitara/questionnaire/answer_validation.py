@@ -62,7 +62,7 @@ class QuestionnaireAnswerError(Exception):
         super().__init__("questionnaire answers failed validation")
 
 
-def _normalise_text(value: str) -> str:
+def normalise_text(value: str) -> str:
     # CRLF/CR → LF, trim OUTER whitespace, preserve meaningful internal
     # whitespace. The value is never interpreted as HTML or Markdown.
     unified = value.replace("\r\n", "\n").replace("\r", "\n")
@@ -107,7 +107,7 @@ def _structural_value(
     if question_type == "text":
         if not isinstance(value, str):
             return None, _WRONG_TYPE_TEXT, None
-        return _normalise_text(value), None, None
+        return normalise_text(value), None, None
 
     # Unreachable for a format-valid schema.
     return None, _WRONG_TYPE_TEXT, None

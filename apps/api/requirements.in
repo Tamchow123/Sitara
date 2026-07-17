@@ -31,6 +31,10 @@ Pillow==11.3.0
 # committed JSON Schema. Sitara uses Pydantic directly, so it is an explicit
 # direct dependency (not merely an Anthropic transitive).
 pydantic==2.13.4
+# Anthropic structured-output client for gated DesignSpec generation (Phase 8).
+# Provider calls are fail-closed: a present key never enables a call, tests
+# inject a fake client, and CI never instantiates a real network client.
+anthropic==0.116.0
 
 # Development / CI
 pytest==8.3.4

@@ -401,6 +401,20 @@ FAST_IMAGE_MODEL = os.getenv("FAST_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
 
+# ---------------------------------------------------------------------------
+# Structured DesignSpec generation (Phase 8). Safe development/test defaults;
+# the model name is NEVER exposed via the public config endpoint. Numeric
+# values use the strict positive-integer parser; the model name must be
+# non-empty (a blank value refuses startup without echoing the value).
+# ---------------------------------------------------------------------------
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6").strip()
+if not ANTHROPIC_MODEL:
+    raise ImproperlyConfigured("ANTHROPIC_MODEL must be a non-empty model identifier")
+
+DESIGN_SPEC_MAX_INPUT_CHARS = env_positive_int("DESIGN_SPEC_MAX_INPUT_CHARS", 20_000)
+DESIGN_SPEC_MAX_OUTPUT_TOKENS = env_positive_int("DESIGN_SPEC_MAX_OUTPUT_TOKENS", 4096)
+ANTHROPIC_TIMEOUT_SECONDS = env_positive_int("ANTHROPIC_TIMEOUT_SECONDS", 60)
+
 # Product limits surfaced via /api/v1/config/public.
 MAX_INSPIRATION_IMAGES = 3
 MAX_REFINEMENTS = 1
