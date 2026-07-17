@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "source_selections": {
+    "garment_type": "saree",
+    "ceremony": "pheras",
+    "regional_style": "south_indian",
+    "silhouette": "classic_saree_drape",
+    "colour_palette": ["red", "gold"],
+    "fabrics": ["silk"],
+    "embellishment_styles": ["zardozi"],
+    "embellishment_density": "minimal",
+    "coverage_preferences": ["elbow_sleeves", "full_back"],
+    "dupatta_style": null,
+    "saree_drape": "nivi_drape"
+  },
+  "title": "Red and gold classically draped saree for the pheras",
+  "concept_summary": "A traditional pheras concept centred on a classically draped red silk saree, where the look is created by the drape itself rather than any stitched construction. A fine gold border and restrained zardozi keep the focus on the fabric, the pleats and the flow of the pallu.",
+  "garment_breakdown": {
+    "overall_form": "A single length of silk draped over a fitted blouse, with pleats at the front and a pallu over the shoulder.",
+    "garment_components": ["Fitted blouse", "Draped saree length", "Pleated pallu"],
+    "silhouette": "The silhouette is shaped entirely by the drape, not by a stitched skirt or gown.",
+    "drape_or_layering": "A classic nivi drape with front pleats and the pallu carried over the left shoulder.",
+    "key_proportions": "Neat waist pleats and a long, flowing pallu give a graceful vertical line."
+  },
+  "colour_story": {
+    "palette_summary": "A deep bridal red anchored by a fine gold border.",
+    "placement": "Red fills the body of the saree, with gold running along the border and pallu edge.",
+    "rationale": "Red is a classic bridal choice for the pheras, and the gold border frames the drape cleanly."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Silk",
+      "placement": "The full saree length and blouse",
+      "finish_and_movement": "A weighty, lustrous silk that holds crisp pleats and lets the pallu fall gracefully."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["Fine zardozi border work"],
+    "density": "Minimal work kept to the border so the silk itself remains the focus.",
+    "placement": ["Saree border", "Pallu edge", "Blouse neckline"],
+    "motifs": ["Slim floral border vine", "Simple temple-style edging"],
+    "restraint_notes": "The embroidery is intentionally sparse so the drape and colour lead the concept."
+  },
+  "coverage_and_drape": {
+    "sleeves": "Elbow-length blouse sleeves as requested.",
+    "neckline": "A modest blouse neckline that suits ceremonial rites.",
+    "back_and_midriff": "A closed, full-back blouse per the coverage preference, with the drape crossing the midriff.",
+    "head_covering": "No head covering was requested; the pallu can be lightly drawn up if desired.",
+    "dupatta_or_saree_drape": "A classic nivi saree drape rather than a separate dupatta."
+  },
+  "cultural_context": {
+    "regional_direction": "A broad South Indian influence guides the silk choice and the classic drape.",
+    "interpretation_notes": ["Read as one broad regional direction, interpreted flexibly rather than prescriptively."],
+    "safeguards": ["A saree is treated as a draped garment, not converted into a stitched gown, and no single tradition is universalised."]
+  },
+  "styling_notes": ["Traditional temple-style gold jewellery complements the border.", "A neat, low bun keeps the pallu drape clean."],
+  "construction_caveats": [
+    "This is a concept visualisation and not a sewing pattern or stitching guide.",
+    "It provides no measurements and does not guarantee exact constructibility."
+  ],
+  "image_alt_text": "A model in a red silk saree with a gold border in a classic nivi drape, with fine zardozi, for wedding pheras."
+}

@@ -163,7 +163,20 @@ class DesignVersion(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     design = models.ForeignKey(Design, on_delete=models.CASCADE, related_name="versions")
     version_number = models.PositiveIntegerField()
+    # The validated DesignSpec payload (Phase 8). NULL until a spec is
+    # generated. Never stores prompts, raw provider responses or credentials.
     design_spec = models.JSONField(null=True, blank=True)
+    # Narrow provenance for a generated DesignSpec (Phase 8). Present exactly
+    # when design_spec is present (all-or-none constraint below). NEVER stores
+    # API keys, raw prompts/responses, provider error bodies, headers, hidden
+    # reasoning, inspiration storage keys or image bytes.
+    design_spec_schema_version = models.PositiveSmallIntegerField(null=True, blank=True)
+    design_spec_template_version = models.CharField(max_length=32, blank=True)
+    design_spec_provider = models.CharField(max_length=32, blank=True)
+    design_spec_model = models.CharField(max_length=100, blank=True)
+    design_spec_input_tokens = models.PositiveIntegerField(null=True, blank=True)
+    design_spec_output_tokens = models.PositiveIntegerField(null=True, blank=True)
+    design_spec_generated_at = models.DateTimeField(null=True, blank=True)
     # Object-storage key only — never a URL; signed delivery is a later phase.
     image_storage_key = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -179,6 +192,37 @@ class DesignVersion(models.Model):
             models.CheckConstraint(
                 condition=Q(version_number__gt=0),
                 name="designs_version_number_positive",
+            ),
+            # All-or-none provenance: either there is no spec and every
+            # provenance field is absent, or there is a spec and schema
+            # version, template, provider, model and generated timestamp are
+            # all present. Token counts are independently optional.
+            models.CheckConstraint(
+                condition=(
+                    Q(design_spec__isnull=True)
+                    & Q(design_spec_schema_version__isnull=True)
+                    & Q(design_spec_template_version="")
+                    & Q(design_spec_provider="")
+                    & Q(design_spec_model="")
+                    & Q(design_spec_generated_at__isnull=True)
+                )
+                | (
+                    Q(design_spec__isnull=False)
+                    & Q(design_spec_schema_version__isnull=False)
+                    & ~Q(design_spec_template_version="")
+                    & ~Q(design_spec_provider="")
+                    & ~Q(design_spec_model="")
+                    & Q(design_spec_generated_at__isnull=False)
+                ),
+                name="designs_designversion_spec_provenance_all_or_none",
+            ),
+            # Token counts, when present, are strictly positive.
+            models.CheckConstraint(
+                condition=(
+                    Q(design_spec_input_tokens__isnull=True) | Q(design_spec_input_tokens__gt=0)
+                )
+                & (Q(design_spec_output_tokens__isnull=True) | Q(design_spec_output_tokens__gt=0)),
+                name="designs_designversion_spec_tokens_positive",
             ),
         ]
 

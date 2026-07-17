@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "source_selections": {
+    "garment_type": "gharara",
+    "ceremony": "mehndi",
+    "regional_style": "no_specific_direction",
+    "silhouette": "gharara_construction",
+    "colour_palette": ["green", "yellow", "gold"],
+    "fabrics": ["georgette"],
+    "embellishment_styles": ["gota_patti", "mirror_work"],
+    "embellishment_density": "heavy",
+    "coverage_preferences": ["three_quarter_sleeves"],
+    "dupatta_style": "one_shoulder",
+    "saree_drape": null
+  },
+  "title": "Green and yellow gharara for a mehndi",
+  "concept_summary": "A joyful, festive mehndi concept in fresh green and sunlit yellow, built on a true gharara silhouette. The trousers stay fitted through the upper leg and knee before opening into a dramatic flare, with lively gota patti and mirror work carrying the celebratory mood.",
+  "garment_breakdown": {
+    "overall_form": "A short kurti worn over gharara trousers with a light draped dupatta.",
+    "garment_components": ["Short kurti", "Gharara trousers", "Draped dupatta"],
+    "silhouette": "Fitted through the upper leg and knee, then flaring wide below the knee in the gharara manner.",
+    "drape_or_layering": "A single dupatta rests over one shoulder to keep movement free for dancing.",
+    "key_proportions": "The short kurti balances the volume of the flared gharara legs below the knee."
+  },
+  "colour_story": {
+    "palette_summary": "Fresh green and warm yellow lifted with gold accents.",
+    "placement": "Green leads on the kurti, yellow carries the gharara flare, and gold outlines the borders.",
+    "rationale": "Bright green and yellow feel celebratory for a mehndi, with gold tying the two tones together."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Georgette",
+      "placement": "Kurti, gharara and dupatta",
+      "finish_and_movement": "A light, fluid fabric that swishes with the flared legs and moves easily while dancing."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["Gota patti applique", "Mirror work"],
+    "density": "A rich, heavier spread of work suited to the festive brief.",
+    "placement": ["Kurti neckline and hem", "Gharara flare border", "Dupatta corners"],
+    "motifs": ["Leafy vines", "Small round mirrors set in floral clusters"],
+    "restraint_notes": "Even the heavier work leaves breathing space so the mirrors read as sparkle, not clutter."
+  },
+  "coverage_and_drape": {
+    "sleeves": "Three-quarter sleeves as requested.",
+    "neckline": "A comfortable round neckline that suits an energetic celebration.",
+    "back_and_midriff": "The short kurti sits at the hip with a modest closed back.",
+    "head_covering": "No head covering was requested, so the dupatta stays on one shoulder.",
+    "dupatta_or_saree_drape": "A single light dupatta over one shoulder."
+  },
+  "cultural_context": {
+    "regional_direction": null,
+    "interpretation_notes": ["No specific regional direction was chosen, so styling stays broadly celebratory."],
+    "safeguards": ["The gharara is kept distinct from a sharara, and no single community's custom is treated as universal."]
+  },
+  "styling_notes": ["Layer fine gold bangles for movement.", "Loose, soft waves keep the look relaxed for dancing."],
+  "construction_caveats": [
+    "This is a concept visualisation only and is not a sewing pattern.",
+    "No measurements are provided and constructibility exactly as shown is not guaranteed."
+  ],
+  "image_alt_text": "A model in a green kurti with a yellow gharara flaring below the knee, with gota patti and mirror work, at a mehndi."
+}

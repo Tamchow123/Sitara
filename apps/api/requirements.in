@@ -26,6 +26,11 @@ gunicorn==23.0.0
 # decode-verify, EXIF strip, resize and WebP re-encode. The ONLY image
 # dependency — no ImageMagick, no libmagic, no external processing services.
 Pillow==11.3.0
+# Structured DesignSpec contract (Phase 8): a strict Pydantic v2 model is the
+# authoritative shape of generated design specifications and the source of the
+# committed JSON Schema. Sitara uses Pydantic directly, so it is an explicit
+# direct dependency (not merely an Anthropic transitive).
+pydantic==2.13.4
 
 # Development / CI
 pytest==8.3.4

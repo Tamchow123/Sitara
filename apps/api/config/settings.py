@@ -223,6 +223,7 @@ INSTALLED_APPS = [
     "sitara.catalogue",
     "sitara.health",
     "sitara.ai_gateway",
+    "sitara.generation",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
