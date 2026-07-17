@@ -18,13 +18,35 @@ import logging
 
 from django.core.files.storage import default_storage
 from django.http import HttpResponse
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from sitara.schema import ErrorEnvelopeSerializer
+
 from .models import InspirationAsset
+from .openapi import InspirationCatalogueResponseSerializer
 from .serializers import public_asset_payload
+
+_CATALOGUE_TAGS = ["Inspiration catalogue"]
+
+# Documented responses shared by both binary image-variant endpoints.
+_IMAGE_RESPONSES = {
+    (200, "image/webp"): OpenApiResponse(
+        OpenApiTypes.BINARY, description="Sanitised WebP image bytes streamed through Django."
+    ),
+    404: OpenApiResponse(
+        ErrorEnvelopeSerializer,
+        description="Missing or ineligible asset (indistinguishable from absent).",
+    ),
+    503: OpenApiResponse(
+        ErrorEnvelopeSerializer,
+        description="Eligible asset whose private storage object is unavailable.",
+    ),
+}
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +84,17 @@ class _PublicCatalogueView(APIView):
 
 
 class InspirationAssetListView(_PublicCatalogueView):
+    @extend_schema(
+        operation_id="inspiration_assets_list",
+        tags=_CATALOGUE_TAGS,
+        responses={200: InspirationCatalogueResponseSerializer},
+        summary="List inspiration assets",
+        description=(
+            "Public, identity-free catalogue of rights-approved inspiration "
+            "images (approved + verified + unexpired + all usage permissions). "
+            "No authentication required; only the public fields are returned."
+        ),
+    )
     def get(self, request):
         assets = InspirationAsset.objects.publicly_eligible().select_related("usage_rights")
         return Response(
@@ -73,7 +106,7 @@ class InspirationAssetListView(_PublicCatalogueView):
 class _InspirationImageBaseView(_PublicCatalogueView):
     variant = "image"
 
-    def get(self, request, asset_id):
+    def get(self, request, asset_id):  # noqa: D102 — annotated on subclasses
         asset = InspirationAsset.objects.publicly_eligible().filter(pk=asset_id).first()
         if asset is None:
             return _not_found()
@@ -103,9 +136,33 @@ class _InspirationImageBaseView(_PublicCatalogueView):
         return response
 
 
+@extend_schema_view(
+    get=extend_schema(
+        operation_id="inspiration_asset_image",
+        tags=_CATALOGUE_TAGS,
+        responses=_IMAGE_RESPONSES,
+        summary="Inspiration asset image",
+        description=(
+            "Streams the full-size sanitised WebP for an eligible asset. "
+            "No storage keys or storage URLs are exposed."
+        ),
+    )
+)
 class InspirationAssetImageView(_InspirationImageBaseView):
     variant = "image"
 
 
+@extend_schema_view(
+    get=extend_schema(
+        operation_id="inspiration_asset_thumbnail",
+        tags=_CATALOGUE_TAGS,
+        responses=_IMAGE_RESPONSES,
+        summary="Inspiration asset thumbnail",
+        description=(
+            "Streams the thumbnail sanitised WebP for an eligible asset. "
+            "No storage keys or storage URLs are exposed."
+        ),
+    )
+)
 class InspirationAssetThumbnailView(_InspirationImageBaseView):
     variant = "thumbnail"

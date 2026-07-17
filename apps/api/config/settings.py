@@ -215,6 +215,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "drf_spectacular",
     "corsheaders",
     "sitara.accounts",
     "sitara.designs",
@@ -296,6 +297,49 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
     ],
+    # drf-spectacular generates the committed OpenAPI contract (Phase 6). It
+    # is used ONLY through the `spectacular` management command — no runtime
+    # schema endpoint, Swagger UI or Redoc is served (see config/urls.py).
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+# ---------------------------------------------------------------------------
+# OpenAPI contract (drf-spectacular) — the single source of truth for the
+# generated frontend TypeScript client. Kept deliberately small: no served
+# schema/UI endpoint, deterministic ordering so the committed
+# apps/api/openapi/schema.json is byte-stable, and a preprocessing hook that
+# collapses the slash-optional runtime routes to their canonical
+# trailing-slash spelling (runtime routing is unaffected).
+# ---------------------------------------------------------------------------
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Sitara API",
+    "VERSION": "1.0.0",
+    "DESCRIPTION": (
+        "Sitara is an AI-assisted South Asian bridalwear **concept "
+        "visualisation** application (concept only — not sewing patterns or "
+        "manufacturing specifications).\n\n"
+        "Designs are **private by default**: they are never public merely "
+        "because their UUID is known, and every inaccessible design returns "
+        "an indistinguishable 404. Authentication is a Django server-side "
+        "session (HttpOnly cookie) coordinated with a CSRF token; the "
+        "browser calls the API same-origin.\n\n"
+        "AI generation is demo/provider gated and is **not** part of this "
+        "contract yet — no generation, questionnaire-answer submission, "
+        "inspiration selection or provider endpoints are documented here."
+    ),
+    "OAS_VERSION": "3.0.3",
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SERVE_INCLUDE_SCHEMA": False,
+    # Deterministic output for the committed contract + CI drift check.
+    "SORT_OPERATIONS": True,
+    "SORT_OPERATION_PARAMETERS": True,
+    # Collapse slash-optional regex routes to one canonical documented path.
+    "PREPROCESSING_HOOKS": [
+        "config.spectacular.normalise_trailing_slash",
+    ],
+    # No Django admin, no served schema route in the contract.
+    "SCHEMA_PATH_PREFIX": r"/api/v1",
 }
 
 # ---------------------------------------------------------------------------

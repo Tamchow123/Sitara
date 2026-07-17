@@ -7,6 +7,7 @@ storage credentials, bucket details, Django secrets or internal limits.
 """
 
 from django.conf import settings
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -15,8 +16,16 @@ from rest_framework.response import Response
 from sitara.ai_gateway.policy import generation_is_available
 
 from . import checks
+from .openapi import LiveResponseSerializer, PublicConfigSerializer, ReadyResponseSerializer
 
 
+@extend_schema(
+    operation_id="health_live",
+    tags=["Health"],
+    responses={200: LiveResponseSerializer},
+    summary="Liveness",
+    description="The process answers. No dependency checks. No authentication required.",
+)
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def live(request):
@@ -24,6 +33,23 @@ def live(request):
     return Response({"status": "ok", "service": "sitara-api"})
 
 
+@extend_schema(
+    operation_id="health_ready",
+    tags=["Health"],
+    responses={
+        200: ReadyResponseSerializer,
+        503: OpenApiResponse(
+            ReadyResponseSerializer,
+            description="At least one dependency is unavailable; the body still lists each check.",
+        ),
+    },
+    summary="Readiness",
+    description=(
+        "PostgreSQL, the Redis broker, the auth-rate-limit cache and private "
+        "object storage. Returns 503 with a displayable per-check body when "
+        "any dependency is down. No authentication required."
+    ),
+)
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def ready(request):
@@ -42,6 +68,17 @@ def ready(request):
     )
 
 
+@extend_schema(
+    operation_id="config_public",
+    tags=["Configuration"],
+    responses={200: PublicConfigSerializer},
+    summary="Public configuration",
+    description=(
+        "Safe, non-secret configuration for the frontend: demo mode, whether "
+        "generation is available, and the inspiration/refinement limits. No "
+        "authentication required; no tokens, credentials or storage details."
+    ),
+)
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def public_config(request):

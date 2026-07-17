@@ -78,6 +78,14 @@ jobs:
         run: python manage.py check
       - name: Migration consistency
         run: python manage.py makemigrations --check --dry-run
+      - name: OpenAPI schema freshness (contract-drift check)
+        run: |
+          python manage.py spectacular \
+            --format openapi-json \
+            --file openapi/schema.json \
+            --validate \
+            --fail-on-warn
+          git diff --exit-code -- openapi/schema.json
       - name: Tests
         run: pytest
 

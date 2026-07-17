@@ -10,6 +10,10 @@
 
 Django==5.2.4
 djangorestframework==3.16.0
+# OpenAPI 3.0 contract generation (Phase 6): produces the committed
+# apps/api/openapi/schema.json through the `spectacular` management command
+# only — no runtime schema/Swagger/Redoc endpoint is served.
+drf-spectacular==0.28.0
 django-cors-headers==4.6.0
 django-storages[s3]==1.14.4
 boto3==1.35.99

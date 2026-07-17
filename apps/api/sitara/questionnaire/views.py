@@ -9,12 +9,16 @@ type logged, never the malformed content or validation detail.
 
 import logging
 
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from sitara.schema import ErrorEnvelopeSerializer
+
 from .models import QuestionnaireVersion
+from .openapi import ActiveQuestionnaireResponseSerializer
 from .schema_validation import validate_questionnaire_schema
 from .serializers import ActiveQuestionnaireSerializer
 
@@ -42,6 +46,25 @@ class ActiveQuestionnaireView(APIView):
     authentication_classes: list = []
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        operation_id="questionnaire_active",
+        tags=["Questionnaire"],
+        responses={
+            200: ActiveQuestionnaireResponseSerializer,
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="No valid active questionnaire version is available.",
+            ),
+        },
+        summary="Active questionnaire",
+        description=(
+            "Serves the single active questionnaire version as {id, version, "
+            "schema}. Public and identity-free (creates no session or "
+            "workspace); no authentication required. The schema is the "
+            "authoritative source of question types, constraints and "
+            "compatibility rules."
+        ),
+    )
     def get(self, request):
         active = QuestionnaireVersion.objects.filter(
             status=QuestionnaireVersion.Status.ACTIVE

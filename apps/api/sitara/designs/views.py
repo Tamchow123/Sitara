@@ -23,6 +23,7 @@ import logging
 from django.db import transaction
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.exceptions import ParseError
@@ -30,10 +31,24 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from sitara.schema import (
+    CSRF_HEADER_PARAMETER,
+    ErrorEnvelopeSerializer,
+    ValidationErrorEnvelopeSerializer,
+)
+
 from .models import Design
+from .openapi import DesignListResponseSerializer
 from .ownership import accessible_designs
 from .serializers import DesignReadSerializer, DesignWriteSerializer
 from .services import WorkspaceCoordinationError, resolve_current_design_session
+
+_DESIGN_TAGS = ["Designs"]
+_OWNERSHIP_NOTE = (
+    "Ownership is by Django session (anonymous workspace) OR authenticated "
+    "account — never by knowing a UUID. Anything inaccessible returns an "
+    "indistinguishable 404."
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +92,16 @@ class DesignListCreateView(APIView):
     authentication_classes = [SessionAuthentication]
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        operation_id="designs_list",
+        tags=_DESIGN_TAGS,
+        responses={200: DesignListResponseSerializer},
+        summary="List your designs",
+        description=(
+            "Returns the private designs owned by the current session or "
+            "account. A list request never creates a workspace. " + _OWNERSHIP_NOTE
+        ),
+    )
     def get(self, request):
         # Listing never creates a workspace (accessible_designs resolves
         # with create=False); an anonymous browser that has not designed
@@ -87,6 +112,27 @@ class DesignListCreateView(APIView):
             headers=NO_STORE,
         )
 
+    @extend_schema(
+        operation_id="designs_create",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=DesignWriteSerializer,
+        responses={
+            201: DesignReadSerializer,
+            400: ValidationErrorEnvelopeSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Design workspace temporarily unavailable."
+            ),
+        },
+        summary="Create a design",
+        description=(
+            "Creates a private draft (title only; status and answers are "
+            "server-owned). " + _OWNERSHIP_NOTE
+        ),
+    )
     def post(self, request):
         body, parse_failure = _parse_body(request)
         if parse_failure is not None:
@@ -134,12 +180,42 @@ class DesignDetailView(APIView):
         # Ownership filter FIRST, UUID lookup second — never the reverse.
         return accessible_designs(request).filter(pk=design_id).first()
 
+    @extend_schema(
+        operation_id="designs_retrieve",
+        tags=_DESIGN_TAGS,
+        responses={
+            200: DesignReadSerializer,
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+        },
+        summary="Retrieve a design",
+        description=_OWNERSHIP_NOTE,
+    )
     def get(self, request, design_id: str):
         design = self._get_owned(request, design_id)
         if design is None:
             return _not_found()
         return Response(DesignReadSerializer(design).data, headers=NO_STORE)
 
+    @extend_schema(
+        operation_id="designs_update",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=DesignWriteSerializer,
+        responses={
+            200: DesignReadSerializer,
+            400: ValidationErrorEnvelopeSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+        },
+        summary="Update a design",
+        description="Title-only update. " + _OWNERSHIP_NOTE,
+    )
     def patch(self, request, design_id: str):
         design = self._get_owned(request, design_id)
         if design is None:

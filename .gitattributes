@@ -1,0 +1,5 @@
+# Generated OpenAPI contract files are byte-compared by the CI drift checks
+# (backend schema + frontend types). Pin them to LF so generation on Linux
+# CI and checkout on Windows/macOS never disagree over line endings.
+apps/api/openapi/schema.json text eol=lf
+apps/web/src/api/schema.d.ts text eol=lf

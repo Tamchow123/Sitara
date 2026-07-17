@@ -1,0 +1,1552 @@
+{
+    "openapi": "3.0.3",
+    "info": {
+        "title": "Sitara API",
+        "version": "1.0.0",
+        "description": "Sitara is an AI-assisted South Asian bridalwear **concept visualisation** application (concept only — not sewing patterns or manufacturing specifications).\n\nDesigns are **private by default**: they are never public merely because their UUID is known, and every inaccessible design returns an indistinguishable 404. Authentication is a Django server-side session (HttpOnly cookie) coordinated with a CSRF token; the browser calls the API same-origin.\n\nAI generation is demo/provider gated and is **not** part of this contract yet — no generation, questionnaire-answer submission, inspiration selection or provider endpoints are documented here."
+    },
+    "paths": {
+        "/api/v1/auth/csrf/": {
+            "get": {
+                "operationId": "auth_csrf",
+                "description": "Sets the sitara_csrftoken cookie and returns the matching token, and MATERIALISES the Django database session (setting sitara_sessionid) so later anonymous design operations can coordinate. Call this before any unsafe request. The token is never logged; the session key never leaves the backend.",
+                "summary": "Bootstrap the CSRF token and browser session",
+                "tags": [
+                    "Authentication"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CsrfResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/login/": {
+            "post": {
+                "operationId": "auth_login",
+                "description": "Authenticates against a Django session. Failures for unknown email, wrong password and inactive accounts are one generic 401.",
+                "summary": "Sign in",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LoginRequest"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LoginRequest"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LoginRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AuthSuccessResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Invalid credentials."
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Login rate limited."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Authentication cache unavailable."
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/logout/": {
+            "post": {
+                "operationId": "auth_logout",
+                "description": "Flushes the session and returns a fresh anonymous token. Idempotent: an anonymous browser gets the same shape of answer.",
+                "summary": "Sign out",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LogoutResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/me/": {
+            "get": {
+                "operationId": "auth_me",
+                "description": "Browser session-state bootstrap. Returns the authenticated {id, email} user or an anonymous body — both are HTTP 200. Relies on the HttpOnly session cookie; anonymous access is intentional (no bearer token or API key is used).",
+                "summary": "Current session state",
+                "tags": [
+                    "Authentication"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MeResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/register/": {
+            "post": {
+                "operationId": "auth_register",
+                "description": "Creates an account and logs the browser in, rotating the session and token.",
+                "summary": "Register and sign in",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegisterRequest"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegisterRequest"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegisterRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AuthSuccessResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Registration rate limited."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Authentication cache unavailable."
+                    }
+                }
+            }
+        },
+        "/api/v1/config/public": {
+            "get": {
+                "operationId": "config_public",
+                "description": "Safe, non-secret configuration for the frontend: demo mode, whether generation is available, and the inspiration/refinement limits. No authentication required; no tokens, credentials or storage details.",
+                "summary": "Public configuration",
+                "tags": [
+                    "Configuration"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PublicConfig"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/designs/": {
+            "get": {
+                "operationId": "designs_list",
+                "description": "Returns the private designs owned by the current session or account. A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "List your designs",
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DesignListResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "post": {
+                "operationId": "designs_create",
+                "description": "Creates a private draft (title only; status and answers are server-owned). Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Create a design",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DesignWriteRequest"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DesignWriteRequest"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DesignWriteRequest"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DesignRead"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Design workspace temporarily unavailable."
+                    }
+                }
+            }
+        },
+        "/api/v1/designs/{design_id}/": {
+            "get": {
+                "operationId": "designs_retrieve",
+                "description": "Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Retrieve a design",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DesignRead"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    }
+                }
+            },
+            "patch": {
+                "operationId": "designs_update",
+                "description": "Title-only update. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Update a design",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PatchedDesignWriteRequest"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PatchedDesignWriteRequest"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PatchedDesignWriteRequest"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DesignRead"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    }
+                }
+            }
+        },
+        "/api/v1/health/live": {
+            "get": {
+                "operationId": "health_live",
+                "description": "The process answers. No dependency checks. No authentication required.",
+                "summary": "Liveness",
+                "tags": [
+                    "Health"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LiveResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/health/ready": {
+            "get": {
+                "operationId": "health_ready",
+                "description": "PostgreSQL, the Redis broker, the auth-rate-limit cache and private object storage. Returns 503 with a displayable per-check body when any dependency is down. No authentication required.",
+                "summary": "Readiness",
+                "tags": [
+                    "Health"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReadyResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReadyResponse"
+                                }
+                            }
+                        },
+                        "description": "At least one dependency is unavailable; the body still lists each check."
+                    }
+                }
+            }
+        },
+        "/api/v1/inspiration-assets/": {
+            "get": {
+                "operationId": "inspiration_assets_list",
+                "description": "Public, identity-free catalogue of rights-approved inspiration images (approved + verified + unexpired + all usage permissions). No authentication required; only the public fields are returned.",
+                "summary": "List inspiration assets",
+                "tags": [
+                    "Inspiration catalogue"
+                ],
+                "security": [
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InspirationCatalogueResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/inspiration-assets/{asset_id}/image/": {
+            "get": {
+                "operationId": "inspiration_asset_image",
+                "description": "Streams the full-size sanitised WebP for an eligible asset. No storage keys or storage URLs are exposed.",
+                "summary": "Inspiration asset image",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "asset_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Inspiration catalogue"
+                ],
+                "security": [
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "image/webp": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        },
+                        "description": "Sanitised WebP image bytes streamed through Django."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Missing or ineligible asset (indistinguishable from absent)."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Eligible asset whose private storage object is unavailable."
+                    }
+                }
+            }
+        },
+        "/api/v1/inspiration-assets/{asset_id}/thumbnail/": {
+            "get": {
+                "operationId": "inspiration_asset_thumbnail",
+                "description": "Streams the thumbnail sanitised WebP for an eligible asset. No storage keys or storage URLs are exposed.",
+                "summary": "Inspiration asset thumbnail",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "asset_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Inspiration catalogue"
+                ],
+                "security": [
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "image/webp": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        },
+                        "description": "Sanitised WebP image bytes streamed through Django."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Missing or ineligible asset (indistinguishable from absent)."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Eligible asset whose private storage object is unavailable."
+                    }
+                }
+            }
+        },
+        "/api/v1/questionnaire/active/": {
+            "get": {
+                "operationId": "questionnaire_active",
+                "description": "Serves the single active questionnaire version as {id, version, schema}. Public and identity-free (creates no session or workspace); no authentication required. The schema is the authoritative source of question types, constraints and compatibility rules.",
+                "summary": "Active questionnaire",
+                "tags": [
+                    "Questionnaire"
+                ],
+                "security": [
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ActiveQuestionnaireResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "No valid active questionnaire version is available."
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "ActionEnum": {
+                "enum": [
+                    "hide",
+                    "require",
+                    "restrict_options",
+                    "show"
+                ],
+                "type": "string",
+                "description": "* `hide` - hide\n* `require` - require\n* `restrict_options` - restrict_options\n* `show` - show"
+            },
+            "ActiveQuestionnaireResponse": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "version": {
+                        "type": "integer"
+                    },
+                    "schema": {
+                        "$ref": "#/components/schemas/QuestionnaireSchema"
+                    }
+                },
+                "required": [
+                    "id",
+                    "schema",
+                    "version"
+                ]
+            },
+            "AuthSuccessResponse": {
+                "type": "object",
+                "properties": {
+                    "authenticated": {
+                        "type": "boolean",
+                        "description": "True on a successful login/registration."
+                    },
+                    "user": {
+                        "$ref": "#/components/schemas/AuthUser"
+                    },
+                    "csrf_token": {
+                        "type": "string",
+                        "description": "Freshly rotated token to use going forward."
+                    }
+                },
+                "required": [
+                    "authenticated",
+                    "csrf_token",
+                    "user"
+                ]
+            },
+            "AuthUser": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "readOnly": true,
+                        "description": "The user's UUID."
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "readOnly": true,
+                        "description": "Canonical (lower-cased) email."
+                    }
+                },
+                "required": [
+                    "email",
+                    "id"
+                ]
+            },
+            "CompatibilityRuleSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "when": {
+                        "$ref": "#/components/schemas/RuleConditionSchema"
+                    },
+                    "then": {
+                        "$ref": "#/components/schemas/RuleActionSchema"
+                    }
+                },
+                "required": [
+                    "id",
+                    "then",
+                    "when"
+                ]
+            },
+            "CsrfResponse": {
+                "type": "object",
+                "properties": {
+                    "csrf_token": {
+                        "type": "string",
+                        "description": "Send this back as the X-CSRFToken header on unsafe requests."
+                    }
+                },
+                "required": [
+                    "csrf_token"
+                ]
+            },
+            "DesignListResponse": {
+                "type": "object",
+                "properties": {
+                    "designs": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DesignRead"
+                        }
+                    }
+                },
+                "required": [
+                    "designs"
+                ]
+            },
+            "DesignRead": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "readOnly": true
+                    },
+                    "title": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "status": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/StatusEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "answers": {
+                        "readOnly": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "answers",
+                    "created_at",
+                    "id",
+                    "status",
+                    "title",
+                    "updated_at"
+                ]
+            },
+            "DesignWriteRequest": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "maxLength": 120
+                    }
+                }
+            },
+            "ErrorDetail": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Stable machine-readable error code."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Safe, user-facing message; never echoes secrets."
+                    }
+                },
+                "required": [
+                    "code",
+                    "message"
+                ]
+            },
+            "ErrorEnvelope": {
+                "type": "object",
+                "description": "The standard error body for 401/403/404/429/503 responses.",
+                "properties": {
+                    "error": {
+                        "$ref": "#/components/schemas/ErrorDetail"
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            },
+            "FieldValidationErrorDetail": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Stable machine-readable error code."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Safe, user-facing message."
+                    },
+                    "fields": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "description": "Per-field validation messages keyed by field name."
+                    }
+                },
+                "required": [
+                    "code",
+                    "message"
+                ]
+            },
+            "InspirationCatalogueResponse": {
+                "type": "object",
+                "properties": {
+                    "assets": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PublicInspirationAsset"
+                        }
+                    }
+                },
+                "required": [
+                    "assets"
+                ]
+            },
+            "LiveResponse": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Always \"ok\" when the process answers."
+                    },
+                    "service": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "service",
+                    "status"
+                ]
+            },
+            "LoginRequest": {
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "minLength": 1
+                    },
+                    "password": {
+                        "type": "string",
+                        "writeOnly": true,
+                        "minLength": 1,
+                        "maxLength": 128
+                    }
+                },
+                "required": [
+                    "email",
+                    "password"
+                ]
+            },
+            "LogoutResponse": {
+                "type": "object",
+                "properties": {
+                    "authenticated": {
+                        "type": "boolean",
+                        "description": "Always false after logout."
+                    },
+                    "user": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/AuthUser"
+                            }
+                        ],
+                        "nullable": true,
+                        "description": "Always null after logout."
+                    },
+                    "csrf_token": {
+                        "type": "string",
+                        "description": "Fresh anonymous token."
+                    }
+                },
+                "required": [
+                    "authenticated",
+                    "csrf_token",
+                    "user"
+                ]
+            },
+            "MeResponse": {
+                "type": "object",
+                "properties": {
+                    "authenticated": {
+                        "type": "boolean"
+                    },
+                    "user": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/AuthUser"
+                            }
+                        ],
+                        "nullable": true,
+                        "description": "The user when authenticated, else null."
+                    }
+                },
+                "required": [
+                    "authenticated",
+                    "user"
+                ]
+            },
+            "OperatorEnum": {
+                "enum": [
+                    "equals",
+                    "in",
+                    "not_in"
+                ],
+                "type": "string",
+                "description": "* `equals` - equals\n* `in` - in\n* `not_in` - not_in"
+            },
+            "PatchedDesignWriteRequest": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "maxLength": 120
+                    }
+                }
+            },
+            "PublicConfig": {
+                "type": "object",
+                "properties": {
+                    "demo_mode": {
+                        "type": "boolean"
+                    },
+                    "generation_enabled": {
+                        "type": "boolean",
+                        "description": "True only when environment gates AND a paid provider implementation allow it."
+                    },
+                    "max_inspiration_images": {
+                        "type": "integer"
+                    },
+                    "max_refinements": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "demo_mode",
+                    "generation_enabled",
+                    "max_inspiration_images",
+                    "max_refinements"
+                ]
+            },
+            "PublicInspirationAsset": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "alt_text": {
+                        "type": "string"
+                    },
+                    "garment_type": {
+                        "type": "string"
+                    },
+                    "cultural_context": {
+                        "type": "string"
+                    },
+                    "attribution": {
+                        "type": "string",
+                        "description": "Approved public attribution text, if any."
+                    },
+                    "image_url": {
+                        "type": "string",
+                        "description": "Relative Django endpoint streaming WebP bytes."
+                    },
+                    "thumbnail_url": {
+                        "type": "string",
+                        "description": "Relative Django endpoint streaming WebP bytes."
+                    }
+                },
+                "required": [
+                    "alt_text",
+                    "attribution",
+                    "cultural_context",
+                    "garment_type",
+                    "id",
+                    "image_url",
+                    "thumbnail_url",
+                    "title"
+                ]
+            },
+            "QuestionConstraintsSchema": {
+                "type": "object",
+                "description": "Bounded per-question-type constraint mapping (all keys optional).\n\n``min_items``/``max_items``/``exclusive_values`` apply to ``multi_choice``;\n``min_length``/``max_length`` apply to ``text``. Choice questions may omit\nconstraints entirely.",
+                "properties": {
+                    "min_items": {
+                        "type": "integer"
+                    },
+                    "max_items": {
+                        "type": "integer"
+                    },
+                    "exclusive_values": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "min_length": {
+                        "type": "integer"
+                    },
+                    "max_length": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "QuestionOptionSchema": {
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "string",
+                        "description": "Stable machine identifier persisted in answers."
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "label",
+                    "value"
+                ]
+            },
+            "QuestionSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Stable machine identifier."
+                    },
+                    "type": {
+                        "$ref": "#/components/schemas/TypeEnum"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "help_text": {
+                        "type": "string"
+                    },
+                    "required": {
+                        "type": "boolean"
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/QuestionOptionSchema"
+                        },
+                        "description": "Present for choice questions."
+                    },
+                    "constraints": {
+                        "$ref": "#/components/schemas/QuestionConstraintsSchema"
+                    }
+                },
+                "required": [
+                    "id",
+                    "label",
+                    "required",
+                    "type"
+                ]
+            },
+            "QuestionnaireSchema": {
+                "type": "object",
+                "properties": {
+                    "schema_version": {
+                        "type": "integer"
+                    },
+                    "key": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "steps": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/StepSchema"
+                        }
+                    },
+                    "rules": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/CompatibilityRuleSchema"
+                        }
+                    }
+                },
+                "required": [
+                    "key",
+                    "rules",
+                    "schema_version",
+                    "steps",
+                    "title"
+                ]
+            },
+            "ReadyChecks": {
+                "type": "object",
+                "properties": {
+                    "database": {
+                        "type": "string",
+                        "description": "\"ok\" or \"unavailable\"."
+                    },
+                    "redis": {
+                        "type": "string",
+                        "description": "\"ok\" or \"unavailable\"."
+                    },
+                    "auth_cache": {
+                        "type": "string",
+                        "description": "\"ok\" or \"unavailable\"."
+                    },
+                    "storage": {
+                        "type": "string",
+                        "description": "\"ok\" or \"unavailable\"."
+                    }
+                },
+                "required": [
+                    "auth_cache",
+                    "database",
+                    "redis",
+                    "storage"
+                ]
+            },
+            "ReadyResponse": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "\"ok\" (200) or \"unavailable\" (503)."
+                    },
+                    "checks": {
+                        "$ref": "#/components/schemas/ReadyChecks"
+                    }
+                },
+                "required": [
+                    "checks",
+                    "status"
+                ]
+            },
+            "RegisterRequest": {
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "minLength": 1
+                    },
+                    "password": {
+                        "type": "string",
+                        "writeOnly": true,
+                        "minLength": 1,
+                        "maxLength": 128
+                    },
+                    "password_confirm": {
+                        "type": "string",
+                        "writeOnly": true,
+                        "minLength": 1,
+                        "maxLength": 128
+                    }
+                },
+                "required": [
+                    "email",
+                    "password",
+                    "password_confirm"
+                ]
+            },
+            "RuleActionSchema": {
+                "type": "object",
+                "description": "A rule's ``then`` clause.",
+                "properties": {
+                    "action": {
+                        "$ref": "#/components/schemas/ActionEnum"
+                    },
+                    "question_id": {
+                        "type": "string",
+                        "description": "The question the action targets."
+                    },
+                    "values": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Option values; present only for restrict_options."
+                    }
+                },
+                "required": [
+                    "action",
+                    "question_id"
+                ]
+            },
+            "RuleConditionSchema": {
+                "type": "object",
+                "description": "A rule's ``when`` clause.",
+                "properties": {
+                    "question_id": {
+                        "type": "string",
+                        "description": "The choice question this condition tests."
+                    },
+                    "operator": {
+                        "$ref": "#/components/schemas/OperatorEnum"
+                    },
+                    "values": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": [
+                    "operator",
+                    "question_id",
+                    "values"
+                ]
+            },
+            "StatusEnum": {
+                "enum": [
+                    "draft"
+                ],
+                "type": "string",
+                "description": "* `draft` - Draft"
+            },
+            "StepSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "questions": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/QuestionSchema"
+                        }
+                    }
+                },
+                "required": [
+                    "id",
+                    "questions",
+                    "title"
+                ]
+            },
+            "TypeEnum": {
+                "enum": [
+                    "multi_choice",
+                    "single_choice",
+                    "text"
+                ],
+                "type": "string",
+                "description": "* `multi_choice` - multi_choice\n* `single_choice` - single_choice\n* `text` - text"
+            },
+            "ValidationErrorEnvelope": {
+                "type": "object",
+                "description": "The error body for 400 validation failures (adds ``fields``).",
+                "properties": {
+                    "error": {
+                        "$ref": "#/components/schemas/FieldValidationErrorDetail"
+                    }
+                },
+                "required": [
+                    "error"
+                ]
+            }
+        },
+        "securitySchemes": {
+            "cookieAuth": {
+                "type": "apiKey",
+                "in": "cookie",
+                "name": "sitara_sessionid"
+            }
+        }
+    }
+}
