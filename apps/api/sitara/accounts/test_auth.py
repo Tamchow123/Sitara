@@ -449,3 +449,50 @@ class TestResponseAndLogSafety:
         assert session_cookie["samesite"] == "Lax"
         assert session_cookie["path"] == "/"
         assert not session_cookie["domain"]  # host-only cookie, no broad domain
+
+
+class TestCsrfSessionMaterialisation:
+    """The CSRF bootstrap must leave the browser with a LIVE database
+    session: design-workspace creation coordinates concurrent requests by
+    locking the django_session row, so that row must exist before the
+    first unsafe request."""
+
+    def test_bootstrap_creates_a_database_session_for_a_fresh_browser(self):
+        client = csrf_client()
+        assert Session.objects.count() == 0
+        response = client.get("/api/v1/auth/csrf/")
+        assert response.status_code == 200
+        assert Session.objects.count() == 1
+        # A successful bootstrap sets BOTH Sitara cookies.
+        assert "sitara_sessionid" in response.cookies
+        assert "sitara_csrftoken" in response.cookies
+        assert response["Cache-Control"] == "no-store"
+
+    def test_repeated_bootstrap_reuses_the_existing_browser_session(self):
+        client = csrf_client()
+        client.get("/api/v1/auth/csrf/")
+        first_key = client.session.session_key
+        assert first_key
+        response = client.get("/api/v1/auth/csrf/")
+        assert response.status_code == 200
+        assert client.session.session_key == first_key
+        assert Session.objects.count() == 1
+
+    def test_bootstrap_replaces_a_stale_session_cookie_with_a_live_session(self):
+        client = csrf_client()
+        client.get("/api/v1/auth/csrf/")
+        stale_key = client.session.session_key
+        Session.objects.all().delete()  # simulate expiry/cleanup
+        response = client.get("/api/v1/auth/csrf/")
+        assert response.status_code == 200
+        assert Session.objects.count() == 1
+        assert client.session.session_key != stale_key
+
+    def test_no_session_key_in_response_body_or_logs(self, caplog):
+        client = csrf_client()
+        with caplog.at_level("DEBUG"):
+            response = client.get("/api/v1/auth/csrf/")
+        session_key = client.session.session_key
+        assert session_key
+        assert session_key not in response.content.decode()
+        assert session_key not in caplog.text

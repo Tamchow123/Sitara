@@ -1,6 +1,8 @@
 # ADR 0004 — Private design ownership (Phase 4)
 
-- **Status:** Accepted (2026-07-17, after the Phase 4 test suite passed)
+- **Status:** Accepted (2026-07-17, after the Phase 4 test suite passed);
+  amended 2026-07-17 with the workspace-creation concurrency correction
+  (see "Concurrency" below)
 - **Deciders:** Sitara project
 - **Related:** ADR 0002 (application foundation), ADR 0003 (session authentication)
 
@@ -38,6 +40,48 @@ session keys would break on every login, tempt code into disabling
 rotation, and turn a session-store leak into a design-ownership leak.
 Session *data* survives the rotation — which is exactly the property that
 lets an anonymous workspace follow its browser through login.
+
+### Concurrency: workspace creation is serialised per browser session
+
+*(correction, 2026-07-17)*
+
+As first shipped, the create path checked the pointer and created a
+workspace without coordination: two requests sharing one browser session
+(two tabs) could both observe "no pointer", create separate workspaces, and
+let competing session saves strand one design. Corrected as follows:
+
+- **CSRF bootstrap materialises the Django session.** `GET
+  /api/v1/auth/csrf/` now creates/saves the database session (through the
+  supported session API) whenever the browser lacks a live one, so a
+  successful bootstrap sets both `sitara_csrftoken` and `sitara_sessionid`
+  and the `django_session` row exists before the first unsafe request.
+  Repeated bootstraps reuse the existing session; no session key is ever
+  returned or logged.
+- **The create path locks the browser's `django_session` row**
+  (`SELECT … FOR UPDATE` inside a transaction), re-reads the freshest
+  committed session data, re-checks the pointer under the unchanged
+  ownership rules (reuse unclaimed/own, claim lazily, never another
+  user's), and creates a new `DesignSession` only when the locked, freshly
+  loaded data still has no usable pointer. The loser of a race blocks
+  briefly and then reuses the winner's workspace. The chosen pointer is
+  persisted into the locked row, and `request.session` is synchronised so
+  `SessionMiddleware`'s save of this request's earlier snapshot cannot
+  erase it.
+- **Design creation joins the same transaction**, so a failed insert
+  leaves neither an empty workspace nor a dangling pointer, and the row
+  lock is held no longer than that one request's work.
+- **Failures fail closed.** A lock or session-persistence failure rolls
+  everything back and returns a controlled
+  `503 design_workspace_unavailable`; there is no unlocked fallback, and
+  neither responses nor logs carry session keys, cookie values or store
+  payloads (logs record only the exception type).
+- **Locking the row is not storing the key**: domain tables still hold no
+  raw Django session key, and the non-create read path stays lightweight
+  (no session-row lock).
+- **Per-browser, not per-user**: a user may still legitimately hold
+  several DesignSessions — one per browser session they designed in; only
+  simultaneous creation *within* one browser session serialises onto one
+  workspace.
 
 ### Automatic promotion after login (lazy, no claim endpoint)
 

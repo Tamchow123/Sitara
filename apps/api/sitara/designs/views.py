@@ -18,6 +18,9 @@ Inaccessible designs are 404, never 403: a 403 would confirm that a guessed
 UUID exists. Every response carries ``Cache-Control: no-store``.
 """
 
+import logging
+
+from django.db import transaction
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
 from rest_framework import status
@@ -30,7 +33,9 @@ from rest_framework.views import APIView
 from .models import Design
 from .ownership import accessible_designs
 from .serializers import DesignReadSerializer, DesignWriteSerializer
-from .services import resolve_current_design_session
+from .services import WorkspaceCoordinationError, resolve_current_design_session
+
+logger = logging.getLogger(__name__)
 
 NO_STORE = {"Cache-Control": "no-store"}
 
@@ -90,12 +95,29 @@ class DesignListCreateView(APIView):
         if not serializer.is_valid():
             return _validation_failed(serializer.errors)
 
-        design_session = resolve_current_design_session(request, create=True)
-        design = Design.objects.create(
-            design_session=design_session,
-            title=serializer.validated_data.get("title", ""),
-            # status and answers are server-owned: always draft, always {}.
-        )
+        try:
+            # One coherent transaction: workspace resolution (which locks
+            # the browser's django_session row) and the design insert
+            # commit together, so a failed insert never leaves behind an
+            # empty workspace or a pointer to nothing.
+            with transaction.atomic():
+                design_session = resolve_current_design_session(request, create=True)
+                design = Design.objects.create(
+                    design_session=design_session,
+                    title=serializer.validated_data.get("title", ""),
+                    # status and answers are server-owned: draft and {}.
+                )
+        except WorkspaceCoordinationError as exc:
+            # Fail closed: never fall back to UNLOCKED workspace creation,
+            # and never expose database or session-store details. Log only
+            # the underlying exception type.
+            cause = type(exc.__cause__).__name__ if exc.__cause__ else "unknown"
+            logger.warning("design workspace coordination failed exception_type=%s", cause)
+            return _error(
+                "design_workspace_unavailable",
+                "Designs are temporarily unavailable. Try again shortly.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         return Response(
             DesignReadSerializer(design).data,
             status=status.HTTP_201_CREATED,

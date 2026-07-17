@@ -251,6 +251,62 @@ class TestResponsePrivacy:
         ):
             assert design_session_id not in response.content.decode()
 
+
+class TestWorkspaceCoordinationFailure:
+    """A session-store failure during workspace resolution must fail
+    CLOSED: controlled 503, full rollback, no unlocked fallback, and no
+    database/session detail in the response or the logs."""
+
+    POISON = "session store exploded: secret=hunter2 sessionid=abc123xyz"
+
+    def _assert_failed_closed(self, response, caplog):
+        assert response.status_code == 503
+        body = response.json()
+        assert body["error"]["code"] == "design_workspace_unavailable"
+        assert response["Cache-Control"] == "no-store"
+        text = response.content.decode()
+        for marker in ("hunter2", "abc123xyz", "RuntimeError", "Traceback", "session"):
+            assert marker not in text
+        # No design was created under an uncertain owner — everything
+        # rolled back, including the workspace row.
+        assert Design.objects.count() == 0
+        assert DesignSession.objects.count() == 0
+        # Logs carry only the safe breadcrumb, never the store detail.
+        assert "design workspace coordination failed" in caplog.text
+        assert "exception_type=RuntimeError" in caplog.text
+        assert "hunter2" not in caplog.text
+        assert "abc123xyz" not in caplog.text
+
+    def test_session_row_save_failure_fails_closed(self, monkeypatch, caplog):
+        from django.contrib.sessions.models import Session
+
+        client = csrf_client()
+        token = bootstrap_csrf(client)
+
+        def exploding_save(self, *args, **kwargs):
+            raise RuntimeError(TestWorkspaceCoordinationFailure.POISON)
+
+        monkeypatch.setattr(Session, "save", exploding_save)
+        with caplog.at_level("WARNING"):
+            response = send_json(client, "post", DESIGNS_URL, {"title": "doomed"}, token=token)
+        self._assert_failed_closed(response, caplog)
+
+    def test_session_encode_failure_fails_closed(self, monkeypatch, caplog):
+        from django.contrib.sessions.backends.base import SessionBase
+
+        client = csrf_client()
+        token = bootstrap_csrf(client)
+
+        def exploding_encode(self, session_dict):
+            raise RuntimeError(TestWorkspaceCoordinationFailure.POISON)
+
+        monkeypatch.setattr(SessionBase, "encode", exploding_encode)
+        with caplog.at_level("WARNING"):
+            response = send_json(client, "post", DESIGNS_URL, {}, token=token)
+        self._assert_failed_closed(response, caplog)
+
+
+class TestResponseCaching:
     def test_all_design_responses_carry_no_store(self):
         client = csrf_client()
         token = bootstrap_csrf(client)

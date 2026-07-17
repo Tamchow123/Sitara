@@ -127,6 +127,14 @@ any signed-in browser. Anything inaccessible returns 404 (never 403), and
 `MAX_DESIGN_VERSIONS` (default 2 = initial concept + one refinement) caps
 version numbering at the application level.
 
+Concurrency: the CSRF bootstrap (`GET /api/v1/auth/csrf/`) materialises the
+Django database session, and concurrent design creates sharing one browser
+session serialise on that session's database row — two tabs always end up
+in the same workspace, with a controlled 503 (never unlocked creation) if
+the session store fails. Domain tables still store no raw Django session
+key, and a user may legitimately hold several workspaces across different
+browser sessions.
+
 ### 8. Celery ping test
 
 ```powershell

@@ -73,7 +73,19 @@ def _user_payload(user) -> dict:
 @ensure_csrf_cookie
 def csrf_view(request):
     """Anonymous CSRF bootstrap: sets the sitara_csrftoken cookie and
-    returns the matching token. The token is never logged."""
+    returns the matching token. The token is never logged.
+
+    Bootstrap also MATERIALISES the Django database session when the
+    browser does not have a live one yet, so a successful call sets both
+    sitara_csrftoken and sitara_sessionid. Design-workspace creation
+    serialises concurrent requests by locking the browser's django_session
+    row, which therefore must exist before the first unsafe request.
+    Repeated bootstraps reuse the existing session; the session key is
+    never returned or logged."""
+    if request.session.session_key is None or not request.session.exists(
+        request.session.session_key
+    ):
+        request.session.create()
     return _json({"csrf_token": get_token(request)})
 
 
