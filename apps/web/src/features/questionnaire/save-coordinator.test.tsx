@@ -122,10 +122,10 @@ describe("save coordinator", () => {
     render(<QuestionnaireWizard />);
     fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
     fireEvent.click(screen.getByRole("radio", { name: "Saree" }));
-    await flushMicrotasks();
 
-    // Single-flight creation: one POST despite two changes.
-    expect(mocks.createDesignDraft).toHaveBeenCalledTimes(1);
+    // Observe the first POST via waitFor rather than a fixed microtask flush,
+    // and assert it carries the correct non-empty questionnaire version.
+    await waitFor(() => expect(mocks.createDesignDraft).toHaveBeenCalledTimes(1));
     expect(mocks.createDesignDraft).toHaveBeenCalledWith({
       questionnaire_version_id: "v1",
       answers: { garment_type: "lehenga" },
@@ -144,6 +144,8 @@ describe("save coordinator", () => {
     for (const call of calls) {
       expect(call[1]).not.toEqual({ answers: { garment_type: "lehenga" } });
     }
+    // Still exactly one design created — the queued change never re-POSTed.
+    expect(mocks.createDesignDraft).toHaveBeenCalledTimes(1);
   });
 
   it("4: does not show Saved while a newer revision is still pending", async () => {
@@ -348,5 +350,124 @@ describe("save coordinator — inspiration step", () => {
     expect(
       screen.queryByText(/Inspiration images are temporarily unavailable/i),
     ).not.toBeInTheDocument();
+  });
+});
+
+// A two-required-step schema for validation-timing regressions.
+const REQUIRED_TWO_STEP: QuestionnaireSchema = {
+  schema_version: 1,
+  key: "test",
+  title: "Test",
+  steps: [
+    {
+      id: "garment",
+      title: "Garment step",
+      questions: [
+        {
+          id: "garment_type",
+          type: "single_choice",
+          label: "Garment",
+          required: true,
+          options: [{ value: "lehenga", label: "Lehenga" }],
+        },
+      ],
+    },
+    {
+      id: "silhouette_step",
+      title: "Silhouette step",
+      questions: [
+        {
+          id: "silhouette",
+          type: "single_choice",
+          label: "Silhouette",
+          required: true,
+          options: [{ value: "flared", label: "Flared" }],
+        },
+      ],
+    },
+  ],
+  rules: [],
+};
+
+describe("wizard initialisation race (synchronous refs)", () => {
+  it("1: clicking an answer the instant the control appears sends one POST with version v1", async () => {
+    const create = deferred<{ ok: true; data: ReturnType<typeof detail> }>();
+    mocks.createDesignDraft.mockReturnValue(create.promise);
+
+    render(<QuestionnaireWizard />);
+    // Click immediately once the control appears — no artificial wait for the
+    // version-sync effect (which no longer exists).
+    fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
+
+    await waitFor(() => expect(mocks.createDesignDraft).toHaveBeenCalledTimes(1));
+    expect(mocks.createDesignDraft).toHaveBeenCalledWith({
+      questionnaire_version_id: "v1",
+      answers: { garment_type: "lehenga" },
+    });
+  });
+
+  it("2: the immediate first answer never triggers a client envelope failure", async () => {
+    render(<QuestionnaireWizard />);
+    fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
+    await waitFor(() => expect(mocks.createDesignDraft).toHaveBeenCalled());
+    // No local invalid_request / envelope-rejection message is shown.
+    expect(
+      screen.queryByText(/could not be prepared to save/i),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/Could not save/i)).not.toBeInTheDocument();
+  });
+
+  it("3: clicking Continue the instant the first required step appears does not bypass validation", async () => {
+    render(<QuestionnaireWizard />);
+    // Wait only for the step control, then Continue immediately without answering.
+    await screen.findByRole("radio", { name: "Lehenga" });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    });
+    // Validation ran against the current step → blocked, no design created.
+    expect(screen.getByRole("heading", { name: "Garment step" })).toBeInTheDocument();
+    expect(await screen.findByRole("alert", { name: "There is a problem" })).toBeInTheDocument();
+    expect(mocks.createDesignDraft).not.toHaveBeenCalled();
+  });
+
+  it("4: Continue after moving to a new required step validates the NEW step, not the previous one", async () => {
+    mocks.fetchActiveQuestionnaire.mockResolvedValue({
+      id: "v1",
+      version: 1,
+      schema: REQUIRED_TWO_STEP,
+    });
+    mocks.createDesignDraft.mockResolvedValue({
+      ok: true,
+      data: detail({ answers: { garment_type: "lehenga" } }),
+    });
+    render(<QuestionnaireWizard />);
+    fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
+    await waitFor(() => expect(mocks.createDesignDraft).toHaveBeenCalled());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    });
+    // Now on the silhouette step; Continue immediately without answering it.
+    expect(await screen.findByRole("heading", { name: "Silhouette step" })).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    });
+    // The NEW step's required question blocks — we did not advance past it.
+    expect(screen.getByRole("heading", { name: "Silhouette step" })).toBeInTheDocument();
+    expect(screen.getByRole("alert", { name: "There is a problem" })).toHaveTextContent(
+      /Silhouette/,
+    );
+  });
+
+  it("5: two rapid initial changes create exactly one design and persist the newest state", async () => {
+    render(<QuestionnaireWizard />);
+    fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Saree" }));
+    await waitFor(() => expect(mocks.createDesignDraft).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mocks.updateDesignDraft).toHaveBeenLastCalledWith("d1", {
+        answers: { garment_type: "saree" },
+      }),
+    );
+    expect(mocks.createDesignDraft).toHaveBeenCalledTimes(1);
   });
 });

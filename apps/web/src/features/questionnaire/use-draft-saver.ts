@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createDesignDraft, updateDesignDraft } from "./api";
+import { useLatest } from "./use-latest";
 import { designEnvelopeSchema } from "./validation";
 import type { Answers, DesignDraft, FieldErrors } from "./types";
 import type { DraftFailure, DraftResult } from "@/lib/api";
@@ -64,18 +65,18 @@ export function useDraftSaver({ versionId, onCreated, onLatestConfirmed }: Optio
   const inFlightRef = useRef<Promise<void> | null>(null);
   const failedRef = useRef(false);
   const designIdRef = useRef<string | null>(null);
-  const versionRef = useRef(versionId);
   const textTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const mountedRef = useRef(true);
 
-  const onCreatedRef = useRef(onCreated);
-  const onLatestConfirmedRef = useRef(onLatestConfirmed);
-  useEffect(() => {
-    onCreatedRef.current = onCreated;
-    onLatestConfirmedRef.current = onLatestConfirmed;
-    versionRef.current = versionId;
-  });
+  // Render-critical values used by stable async callbacks, synchronised DURING
+  // render so the very first save (which can fire before any effect runs)
+  // never reads a stale initial value — the empty version id was exactly the
+  // hosted-CI initialisation race.
+  const versionRef = useLatest(versionId);
+  const onCreatedRef = useLatest(onCreated);
+  const onLatestConfirmedRef = useLatest(onLatestConfirmed);
 
+  // Separate effect for mounted/unmount cleanup ONLY.
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -118,7 +119,9 @@ export function useDraftSaver({ versionId, onCreated, onLatestConfirmed }: Optio
         ? createDesignDraft(body)
         : updateDesignDraft(designIdRef.current as string, payload);
     },
-    [],
+    // versionRef is a stable useLatest ref (identity never changes); listed to
+    // satisfy exhaustive-deps.
+    [versionRef],
   );
 
   const drain = useCallback((): Promise<void> => {
@@ -175,7 +178,9 @@ export function useDraftSaver({ versionId, onCreated, onLatestConfirmed }: Optio
     })();
     inFlightRef.current = run;
     return run;
-  }, [sendOnce, takePending, set]);
+    // onCreatedRef/onLatestConfirmedRef are stable useLatest refs; listed to
+    // satisfy exhaustive-deps.
+  }, [sendOnce, takePending, set, onCreatedRef, onLatestConfirmedRef]);
 
   // Immediate save (choices, selections, blur): record and drain now.
   const save = useCallback(

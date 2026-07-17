@@ -21,6 +21,7 @@ import { allowedOptions, questionsById, visibleQuestions } from "./rules";
 import { clearStaleAnswers, resumeStepIndex } from "./answer-utils";
 import { createStepResolver } from "./validation";
 import { useDraftSaver } from "./use-draft-saver";
+import { useLatest } from "./use-latest";
 import type { Answers, AnswerValue, PublicAsset, QuestionnaireSchema, Step } from "./types";
 
 const MAX_INSPIRATIONS = 3;
@@ -48,8 +49,6 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
   const [errorTick, setErrorTick] = useState(0);
 
   const answersRef = useRef<Answers>({});
-  const schemaRef = useRef<QuestionnaireSchema | null>(null);
-  const stepIndexRef = useRef(0);
   const errorSummaryRef = useRef<HTMLDivElement>(null);
 
   const setAnswersSynced = useCallback((next: Answers) => {
@@ -57,12 +56,12 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
     setAnswers(next);
   }, []);
 
-  useEffect(() => {
-    schemaRef.current = schema;
-  }, [schema]);
-  useEffect(() => {
-    stepIndexRef.current = stepIndex;
-  }, [stepIndex]);
+  // Synchronised DURING render (not in a post-render effect) so the RHF step
+  // resolver always sees the CURRENT schema and step the instant a Continue
+  // click fires — never null/stale, which would bypass or misdirect
+  // validation. answersRef stays synchronous via setAnswersSynced above.
+  const schemaRef = useLatest(schema);
+  const stepIndexRef = useLatest(stepIndex);
 
   const saver = useDraftSaver({
     versionId,
@@ -82,7 +81,9 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
         const step = s && idx < s.steps.length ? s.steps[idx] : null;
         return { schema: s, step, answers: answersRef.current };
       }),
-    [],
+    // schemaRef/stepIndexRef are stable useLatest refs (identity never
+    // changes); listed to satisfy exhaustive-deps.
+    [schemaRef, stepIndexRef],
   );
   const form = useForm<StepValues>({
     values: answers as StepValues,
