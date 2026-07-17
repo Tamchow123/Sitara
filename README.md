@@ -6,6 +6,8 @@ AI-assisted South Asian bridalwear **concept design**. A guided questionnaire, a
 
 ## Status
 
+**Phase 6 — OpenAPI contract and generated TypeScript client.** The backend OpenAPI 3.0.3 schema (drf-spectacular) is committed at `apps/api/openapi/schema.json` and is the single source of the frontend's API types: `openapi-typescript` generates `apps/web/src/api/schema.d.ts` and `openapi-fetch` provides a same-origin typed client for safe reads, sharing one request transport with the tested CSRF-aware client. Backend and frontend CI both fail on contract drift. No runtime schema/Swagger endpoint is served, and unsafe typed mutations remain deferred — see `docs/decisions/0007-openapi-generated-client.md`.
+
 **Phase 5B — rights-controlled inspiration catalogue.** On top of the Phase 3A/3B/4/5A foundation (Next.js frontend, Django/DRF backend, PostgreSQL, Redis + Celery, private MinIO/S3 storage, health endpoints, fail-closed AI-provider boundary, session authentication with optional accounts — ADR 0003, private design ownership — ADR 0004, versioned questionnaire taxonomy — ADR 0005), Sitara now has a staff-managed catalogue of rights-approved inspiration images: `UsageRights` records with a pending/verified/rejected lifecycle and four mandatory usage permissions, `InspirationAsset` drafts whose images are sanitised on ingestion (Pillow-only pipeline, metadata stripped, WebP derivatives, original discarded), a service-only approve/retire lifecycle, and public identity-free catalogue + image-streaming endpoints that re-check rights eligibility on every request — see `docs/decisions/0006-rights-controlled-inspiration-catalogue.md`. The frontend wizard will *derive* its Zod validation from the questionnaire schema (Phase 7); design-spec and image generation arrive later. Phase 2 (image-model evaluation) selected **`black-forest-labs/flux-1.1-pro`** — see `docs/decisions/0001-image-model.md` / `.json`.
 
 ## Layout
@@ -223,6 +225,52 @@ because pip-tools relies on pip internals and mismatched versions break the
 CI freshness check.
 
 CI fails if the lock is stale.
+
+### 9c. OpenAPI contract & generated TypeScript types (Phase 6)
+
+The backend is the single source of the API contract. drf-spectacular
+produces the committed `apps/api/openapi/schema.json` (through the management
+command only — no served schema/Swagger endpoint), and `openapi-typescript`
+generates `apps/web/src/api/schema.d.ts` from it. **Never hand-edit either
+generated file** — change the serializer or `requirements`/`package` and
+regenerate. Backend and frontend CI both fail on drift (ADR 0007).
+
+After changing any backend serializer, view annotation or the committed
+schema, regenerate BOTH files and review the diffs. The commands below mount
+your working tree into the existing images, so no image rebuild is needed
+(the images already carry drf-spectacular and openapi-typescript).
+
+```powershell
+# 1. Backend schema — validated, warning-free; writes apps/api/openapi/schema.json
+docker compose run --rm -v "${PWD}\apps\api:/app" api `
+  python manage.py spectacular --format openapi-json --file openapi/schema.json --validate --fail-on-warn
+
+# 2. Frontend types — regenerated from the committed schema
+docker compose run --rm `
+  -v "${PWD}\apps\web\src:/app/src" `
+  -v "${PWD}\apps\api\openapi:/api/openapi:ro" `
+  web npm run generate:api
+
+# 3. Review BOTH generated diffs before committing
+git diff -- apps/api/openapi/schema.json apps/web/src/api/schema.d.ts
+
+# 4. Backend and frontend checks
+docker compose exec api pytest
+docker compose exec web npm run typecheck
+docker compose exec web npm test -- --run
+```
+
+If you have host tooling installed (Python 3.12 with the hash-verified deps,
+Node 22 with `npm --prefix apps/web ci`), the same generation runs natively:
+
+```powershell
+# from the repo root
+cd apps/api; python manage.py spectacular --format openapi-json --file openapi/schema.json --validate --fail-on-warn; cd ..
+npm --prefix apps/web run generate:api
+```
+
+The bash equivalents (macOS/Linux) are the same commands with `$PWD` and
+forward slashes.
 
 ### 10. Frontend tests & checks
 

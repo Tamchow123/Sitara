@@ -77,13 +77,15 @@ Standing rules across all phases:
 - **Manual checkpoint:** upload 3 real rights-cleared images through admin end-to-end; confirm attribution fields render in API output. *(Pipeline verified end-to-end with a locally generated synthetic image; the three-real-image checkpoint remains pending until genuinely rights-cleared photographs are available.)*
 - **Commit:** `feat(catalogue): add rights-controlled inspiration catalogue`
 
-## Phase 6 — OpenAPI contract generation
+## Phase 6 — OpenAPI contract generation *(delivered)*
 - **Scope:** drf-spectacular wired with correct typing on all existing endpoints; `npm run generate:api` running openapi-typescript into `frontend/src/api/schema.d.ts` (committed); openapi-fetch client wrapper; CI step regenerating the schema and failing on diff (contract-drift check).
 - **Non-goals:** no new endpoints; no hand-written TS API interfaces anywhere (documented exception process if one ever becomes necessary).
 - **Commands:** `python manage.py spectacular --file schema.yaml`; `npm run generate:api`; `git diff --exit-code` in CI.
 - **Automated tests:** CI drift check; a frontend compile-time usage of the generated types (typecheck is the test).
 - **Manual checkpoint:** intentionally change a serializer field locally and confirm CI-style drift check fails; revert.
 - **Commit:** `feat: OpenAPI schema generation with committed TS types and drift check`
+
+> **Delivered (ADR 0007)** as two commits — `feat(api): add validated OpenAPI contract` and `feat(web): add generated typed API client`. drf-spectacular (0.28.0, hash-locked) produces a committed OpenAPI 3.0.3 `apps/api/openapi/schema.json` for all 16 existing operations via the `spectacular` management command only (no served schema/Swagger/Redoc). Auth views became DRF `APIView`s keeping Django `@csrf_protect` on `dispatch` (anonymous CSRF preserved; all auth tests unchanged). Explicit schema serializers give write-only passwords, a structurally-typed questionnaire schema, binary `image/webp` catalogue responses, `cookieAuth` (no JWT/bearer) and no private-field leakage. openapi-typescript (7.13.0) generates `apps/web/src/api/schema.d.ts`; openapi-fetch (0.17.0) wraps a same-origin typed client for safe GETs sharing one transport with the CSRF-aware `lib/api.ts`; frontend wire types are now generated aliases. Both files are LF-pinned and guarded by backend and frontend CI drift checks. Unsafe typed mutations remain deferred.
 
 ## Phase 7 — Questionnaire vertical slice
 - **Scope:** frontend wizard (RHF, schema-driven from `/questionnaire/`; per-step Zod validators **derived from the backend's machine-readable constraints** rather than hand-duplicated, plus static Zod validation of the stable submission envelope; progress persisted per session), inspiration browsing/selection UI (≤3, attribution shown), draft Design create/update via typed client, review-summary screen. Django re-validates every submission against the questionnaire version and takes precedence.

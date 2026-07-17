@@ -2,33 +2,21 @@
 // the Next.js rewrite — the browser never needs the Django host, and no
 // NEXT_PUBLIC_* backend URL exists.
 //
-// CSRF tokens live in MEMORY ONLY (never localStorage/sessionStorage/
-// IndexedDB); the session itself is an HttpOnly cookie the JS cannot read.
+// This module keeps the CSRF-aware unsafe-request flow (register/login/
+// logout and, later, design mutations): CSRF tokens live in MEMORY ONLY
+// (never localStorage/sessionStorage/IndexedDB); the session itself is an
+// HttpOnly cookie the JS cannot read. Safe GETs may go through the generated
+// typed client (api/client.ts); both share the transport below.
 
-export const REQUEST_TIMEOUT_MS = 5000;
+import type { components } from "@/api/schema";
+import { REQUEST_TIMEOUT_MS, fetchWithTimeout } from "@/lib/transport";
+
+export { REQUEST_TIMEOUT_MS };
 
 let csrfToken: string | null = null;
 
 export function _resetCsrfTokenForTests(): void {
   csrfToken = null;
-}
-
-async function fetchWithTimeout(path: string, init: RequestInit = {}): Promise<Response> {
-  // Abort half-open connections so the UI can never hang forever; timeouts,
-  // network errors and malformed JSON all surface as thrown errors.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(path, {
-      credentials: "same-origin",
-      cache: "no-store",
-      ...init,
-      headers: { Accept: "application/json", ...(init.headers ?? {}) },
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 export async function getJson<T>(path: string): Promise<T> {
@@ -83,19 +71,12 @@ async function postJson<T>(
 // Platform status (unchanged behaviour, now same-origin)
 // ---------------------------------------------------------------------------
 
-export type ReadyChecks = {
-  database: string;
-  redis: string;
-  auth_cache: string;
-  storage: string;
-};
-export type ReadyResponse = { status: string; checks: ReadyChecks };
-export type PublicConfig = {
-  demo_mode: boolean;
-  generation_enabled: boolean;
-  max_inspiration_images: number;
-  max_refinements: number;
-};
+// Server wire types are ALIASES of the generated OpenAPI schema — never
+// hand-maintained duplicates (Phase 6). Change the backend serializer and
+// regenerate; these follow automatically.
+export type ReadyChecks = components["schemas"]["ReadyChecks"];
+export type ReadyResponse = components["schemas"]["ReadyResponse"];
+export type PublicConfig = components["schemas"]["PublicConfig"];
 
 export function fetchReadiness(): Promise<ReadyResponse> {
   return getJson<ReadyResponse>("/api/v1/health/ready");
@@ -109,8 +90,8 @@ export function fetchPublicConfig(): Promise<PublicConfig> {
 // Authentication
 // ---------------------------------------------------------------------------
 
-export type AuthUser = { id: string; email: string };
-export type MeResponse = { authenticated: boolean; user: AuthUser | null };
+export type AuthUser = components["schemas"]["AuthUser"];
+export type MeResponse = components["schemas"]["MeResponse"];
 
 export type AuthFailure = {
   ok: false;

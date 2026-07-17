@@ -106,6 +106,10 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Generated API types freshness (contract-drift check)
+        run: |
+          npm run generate:api
+          git diff --exit-code -- src/api/schema.d.ts
       - name: Lint
         run: npm run lint
       - name: Typecheck

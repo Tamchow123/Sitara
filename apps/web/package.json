@@ -8,10 +8,12 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "generate:api": "openapi-typescript ../api/openapi/schema.json --output src/api/schema.d.ts"
   },
   "dependencies": {
     "next": "15.5.20",
+    "openapi-fetch": "0.17.0",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },
@@ -26,6 +28,7 @@
     "eslint": "9.17.0",
     "eslint-config-next": "15.5.20",
     "jsdom": "25.0.1",
+    "openapi-typescript": "7.13.0",
     "typescript": "5.7.2",
     "vitest": "2.1.8"
   }
