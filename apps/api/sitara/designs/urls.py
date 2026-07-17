@@ -21,4 +21,9 @@ _UUID = (
 urlpatterns = [
     re_path(r"^designs/?$", views.DesignListCreateView.as_view(), name="design-list"),
     re_path(rf"^designs/{_UUID}/?$", views.DesignDetailView.as_view(), name="design-detail"),
+    re_path(
+        rf"^designs/{_UUID}/validate/?$",
+        views.DesignValidateView.as_view(),
+        name="design-validate",
+    ),
 ]

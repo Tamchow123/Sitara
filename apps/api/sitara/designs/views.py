@@ -1,21 +1,20 @@
-"""Design API (Phase 4): list, create, retrieve, update — private drafts only.
+"""Design API (Phase 7): list, create, retrieve, update, validate.
 
-DRF views (so they can later join OpenAPI generation) with two deliberate
-deviations from the project defaults:
+DRF views with two deliberate deviations from the project defaults, both
+unchanged since Phase 4:
 
 - ``AllowAny`` — ownership is session-based and anonymous workspaces are a
   feature, so authentication cannot be the gate. The ownership filter in
-  ``ownership.accessible_designs`` is the mandatory access control, and the
-  global authenticated-by-default DRF setting stays untouched for everything
-  else.
+  ``ownership.accessible_designs`` is the mandatory access control.
 - ``@csrf_protect`` on dispatch — DRF's SessionAuthentication only enforces
   CSRF for already-authenticated requests, but these endpoints accept
-  anonymous unsafe requests too. Django's decorator enforces the token on
-  every POST/PATCH (safe methods are unaffected) and routes failures through
-  the JSON CSRF_FAILURE_VIEW. Nothing here is csrf_exempt.
+  anonymous unsafe requests too. Nothing here is csrf_exempt.
 
-Inaccessible designs are 404, never 403: a 403 would confirm that a guessed
-UUID exists. Every response carries ``Cache-Control: no-store``.
+Phase 7 extends the draft with a linked questionnaire version, validated
+answers and ordered inspiration selections. All answer/selection validation
+and persistence is authoritative in ``services.update_design_draft`` (one
+atomic, row-locked transaction); views stay thin. Inaccessible designs are
+404, never 403. Every response carries ``Cache-Control: no-store``.
 """
 
 import logging
@@ -31,6 +30,11 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from sitara.catalogue.models import InspirationAsset
+from sitara.questionnaire.answer_validation import (
+    QuestionnaireAnswerError,
+    validate_questionnaire_answers,
+)
 from sitara.schema import (
     CSRF_HEADER_PARAMETER,
     ErrorEnvelopeSerializer,
@@ -38,10 +42,23 @@ from sitara.schema import (
 )
 
 from .models import Design
-from .openapi import DesignListResponseSerializer
+from .openapi import (
+    DesignDetailResponseSerializer,
+    DesignListResponseSerializer,
+    DesignValidationSuccessSerializer,
+)
 from .ownership import accessible_designs
-from .serializers import DesignReadSerializer, DesignWriteSerializer
-from .services import WorkspaceCoordinationError, resolve_current_design_session
+from .serializers import (
+    DesignWriteSerializer,
+    design_detail_payload,
+    design_list_item_payload,
+)
+from .services import (
+    DraftUpdateError,
+    WorkspaceCoordinationError,
+    resolve_current_design_session,
+    update_design_draft,
+)
 
 _DESIGN_TAGS = ["Designs"]
 _OWNERSHIP_NOTE = (
@@ -78,6 +95,24 @@ def _validation_failed(errors: dict) -> Response:
     )
 
 
+def _draft_error(exc: DraftUpdateError) -> Response:
+    if exc.field_errors:
+        return _validation_failed(exc.field_errors)
+    return _error(exc.code, exc.message, status.HTTP_400_BAD_REQUEST)
+
+
+def _workspace_unavailable(exc: WorkspaceCoordinationError) -> Response:
+    # Fail closed: never fall back to UNLOCKED workspace creation, and never
+    # expose database or session-store details. Log only the exception type.
+    cause = type(exc.__cause__).__name__ if exc.__cause__ else "unknown"
+    logger.warning("design workspace coordination failed exception_type=%s", cause)
+    return _error(
+        "design_workspace_unavailable",
+        "Designs are temporarily unavailable. Try again shortly.",
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+
+
 def _parse_body(request) -> tuple[dict | list | None, Response | None]:
     try:
         return request.data, None
@@ -85,6 +120,26 @@ def _parse_body(request) -> tuple[dict | list | None, Response | None]:
         return None, _error(
             "invalid_json", "The request body is not valid JSON.", status.HTTP_400_BAD_REQUEST
         )
+
+
+def _draft_kwargs(validated: dict, *, include_title: bool) -> dict:
+    """Only the draft fields actually present in the request become kwargs, so
+    an omitted field stays UNSET (untouched) in the service."""
+    kwargs: dict = {}
+    if include_title and "title" in validated:
+        kwargs["title"] = validated["title"]
+    if "questionnaire_version_id" in validated:
+        kwargs["questionnaire_version_id"] = str(validated["questionnaire_version_id"])
+    if "answers" in validated:
+        kwargs["answers"] = validated["answers"]
+    if "inspiration_asset_ids" in validated:
+        kwargs["inspiration_asset_ids"] = [str(a) for a in validated["inspiration_asset_ids"]]
+    return kwargs
+
+
+def _detail(design_id) -> dict:
+    design = Design.objects.select_related("questionnaire_version").get(pk=design_id)
+    return design_detail_payload(design)
 
 
 @method_decorator(csrf_protect, name="dispatch")
@@ -99,7 +154,8 @@ class DesignListCreateView(APIView):
         summary="List your designs",
         description=(
             "Returns the private designs owned by the current session or "
-            "account. A list request never creates a workspace. " + _OWNERSHIP_NOTE
+            "account as compact rows (no questionnaire schema, no inspiration "
+            "records). A list request never creates a workspace. " + _OWNERSHIP_NOTE
         ),
     )
     def get(self, request):
@@ -108,7 +164,7 @@ class DesignListCreateView(APIView):
         # anything gets an empty list and no database row.
         designs = accessible_designs(request)
         return Response(
-            {"designs": DesignReadSerializer(designs, many=True).data},
+            {"designs": [design_list_item_payload(design) for design in designs]},
             headers=NO_STORE,
         )
 
@@ -118,7 +174,7 @@ class DesignListCreateView(APIView):
         parameters=[CSRF_HEADER_PARAMETER],
         request=DesignWriteSerializer,
         responses={
-            201: DesignReadSerializer,
+            201: DesignDetailResponseSerializer,
             400: ValidationErrorEnvelopeSerializer,
             403: OpenApiResponse(
                 ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
@@ -129,8 +185,10 @@ class DesignListCreateView(APIView):
         },
         summary="Create a design",
         description=(
-            "Creates a private draft (title only; status and answers are "
-            "server-owned). " + _OWNERSHIP_NOTE
+            "Creates a private draft. Accepts optional title, questionnaire "
+            "version, answers and inspiration selections; status is "
+            "server-owned (draft). Answers and inspirations are validated "
+            "authoritatively and roll back together on any failure. " + _OWNERSHIP_NOTE
         ),
     )
     def post(self, request):
@@ -140,35 +198,30 @@ class DesignListCreateView(APIView):
         serializer = DesignWriteSerializer(data=body)
         if not serializer.is_valid():
             return _validation_failed(serializer.errors)
+        validated = serializer.validated_data
 
         try:
-            # One coherent transaction: workspace resolution (which locks
-            # the browser's django_session row) and the design insert
-            # commit together, so a failed insert never leaves behind an
-            # empty workspace or a pointer to nothing.
+            # One coherent transaction: workspace resolution (which locks the
+            # browser's django_session row), the design insert AND the draft
+            # update commit together, so a failed answer/inspiration update
+            # never leaves behind an empty workspace or a half-saved draft.
             with transaction.atomic():
                 design_session = resolve_current_design_session(request, create=True)
                 design = Design.objects.create(
                     design_session=design_session,
-                    title=serializer.validated_data.get("title", ""),
-                    # status and answers are server-owned: draft and {}.
+                    title=validated.get("title", ""),
                 )
+                draft_kwargs = _draft_kwargs(validated, include_title=False)
+                if draft_kwargs:
+                    update_design_draft(design, **draft_kwargs)
+                payload = _detail(design.pk)
         except WorkspaceCoordinationError as exc:
-            # Fail closed: never fall back to UNLOCKED workspace creation,
-            # and never expose database or session-store details. Log only
-            # the underlying exception type.
-            cause = type(exc.__cause__).__name__ if exc.__cause__ else "unknown"
-            logger.warning("design workspace coordination failed exception_type=%s", cause)
-            return _error(
-                "design_workspace_unavailable",
-                "Designs are temporarily unavailable. Try again shortly.",
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        return Response(
-            DesignReadSerializer(design).data,
-            status=status.HTTP_201_CREATED,
-            headers=NO_STORE,
-        )
+            return _workspace_unavailable(exc)
+        except QuestionnaireAnswerError as exc:
+            return _validation_failed(exc.errors)
+        except DraftUpdateError as exc:
+            return _draft_error(exc)
+        return Response(payload, status=status.HTTP_201_CREATED, headers=NO_STORE)
 
 
 @method_decorator(csrf_protect, name="dispatch")
@@ -184,19 +237,22 @@ class DesignDetailView(APIView):
         operation_id="designs_retrieve",
         tags=_DESIGN_TAGS,
         responses={
-            200: DesignReadSerializer,
+            200: DesignDetailResponseSerializer,
             404: OpenApiResponse(
                 ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
             ),
         },
         summary="Retrieve a design",
-        description=_OWNERSHIP_NOTE,
+        description=(
+            "Returns the full draft: linked questionnaire (or null), answers "
+            "and ordered inspiration selections with live availability. " + _OWNERSHIP_NOTE
+        ),
     )
     def get(self, request, design_id: str):
         design = self._get_owned(request, design_id)
         if design is None:
             return _not_found()
-        return Response(DesignReadSerializer(design).data, headers=NO_STORE)
+        return Response(design_detail_payload(design), headers=NO_STORE)
 
     @extend_schema(
         operation_id="designs_update",
@@ -204,7 +260,7 @@ class DesignDetailView(APIView):
         parameters=[CSRF_HEADER_PARAMETER],
         request=DesignWriteSerializer,
         responses={
-            200: DesignReadSerializer,
+            200: DesignDetailResponseSerializer,
             400: ValidationErrorEnvelopeSerializer,
             403: OpenApiResponse(
                 ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
@@ -214,7 +270,11 @@ class DesignDetailView(APIView):
             ),
         },
         summary="Update a design",
-        description="Title-only update. " + _OWNERSHIP_NOTE,
+        description=(
+            "Partial draft update: title, questionnaire version (assignable "
+            "once), answers (draft-validated) and inspiration selections "
+            "(replaced as one ordered set). " + _OWNERSHIP_NOTE
+        ),
     )
     def patch(self, request, design_id: str):
         design = self._get_owned(request, design_id)
@@ -226,7 +286,87 @@ class DesignDetailView(APIView):
         serializer = DesignWriteSerializer(data=body)
         if not serializer.is_valid():
             return _validation_failed(serializer.errors)
-        if "title" in serializer.validated_data:
-            design.title = serializer.validated_data["title"]
-            design.save(update_fields=["title", "updated_at"])
-        return Response(DesignReadSerializer(design).data, headers=NO_STORE)
+        draft_kwargs = _draft_kwargs(serializer.validated_data, include_title=True)
+        if not draft_kwargs:
+            # Nothing to change (empty patch): return the current state.
+            return Response(design_detail_payload(design), headers=NO_STORE)
+        try:
+            update_design_draft(design, **draft_kwargs)
+            payload = _detail(design.pk)
+        except QuestionnaireAnswerError as exc:
+            return _validation_failed(exc.errors)
+        except DraftUpdateError as exc:
+            return _draft_error(exc)
+        return Response(payload, headers=NO_STORE)
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class DesignValidateView(APIView):
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        operation_id="designs_validate",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=None,
+        responses={
+            200: DesignValidationSuccessSerializer,
+            400: ValidationErrorEnvelopeSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+        },
+        summary="Validate a design draft",
+        description=(
+            "Performs NO generation. Re-checks the persisted draft with "
+            "complete validation (every visible required question answered, "
+            "minimum counts/lengths) and re-checks that every selected "
+            'inspiration is still eligible. Returns {"valid": true} or a '
+            "controlled 400 with question/selection errors. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def post(self, request, design_id: str):
+        # Ownership filter FIRST, UUID lookup second. No request body.
+        design = accessible_designs(request).filter(pk=design_id).first()
+        if design is None:
+            return _not_found()
+        if design.questionnaire_version_id is None:
+            return _validation_failed(
+                {"questionnaire_version_id": ["Select a questionnaire before validating."]}
+            )
+        errors: dict = {}
+        try:
+            validate_questionnaire_answers(
+                design.questionnaire_version.schema, design.answers, require_complete=True
+            )
+        except QuestionnaireAnswerError as exc:
+            errors.update(exc.errors)
+
+        selection_errors = _revalidate_inspirations(design)
+        if selection_errors:
+            errors["inspiration_asset_ids"] = selection_errors
+
+        if errors:
+            return _validation_failed(errors)
+        return Response({"valid": True}, headers=NO_STORE)
+
+
+def _revalidate_inspirations(design: Design) -> list[str]:
+    """Complete validation must fail while any selected inspiration is no
+    longer publicly eligible. The message never reveals which one or why."""
+    selections = list(design.inspiration_selections.all())
+    if not selections:
+        return []
+    selected_ids = [selection.inspiration_asset_id for selection in selections]
+    eligible = set(
+        InspirationAsset.objects.publicly_eligible()
+        .filter(pk__in=selected_ids)
+        .values_list("pk", flat=True)
+    )
+    if any(asset_id not in eligible for asset_id in selected_ids):
+        return ["Remove or replace inspirations that are no longer available."]
+    return []

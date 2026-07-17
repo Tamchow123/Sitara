@@ -10,7 +10,13 @@ rendered — storage keys stay opaque strings.
 
 from django.contrib import admin
 
-from .models import Design, DesignSession, DesignVersion, GenerationAttempt
+from .models import (
+    Design,
+    DesignInspiration,
+    DesignSession,
+    DesignVersion,
+    GenerationAttempt,
+)
 
 
 @admin.register(DesignSession)
@@ -31,13 +37,34 @@ class DesignAdmin(admin.ModelAdmin):
     list_display = ("id", "title", "status", "owner_email", "created_at")
     list_filter = ("status", "created_at")
     search_fields = ("id", "title", "design_session__user__email")
-    readonly_fields = ("id", "design_session", "status", "answers", "created_at", "updated_at")
+    readonly_fields = (
+        "id",
+        "design_session",
+        "questionnaire_version",
+        "status",
+        "answers",
+        "created_at",
+        "updated_at",
+    )
     ordering = ("-created_at",)
 
     @admin.display(description="owner", ordering="design_session__user__email")
     def owner_email(self, obj: Design) -> str:
         user = obj.design_session.user
         return user.email if user else "anonymous"
+
+
+@admin.register(DesignInspiration)
+class DesignInspirationAdmin(admin.ModelAdmin):
+    list_display = ("id", "design", "inspiration_asset", "position", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("id", "design__id", "inspiration_asset__id")
+    readonly_fields = ("id", "design", "inspiration_asset", "position", "created_at")
+    ordering = ("design", "position")
+
+    def has_add_permission(self, request):
+        # Selections are created only through the design API service.
+        return False
 
 
 @admin.register(DesignVersion)

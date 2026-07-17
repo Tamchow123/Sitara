@@ -330,7 +330,7 @@
         "/api/v1/designs/": {
             "get": {
                 "operationId": "designs_list",
-                "description": "Returns the private designs owned by the current session or account. A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Returns the private designs owned by the current session or account as compact rows (no questionnaire schema, no inspiration records). A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "List your designs",
                 "tags": [
                     "Designs"
@@ -356,7 +356,7 @@
             },
             "post": {
                 "operationId": "designs_create",
-                "description": "Creates a private draft (title only; status and answers are server-owned). Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Creates a private draft. Accepts optional title, questionnaire version, answers and inspiration selections; status is server-owned (draft). Answers and inspirations are validated authoritatively and roll back together on any failure. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "Create a design",
                 "parameters": [
                     {
@@ -402,7 +402,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/DesignRead"
+                                    "$ref": "#/components/schemas/DesignDetailResponse"
                                 }
                             }
                         },
@@ -444,7 +444,7 @@
         "/api/v1/designs/{design_id}/": {
             "get": {
                 "operationId": "designs_retrieve",
-                "description": "Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Returns the full draft: linked questionnaire (or null), answers and ordered inspiration selections with live availability. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "Retrieve a design",
                 "parameters": [
                     {
@@ -471,7 +471,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/DesignRead"
+                                    "$ref": "#/components/schemas/DesignDetailResponse"
                                 }
                             }
                         },
@@ -491,7 +491,7 @@
             },
             "patch": {
                 "operationId": "designs_update",
-                "description": "Title-only update. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Partial draft update: title, questionnaire version (assignable once), answers (draft-validated) and inspiration selections (replaced as one ordered set). Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "Update a design",
                 "parameters": [
                     {
@@ -546,7 +546,85 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/DesignRead"
+                                    "$ref": "#/components/schemas/DesignDetailResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    }
+                }
+            }
+        },
+        "/api/v1/designs/{design_id}/validate/": {
+            "post": {
+                "operationId": "designs_validate",
+                "description": "Performs NO generation. Re-checks the persisted draft with complete validation (every visible required question answered, minimum counts/lengths) and re-checks that every selected inspiration is still eligible. Returns {\"valid\": true} or a controlled 400 with question/selection errors. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Validate a design draft",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DesignValidationSuccess"
                                 }
                             }
                         },
@@ -931,13 +1009,94 @@
                     "csrf_token"
                 ]
             },
+            "DesignDetailResponse": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "questionnaire": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/DesignQuestionnaire"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "answers": {
+                        "description": "Answers keyed by stable question id."
+                    },
+                    "selected_inspirations": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SelectedInspiration"
+                        }
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": [
+                    "answers",
+                    "created_at",
+                    "id",
+                    "questionnaire",
+                    "selected_inspirations",
+                    "status",
+                    "title",
+                    "updated_at"
+                ]
+            },
+            "DesignListItem": {
+                "type": "object",
+                "description": "A compact list row — no questionnaire schema, no inspiration records.",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": [
+                    "created_at",
+                    "id",
+                    "status",
+                    "title",
+                    "updated_at"
+                ]
+            },
             "DesignListResponse": {
                 "type": "object",
                 "properties": {
                     "designs": {
                         "type": "array",
                         "items": {
-                            "$ref": "#/components/schemas/DesignRead"
+                            "$ref": "#/components/schemas/DesignListItem"
                         }
                     }
                 },
@@ -945,47 +1104,36 @@
                     "designs"
                 ]
             },
-            "DesignRead": {
+            "DesignQuestionnaire": {
                 "type": "object",
+                "description": "The questionnaire a design is pinned to (null for legacy designs).",
                 "properties": {
                     "id": {
                         "type": "string",
-                        "format": "uuid",
-                        "readOnly": true
+                        "format": "uuid"
                     },
-                    "title": {
-                        "type": "string",
-                        "readOnly": true
+                    "version": {
+                        "type": "integer"
                     },
-                    "status": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/StatusEnum"
-                            }
-                        ],
-                        "readOnly": true
-                    },
-                    "answers": {
-                        "readOnly": true
-                    },
-                    "created_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "readOnly": true
-                    },
-                    "updated_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "readOnly": true
+                    "schema": {
+                        "$ref": "#/components/schemas/QuestionnaireSchema"
                     }
                 },
                 "required": [
-                    "answers",
-                    "created_at",
                     "id",
-                    "status",
-                    "title",
-                    "updated_at"
+                    "schema",
+                    "version"
+                ]
+            },
+            "DesignValidationSuccess": {
+                "type": "object",
+                "properties": {
+                    "valid": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "valid"
                 ]
             },
             "DesignWriteRequest": {
@@ -994,6 +1142,18 @@
                     "title": {
                         "type": "string",
                         "maxLength": 120
+                    },
+                    "questionnaire_version_id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "answers": {},
+                    "inspiration_asset_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
                     }
                 }
             },
@@ -1166,6 +1326,18 @@
                     "title": {
                         "type": "string",
                         "maxLength": 120
+                    },
+                    "questionnaire_version_id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "answers": {},
+                    "inspiration_asset_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
                     }
                 }
             },
@@ -1467,12 +1639,77 @@
                     "values"
                 ]
             },
-            "StatusEnum": {
-                "enum": [
-                    "draft"
-                ],
-                "type": "string",
-                "description": "* `draft` - Draft"
+            "SelectedInspiration": {
+                "type": "object",
+                "description": "One inspiration selection with its live availability.\n\n``available: false`` with ``asset: null`` means the previously-selected\nasset is no longer publicly eligible (retired, expired or revoked). The\nreason is deliberately not disclosed.",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "The selected inspiration asset id."
+                    },
+                    "position": {
+                        "type": "integer"
+                    },
+                    "available": {
+                        "type": "boolean"
+                    },
+                    "asset": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/SelectedInspirationAsset"
+                            }
+                        ],
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "asset",
+                    "available",
+                    "id",
+                    "position"
+                ]
+            },
+            "SelectedInspirationAsset": {
+                "type": "object",
+                "description": "The public catalogue fields for an inspiration that is still eligible.",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "alt_text": {
+                        "type": "string"
+                    },
+                    "garment_type": {
+                        "type": "string"
+                    },
+                    "cultural_context": {
+                        "type": "string"
+                    },
+                    "attribution": {
+                        "type": "string"
+                    },
+                    "image_url": {
+                        "type": "string"
+                    },
+                    "thumbnail_url": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "alt_text",
+                    "attribution",
+                    "cultural_context",
+                    "garment_type",
+                    "id",
+                    "image_url",
+                    "thumbnail_url",
+                    "title"
+                ]
             },
             "StepSchema": {
                 "type": "object",

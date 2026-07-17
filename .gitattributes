@@ -3,3 +3,9 @@
 # CI and checkout on Windows/macOS never disagree over line endings.
 apps/api/openapi/schema.json text eol=lf
 apps/web/src/api/schema.d.ts text eol=lf
+
+# The shared cross-language questionnaire validation contract is consumed by
+# both the Django and the frontend test suites; pin it to LF so it reads
+# identically on every platform.
+contracts/questionnaire-validation-cases.json text eol=lf
+

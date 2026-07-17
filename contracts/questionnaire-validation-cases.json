@@ -1,0 +1,353 @@
+{
+  "description": "Shared cross-language questionnaire answer-validation contract. Both the Django validator (sitara.questionnaire.answer_validation) and the derived frontend Zod/rule logic (apps/web/src/features/questionnaire) run every case against the embedded compact schema and must agree. The schema is a small purpose-built questionnaire that exercises the same rule semantics as the real v1 fixture WITHOUT duplicating it: single/multi/text questions, show/hide/require/restrict rules, saree-vs-non-saree draping, garment-specific silhouettes, colour and embellishment constraints, and a capped free-text note.",
+  "schema": {
+    "schema_version": 1,
+    "key": "sitara_contract_test_schema",
+    "title": "Contract test questionnaire",
+    "steps": [
+      {
+        "id": "garment",
+        "title": "Garment",
+        "questions": [
+          {
+            "id": "garment_type",
+            "type": "single_choice",
+            "label": "Which garment?",
+            "required": true,
+            "options": [
+              { "value": "lehenga", "label": "Lehenga" },
+              { "value": "saree", "label": "Saree" },
+              { "value": "gharara", "label": "Gharara" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "silhouette_step",
+        "title": "Silhouette",
+        "questions": [
+          {
+            "id": "silhouette",
+            "type": "single_choice",
+            "label": "Which silhouette?",
+            "required": true,
+            "options": [
+              { "value": "flared_lehenga", "label": "Flared lehenga" },
+              { "value": "a_line_lehenga", "label": "A-line lehenga" },
+              { "value": "classic_saree_drape", "label": "Classic saree drape" },
+              { "value": "lehenga_style_saree", "label": "Lehenga-style saree" },
+              { "value": "gharara_construction", "label": "Gharara flare" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "colours",
+        "title": "Colours",
+        "questions": [
+          {
+            "id": "colour_palette",
+            "type": "multi_choice",
+            "label": "Which colours?",
+            "required": true,
+            "options": [
+              { "value": "red", "label": "Red" },
+              { "value": "gold", "label": "Gold" },
+              { "value": "green", "label": "Green" },
+              { "value": "ivory", "label": "Ivory" }
+            ],
+            "constraints": { "min_items": 1, "max_items": 2 }
+          }
+        ]
+      },
+      {
+        "id": "embellishment_step",
+        "title": "Embellishment",
+        "questions": [
+          {
+            "id": "embellishment_styles",
+            "type": "multi_choice",
+            "label": "Which embellishment?",
+            "required": true,
+            "options": [
+              { "value": "zardozi", "label": "Zardozi" },
+              { "value": "mirror_work", "label": "Mirror work" },
+              { "value": "sequins", "label": "Sequins" },
+              { "value": "none", "label": "No embellishment" }
+            ],
+            "constraints": { "min_items": 1, "max_items": 3, "exclusive_values": ["none"] }
+          }
+        ]
+      },
+      {
+        "id": "drape",
+        "title": "Draping",
+        "questions": [
+          {
+            "id": "dupatta_style",
+            "type": "single_choice",
+            "label": "Dupatta style?",
+            "required": false,
+            "options": [
+              { "value": "head_drape", "label": "Over the head" },
+              { "value": "one_shoulder", "label": "Over one shoulder" }
+            ]
+          },
+          {
+            "id": "saree_drape",
+            "type": "single_choice",
+            "label": "Saree drape?",
+            "required": false,
+            "options": [
+              { "value": "nivi_drape", "label": "Nivi drape" },
+              { "value": "seedha_pallu", "label": "Seedha pallu" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "notes",
+        "title": "Notes",
+        "questions": [
+          {
+            "id": "final_notes",
+            "type": "text",
+            "label": "Anything else?",
+            "required": false,
+            "constraints": { "min_length": 0, "max_length": 20 }
+          }
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "id": "saree_shows_saree_drape",
+        "when": { "question_id": "garment_type", "operator": "equals", "values": ["saree"] },
+        "then": { "action": "show", "question_id": "saree_drape" }
+      },
+      {
+        "id": "saree_hides_dupatta_style",
+        "when": { "question_id": "garment_type", "operator": "equals", "values": ["saree"] },
+        "then": { "action": "hide", "question_id": "dupatta_style" }
+      },
+      {
+        "id": "non_saree_hides_saree_drape",
+        "when": { "question_id": "garment_type", "operator": "not_in", "values": ["saree"] },
+        "then": { "action": "hide", "question_id": "saree_drape" }
+      },
+      {
+        "id": "lehenga_silhouettes",
+        "when": { "question_id": "garment_type", "operator": "equals", "values": ["lehenga"] },
+        "then": {
+          "action": "restrict_options",
+          "question_id": "silhouette",
+          "values": ["flared_lehenga", "a_line_lehenga"]
+        }
+      },
+      {
+        "id": "saree_silhouettes",
+        "when": { "question_id": "garment_type", "operator": "equals", "values": ["saree"] },
+        "then": {
+          "action": "restrict_options",
+          "question_id": "silhouette",
+          "values": ["classic_saree_drape", "lehenga_style_saree"]
+        }
+      },
+      {
+        "id": "gharara_silhouette",
+        "when": { "question_id": "garment_type", "operator": "equals", "values": ["gharara"] },
+        "then": {
+          "action": "restrict_options",
+          "question_id": "silhouette",
+          "values": ["gharara_construction"]
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "valid_partial_only_garment",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga" },
+      "valid": true
+    },
+    {
+      "name": "valid_partial_lehenga_silhouette",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "silhouette": "flared_lehenga" },
+      "valid": true
+    },
+    {
+      "name": "valid_complete_lehenga",
+      "require_complete": true,
+      "answers": {
+        "garment_type": "lehenga",
+        "silhouette": "a_line_lehenga",
+        "colour_palette": ["red", "gold"],
+        "embellishment_styles": ["zardozi", "mirror_work"],
+        "final_notes": "Elegant please"
+      },
+      "valid": true
+    },
+    {
+      "name": "valid_complete_saree_with_drape",
+      "require_complete": true,
+      "answers": {
+        "garment_type": "saree",
+        "silhouette": "classic_saree_drape",
+        "colour_palette": ["gold"],
+        "embellishment_styles": ["none"],
+        "saree_drape": "nivi_drape"
+      },
+      "valid": true
+    },
+    {
+      "name": "missing_required_silhouette_complete",
+      "require_complete": true,
+      "answers": {
+        "garment_type": "lehenga",
+        "colour_palette": ["red"],
+        "embellishment_styles": ["zardozi"]
+      },
+      "valid": false,
+      "error_questions": ["silhouette"]
+    },
+    {
+      "name": "missing_required_allowed_in_draft",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "colour_palette": ["red"] },
+      "valid": true
+    },
+    {
+      "name": "hidden_saree_drape_on_non_saree",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "saree_drape": "nivi_drape" },
+      "valid": false,
+      "error_questions": ["saree_drape"]
+    },
+    {
+      "name": "hidden_dupatta_on_saree",
+      "require_complete": false,
+      "answers": { "garment_type": "saree", "dupatta_style": "head_drape" },
+      "valid": false,
+      "error_questions": ["dupatta_style"]
+    },
+    {
+      "name": "saree_drape_visible_on_saree",
+      "require_complete": false,
+      "answers": { "garment_type": "saree", "saree_drape": "seedha_pallu" },
+      "valid": true
+    },
+    {
+      "name": "dupatta_visible_on_lehenga",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "dupatta_style": "one_shoulder" },
+      "valid": true
+    },
+    {
+      "name": "silhouette_restriction_saree_rejects_lehenga_silhouette",
+      "require_complete": false,
+      "answers": { "garment_type": "saree", "silhouette": "flared_lehenga" },
+      "valid": false,
+      "error_questions": ["silhouette"]
+    },
+    {
+      "name": "silhouette_restriction_lehenga_rejects_saree_silhouette",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "silhouette": "classic_saree_drape" },
+      "valid": false,
+      "error_questions": ["silhouette"]
+    },
+    {
+      "name": "silhouette_restriction_gharara",
+      "require_complete": false,
+      "answers": { "garment_type": "gharara", "silhouette": "gharara_construction" },
+      "valid": true
+    },
+    {
+      "name": "unknown_option_value",
+      "require_complete": false,
+      "answers": { "garment_type": "kurta" },
+      "valid": false,
+      "error_questions": ["garment_type"]
+    },
+    {
+      "name": "unknown_question_id",
+      "require_complete": false,
+      "answers": { "shoe_style": "heels" },
+      "valid": false,
+      "error_questions": ["shoe_style"]
+    },
+    {
+      "name": "duplicate_multi_choice_value",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "colour_palette": ["red", "red"] },
+      "valid": false,
+      "error_questions": ["colour_palette"]
+    },
+    {
+      "name": "too_many_colours",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "colour_palette": ["red", "gold", "green"] },
+      "valid": false,
+      "error_questions": ["colour_palette"]
+    },
+    {
+      "name": "exclusive_none_combined_with_other",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "embellishment_styles": ["none", "zardozi"] },
+      "valid": false,
+      "error_questions": ["embellishment_styles"]
+    },
+    {
+      "name": "final_notes_over_maximum",
+      "require_complete": false,
+      "answers": {
+        "garment_type": "lehenga",
+        "final_notes": "This note is definitely far too long to accept"
+      },
+      "valid": false,
+      "error_questions": ["final_notes"]
+    },
+    {
+      "name": "changed_garment_invalidates_dependent_silhouette",
+      "require_complete": false,
+      "answers": { "garment_type": "gharara", "silhouette": "flared_lehenga" },
+      "valid": false,
+      "error_questions": ["silhouette"]
+    },
+    {
+      "name": "wrong_type_single_choice_as_list",
+      "require_complete": false,
+      "answers": { "garment_type": ["lehenga"] },
+      "valid": false,
+      "error_questions": ["garment_type"]
+    },
+    {
+      "name": "wrong_type_multi_choice_as_string",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "colour_palette": "red" },
+      "valid": false,
+      "error_questions": ["colour_palette"]
+    },
+    {
+      "name": "answers_not_an_object",
+      "require_complete": false,
+      "answers": ["garment_type"],
+      "valid": false,
+      "error_questions": ["__all__"]
+    },
+    {
+      "name": "too_few_items_only_enforced_when_complete",
+      "require_complete": true,
+      "answers": {
+        "garment_type": "lehenga",
+        "silhouette": "flared_lehenga",
+        "colour_palette": [],
+        "embellishment_styles": ["zardozi"]
+      },
+      "valid": false,
+      "error_questions": ["colour_palette"]
+    }
+  ]
+}

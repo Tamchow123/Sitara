@@ -15,9 +15,21 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
-from .models import Design, DesignSession, DesignVersion
+from sitara.catalogue.models import InspirationAsset
+from sitara.questionnaire.answer_validation import (
+    QuestionnaireAnswerError,
+    validate_questionnaire_answers,
+)
+from sitara.questionnaire.models import QuestionnaireVersion
+
+from .models import Design, DesignInspiration, DesignSession, DesignVersion
 
 logger = logging.getLogger(__name__)
+
+# Sentinel distinguishing "field omitted from this partial update" from an
+# explicit value (including None / empty). Each field of ``update_design_draft``
+# is only touched when its argument is not UNSET.
+UNSET = object()
 
 # Key inside Django session DATA (which survives the login key rotation —
 # django.contrib.auth.login() cycles the session KEY but keeps the data).
@@ -26,6 +38,21 @@ DESIGN_SESSION_KEY = "sitara_design_session_id"
 
 class DesignVersionLimitReached(Exception):
     """The design already has MAX_DESIGN_VERSIONS versions."""
+
+
+class DraftUpdateError(Exception):
+    """A draft update was rejected for a controlled, safe reason.
+
+    ``code`` is a stable machine code and ``field_errors`` (when present)
+    maps a request field or question id to safe messages, so the view can
+    return a 400 ``validation_failed`` without leaking storage keys, rights
+    data or which private object exists."""
+
+    def __init__(self, code: str, message: str, *, field_errors: dict | None = None):
+        self.code = code
+        self.message = message
+        self.field_errors = field_errors
+        super().__init__(message)
 
 
 class WorkspaceCoordinationError(Exception):
@@ -225,3 +252,191 @@ def create_next_design_version(design: Design) -> DesignVersion:
                 f"design already has the maximum of {settings.MAX_DESIGN_VERSIONS} versions"
             )
         return DesignVersion.objects.create(design=locked, version_number=highest + 1)
+
+
+def _assign_questionnaire_version(design: Design, questionnaire_version_id) -> None:
+    """Assign the design's questionnaire version — at most once, ever.
+
+    A version may be linked only if it is active or retired (a draft
+    questionnaire can never receive user answers). Once assigned, the link is
+    immutable: re-sending the SAME id is a no-op; a DIFFERENT id is rejected,
+    because persisted answers reference that version's stable ids forever."""
+    try:
+        target = uuid.UUID(str(questionnaire_version_id))
+    except (ValueError, AttributeError, TypeError):
+        raise DraftUpdateError(
+            "validation_failed",
+            "Invalid questionnaire version.",
+            field_errors={"questionnaire_version_id": ["Unknown questionnaire version."]},
+        ) from None
+
+    if design.questionnaire_version_id is not None:
+        if design.questionnaire_version_id == target:
+            return
+        raise DraftUpdateError(
+            "validation_failed",
+            "The questionnaire version cannot be changed once assigned.",
+            field_errors={
+                "questionnaire_version_id": [
+                    "This design's questionnaire version is already set and cannot be changed."
+                ]
+            },
+        )
+
+    version = QuestionnaireVersion.objects.filter(pk=target).first()
+    if version is None or version.status not in (
+        QuestionnaireVersion.Status.ACTIVE,
+        QuestionnaireVersion.Status.RETIRED,
+    ):
+        # A missing version and a draft (never-answerable) version are the
+        # same controlled rejection.
+        raise DraftUpdateError(
+            "validation_failed",
+            "Invalid questionnaire version.",
+            field_errors={"questionnaire_version_id": ["Unknown questionnaire version."]},
+        )
+    design.questionnaire_version = version
+    design.save(update_fields=["questionnaire_version", "updated_at"])
+
+
+def _replace_inspirations(design: Design, inspiration_asset_ids) -> None:
+    """Replace the design's inspiration selections with one ordered set.
+
+    Rejects duplicates and more than ``settings.MAX_INSPIRATION_IMAGES``, and
+    accepts ONLY assets currently returned by ``publicly_eligible()`` — so a
+    draft, retired, expired, unverified or incompletely-permitted asset is
+    refused with the same indistinguishable message and never linked. The
+    submitted order becomes positions 1..n. The Design row is already locked
+    by the caller, so concurrent updates serialise and can never create
+    duplicate positions or exceed the limit."""
+    if not isinstance(inspiration_asset_ids, list):
+        raise DraftUpdateError(
+            "validation_failed",
+            "Invalid inspiration selection.",
+            field_errors={"inspiration_asset_ids": ["Must be a list of asset ids."]},
+        )
+    if len(inspiration_asset_ids) > settings.MAX_INSPIRATION_IMAGES:
+        raise DraftUpdateError(
+            "validation_failed",
+            "Too many inspiration images selected.",
+            field_errors={
+                "inspiration_asset_ids": [
+                    f"Select at most {settings.MAX_INSPIRATION_IMAGES} inspiration images."
+                ]
+            },
+        )
+
+    parsed: list[uuid.UUID] = []
+    seen: set[uuid.UUID] = set()
+    for raw in inspiration_asset_ids:
+        try:
+            asset_id = uuid.UUID(str(raw))
+        except (ValueError, AttributeError, TypeError):
+            raise DraftUpdateError(
+                "validation_failed",
+                "Invalid inspiration selection.",
+                field_errors={"inspiration_asset_ids": ["That inspiration is not available."]},
+            ) from None
+        if asset_id in seen:
+            raise DraftUpdateError(
+                "validation_failed",
+                "Duplicate inspiration selected.",
+                field_errors={
+                    "inspiration_asset_ids": ["The same inspiration was selected more than once."]
+                },
+            )
+        seen.add(asset_id)
+        parsed.append(asset_id)
+
+    eligible = {
+        asset.pk: asset
+        for asset in InspirationAsset.objects.publicly_eligible().filter(pk__in=parsed)
+    }
+    for asset_id in parsed:
+        if asset_id not in eligible:
+            # Missing, retired, expired, unverified or incompletely-permitted:
+            # one indistinguishable rejection, no private reason revealed.
+            raise DraftUpdateError(
+                "validation_failed",
+                "That inspiration is not available.",
+                field_errors={"inspiration_asset_ids": ["That inspiration is not available."]},
+            )
+
+    # Replace as one ordered set. Deleting first then recreating is safe
+    # under the Design row lock the caller holds.
+    DesignInspiration.objects.filter(design=design).delete()
+    DesignInspiration.objects.bulk_create(
+        [
+            DesignInspiration(design=design, inspiration_asset=eligible[asset_id], position=index)
+            for index, asset_id in enumerate(parsed, start=1)
+        ]
+    )
+
+
+def update_design_draft(
+    design: Design,
+    *,
+    title=UNSET,
+    questionnaire_version_id=UNSET,
+    answers=UNSET,
+    inspiration_asset_ids=UNSET,
+) -> Design:
+    """Atomically apply a partial draft update to one owned design.
+
+    Ownership MUST be enforced by the caller before this runs (the view
+    resolves the design through ``accessible_designs`` first). Everything
+    here — version assignment, answer validation/persistence and the ordered
+    inspiration replacement — happens inside one transaction under a Design
+    row lock, so answers and selections roll back together on any failure and
+    no partial update (answers saved but inspirations failed, or vice versa)
+    can ever occur.
+
+    Raises :class:`DraftUpdateError` (controlled, safe) or
+    :class:`~sitara.questionnaire.answer_validation.QuestionnaireAnswerError`
+    (per-question), both mapped to a 400 by the view."""
+    with transaction.atomic():
+        locked = Design.objects.select_for_update().get(pk=design.pk)
+
+        if title is not UNSET:
+            locked.title = title
+            locked.save(update_fields=["title", "updated_at"])
+
+        if questionnaire_version_id is not UNSET and questionnaire_version_id is not None:
+            _assign_questionnaire_version(locked, questionnaire_version_id)
+
+        if answers is not UNSET:
+            if locked.questionnaire_version_id is None:
+                raise DraftUpdateError(
+                    "validation_failed",
+                    "A questionnaire version must be selected before answering.",
+                    field_errors={
+                        "answers": ["Select a questionnaire version before saving answers."]
+                    },
+                )
+            # Draft persistence: partial answers are validated structurally,
+            # against option allowlists, active restrictions, exclusivity and
+            # maximum counts/lengths — but missing required answers and
+            # minimums are only enforced at completion (the validate endpoint).
+            normalised = validate_questionnaire_answers(
+                locked.questionnaire_version.schema, answers, require_complete=False
+            )
+            locked.answers = normalised
+            locked.save(update_fields=["answers", "updated_at"])
+
+        if inspiration_asset_ids is not UNSET:
+            _replace_inspirations(locked, inspiration_asset_ids)
+
+        return locked
+
+
+# Re-exported so callers can catch answer-validation failures alongside
+# DraftUpdateError without importing from the questionnaire app directly.
+__all__ = [
+    "DesignVersionLimitReached",
+    "DraftUpdateError",
+    "QuestionnaireAnswerError",
+    "WorkspaceCoordinationError",
+    "create_next_design_version",
+    "resolve_current_design_session",
+    "update_design_draft",
+]

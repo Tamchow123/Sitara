@@ -23,6 +23,12 @@ from django.utils import timezone
 
 DESIGN_TITLE_MAX_LENGTH = 120
 
+# Upper bound for an inspiration selection's position, mirroring the current
+# ``settings.MAX_INSPIRATION_IMAGES`` (3). Baked into the database CHECK
+# constraint below as a final backstop; the application-level limit is
+# enforced in ``services.update_design_draft`` from the live setting.
+MAX_INSPIRATION_POSITION = settings.MAX_INSPIRATION_IMAGES
+
 
 class DesignSession(models.Model):
     """One private design workspace.
@@ -68,6 +74,18 @@ class Design(models.Model):
     design_session = models.ForeignKey(
         DesignSession, on_delete=models.CASCADE, related_name="designs"
     )
+    # The questionnaire version this design's answers are validated against.
+    # Null for legacy (Phase 4) title-only designs. Assigned at most once by
+    # ``services.update_design_draft`` and never changed afterwards, because
+    # persisted answers reference that version's stable question/option ids
+    # forever. PROTECT: a version with any linked design can never be deleted.
+    questionnaire_version = models.ForeignKey(
+        "questionnaire.QuestionnaireVersion",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="designs",
+    )
     title = models.CharField(max_length=DESIGN_TITLE_MAX_LENGTH, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     answers = models.JSONField(default=dict, blank=True)
@@ -85,6 +103,52 @@ class Design(models.Model):
         # The serializer already trims; this backstops direct ORM writes.
         self.title = (self.title or "").strip()
         super().save(*args, **kwargs)
+
+
+class DesignInspiration(models.Model):
+    """One inspiration image a user selected for a design, at a position.
+
+    A through model rather than a plain M2M so the selection carries an
+    explicit 1-based ``position`` (the user's ordering) and its own audit
+    timestamp. It links to the catalogue asset by ``PROTECT`` and stores
+    NOTHING copied from it — no storage key, image hash, rights evidence,
+    rights note, verifier detail, image bytes or attribution. The linked
+    asset and its live rights record remain the single source of truth, so a
+    later rights revocation is reflected immediately (the asset simply stops
+    being ``publicly_eligible()`` and the selection is rendered as
+    unavailable)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    design = models.ForeignKey(
+        Design, on_delete=models.CASCADE, related_name="inspiration_selections"
+    )
+    inspiration_asset = models.ForeignKey(
+        "catalogue.InspirationAsset",
+        on_delete=models.PROTECT,
+        related_name="design_selections",
+    )
+    position = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["position"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["design", "inspiration_asset"],
+                name="designs_inspiration_unique_asset_per_design",
+            ),
+            models.UniqueConstraint(
+                fields=["design", "position"],
+                name="designs_inspiration_unique_position_per_design",
+            ),
+            models.CheckConstraint(
+                condition=Q(position__gte=1) & Q(position__lte=MAX_INSPIRATION_POSITION),
+                name="designs_inspiration_position_bounds",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"inspiration {self.inspiration_asset_id} at position {self.position}"
 
 
 class DesignVersion(models.Model):

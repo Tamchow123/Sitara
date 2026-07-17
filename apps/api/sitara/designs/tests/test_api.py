@@ -21,7 +21,16 @@ from .utils import (
 
 pytestmark = pytest.mark.django_db
 
-PUBLIC_DESIGN_KEYS = {"id", "title", "status", "answers", "created_at", "updated_at"}
+PUBLIC_DESIGN_KEYS = {
+    "id",
+    "title",
+    "status",
+    "questionnaire",
+    "answers",
+    "selected_inspirations",
+    "created_at",
+    "updated_at",
+}
 
 
 class TestCsrfEnforcement:

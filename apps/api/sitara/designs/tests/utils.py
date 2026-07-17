@@ -9,13 +9,41 @@ import uuid
 
 from django.test import Client
 
+from sitara.questionnaire.models import QuestionnaireVersion
+from sitara.questionnaire.tests.contract import load_contract
+
 STRONG_PASSWORD = "Correct-Horse-Battery-2026!"
 
 DESIGNS_URL = "/api/v1/designs/"
 
+# The shared contract's compact schema doubles as a realistic active
+# questionnaire for draft-API tests (garment → silhouette restrictions,
+# saree draping visibility, colour/embellishment constraints, capped notes).
+CONTRACT = load_contract()
+CONTRACT_SCHEMA = CONTRACT["schema"]
+
+# A complete, valid set of answers for CONTRACT_SCHEMA (lehenga path).
+COMPLETE_ANSWERS = {
+    "garment_type": "lehenga",
+    "silhouette": "a_line_lehenga",
+    "colour_palette": ["red", "gold"],
+    "embellishment_styles": ["zardozi"],
+}
+
 
 def design_url(design_id) -> str:
     return f"{DESIGNS_URL}{design_id}/"
+
+
+def validate_url(design_id) -> str:
+    return f"{DESIGNS_URL}{design_id}/validate/"
+
+
+def make_active_questionnaire(*, version: int = 1) -> QuestionnaireVersion:
+    """An ACTIVE questionnaire version carrying the shared contract schema."""
+    return QuestionnaireVersion.objects.create(
+        version=version, status="active", schema=CONTRACT_SCHEMA
+    )
 
 
 def unique_email() -> str:
