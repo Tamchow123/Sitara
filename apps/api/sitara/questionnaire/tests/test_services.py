@@ -87,6 +87,27 @@ class TestActivation:
         assert current.activated_at == activated_at_before
         assert bad_draft.status == QuestionnaireVersion.Status.DRAFT
 
+    def test_poisoned_rule_values_never_replace_the_active_version(self):
+        # A draft whose rule values would previously have raised TypeError
+        # must fail with QuestionnaireSchemaError and roll back completely.
+        current = make_version(version=1)
+        activate_questionnaire_version(current)
+        current.refresh_from_db()
+        activated_at_before = current.activated_at
+
+        poisoned = valid_schema()
+        poisoned["rules"][0]["when"]["values"] = [{"poison": "value"}]
+        bad_draft = make_version(version=2, schema=poisoned)
+        with pytest.raises(QuestionnaireSchemaError):
+            activate_questionnaire_version(bad_draft)
+
+        current.refresh_from_db()
+        bad_draft.refresh_from_db()
+        assert current.status == QuestionnaireVersion.Status.ACTIVE
+        assert current.activated_at == activated_at_before
+        assert bad_draft.status == QuestionnaireVersion.Status.DRAFT
+        assert bad_draft.activated_at is None
+
     def test_activation_replaces_rather_than_mutates(self):
         # The replacement flow end to end: v1 active, v2 drafted with a
         # different schema, v2 activated. v1's schema never changed.

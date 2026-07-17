@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import QuestionnaireVersion
-from .schema_validation import QuestionnaireSchemaError, validate_questionnaire_schema
+from .schema_validation import validate_questionnaire_schema
 from .serializers import ActiveQuestionnaireSerializer
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,12 @@ class ActiveQuestionnaireView(APIView):
             return _unavailable()
         try:
             validate_questionnaire_schema(active.schema)
-        except QuestionnaireSchemaError as exc:
+        except Exception as exc:
+            # QuestionnaireSchemaError is the anticipated failure; anything
+            # else means corrupted storage slipped past the validator's
+            # type handling. Both get the identical safe 503, and the log
+            # carries only the version id and exception type — never the
+            # exception text, a traceback or any schema content.
             logger.error(
                 "active questionnaire schema invalid questionnaire_version_id=%s "
                 "exception_type=%s",

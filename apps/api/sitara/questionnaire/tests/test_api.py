@@ -120,3 +120,50 @@ class TestUnavailable:
         assert f"questionnaire_version_id={active.pk}" in caplog.text
         assert "exception_type=QuestionnaireSchemaError" in caplog.text
         assert "poison_marker" not in caplog.text
+
+    def _assert_only_id_and_type_logged(self, caplog, response, pk, exception_type):
+        self._assert_safe_503(response)
+        assert "poison_marker" not in response.content.decode()
+        assert f"questionnaire_version_id={pk}" in caplog.text
+        assert f"exception_type={exception_type}" in caplog.text
+        assert "poison_marker" not in caplog.text
+        assert "Traceback" not in caplog.text
+
+    def test_object_inside_when_values_returns_safe_503(self, caplog):
+        # Before the validator was total over rule-value types, this shape
+        # raised TypeError (unhashable dict) and the endpoint answered 500.
+        active = _activate()
+        corrupt = active.schema
+        corrupt["rules"][0]["when"]["values"] = [{"poison_marker_key": "poison_marker_value"}]
+        QuestionnaireVersion.objects.filter(pk=active.pk).update(schema=corrupt)
+        with caplog.at_level("ERROR"):
+            response = Client().get(QUESTIONNAIRE_ACTIVE_URL)
+        self._assert_only_id_and_type_logged(
+            caplog, response, active.pk, "QuestionnaireSchemaError"
+        )
+
+    def test_nested_list_inside_restrict_values_returns_safe_503(self, caplog):
+        active = _activate()
+        corrupt = active.schema
+        corrupt["rules"][0]["then"]["values"] = [["poison_marker_nested"]]
+        QuestionnaireVersion.objects.filter(pk=active.pk).update(schema=corrupt)
+        with caplog.at_level("ERROR"):
+            response = Client().get(QUESTIONNAIRE_ACTIVE_URL)
+        self._assert_only_id_and_type_logged(
+            caplog, response, active.pk, "QuestionnaireSchemaError"
+        )
+
+    def test_unexpected_validation_exception_returns_safe_503(self, caplog, monkeypatch):
+        # Defence in depth: even if a validator gap lets some structure
+        # raise something other than QuestionnaireSchemaError, the public
+        # response is the same safe 503 and the exception text never
+        # reaches the log.
+        active = _activate()
+
+        def boom(schema):
+            raise RuntimeError("poison_marker_secret_detail")
+
+        monkeypatch.setattr("sitara.questionnaire.views.validate_questionnaire_schema", boom)
+        with caplog.at_level("ERROR"):
+            response = Client().get(QUESTIONNAIRE_ACTIVE_URL)
+        self._assert_only_id_and_type_logged(caplog, response, active.pk, "RuntimeError")

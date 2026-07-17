@@ -68,15 +68,46 @@ def _require_dict(value, path: str) -> dict:
 
 
 def _require_known_keys(mapping: dict, allowed: frozenset, path: str) -> None:
-    unknown = sorted(set(mapping) - allowed)
-    if unknown:
-        _fail(path, f"unsupported keys: {', '.join(unknown)}")
+    if set(mapping) - allowed:
+        # Unknown keys are raw malformed input — never echoed back, so the
+        # message stays safe for admin display and logs.
+        _fail(path, "contains unsupported keys")
 
 
 def _require_machine_id(value, path: str) -> str:
     if not isinstance(value, str) or not MACHINE_ID_PATTERN.fullmatch(value):
         _fail(path, "must be a lower-case machine identifier matching ^[a-z][a-z0-9_]{1,63}$")
     return value
+
+
+def _require_machine_id_list(
+    value,
+    path: str,
+    *,
+    require_non_empty: bool = True,
+    exact_length: int | None = None,
+) -> list[str]:
+    """A JSON list whose every item is a unique, valid machine identifier.
+
+    This is the single gate through which rule values and exclusive values
+    pass before any membership check — booleans, numbers, objects, nested
+    lists and null all raise :class:`QuestionnaireSchemaError` here instead
+    of surfacing later as ``TypeError`` from an unhashable set lookup.
+    """
+    if not isinstance(value, list):
+        _fail(path, "must be a list of option values")
+    if require_non_empty and not value:
+        _fail(path, "must be a non-empty list of option values")
+    if exact_length is not None and len(value) != exact_length:
+        _fail(path, f"must contain exactly {exact_length} value(s)")
+    validated: list[str] = []
+    for index, item in enumerate(value):
+        item_path = f"{path}[{index}]"
+        _require_machine_id(item, item_path)
+        if item in validated:
+            _fail(item_path, "duplicate value")
+        validated.append(item)
+    return validated
 
 
 def _require_text(value, path: str, *, max_length: int, allow_empty: bool = False) -> str:
@@ -143,17 +174,15 @@ def _validate_multi_choice_constraints(constraints: dict, option_values: list[st
     if min_items is not None and max_items is not None and min_items > max_items:
         _fail(f"{path}.min_items", "must not exceed max_items")
     if "exclusive_values" in constraints:
-        exclusive = constraints["exclusive_values"]
-        if not isinstance(exclusive, list) or not exclusive:
-            _fail(f"{path}.exclusive_values", "must be a non-empty list of option values")
+        exclusive = _require_machine_id_list(
+            constraints["exclusive_values"], f"{path}.exclusive_values"
+        )
         for index, value in enumerate(exclusive):
             if value not in option_values:
                 _fail(
                     f"{path}.exclusive_values[{index}]",
                     "references an option value that does not exist on this question",
                 )
-        if len(set(exclusive)) != len(exclusive):
-            _fail(f"{path}.exclusive_values", "contains duplicate values")
 
 
 def _validate_text_constraints(constraints: dict, path: str) -> None:
@@ -243,11 +272,11 @@ def _validate_rule(rule, path: str, questions_by_id: dict[str, dict], seen_rule_
     if operator not in RULE_OPERATORS:
         _fail(f"{path}.when.operator", f"must be one of {sorted(RULE_OPERATORS)}")
 
-    values = when.get("values")
-    if not isinstance(values, list) or not values:
-        _fail(f"{path}.when.values", "must be a non-empty list of option values")
-    if operator == "equals" and len(values) != 1:
-        _fail(f"{path}.when.values", "equals takes exactly one value")
+    values = _require_machine_id_list(
+        when.get("values"),
+        f"{path}.when.values",
+        exact_length=1 if operator == "equals" else None,
+    )
     condition_options = _option_values(condition_question)
     for index, value in enumerate(values):
         if value not in condition_options:
@@ -270,9 +299,7 @@ def _validate_rule(rule, path: str, questions_by_id: dict[str, dict], seen_rule_
     if action == "restrict_options":
         if target_question["type"] == "text":
             _fail(f"{path}.then.question_id", "restrict_options must target a choice question")
-        restricted = then.get("values")
-        if not isinstance(restricted, list) or not restricted:
-            _fail(f"{path}.then.values", "restrict_options requires a non-empty values list")
+        restricted = _require_machine_id_list(then.get("values"), f"{path}.then.values")
         target_options = _option_values(target_question)
         for index, value in enumerate(restricted):
             if value not in target_options:
@@ -280,8 +307,6 @@ def _validate_rule(rule, path: str, questions_by_id: dict[str, dict], seen_rule_
                     f"{path}.then.values[{index}]",
                     "references an option value that does not exist on the target question",
                 )
-        if len(set(restricted)) != len(restricted):
-            _fail(f"{path}.then.values", "contains duplicate values")
     elif "values" in then:
         _fail(f"{path}.then.values", f"'{action}' does not take values")
 
@@ -306,7 +331,12 @@ def validate_questionnaire_schema(schema: object) -> None:
         if key not in schema:
             _fail("schema", f"missing required key '{key}'")
 
-    if schema["schema_version"] != SUPPORTED_SCHEMA_VERSION:
+    schema_version = schema["schema_version"]
+    # Strictly the int 1: bool is an int subclass (True == 1) and 1.0 == 1,
+    # so equality alone would accept both — require the exact type first.
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        _fail("schema.schema_version", f"must be the integer {SUPPORTED_SCHEMA_VERSION}")
+    if schema_version != SUPPORTED_SCHEMA_VERSION:
         _fail("schema.schema_version", f"must be {SUPPORTED_SCHEMA_VERSION}")
     _require_machine_id(schema["key"], "schema.key")
     _require_text(schema["title"], "schema.title", max_length=MAX_TITLE_LENGTH)

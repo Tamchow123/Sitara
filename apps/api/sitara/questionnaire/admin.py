@@ -7,11 +7,15 @@ and schema freeze once a row is active or retired, and active versions
 cannot be deleted. Retired versions remain inspectable read-only history.
 """
 
+import logging
+
 from django.contrib import admin, messages
 
 from .models import QuestionnaireVersion
 from .schema_validation import QuestionnaireSchemaError
 from .services import QuestionnaireActivationError, activate_questionnaire_version
+
+logger = logging.getLogger(__name__)
 
 _ALWAYS_READONLY = (
     "id",
@@ -82,6 +86,23 @@ class QuestionnaireVersionAdmin(admin.ModelAdmin):
             return
         except QuestionnaireActivationError as exc:
             self.message_user(request, str(exc), messages.ERROR)
+            return
+        except Exception as exc:
+            # Defence in depth: the transaction has already rolled back, so
+            # the previously active version is unchanged. Staff see a
+            # generic message — never a traceback or raw schema content —
+            # and the log carries only the version id and exception type.
+            logger.error(
+                "questionnaire activation failed unexpectedly "
+                "questionnaire_version_id=%s exception_type=%s",
+                target.pk,
+                type(exc).__name__,
+            )
+            self.message_user(
+                request,
+                "Activation failed unexpectedly. The previously active version is unchanged.",
+                messages.ERROR,
+            )
             return
         self.message_user(
             request,

@@ -51,6 +51,15 @@ class TestTopLevel:
         with pytest.raises(QuestionnaireSchemaError):
             validate_questionnaire_schema(schema)
 
+    @pytest.mark.parametrize("bad", [True, False, "1", 1.0, None])
+    def test_schema_version_must_be_exactly_the_int_one(self, bad):
+        # bool is an int subclass (True == 1) and 1.0 == 1 — neither may
+        # slip through equality; only the exact int 1 is accepted.
+        schema = valid_schema()
+        schema["schema_version"] = bad
+        with pytest.raises(QuestionnaireSchemaError):
+            validate_questionnaire_schema(schema)
+
     @pytest.mark.parametrize("bad_key", ["Bad-Key", "1starts_with_digit", "UPPER", "a", ""])
     def test_key_must_be_a_machine_identifier(self, bad_key):
         schema = valid_schema()
@@ -205,6 +214,19 @@ class TestConstraints:
         with pytest.raises(QuestionnaireSchemaError):
             validate_questionnaire_schema(schema)
 
+    @pytest.mark.parametrize("bad_item", [{"poison": "value"}, ["none"], 3, True, None])
+    def test_non_string_exclusive_values_are_rejected(self, bad_item):
+        schema = valid_schema()
+        _question(schema, "embellishments")["constraints"] = {"exclusive_values": [bad_item]}
+        with pytest.raises(QuestionnaireSchemaError):
+            validate_questionnaire_schema(schema)
+
+    def test_duplicate_exclusive_values_are_rejected(self):
+        schema = valid_schema()
+        _question(schema, "embellishments")["constraints"] = {"exclusive_values": ["none", "none"]}
+        with pytest.raises(QuestionnaireSchemaError, match="duplicate"):
+            validate_questionnaire_schema(schema)
+
     def test_single_choice_takes_no_constraints(self):
         schema = valid_schema()
         _question(schema, "garment_type")["constraints"] = {"max_items": 1}
@@ -291,4 +313,44 @@ class TestRules:
         schema = valid_schema()
         schema["rules"][0]["expression"] = "answers['x'] > 1"
         with pytest.raises(QuestionnaireSchemaError, match="unsupported keys"):
+            validate_questionnaire_schema(schema)
+
+
+class TestRuleValueTypes:
+    """The validator must be total: every JSON-compatible shape inside rule
+    values raises QuestionnaireSchemaError — never TypeError from an
+    unhashable set-membership lookup."""
+
+    @pytest.mark.parametrize("bad_item", [{"poison": "value"}, ["saree"], 1, True, False, None])
+    def test_non_string_when_values_are_rejected(self, bad_item):
+        schema = valid_schema()
+        schema["rules"][0]["when"]["values"] = [bad_item]
+        with pytest.raises(QuestionnaireSchemaError):
+            validate_questionnaire_schema(schema)
+
+    def test_duplicate_when_values_are_rejected(self):
+        schema = valid_schema()
+        schema["rules"][0]["when"]["operator"] = "in"
+        schema["rules"][0]["when"]["values"] = ["saree", "saree"]
+        with pytest.raises(QuestionnaireSchemaError, match="duplicate"):
+            validate_questionnaire_schema(schema)
+
+    @pytest.mark.parametrize("bad_values", [None, "zardozi", {}, 0])
+    def test_when_values_must_be_a_list(self, bad_values):
+        schema = valid_schema()
+        schema["rules"][0]["when"]["values"] = bad_values
+        with pytest.raises(QuestionnaireSchemaError):
+            validate_questionnaire_schema(schema)
+
+    @pytest.mark.parametrize("bad_item", [{"poison": "value"}, ["zardozi"], 1, True, None])
+    def test_non_string_restrict_options_values_are_rejected(self, bad_item):
+        schema = valid_schema()
+        schema["rules"][0]["then"]["values"] = [bad_item]
+        with pytest.raises(QuestionnaireSchemaError):
+            validate_questionnaire_schema(schema)
+
+    def test_duplicate_restrict_options_values_are_rejected(self):
+        schema = valid_schema()
+        schema["rules"][0]["then"]["values"] = ["zardozi", "zardozi"]
+        with pytest.raises(QuestionnaireSchemaError, match="duplicate"):
             validate_questionnaire_schema(schema)
