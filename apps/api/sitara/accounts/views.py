@@ -47,7 +47,6 @@ from .openapi import (
     CsrfResponseSerializer,
     LoginSerializer,
     LogoutResponseSerializer,
-    LogoutSerializer,
     MeResponseSerializer,
     RegisterSerializer,
 )
@@ -143,7 +142,10 @@ class RegisterView(APIView):
         operation_id="auth_register",
         tags=_AUTH_TAGS,
         parameters=[CSRF_HEADER_PARAMETER],
-        request=RegisterSerializer,
+        # JSON only — the runtime rejects any other content type. Restricting
+        # the media type here keeps the contract honest without a behaviour
+        # change (the view reads request.body directly, not DRF parsers).
+        request={"application/json": RegisterSerializer},
         responses={
             201: AuthSuccessResponseSerializer,
             400: ValidationErrorEnvelopeSerializer,
@@ -231,7 +233,8 @@ class LoginView(APIView):
         operation_id="auth_login",
         tags=_AUTH_TAGS,
         parameters=[CSRF_HEADER_PARAMETER],
-        request=LoginSerializer,
+        # JSON only — see auth_register.
+        request={"application/json": LoginSerializer},
         responses={
             200: AuthSuccessResponseSerializer,
             400: ValidationErrorEnvelopeSerializer,
@@ -302,7 +305,9 @@ class LogoutView(APIView):
         operation_id="auth_logout",
         tags=_AUTH_TAGS,
         parameters=[CSRF_HEADER_PARAMETER],
-        request=LogoutSerializer,
+        # No request body: logout ignores any payload (only the CSRF header
+        # and session cookie matter).
+        request=None,
         responses={
             200: LogoutResponseSerializer,
             403: OpenApiResponse(

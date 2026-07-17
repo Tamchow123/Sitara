@@ -569,8 +569,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["LoginRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["LoginRequest"];
-                "multipart/form-data": components["schemas"]["LoginRequest"];
             };
         };
         responses: {
@@ -691,8 +689,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RegisterRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["RegisterRequest"];
-                "multipart/form-data": components["schemas"]["RegisterRequest"];
             };
         };
         responses: {

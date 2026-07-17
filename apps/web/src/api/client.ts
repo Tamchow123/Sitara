@@ -23,10 +23,21 @@ import { fetchWithTimeout } from "@/lib/transport";
 const sameOriginBaseUrl =
   typeof window !== "undefined" ? window.location.origin : "";
 
-export const apiClient = createClient<paths>({
+// The raw openapi-fetch client is MODULE-PRIVATE: it exposes GET/POST/PUT/
+// PATCH/DELETE, and a POST/PATCH here would send an unsafe request with no
+// X-CSRFToken header. We never export it.
+const client = createClient<paths>({
   baseUrl: sameOriginBaseUrl,
   // Route every request through the shared timeout/same-origin/no-store
   // transport. openapi-fetch hands us a Request; we add the abort signal and
   // the same-origin/no-store policy without a competing implementation.
   fetch: (request) => fetchWithTimeout(request),
 });
+
+// The public surface is GET-ONLY. Unsafe methods are intentionally absent so
+// a typed mutation that silently omits CSRF is impossible to write; those go
+// through lib/api.ts's tested CSRF-aware flow. `Pick` keeps GET fully
+// path-typed while making apiClient.POST/PATCH/PUT/DELETE a compile error.
+export const apiClient: Pick<typeof client, "GET"> = {
+  GET: client.GET,
+};

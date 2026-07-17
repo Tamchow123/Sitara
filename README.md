@@ -264,8 +264,11 @@ If you have host tooling installed (Python 3.12 with the hash-verified deps,
 Node 22 with `npm --prefix apps/web ci`), the same generation runs natively:
 
 ```powershell
-# from the repo root
-cd apps/api; python manage.py spectacular --format openapi-json --file openapi/schema.json --validate --fail-on-warn; cd ..
+# from the repo root — Push/Pop-Location reliably returns to the root even if
+# the schema command fails
+Push-Location apps/api
+python manage.py spectacular --format openapi-json --file openapi/schema.json --validate --fail-on-warn
+Pop-Location
 npm --prefix apps/web run generate:api
 ```
 

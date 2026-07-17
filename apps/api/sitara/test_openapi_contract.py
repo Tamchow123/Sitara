@@ -270,6 +270,17 @@ def test_no_private_fields_in_any_component(committed_schema):
     assert not leaked, f"private fields leaked into the contract: {sorted(leaked)}"
 
 
+def test_register_and_login_advertise_only_json(committed_schema):
+    for path in ("/api/v1/auth/register/", "/api/v1/auth/login/"):
+        content = committed_schema["paths"][path]["post"]["requestBody"]["content"]
+        assert set(content) == {"application/json"}, (path, sorted(content))
+
+
+def test_logout_has_no_request_body(committed_schema):
+    logout = committed_schema["paths"]["/api/v1/auth/logout/"]["post"]
+    assert "requestBody" not in logout
+
+
 def test_no_provider_secrets_or_storage_details_in_schema(committed_schema):
     blob = json.dumps(committed_schema["components"]["schemas"]).lower()
     for forbidden in (

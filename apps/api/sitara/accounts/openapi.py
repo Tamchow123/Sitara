@@ -41,10 +41,6 @@ class LoginSerializer(serializers.Serializer):
     )
 
 
-class LogoutSerializer(serializers.Serializer):
-    """Logout takes an empty JSON object; only the CSRF header matters."""
-
-
 class AuthSuccessResponseSerializer(serializers.Serializer):
     authenticated = serializers.BooleanField(help_text="True on a successful login/registration.")
     user = AuthUserSerializer()

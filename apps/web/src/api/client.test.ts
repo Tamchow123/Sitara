@@ -47,6 +47,19 @@ export type NoStorageKey = PublicAsset["image_storage_key"];
 // @ts-expect-error rights evidence is never exposed on the public asset type.
 export type NoRightsEvidence = PublicAsset["evidence_reference"];
 
+// 7: the exported client is GET-ONLY. GET is available and path-typed; the
+// unsafe methods are absent so a typed mutation cannot be written here (they
+// go through lib/api.ts's CSRF-aware flow).
+export type GetIsAvailable = typeof apiClient.GET;
+// @ts-expect-error POST is not exposed — unsafe mutations go through lib/api.ts.
+export type PostUnavailable = typeof apiClient.POST;
+// @ts-expect-error PATCH is not exposed — unsafe mutations go through lib/api.ts.
+export type PatchUnavailable = typeof apiClient.PATCH;
+// @ts-expect-error PUT is not exposed — unsafe mutations go through lib/api.ts.
+export type PutUnavailable = typeof apiClient.PUT;
+// @ts-expect-error DELETE is not exposed — unsafe mutations go through lib/api.ts.
+export type DeleteUnavailable = typeof apiClient.DELETE;
+
 // ---------------------------------------------------------------------------
 // Runtime transport behaviour.
 // ---------------------------------------------------------------------------
