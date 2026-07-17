@@ -6,12 +6,12 @@ AI-assisted South Asian bridalwear **concept design**. A guided questionnaire, a
 
 ## Status
 
-**Phase 4 — private design ownership.** On top of the Phase 3A/3B foundation (Next.js frontend, Django/DRF backend, PostgreSQL, Redis + Celery, private MinIO/S3 storage, health endpoints, fail-closed AI-provider boundary, session authentication with optional accounts — ADR 0003), Sitara now has its core design domain: `DesignSession` / `Design` / `DesignVersion` / `GenerationAttempt` models and a private design API (`/api/v1/designs/`). Designs are owned either by the anonymous browser session or by an authenticated user; an anonymous workspace is claimed automatically after login; anything inaccessible answers 404 — see `docs/decisions/0004-private-design-ownership.md`. The bridal questionnaire, design-spec generation and image generation arrive in later phases. Phase 2 (image-model evaluation) selected **`black-forest-labs/flux-1.1-pro`** — see `docs/decisions/0001-image-model.md` / `.json`.
+**Phase 5A — versioned questionnaire taxonomy.** On top of the Phase 3A/3B/4 foundation (Next.js frontend, Django/DRF backend, PostgreSQL, Redis + Celery, private MinIO/S3 storage, health endpoints, fail-closed AI-provider boundary, session authentication with optional accounts — ADR 0003, private design ownership — ADR 0004), Sitara now has its authoritative bridal questionnaire: a versioned `QuestionnaireVersion` schema with a strict pure-Python format validator, a one-active-version lifecycle enforced by a PostgreSQL partial unique constraint, an admin activation workflow, and a public `GET /api/v1/questionnaire/active/` endpoint — see `docs/decisions/0005-versioned-questionnaire-schema.md`. The frontend wizard will *derive* its Zod validation from this schema (Phase 7); the rights-controlled inspiration catalogue is Phase 5B; design-spec and image generation arrive later. Phase 2 (image-model evaluation) selected **`black-forest-labs/flux-1.1-pro`** — see `docs/decisions/0001-image-model.md` / `.json`.
 
 ## Layout
 
 ```
-apps/api      Django + DRF backend (config/, sitara/{accounts,designs,health,ai_gateway})
+apps/api      Django + DRF backend (config/, sitara/{accounts,designs,questionnaire,health,ai_gateway})
 apps/web      Next.js (App Router, strict TypeScript) frontend
 infra/minio   local object-storage bucket initialisation
 experiments/  Phase 2 model evaluation (frozen evidence; do not modify outputs/)
@@ -135,6 +135,33 @@ the session store fails. Domain tables still store no raw Django session
 key, and a user may legitimately hold several workspaces across different
 browser sessions.
 
+### 7d. Questionnaire (Phase 5A)
+
+`GET /api/v1/questionnaire/active/` serves the single active questionnaire
+version as `{id, version, schema}` — a public, identity-free read (it never
+creates a session or a design workspace) with `Cache-Control: no-store` and
+a safe `503 questionnaire_unavailable` when no valid active version exists.
+The schema is the **single authoritative source** of questionnaire rules
+(ADR 0005): three question types (`single_choice`, `multi_choice`, `text`),
+machine-readable constraints (selection caps, mandatory text length caps,
+exclusive values) and allowlisted show/hide/require/restrict-options
+compatibility rules — the same constraints Django will validate answers
+against, and the source Phase 7 derives frontend Zod validation from.
+
+Seed (or re-seed) version 1 with:
+
+```powershell
+docker compose exec api python manage.py loaddata questionnaire_v1
+```
+
+Lifecycle: staff create **drafts** in Django admin and publish them with the
+"Activate selected questionnaire version" action; activation validates the
+full schema, retires the previous active version in the same transaction,
+and a PostgreSQL partial unique constraint guarantees at most one active
+version. Once active or retired, a version's number and schema are
+immutable and active versions cannot be deleted — corrections ship as new
+versions.
+
 ### 8. Celery ping test
 
 ```powershell
@@ -192,7 +219,7 @@ docker compose down --volumes
 
 `python manage.py check --deploy` under local development settings reports five expected warnings (W004 HSTS, W008 SSL redirect, W012/W016 secure cookies, W018 DEBUG) — all are governed by the `APP_ENV=production` settings branch, which enforces secure cookies, optional SSL redirect/HSTS, and fails startup when required production values (secret key, hosts, database, Redis, storage credentials) are missing.
 
-## Security & privacy foundations (Phases 3A–4)
+## Security & privacy foundations (Phases 3A–5A)
 
 Implemented now: private storage bucket with no public ACLs; CORS/CSRF explicit allowlists; DRF authenticated-by-default; JSON-only API; secrets only via environment; tokens never logged or returned; demo mode provably unable to call paid providers; session authentication with HttpOnly cookies, JSON CSRF failure handling, hashed-identifier rate limiting and `Cache-Control: no-store` on all auth responses; private-by-construction designs (ownership filtering before every lookup, 404 for anything inaccessible, no raw session keys in domain tables, no public design URLs). Django endpoint permissions are the authorization boundary — the Next.js middleware redirect on `/account` is a navigation nicety only.
 

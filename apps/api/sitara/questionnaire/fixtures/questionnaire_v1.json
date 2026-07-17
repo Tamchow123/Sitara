@@ -1,0 +1,553 @@
+[
+  {
+    "model": "questionnaire.questionnaireversion",
+    "pk": "3f7a2b9e-4c1d-4e8a-9b6f-1a2b3c4d5e6f",
+    "fields": {
+      "version": 1,
+      "status": "active",
+      "created_by": null,
+      "activated_by": null,
+      "activated_at": "2026-07-17T00:00:00Z",
+      "created_at": "2026-07-17T00:00:00Z",
+      "updated_at": "2026-07-17T00:00:00Z",
+      "schema": {
+        "schema_version": 1,
+        "key": "sitara_bridal_questionnaire_v1",
+        "title": "Design your bridalwear concept",
+        "steps": [
+          {
+            "id": "garment_and_ceremony",
+            "title": "Your garment and occasion",
+            "description": "Start with the outfit you are dreaming of and the ceremony it is for.",
+            "questions": [
+              {
+                "id": "garment_type",
+                "type": "single_choice",
+                "label": "Which garment would you like to design?",
+                "required": true,
+                "options": [
+                  {
+                    "value": "lehenga",
+                    "label": "Lehenga",
+                    "description": "A fitted blouse with a full, flared skirt, usually styled with a dupatta."
+                  },
+                  {
+                    "value": "saree",
+                    "label": "Saree",
+                    "description": "A single length of fabric styled through its drape over a fitted blouse — the drape, not stitched construction, defines the look."
+                  },
+                  {
+                    "value": "gharara",
+                    "label": "Gharara",
+                    "description": "A short kurti with trousers fitted through the upper leg and knee that open into a wide, dramatic flare below the knee."
+                  },
+                  {
+                    "value": "sharara",
+                    "label": "Sharara",
+                    "description": "A kurti with trousers that flare broadly from the waist or upper leg all the way down."
+                  },
+                  {
+                    "value": "anarkali",
+                    "label": "Anarkali",
+                    "description": "A fitted bodice flowing into a long, frock-style silhouette, usually worn with churidar and dupatta."
+                  },
+                  {
+                    "value": "shalwar_kameez",
+                    "label": "Shalwar kameez",
+                    "description": "A kameez worn over shalwar trousers, usually styled with a dupatta."
+                  }
+                ]
+              },
+              {
+                "id": "ceremony",
+                "type": "single_choice",
+                "label": "Which ceremony is this outfit for?",
+                "required": true,
+                "options": [
+                  {
+                    "value": "nikah",
+                    "label": "Nikah",
+                    "description": "The Islamic marriage ceremony."
+                  },
+                  {
+                    "value": "mehndi",
+                    "label": "Mehndi",
+                    "description": "The henna celebration before the wedding."
+                  },
+                  {
+                    "value": "baraat",
+                    "label": "Baraat",
+                    "description": "The main wedding day, welcoming the groom's procession."
+                  },
+                  {
+                    "value": "walima",
+                    "label": "Walima",
+                    "description": "The celebration hosted after the nikah."
+                  },
+                  {
+                    "value": "pheras",
+                    "label": "Pheras",
+                    "description": "The Hindu wedding rites around the sacred fire."
+                  },
+                  {
+                    "value": "reception",
+                    "label": "Reception",
+                    "description": "The reception celebration with family and friends."
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "cultural_direction",
+            "title": "Cultural styling direction",
+            "description": "An optional regional direction to lean into. These are broad influences, not fixed rules — bridal traditions vary richly between communities, regions and families.",
+            "questions": [
+              {
+                "id": "regional_style",
+                "type": "single_choice",
+                "label": "Would you like a particular regional direction?",
+                "help_text": "Every option can be interpreted many ways; this only sets a general direction.",
+                "required": false,
+                "options": [
+                  {
+                    "value": "no_specific_direction",
+                    "label": "No specific regional direction"
+                  },
+                  {
+                    "value": "pakistani",
+                    "label": "Pakistani bridal influences"
+                  },
+                  {
+                    "value": "bangladeshi",
+                    "label": "Bangladeshi bridal influences"
+                  },
+                  {
+                    "value": "north_indian",
+                    "label": "North Indian bridal influences"
+                  },
+                  {
+                    "value": "south_indian",
+                    "label": "South Indian bridal influences"
+                  },
+                  {
+                    "value": "punjabi",
+                    "label": "Punjabi bridal influences"
+                  },
+                  {
+                    "value": "gujarati",
+                    "label": "Gujarati bridal influences"
+                  },
+                  {
+                    "value": "rajasthani",
+                    "label": "Rajasthani bridal influences"
+                  },
+                  {
+                    "value": "hyderabadi",
+                    "label": "Hyderabadi bridal influences"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "silhouette",
+            "title": "Silhouette",
+            "description": "The overall shape of the outfit. The options narrow to match the garment you chose.",
+            "questions": [
+              {
+                "id": "silhouette",
+                "type": "single_choice",
+                "label": "Which silhouette do you love?",
+                "required": true,
+                "options": [
+                  {
+                    "value": "flared_lehenga",
+                    "label": "Full-flared lehenga",
+                    "description": "A voluminous, circular skirt with a fitted choli."
+                  },
+                  {
+                    "value": "a_line_lehenga",
+                    "label": "A-line lehenga",
+                    "description": "A cleaner flare that falls in a gentle A shape."
+                  },
+                  {
+                    "value": "mermaid_lehenga",
+                    "label": "Fishtail lehenga",
+                    "description": "Fitted through the hip and thigh, flaring below the knee."
+                  },
+                  {
+                    "value": "classic_saree_drape",
+                    "label": "Classically draped saree",
+                    "description": "The look is created by the drape itself over a fitted blouse."
+                  },
+                  {
+                    "value": "lehenga_style_saree",
+                    "label": "Lehenga-style saree",
+                    "description": "A pre-pleated or stitched drape that evokes a lehenga while remaining a saree."
+                  },
+                  {
+                    "value": "gharara_construction",
+                    "label": "Gharara flare",
+                    "description": "Fitted through the upper leg to the knee, opening into a dramatic flare below the knee."
+                  },
+                  {
+                    "value": "sharara_construction",
+                    "label": "Sharara flare",
+                    "description": "Trousers that flare broadly from the waist or upper leg down."
+                  },
+                  {
+                    "value": "floor_length_anarkali",
+                    "label": "Floor-length anarkali",
+                    "description": "A fitted bodice sweeping into a floor-length frock."
+                  },
+                  {
+                    "value": "knee_length_anarkali",
+                    "label": "Knee-length anarkali",
+                    "description": "A shorter frock silhouette over churidar."
+                  },
+                  {
+                    "value": "straight_kameez",
+                    "label": "Straight-cut kameez",
+                    "description": "A clean, straight-falling kameez over shalwar."
+                  },
+                  {
+                    "value": "a_line_kameez",
+                    "label": "A-line kameez",
+                    "description": "A kameez that opens gently from the waist."
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "colours_and_fabrics",
+            "title": "Colours and fabrics",
+            "questions": [
+              {
+                "id": "colour_palette",
+                "type": "multi_choice",
+                "label": "Which colours should lead the palette?",
+                "help_text": "Pick up to four — the first choices carry the most weight.",
+                "required": true,
+                "options": [
+                  { "value": "ivory", "label": "Ivory" },
+                  { "value": "white", "label": "White" },
+                  { "value": "red", "label": "Red" },
+                  { "value": "maroon", "label": "Maroon" },
+                  { "value": "blush", "label": "Blush" },
+                  { "value": "pink", "label": "Pink" },
+                  { "value": "peach", "label": "Peach" },
+                  { "value": "orange", "label": "Orange" },
+                  { "value": "yellow", "label": "Yellow" },
+                  { "value": "green", "label": "Green" },
+                  { "value": "emerald", "label": "Emerald" },
+                  { "value": "teal", "label": "Teal" },
+                  { "value": "blue", "label": "Blue" },
+                  { "value": "navy", "label": "Navy" },
+                  { "value": "purple", "label": "Purple" },
+                  { "value": "gold", "label": "Gold" },
+                  { "value": "silver", "label": "Silver" },
+                  { "value": "champagne", "label": "Champagne" },
+                  { "value": "beige", "label": "Beige" },
+                  { "value": "brown", "label": "Brown" },
+                  { "value": "black", "label": "Black" },
+                  { "value": "multicolour", "label": "Multicolour" }
+                ],
+                "constraints": {
+                  "min_items": 1,
+                  "max_items": 4
+                }
+              },
+              {
+                "id": "fabrics",
+                "type": "multi_choice",
+                "label": "Any fabrics you are drawn to?",
+                "help_text": "Optional — leave empty to let the concept choose.",
+                "required": false,
+                "options": [
+                  { "value": "silk", "label": "Silk" },
+                  { "value": "raw_silk", "label": "Raw silk" },
+                  { "value": "velvet", "label": "Velvet" },
+                  { "value": "organza", "label": "Organza" },
+                  { "value": "chiffon", "label": "Chiffon" },
+                  { "value": "georgette", "label": "Georgette" },
+                  { "value": "net", "label": "Net" },
+                  { "value": "brocade", "label": "Brocade" },
+                  { "value": "jamawar", "label": "Jamawar" },
+                  { "value": "tissue", "label": "Tissue" },
+                  { "value": "cotton_silk", "label": "Cotton silk" }
+                ],
+                "constraints": {
+                  "max_items": 3
+                }
+              }
+            ]
+          },
+          {
+            "id": "embellishment",
+            "title": "Embroidery and embellishment",
+            "questions": [
+              {
+                "id": "embellishment_styles",
+                "type": "multi_choice",
+                "label": "Which embellishment work speaks to you?",
+                "help_text": "Pick up to five, or choose \"No embellishment\" for an unadorned look.",
+                "required": true,
+                "options": [
+                  { "value": "zardozi", "label": "Zardozi" },
+                  { "value": "dabka", "label": "Dabka" },
+                  { "value": "nakshi", "label": "Nakshi" },
+                  { "value": "gota_patti", "label": "Gota patti" },
+                  { "value": "mirror_work", "label": "Mirror work" },
+                  { "value": "resham_threadwork", "label": "Resham threadwork" },
+                  { "value": "chikankari", "label": "Chikankari" },
+                  { "value": "sequins", "label": "Sequins" },
+                  { "value": "pearls", "label": "Pearls" },
+                  { "value": "crystals", "label": "Crystals" },
+                  { "value": "beads", "label": "Beadwork" },
+                  { "value": "applique", "label": "Appliqué" },
+                  { "value": "none", "label": "No embellishment" }
+                ],
+                "constraints": {
+                  "min_items": 1,
+                  "max_items": 5,
+                  "exclusive_values": ["none"]
+                }
+              },
+              {
+                "id": "embellishment_density",
+                "type": "single_choice",
+                "label": "How richly worked should it be?",
+                "required": false,
+                "options": [
+                  {
+                    "value": "minimal",
+                    "label": "Minimal and airy"
+                  },
+                  {
+                    "value": "balanced",
+                    "label": "Balanced"
+                  },
+                  {
+                    "value": "heavy",
+                    "label": "Rich and heavily worked"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "coverage_and_drape",
+            "title": "Coverage and draping",
+            "questions": [
+              {
+                "id": "coverage_preferences",
+                "type": "multi_choice",
+                "label": "Any coverage preferences?",
+                "help_text": "Choose any that matter to you — every option can be styled beautifully.",
+                "required": false,
+                "options": [
+                  { "value": "sleeveless", "label": "Sleeveless" },
+                  { "value": "short_sleeves", "label": "Short sleeves" },
+                  { "value": "elbow_sleeves", "label": "Elbow-length sleeves" },
+                  { "value": "three_quarter_sleeves", "label": "Three-quarter sleeves" },
+                  { "value": "full_sleeves", "label": "Full sleeves" },
+                  { "value": "high_neckline", "label": "High neckline" },
+                  { "value": "full_back", "label": "Full back coverage" },
+                  { "value": "full_midriff", "label": "Full midriff coverage" },
+                  { "value": "head_drape_preferred", "label": "Prefer the head covered" }
+                ],
+                "constraints": {
+                  "max_items": 6
+                }
+              },
+              {
+                "id": "dupatta_style",
+                "type": "single_choice",
+                "label": "How should the dupatta be styled?",
+                "required": false,
+                "options": [
+                  { "value": "head_drape", "label": "Draped over the head" },
+                  { "value": "one_shoulder", "label": "Over one shoulder" },
+                  { "value": "both_shoulders", "label": "Across both shoulders" },
+                  { "value": "front_drape", "label": "Draped across the front" },
+                  { "value": "double_dupatta", "label": "Double dupatta" },
+                  { "value": "cape_drape", "label": "Cape-style drape" },
+                  { "value": "arm_drape", "label": "Resting along the arms" }
+                ]
+              },
+              {
+                "id": "saree_drape",
+                "type": "single_choice",
+                "label": "How should the saree be draped?",
+                "help_text": "Drape styles carry their own regional histories — pick the one you love.",
+                "required": false,
+                "options": [
+                  {
+                    "value": "nivi_drape",
+                    "label": "Nivi drape",
+                    "description": "Pleats at the front with the pallu over the left shoulder."
+                  },
+                  {
+                    "value": "seedha_pallu",
+                    "label": "Seedha pallu",
+                    "description": "The pallu brought forward over the right shoulder to display its work."
+                  },
+                  {
+                    "value": "bengali_drape",
+                    "label": "Bengali-style drape",
+                    "description": "Wide box pleats with the pallu wrapped around."
+                  },
+                  {
+                    "value": "open_pallu",
+                    "label": "Open, flowing pallu",
+                    "description": "The pallu left loose and unpleated."
+                  },
+                  {
+                    "value": "pinned_pleats",
+                    "label": "Pre-set, pinned pleats",
+                    "description": "Crisp pleats pinned in place for a structured look."
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "final_notes",
+            "title": "Anything else?",
+            "questions": [
+              {
+                "id": "final_notes",
+                "type": "text",
+                "label": "Anything else we should know?",
+                "help_text": "Optional — a short note about anything the questionnaire didn't ask.",
+                "required": false,
+                "constraints": {
+                  "min_length": 0,
+                  "max_length": 500
+                }
+              }
+            ]
+          }
+        ],
+        "rules": [
+          {
+            "id": "saree_shows_saree_drape",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": ["saree"]
+            },
+            "then": {
+              "action": "show",
+              "question_id": "saree_drape"
+            }
+          },
+          {
+            "id": "saree_hides_dupatta_style",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": ["saree"]
+            },
+            "then": {
+              "action": "hide",
+              "question_id": "dupatta_style"
+            }
+          },
+          {
+            "id": "non_saree_hides_saree_drape",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "not_in",
+              "values": ["saree"]
+            },
+            "then": {
+              "action": "hide",
+              "question_id": "saree_drape"
+            }
+          },
+          {
+            "id": "saree_silhouettes",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": ["saree"]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "silhouette",
+              "values": ["classic_saree_drape", "lehenga_style_saree"]
+            }
+          },
+          {
+            "id": "gharara_silhouette",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": ["gharara"]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "silhouette",
+              "values": ["gharara_construction"]
+            }
+          },
+          {
+            "id": "sharara_silhouette",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": ["sharara"]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "silhouette",
+              "values": ["sharara_construction"]
+            }
+          },
+          {
+            "id": "lehenga_silhouettes",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": ["lehenga"]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "silhouette",
+              "values": ["flared_lehenga", "a_line_lehenga", "mermaid_lehenga"]
+            }
+          },
+          {
+            "id": "anarkali_silhouettes",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": ["anarkali"]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "silhouette",
+              "values": ["floor_length_anarkali", "knee_length_anarkali"]
+            }
+          },
+          {
+            "id": "shalwar_kameez_silhouettes",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": ["shalwar_kameez"]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "silhouette",
+              "values": ["straight_kameez", "a_line_kameez"]
+            }
+          }
+        ]
+      }
+    }
+  }
+]

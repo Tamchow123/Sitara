@@ -218,6 +218,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "sitara.accounts",
     "sitara.designs",
+    "sitara.questionnaire",
     "sitara.health",
     "sitara.ai_gateway",
 ]

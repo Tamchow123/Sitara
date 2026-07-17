@@ -1,0 +1,61 @@
+"""Public questionnaire API (Phase 5A): serve the single active version.
+
+Read-only and identity-free: no authentication classes, so a GET can never
+create a Django session (and therefore never a DesignSession). The stored
+schema is re-validated before serving — a corrupted active schema yields
+the same safe 503 as a missing one, with only the version id and exception
+type logged, never the malformed content or validation detail.
+"""
+
+import logging
+
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from .models import QuestionnaireVersion
+from .schema_validation import QuestionnaireSchemaError, validate_questionnaire_schema
+from .serializers import ActiveQuestionnaireSerializer
+
+logger = logging.getLogger(__name__)
+
+NO_STORE = {"Cache-Control": "no-store"}
+
+
+def _unavailable() -> Response:
+    return Response(
+        {
+            "error": {
+                "code": "questionnaire_unavailable",
+                "message": "The questionnaire is temporarily unavailable.",
+            }
+        },
+        status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        headers=NO_STORE,
+    )
+
+
+class ActiveQuestionnaireView(APIView):
+    # Identity-free by design: an empty authentication list means no
+    # session is ever read into being for this public read.
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        active = QuestionnaireVersion.objects.filter(
+            status=QuestionnaireVersion.Status.ACTIVE
+        ).first()
+        if active is None:
+            return _unavailable()
+        try:
+            validate_questionnaire_schema(active.schema)
+        except QuestionnaireSchemaError as exc:
+            logger.error(
+                "active questionnaire schema invalid questionnaire_version_id=%s "
+                "exception_type=%s",
+                active.pk,
+                type(exc).__name__,
+            )
+            return _unavailable()
+        return Response(ActiveQuestionnaireSerializer(active).data, headers=NO_STORE)
