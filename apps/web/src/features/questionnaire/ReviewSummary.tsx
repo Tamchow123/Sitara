@@ -6,7 +6,7 @@
 // schema (never hard-coded). The "Generate my concept" button is disabled —
 // generation arrives in a later phase; nothing here calls a provider.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 import { fetchDesign, validateDesignDraft } from "./api";
@@ -20,6 +20,9 @@ type State =
   | { phase: "loading" }
   | { phase: "notfound" }
   | { phase: "unavailable" }
+  // The design loaded but validation could not be PERFORMED (timeout, status 0,
+  // malformed response, 5xx) — distinct from a completed 400 (incomplete).
+  | { phase: "validation_unavailable" }
   | {
       phase: "ready";
       design: DesignDraft;
@@ -30,6 +33,12 @@ type State =
 
 export function ReviewSummary({ designId }: Props) {
   const [state, setState] = useState<State>({ phase: "loading" });
+  const [attempt, setAttempt] = useState(0);
+
+  const retry = useCallback(() => {
+    setState({ phase: "loading" });
+    setAttempt((count) => count + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,13 +51,23 @@ export function ReviewSummary({ designId }: Props) {
         }
         const validation = await validateDesignDraft(designId);
         if (cancelled) return;
-        setState({
-          phase: "ready",
-          design,
-          schema: design.questionnaire.schema,
-          valid: validation.ok,
-          errors: validation.ok ? {} : (validation.fields ?? {}),
-        });
+        if (validation.ok) {
+          setState({ phase: "ready", design, schema: design.questionnaire.schema, valid: true, errors: {} });
+          return;
+        }
+        // A completed HTTP 400 means the draft is genuinely incomplete; any
+        // other failure means validation never ran — never conflate the two.
+        if (validation.status === 400 && validation.code === "validation_failed") {
+          setState({
+            phase: "ready",
+            design,
+            schema: design.questionnaire.schema,
+            valid: false,
+            errors: validation.fields ?? {},
+          });
+        } else {
+          setState({ phase: "validation_unavailable" });
+        }
       } catch (error) {
         if (cancelled) return;
         const message = error instanceof Error ? error.message : "";
@@ -59,7 +78,7 @@ export function ReviewSummary({ designId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [designId]);
+  }, [designId, attempt]);
 
   if (state.phase === "loading") {
     return (
@@ -81,6 +100,17 @@ export function ReviewSummary({ designId }: Props) {
       <div role="alert">
         <h1>Review unavailable</h1>
         <p>We could not load this design. Please try again shortly.</p>
+      </div>
+    );
+  }
+  if (state.phase === "validation_unavailable") {
+    return (
+      <div role="alert" className="wizard-unavailable">
+        <h1>Review temporarily unavailable</h1>
+        <p>We could not check your design just now. Your answers are safe.</p>
+        <button type="button" onClick={retry}>
+          Try again
+        </button>
       </div>
     );
   }

@@ -10,6 +10,8 @@
 //    constraints, used with react-hook-form for inline step validation, plus
 //    a static Zod schema for the stable API request envelope.
 
+import { zodResolver } from "@hookform/resolvers/zod";
+import type { Resolver } from "react-hook-form";
 import { z } from "zod";
 
 import {
@@ -211,23 +213,42 @@ export function validateAnswers(
 // a static envelope schema for the API request shape.
 // ---------------------------------------------------------------------------
 
+function isNum(value: unknown): value is number {
+  return typeof value === "number" && !Number.isNaN(value);
+}
+
+// Per-question Zod, built from the machine constraints. Requiredness and
+// minimum-constraint enforcement are SEPARATE concerns: an empty answer to an
+// optional question is valid, but any SUPPLIED value obeys its minimum during
+// complete step validation (a required question additionally must not be
+// empty). Option membership and restrictions stay schema-derived.
 function questionZod(
   question: Question,
   ctx: { required: boolean; allowed: Set<string> },
 ): z.ZodTypeAny {
+  const c = question.constraints ?? {};
+
   if (question.type === "text") {
-    return z.string().superRefine((value, refine) => {
-      const normalised = normaliseText(value);
-      const message = checkText(normalised, question, ctx.required);
-      if (message) refine.addIssue({ code: z.ZodIssueCode.custom, message });
-      if (ctx.required && normalised === "") {
-        refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.required });
+    return z.string().superRefine((raw, refine) => {
+      const value = normaliseText(raw ?? "");
+      if (value === "") {
+        if (ctx.required) {
+          refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.required });
+        }
+        return; // empty optional text is valid; no min/max on emptiness
+      }
+      if (isNum(c.max_length) && value.length > c.max_length) {
+        refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.tooLong(c.max_length) });
+      }
+      if (isNum(c.min_length) && value.length < c.min_length) {
+        refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.tooShort(c.min_length) });
       }
     });
   }
+
   if (question.type === "single_choice") {
     return z.string().superRefine((value, refine) => {
-      if (value === "") {
+      if (!value) {
         if (ctx.required) {
           refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.required });
         }
@@ -238,26 +259,40 @@ function questionZod(
       }
     });
   }
+
   // multi_choice
   return z.array(z.string()).superRefine((values, refine) => {
-    for (const value of values) {
+    const list = values ?? [];
+    for (const value of list) {
       if (!ctx.allowed.has(value)) {
         refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.unknownOption });
         return;
       }
     }
-    const message = checkMulti(values, question, ctx.required);
-    if (message) refine.addIssue({ code: z.ZodIssueCode.custom, message });
-    if (ctx.required && values.length === 0) {
-      refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.required });
+    const exclusive = new Set(c.exclusive_values ?? []);
+    if (exclusive.size > 0 && list.length > 1 && list.some((v) => exclusive.has(v))) {
+      refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.exclusive });
+    }
+    if (isNum(c.max_items) && list.length > c.max_items) {
+      refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.tooMany(c.max_items) });
+    }
+    if (list.length === 0) {
+      if (ctx.required) {
+        refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.required });
+      }
+      return; // empty optional multi-choice is valid; no min on emptiness
+    }
+    if (isNum(c.min_items) && list.length < c.min_items) {
+      refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.tooFew(c.min_items) });
     }
   });
 }
 
 // A Zod object covering the VISIBLE questions of one step, built from the
 // current answers (which determine visibility, required and allowed options).
-// Changing a constraint in the schema changes this validation with no code
-// change — the whole schema is read, nothing hard-coded.
+// Required questions are structurally required; optional questions stay
+// optional (no blanket `.partial()`). Changing a constraint in the schema
+// changes this validation with no code change — the whole schema is read.
 export function buildStepZodSchema(
   schema: QuestionnaireSchema,
   step: Step,
@@ -269,19 +304,38 @@ export function buildStepZodSchema(
   const shape: Record<string, z.ZodTypeAny> = {};
   for (const question of step.questions) {
     if (!visibility[question.id]) continue;
-    shape[question.id] = questionZod(question, {
-      required: Boolean(required[question.id]),
+    const isRequired = Boolean(required[question.id]);
+    const base = questionZod(question, {
+      required: isRequired,
       allowed: allowed[question.id] ?? new Set<string>(),
     });
+    // Optional questions may be absent entirely; required ones may not.
+    shape[question.id] = isRequired ? base : base.optional();
   }
-  return z.object(shape).partial();
+  return z.object(shape);
 }
 
-// Static Zod schema for the stable API request envelope (shape only — the
-// backend remains authoritative for the answer contents).
+// Static Zod schema for the stable API request envelope — a SHAPE guard run
+// before every outgoing create/update. Formats (uuid) are the backend's job;
+// this only proves the client is sending a well-formed body.
 export const designEnvelopeSchema = z.object({
   title: z.string().max(120).optional(),
-  questionnaire_version_id: z.string().uuid().optional(),
+  questionnaire_version_id: z.string().min(1).optional(),
   answers: z.record(z.union([z.string(), z.array(z.string())])).optional(),
-  inspiration_asset_ids: z.array(z.string().uuid()).max(3).optional(),
+  inspiration_asset_ids: z.array(z.string()).optional(),
 });
+
+// A React Hook Form resolver that validates the CURRENT visible step against
+// its derived Zod schema. The wizard uses exactly this; tests use it to prove
+// the RHF integration runs the derived schema. Context is read lazily so
+// visibility/required/allowed always reflect the latest answers.
+export function createStepResolver(
+  getContext: () => { schema: QuestionnaireSchema | null; step: Step | null; answers: Answers },
+): Resolver<Record<string, AnswerValue>> {
+  return async (values, context, options) => {
+    const { schema, step, answers } = getContext();
+    if (!schema || !step) return { values, errors: {} };
+    const zodSchema = buildStepZodSchema(schema, step, answers);
+    return zodResolver(zodSchema)(values, context, options);
+  };
+}

@@ -78,7 +78,7 @@ describe("ReviewSummary", () => {
     expect(button).toBeDisabled();
   });
 
-  it("routes the user back to errors on a validation failure", async () => {
+  it("16a: an HTTP 400 routes the user back to complete the incomplete draft", async () => {
     mocks.validateDesignDraft.mockResolvedValue({
       ok: false,
       status: 400,
@@ -91,6 +91,32 @@ describe("ReviewSummary", () => {
     expect(alert).toHaveTextContent(/still need attention/i);
     const back = screen.getByRole("link", { name: /return to the questionnaire/i });
     expect(back).toHaveAttribute("href", "/design/d1");
+  });
+
+  it("16b: a validation transport failure shows a distinct unavailable state, not incomplete", async () => {
+    mocks.validateDesignDraft.mockResolvedValue({
+      ok: false,
+      status: 0,
+      code: "unavailable",
+      message: "The service could not be reached.",
+    });
+    render(<ReviewSummary designId="d1" />);
+    expect(await screen.findByText(/Review temporarily unavailable/i)).toBeInTheDocument();
+    // Never tell the user their answers are incomplete when validation never ran.
+    expect(screen.queryByText(/still need attention/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Try again/i })).toBeInTheDocument();
+  });
+
+  it("16c: a 5xx during validation is unavailable, not incomplete", async () => {
+    mocks.validateDesignDraft.mockResolvedValue({
+      ok: false,
+      status: 503,
+      code: "unavailable",
+      message: "Temporarily unavailable.",
+    });
+    render(<ReviewSummary designId="d1" />);
+    expect(await screen.findByText(/Review temporarily unavailable/i)).toBeInTheDocument();
+    expect(screen.queryByText(/still need attention/i)).not.toBeInTheDocument();
   });
 
   it("shows attribution for a selected inspiration", async () => {
