@@ -66,6 +66,16 @@ export default function Home() {
         to a private visual concept and detailed design brief.
       </p>
 
+      <p>
+        <Link className="cta" href="/design/new">
+          Start your design
+        </Link>
+      </p>
+      <p className="notice">
+        No account needed — your design stays private to your browser. You can
+        create an account later to keep it.
+      </p>
+
       <section aria-labelledby="platform-status-heading">
         <h2 id="platform-status-heading">Platform status</h2>
         <div role="status" aria-live="polite">

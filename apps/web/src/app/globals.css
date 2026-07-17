@@ -96,7 +96,285 @@ dd {
 
 a:focus-visible,
 button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
 [tabindex]:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Call to action                                                     */
+/* ------------------------------------------------------------------ */
+.cta {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  padding: 0.7rem 1.4rem;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: bold;
+  letter-spacing: 0.02em;
+}
+.cta:hover {
+  background: #74334d;
+}
+
+/* ------------------------------------------------------------------ */
+/* Questionnaire wizard                                               */
+/* ------------------------------------------------------------------ */
+.wizard-progress {
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin: 0 0 1rem;
+}
+
+.step-description {
+  color: var(--muted);
+  margin: 0 0 1.25rem;
+}
+
+.field {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  margin: 0 0 1.25rem;
+}
+
+.field-label {
+  display: block;
+  font-weight: bold;
+  font-size: 1.05rem;
+  margin-bottom: 0.4rem;
+  padding: 0;
+}
+
+.field-help {
+  color: var(--muted);
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+}
+
+.field-error {
+  color: var(--bad);
+  font-weight: bold;
+  margin: 0.5rem 0 0;
+}
+
+.field-textarea {
+  width: 100%;
+  min-height: 6rem;
+  padding: 0.6rem;
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  resize: vertical;
+}
+
+.option-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.option {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  cursor: pointer;
+}
+.option:hover {
+  border-color: var(--accent);
+}
+.option input {
+  margin-top: 0.3rem;
+  /* Larger touch target for mobile. */
+  width: 1.15rem;
+  height: 1.15rem;
+}
+.option-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.option-body {
+  display: flex;
+  flex-direction: column;
+}
+.option-title {
+  font-weight: bold;
+}
+.option-description {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.save-status {
+  min-height: 1.5rem;
+  margin: 0.5rem 0;
+  color: var(--muted);
+}
+.save-error {
+  color: var(--bad);
+  font-weight: bold;
+}
+
+.wizard-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+.wizard-nav button,
+.wizard-nav a {
+  padding: 0.65rem 1.3rem;
+  font: inherit;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+}
+.wizard-nav button:last-child {
+  background: var(--accent);
+  color: #fff;
+}
+.wizard-nav button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error-summary {
+  border: 2px solid var(--bad);
+  border-radius: 8px;
+  padding: 0.75rem 1.1rem;
+  margin-bottom: 1.5rem;
+  background: #fdeceb;
+}
+.error-summary h2 {
+  color: var(--bad);
+  margin-top: 0;
+}
+
+.wizard-unavailable button {
+  margin-top: 0.75rem;
+  padding: 0.5rem 1.1rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ */
+/* Inspiration picker                                                 */
+/* ------------------------------------------------------------------ */
+.inspiration-grid,
+.inspiration-unavailable,
+.review-inspirations {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.75rem;
+}
+
+.inspiration-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  padding: 0;
+  overflow: hidden;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+.inspiration-card-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.inspiration-card[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.inspiration-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  background: #f0e7db;
+}
+.inspiration-meta {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0.6rem;
+  gap: 0.15rem;
+}
+.inspiration-title {
+  font-weight: bold;
+}
+.inspiration-context,
+.inspiration-attribution {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.inspiration-state {
+  font-size: 0.85rem;
+  font-weight: bold;
+  color: var(--accent);
+}
+.inspiration-card-unavailable {
+  border: 1px dashed var(--muted);
+  border-radius: 8px;
+  padding: 0.75rem;
+  color: var(--muted);
+  background: #f6f1ea;
+}
+.empty-state {
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ */
+/* Review                                                             */
+/* ------------------------------------------------------------------ */
+.review-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+.review-row {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.4rem 1.25rem;
+}
+.review figure {
+  margin: 0;
+}
+.review figcaption {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.9rem;
+  padding-top: 0.3rem;
+}
+
+@media (max-width: 34rem) {
+  .review-row {
+    grid-template-columns: 1fr;
+    gap: 0.1rem;
+  }
+  .wizard-nav {
+    flex-direction: column-reverse;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
 }

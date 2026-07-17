@@ -43,14 +43,20 @@ type ErrorBody = {
   error?: { code?: string; message?: string; fields?: Record<string, string[]> };
 };
 
-async function postJson<T>(
+// One CSRF-aware unsafe request for BOTH POST and PATCH. The token lives in
+// memory only; on a stale-token 403 it clears, re-bootstraps and retries
+// EXACTLY once. Same-origin/no-store/5s-timeout all come from the shared
+// transport. Malformed JSON or a network/timeout error throws (the caller
+// turns that into a controlled failure — never a false success).
+async function sendJson<T>(
+  method: "POST" | "PATCH",
   path: string,
   body: unknown,
   hasRetried = false,
 ): Promise<ApiEnvelope<T>> {
   const token = await ensureCsrfToken();
   const response = await fetchWithTimeout(path, {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json", "X-CSRFToken": token },
     body: JSON.stringify(body),
   });
@@ -62,9 +68,13 @@ async function postJson<T>(
   ) {
     // Stale token: clear, bootstrap a fresh one, retry EXACTLY once.
     csrfToken = null;
-    return postJson<T>(path, body, true);
+    return sendJson<T>(method, path, body, true);
   }
   return { ok: response.ok, status: response.status, data };
+}
+
+function postJson<T>(path: string, body: unknown): Promise<ApiEnvelope<T>> {
+  return sendJson<T>("POST", path, body);
 }
 
 // ---------------------------------------------------------------------------
@@ -218,4 +228,93 @@ export async function apiLogout(): Promise<LogoutResult> {
     return { ok: true };
   }
   return toFailure(status, data);
+}
+
+// ---------------------------------------------------------------------------
+// Design drafts (Phase 7) — CSRF-aware unsafe operations
+// ---------------------------------------------------------------------------
+//
+// Explicit typed wrappers (NOT a generic exported POST/PATCH client): the
+// generated api/client.ts stays GET-only, and every unsafe design mutation
+// goes through the tested in-memory-CSRF, retry-once flow above. Request and
+// response types are the generated OpenAPI components, so they cannot drift.
+
+export type DesignDraft = components["schemas"]["DesignDetailResponse"];
+export type DesignWriteRequest = components["schemas"]["DesignWriteRequest"];
+export type DesignValidationSuccess = components["schemas"]["DesignValidationSuccess"];
+export type SelectedInspiration = components["schemas"]["SelectedInspiration"];
+export type DesignQuestionnaire = components["schemas"]["DesignQuestionnaire"];
+
+export type DraftFailure = {
+  ok: false;
+  status: number;
+  code: string;
+  message: string;
+  fields?: Record<string, string[]>;
+};
+export type DraftSuccess<T> = { ok: true; data: T };
+export type DraftResult<T> = DraftSuccess<T> | DraftFailure;
+
+function toDraftFailure(status: number, body: ErrorBody): DraftFailure {
+  return {
+    ok: false,
+    status,
+    code: body.error?.code ?? (status >= 500 ? "unavailable" : "unknown_error"),
+    message:
+      body.error?.message ?? "Something went wrong. Please try again shortly.",
+    fields: body.error?.fields,
+  };
+}
+
+// A thrown transport error (timeout/network/invalid JSON) must become a
+// controlled failure — the caller never reports a save as succeeded unless
+// the server confirmed it.
+const UNREACHABLE: DraftFailure = {
+  ok: false,
+  status: 0,
+  code: "unavailable",
+  message: "The service could not be reached. Your changes were not saved.",
+};
+
+async function draftRequest<T>(
+  method: "POST" | "PATCH",
+  path: string,
+  body: unknown,
+): Promise<DraftResult<T>> {
+  let envelope: ApiEnvelope<T & ErrorBody>;
+  try {
+    envelope = await sendJson<T & ErrorBody>(method, path, body);
+  } catch {
+    return UNREACHABLE;
+  }
+  const { ok, status, data } = envelope;
+  if (ok) return { ok: true, data: data as T };
+  return toDraftFailure(status, data);
+}
+
+export function createDesignDraft(
+  body: DesignWriteRequest,
+): Promise<DraftResult<DesignDraft>> {
+  return draftRequest<DesignDraft>("POST", "/api/v1/designs/", body);
+}
+
+export function updateDesignDraft(
+  designId: string,
+  body: DesignWriteRequest,
+): Promise<DraftResult<DesignDraft>> {
+  return draftRequest<DesignDraft>(
+    "PATCH",
+    `/api/v1/designs/${encodeURIComponent(designId)}/`,
+    body,
+  );
+}
+
+export function validateDesignDraft(
+  designId: string,
+): Promise<DraftResult<DesignValidationSuccess>> {
+  return draftRequest<DesignValidationSuccess>(
+    "POST",
+    `/api/v1/designs/${encodeURIComponent(designId)}/validate/`,
+    {},
+  );
 }

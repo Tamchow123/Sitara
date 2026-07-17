@@ -78,6 +78,8 @@ docs/decisions/0003-session-authentication.md
 docs/decisions/0004-private-design-ownership.md
 docs/decisions/0005-versioned-questionnaire-schema.md
 docs/decisions/0006-rights-controlled-inspiration-catalogue.md
+docs/decisions/0007-openapi-generated-client.md
+docs/decisions/0008-questionnaire-draft-and-wizard.md
 ```
 
 For a phase task stored in a separate specification file, read that file in full before editing.

@@ -133,13 +133,13 @@ export interface paths {
         };
         /**
          * List your designs
-         * @description Returns the private designs owned by the current session or account. A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Returns the private designs owned by the current session or account as compact rows (no questionnaire schema, no inspiration records). A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         get: operations["designs_list"];
         put?: never;
         /**
          * Create a design
-         * @description Creates a private draft (title only; status and answers are server-owned). Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Creates a private draft. Accepts optional title, questionnaire version, answers and inspiration selections; status is server-owned (draft). Answers and inspirations are validated authoritatively and roll back together on any failure. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         post: operations["designs_create"];
         delete?: never;
@@ -157,7 +157,7 @@ export interface paths {
         };
         /**
          * Retrieve a design
-         * @description Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Returns the full draft: linked questionnaire (or null), answers and ordered inspiration selections with live availability. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         get: operations["designs_retrieve"];
         put?: never;
@@ -167,9 +167,29 @@ export interface paths {
         head?: never;
         /**
          * Update a design
-         * @description Title-only update. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Partial draft update: title, questionnaire version (assignable once), answers (draft-validated) and inspiration selections (replaced as one ordered set). Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         patch: operations["designs_update"];
+        trace?: never;
+    };
+    "/api/v1/designs/{design_id}/validate/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate a design draft
+         * @description Performs NO generation. Re-checks the persisted draft with complete validation (every visible required question answered, minimum counts/lengths) and re-checks that every selected inspiration is still eligible. Returns {"valid": true} or a controlled 400 with question/selection errors. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        post: operations["designs_validate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/health/live": {
@@ -338,22 +358,50 @@ export interface components {
             /** @description Send this back as the X-CSRFToken header on unsafe requests. */
             csrf_token: string;
         };
-        DesignListResponse: {
-            designs: components["schemas"]["DesignRead"][];
-        };
-        DesignRead: {
+        DesignDetailResponse: {
             /** Format: uuid */
-            readonly id: string;
-            readonly title: string;
-            readonly status: components["schemas"]["StatusEnum"];
-            readonly answers: unknown;
+            id: string;
+            title: string;
+            status: string;
+            questionnaire: components["schemas"]["DesignQuestionnaire"] | null;
+            /** @description Answers keyed by stable question id. */
+            answers: unknown;
+            selected_inspirations: components["schemas"]["SelectedInspiration"][];
             /** Format: date-time */
-            readonly created_at: string;
+            created_at: string;
             /** Format: date-time */
-            readonly updated_at: string;
+            updated_at: string;
+        };
+        /** @description A compact list row — no questionnaire schema, no inspiration records. */
+        DesignListItem: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            status: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DesignListResponse: {
+            designs: components["schemas"]["DesignListItem"][];
+        };
+        /** @description The questionnaire a design is pinned to (null for legacy designs). */
+        DesignQuestionnaire: {
+            /** Format: uuid */
+            id: string;
+            version: number;
+            schema: components["schemas"]["QuestionnaireSchema"];
+        };
+        DesignValidationSuccess: {
+            valid: boolean;
         };
         DesignWriteRequest: {
             title?: string;
+            /** Format: uuid */
+            questionnaire_version_id?: string;
+            answers?: unknown;
+            inspiration_asset_ids?: string[];
         };
         ErrorDetail: {
             /** @description Stable machine-readable error code. */
@@ -410,6 +458,10 @@ export interface components {
         OperatorEnum: "equals" | "in" | "not_in";
         PatchedDesignWriteRequest: {
             title?: string;
+            /** Format: uuid */
+            questionnaire_version_id?: string;
+            answers?: unknown;
+            inspiration_asset_ids?: string[];
         };
         PublicConfig: {
             demo_mode: boolean;
@@ -507,10 +559,34 @@ export interface components {
             values: string[];
         };
         /**
-         * @description * `draft` - Draft
-         * @enum {string}
+         * @description One inspiration selection with its live availability.
+         *
+         *     ``available: false`` with ``asset: null`` means the previously-selected
+         *     asset is no longer publicly eligible (retired, expired or revoked). The
+         *     reason is deliberately not disclosed.
          */
-        StatusEnum: "draft";
+        SelectedInspiration: {
+            /**
+             * Format: uuid
+             * @description The selected inspiration asset id.
+             */
+            id: string;
+            position: number;
+            available: boolean;
+            asset: components["schemas"]["SelectedInspirationAsset"] | null;
+        };
+        /** @description The public catalogue fields for an inspiration that is still eligible. */
+        SelectedInspirationAsset: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            alt_text: string;
+            garment_type: string;
+            cultural_context: string;
+            attribution: string;
+            image_url: string;
+            thumbnail_url: string;
+        };
         StepSchema: {
             id: string;
             title: string;
@@ -788,8 +864,6 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["DesignWriteRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["DesignWriteRequest"];
-                "multipart/form-data": components["schemas"]["DesignWriteRequest"];
             };
         };
         responses: {
@@ -798,7 +872,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DesignRead"];
+                    "application/json": components["schemas"]["DesignDetailResponse"];
                 };
             };
             400: {
@@ -845,7 +919,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DesignRead"];
+                    "application/json": components["schemas"]["DesignDetailResponse"];
                 };
             };
             /** @description Not found or not owned (indistinguishable). */
@@ -874,8 +948,6 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["PatchedDesignWriteRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["PatchedDesignWriteRequest"];
-                "multipart/form-data": components["schemas"]["PatchedDesignWriteRequest"];
             };
         };
         responses: {
@@ -884,7 +956,57 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DesignRead"];
+                    "application/json": components["schemas"]["DesignDetailResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorEnvelope"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_validate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DesignValidationSuccess"];
                 };
             };
             400: {

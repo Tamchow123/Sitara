@@ -12,10 +12,13 @@
     "generate:api": "openapi-typescript ../api/openapi/schema.json --output src/api/schema.d.ts"
   },
   "dependencies": {
+    "@hookform/resolvers": "3.9.1",
     "next": "15.5.20",
     "openapi-fetch": "0.17.0",
     "react": "19.0.0",
-    "react-dom": "19.0.0"
+    "react-dom": "19.0.0",
+    "react-hook-form": "7.54.2",
+    "zod": "3.24.1"
   },
   "devDependencies": {
     "@testing-library/dom": "10.4.0",
