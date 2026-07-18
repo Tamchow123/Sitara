@@ -21,12 +21,14 @@ timestamps or internal database metadata.
 from dataclasses import dataclass
 
 from django.conf import settings
+from pydantic import ValidationError
 
 from sitara.designs.services import design_completion_errors
 from sitara.questionnaire.answer_validation import normalise_text
 from sitara.questionnaire.models import QuestionnaireVersion
 from sitara.questionnaire.rules import build_selected, questions_by_id, visible_questions
 
+from .design_spec import SourceSelections
 from .input_safety import scan_user_text
 
 # The DesignSpec.source_selections fields map 1:1 onto questionnaire question
@@ -120,6 +122,18 @@ def build_generation_context(design) -> GenerationContext:
     option_labels = _option_labels(schema)
 
     source_selections = _build_source_selections(answers, visibility)
+    # The DesignSpec contract must be satisfiable by this questionnaire BEFORE
+    # any provider is selected or any client is constructed. A schema that does
+    # not supply the required source fields (or supplies an unusable shape) is a
+    # controlled DesignNotReady, never a Pydantic traceback — and neither the
+    # Pydantic input nor questionnaire contents are surfaced.
+    try:
+        SourceSelections.model_validate(source_selections)
+    except ValidationError:
+        raise DesignNotReady(
+            "unsupported_questionnaire_contract",
+            "This questionnaire does not provide a supported design contract.",
+        ) from None
 
     trusted_answers: list[dict] = []
     untrusted_texts: list[dict] = []

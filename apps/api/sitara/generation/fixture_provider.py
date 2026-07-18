@@ -11,6 +11,7 @@ from sitara.ai_gateway.structured_design import (
     StructuredDesignRequest,
     StructuredDesignResult,
 )
+from sitara.generation.design_spec import NO_REGIONAL_DIRECTION
 
 
 def build_fixture_spec(source_selections: dict) -> dict:
@@ -20,6 +21,8 @@ def build_fixture_spec(source_selections: dict) -> dict:
     are negated) and clearly labelled as an offline placeholder."""
     garment = source_selections.get("garment_type") or "outfit"
     ceremony = source_selections.get("ceremony") or "ceremony"
+    regional_style = source_selections.get("regional_style")
+    has_regional_direction = bool(regional_style) and regional_style != NO_REGIONAL_DIRECTION
     return {
         "schema_version": 1,
         "source_selections": source_selections,
@@ -66,7 +69,7 @@ def build_fixture_spec(source_selections: dict) -> dict:
         "cultural_context": {
             "regional_direction": (
                 "Placeholder note on the broad regional direction where one was supplied."
-                if source_selections.get("regional_style")
+                if has_regional_direction
                 else None
             ),
             "interpretation_notes": ["Placeholder interpretation notes, kept broad and flexible."],

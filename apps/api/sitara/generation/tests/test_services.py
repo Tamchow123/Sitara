@@ -3,7 +3,7 @@
 import pytest
 
 from sitara.ai_gateway.structured_design import StructuredDesignProviderError
-from sitara.designs.models import DesignVersion
+from sitara.designs.models import Design, DesignVersion
 from sitara.generation.context import DesignNotReady, build_generation_context
 from sitara.generation.design_spec import (
     DESIGN_SPEC_SCHEMA_VERSION,
@@ -12,13 +12,14 @@ from sitara.generation.design_spec import (
 )
 from sitara.generation.input_safety import UnsafeUserTextError
 from sitara.generation.services import (
+    DesignChangedDuringGeneration,
     GenerationFailed,
     GenerationRefused,
     generate_design_spec_for_design,
 )
 
 from . import fakes
-from .factory import make_complete_design
+from .factory import COMPLETE_ANSWERS, make_active_v1, make_complete_design
 
 pytestmark = pytest.mark.django_db
 
@@ -201,3 +202,140 @@ class TestNoInspirationLeakage:
         assert str(asset.id) not in blob
         assert asset.image_storage_key not in blob
         assert asset.title not in blob
+
+
+class TestStaleInputProtection:
+    """A valid spec built from inputs that changed during the (un-transacted)
+    provider call is discarded — the newer draft is never overwritten."""
+
+    def test_answer_change_during_generation_is_not_persisted(self):
+        design = make_complete_design()
+        ss = _source_selections(design)
+
+        def edit_answers():
+            changed = dict(COMPLETE_ANSWERS)
+            changed["colour_palette"] = ["ivory"]  # still complete, but different
+            Design.objects.filter(pk=design.pk).update(answers=changed)
+
+        provider = fakes.MutatingProvider(ss, edit_answers)
+        with pytest.raises(DesignChangedDuringGeneration):
+            generate_design_spec_for_design(design, provider=provider)
+        assert provider.calls == 1
+        assert DesignVersion.objects.filter(design=design).count() == 0
+
+    def test_questionnaire_version_change_during_generation_is_not_persisted(self):
+        design = make_complete_design()
+        ss = _source_selections(design)
+        other = make_active_v1(version=2, status="retired")
+
+        def swap_version():
+            Design.objects.filter(pk=design.pk).update(questionnaire_version=other)
+
+        provider = fakes.MutatingProvider(ss, swap_version)
+        with pytest.raises(DesignChangedDuringGeneration):
+            generate_design_spec_for_design(design, provider=provider)
+        assert DesignVersion.objects.filter(design=design).count() == 0
+
+    def test_inspiration_selection_change_during_generation_is_not_persisted(
+        self, inmemory_storage
+    ):
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        ss = _source_selections(design)
+        asset = make_eligible_asset()
+
+        def add_inspiration():
+            DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+
+        provider = fakes.MutatingProvider(ss, add_inspiration)
+        with pytest.raises(DesignChangedDuringGeneration):
+            generate_design_spec_for_design(design, provider=provider)
+        assert DesignVersion.objects.filter(design=design).count() == 0
+
+    def test_inspiration_becoming_ineligible_during_generation_is_not_persisted(
+        self, inmemory_storage
+    ):
+        from sitara.catalogue.services import retire_inspiration_asset
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset()
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        ss = _source_selections(design)
+
+        def retire():
+            retire_inspiration_asset(asset)
+
+        provider = fakes.MutatingProvider(ss, retire)
+        with pytest.raises(DesignChangedDuringGeneration):
+            generate_design_spec_for_design(design, provider=provider)
+        assert DesignVersion.objects.filter(design=design).count() == 0
+
+
+class TestTokenAggregation:
+    def test_single_success_stores_its_usage(self):
+        design = make_complete_design()
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider(
+            [fakes.result_with_usage(ss, input_tokens=1200, output_tokens=340)]
+        )
+        version = generate_design_spec_for_design(design, provider=provider)
+        version.refresh_from_db()
+        assert version.design_spec_input_tokens == 1200
+        assert version.design_spec_output_tokens == 340
+
+    def test_invalid_then_valid_sums_both_attempts(self):
+        design = make_complete_design()
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider(
+            [
+                fakes.result_with_usage(ss, input_tokens=10, output_tokens=20, valid=False),
+                fakes.result_with_usage(ss, input_tokens=100, output_tokens=200),
+            ]
+        )
+        version = generate_design_spec_for_design(design, provider=provider)
+        version.refresh_from_db()
+        assert provider.calls == 2
+        assert version.design_spec_input_tokens == 110
+        assert version.design_spec_output_tokens == 220
+
+    def test_missing_dimension_on_any_attempt_stores_none(self):
+        design = make_complete_design()
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider(
+            [
+                fakes.result_with_usage(ss, input_tokens=None, output_tokens=20, valid=False),
+                fakes.result_with_usage(ss, input_tokens=100, output_tokens=200),
+            ]
+        )
+        version = generate_design_spec_for_design(design, provider=provider)
+        version.refresh_from_db()
+        # input unknown on attempt 1 → total input None; output known on both → 220.
+        assert version.design_spec_input_tokens is None
+        assert version.design_spec_output_tokens == 220
+
+
+class TestSemanticRetry:
+    def test_semantic_failure_then_valid_retries_and_persists_once(self):
+        design = make_complete_design()
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider(
+            [fakes.semantic_invalid_result(ss), fakes.valid_result(ss)]
+        )
+        generate_design_spec_for_design(design, provider=provider)
+        assert provider.calls == 2
+        assert DesignVersion.objects.filter(design=design).count() == 1
+
+    def test_two_semantic_failures_persist_nothing(self):
+        design = make_complete_design()
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider(
+            [fakes.semantic_invalid_result(ss), fakes.semantic_invalid_result(ss)]
+        )
+        with pytest.raises(GenerationFailed):
+            generate_design_spec_for_design(design, provider=provider)
+        assert provider.calls == 2
+        assert DesignVersion.objects.filter(design=design).count() == 0

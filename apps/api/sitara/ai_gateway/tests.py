@@ -105,8 +105,26 @@ class TestGenerationCapability:
     def test_structured_generation_availability_needs_both_gates(self, settings, demo, allow):
         settings.DEMO_MODE = demo
         settings.ALLOW_PAID_AI_CALLS = allow
+        # A complete Anthropic configuration is also required; provide it so this
+        # parametrisation isolates the two environment gates.
+        settings.ANTHROPIC_API_KEY = "sk-ant-test-not-a-real-key"
+        settings.ANTHROPIC_MODEL = "claude-sonnet-4-6"
         expected = (not demo) and allow  # structured capability is implemented
         assert structured_design_generation_is_available() is expected
+
+    def test_availability_requires_a_configured_key(self, settings):
+        settings.DEMO_MODE = False
+        settings.ALLOW_PAID_AI_CALLS = True
+        settings.ANTHROPIC_MODEL = "claude-sonnet-4-6"
+        settings.ANTHROPIC_API_KEY = "   "  # blank after stripping
+        assert structured_design_generation_is_available() is False
+
+    def test_availability_requires_a_model_within_field_bound(self, settings):
+        settings.DEMO_MODE = False
+        settings.ALLOW_PAID_AI_CALLS = True
+        settings.ANTHROPIC_API_KEY = "sk-ant-test-not-a-real-key"
+        settings.ANTHROPIC_MODEL = "m" * 101  # exceeds the persisted 100-char bound
+        assert structured_design_generation_is_available() is False
 
     @pytest.mark.parametrize("demo,allow", ALL_GATE_COMBINATIONS)
     def test_generation_unavailable_for_every_gate_combination(self, settings, demo, allow):

@@ -57,6 +57,26 @@ class TestDesignerDenylist:
         assert "Sabyasachi" not in str(excinfo.value)
         assert "sabyasachi" not in str(excinfo.value).lower()
 
+    @pytest.mark.parametrize(
+        "variant",
+        [
+            "Manish_Malhotra",  # underscore separator must not glue tokens
+            "Manish__Malhotra",
+            "Manish---Malhotra",
+            "Manish_-_Malhotra",
+            "Ｍanish＿Ｍalhotra",  # full-width letters + full-width underscore
+            "manish.malhotra",
+        ],
+    )
+    def test_underscore_and_mixed_punctuation_cannot_bypass(self, variant):
+        with pytest.raises(GeneratedContentRejected) as excinfo:
+            scan_generated_text(f"a concept {variant} would admire")
+        assert excinfo.value.category == RejectionCategory.DESIGNER_OR_BRAND
+
+    def test_machine_value_style_underscores_are_not_falsely_rejected(self):
+        # Ordinary underscore-joined text (e.g. echoed machine values) is safe.
+        scan_generated_text("full_sleeves and high_neckline coverage on an ivory_gold palette")
+
 
 class TestSafeTextIsNotFalselyRejected:
     @pytest.mark.parametrize(
@@ -114,22 +134,54 @@ class TestImitationAndLeakage:
         scan_generated_text("line one\nline two")  # must not raise
 
 
-class TestClaimsRequireNegation:
-    def test_positive_sewing_pattern_claim_is_rejected(self):
+class TestClaimsAreScopeAware:
+    # Scope-aware negation: a negation only excuses a claim when it PRECEDES the
+    # claim phrase in the sentence — a trailing "not"/"no" clause does not.
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "This document is a sewing pattern you can cut from.",
+            "This is a sewing pattern, not merely a mood board.",
+            "This sewing pattern contains no measurements.",
+        ],
+    )
+    def test_asserted_sewing_pattern_claims_are_rejected(self, text):
         with pytest.raises(GeneratedContentRejected) as excinfo:
-            scan_generated_text("This document is a sewing pattern you can cut from.")
+            scan_generated_text(text)
         assert excinfo.value.category == RejectionCategory.SEWING_PATTERN_CLAIM
 
-    def test_negated_sewing_pattern_disclaimer_is_allowed(self):
-        scan_generated_text("This is a concept only and is not a sewing pattern.")
-
-    def test_positive_constructibility_claim_is_rejected(self):
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "The garment is guaranteed to construct exactly as shown.",
+            "The garment can be constructed exactly as shown, with no extra fitting.",
+        ],
+    )
+    def test_asserted_constructibility_claims_are_rejected(self, text):
         with pytest.raises(GeneratedContentRejected) as excinfo:
-            scan_generated_text("The garment is guaranteed to construct exactly as shown.")
+            scan_generated_text(text)
         assert excinfo.value.category == RejectionCategory.CONSTRUCTIBILITY_CLAIM
 
-    def test_negated_constructibility_disclaimer_is_allowed(self):
-        scan_generated_text("It cannot be constructed exactly and offers no guarantee.")
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "This is not a sewing pattern.",
+            "This is a concept only and is not a sewing pattern.",
+        ],
+    )
+    def test_negated_sewing_pattern_disclaimers_are_allowed(self, text):
+        scan_generated_text(text)  # must not raise
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "This concept does not guarantee constructibility.",
+            "It cannot be constructed exactly as shown.",
+            "It does not guarantee that the garment can be constructed exactly as shown.",
+        ],
+    )
+    def test_negated_constructibility_disclaimers_are_allowed(self, text):
+        scan_generated_text(text)  # must not raise
 
 
 class TestScanDesignSpec:

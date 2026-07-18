@@ -166,11 +166,16 @@ class UnsafeUserTextError(Exception):
 
 
 def _tokens(text: str) -> list[str]:
-    """NFKC + case-fold + punctuation→space + collapse, then split to tokens."""
+    """NFKC + case-fold + punctuation→space + collapse, then split to tokens.
+
+    Underscores are treated as separators too (``[\\W_]+``): ``\\w`` keeps
+    underscore, so without this ``Manish_Malhotra`` would collapse to one
+    token and slip past a multi-token denylist entry."""
     normalised = unicodedata.normalize("NFKC", text).casefold()
-    # Replace any run of non-word (Unicode-aware) characters with a single
-    # space, so punctuation/spacing variants collapse to the same tokens.
-    normalised = re.sub(r"\W+", " ", normalised, flags=re.UNICODE)
+    # Replace any run of non-word (Unicode-aware) characters OR underscores
+    # with a single space, so punctuation/underscore/spacing variants all
+    # collapse to the same tokens.
+    normalised = re.sub(r"[\W_]+", " ", normalised, flags=re.UNICODE)
     return normalised.split()
 
 
@@ -178,32 +183,56 @@ def _phrase_tokens(phrase: str) -> list[str]:
     return _tokens(phrase)
 
 
+def _phrase_starts(haystack: list[str], needle: list[str]) -> list[int]:
+    """Every start index at which ``needle`` occurs as a contiguous token
+    subsequence of ``haystack`` (empty when it does not occur)."""
+    if not needle:
+        return []
+    limit = len(haystack) - len(needle)
+    return [
+        start for start in range(0, limit + 1) if haystack[start : start + len(needle)] == needle
+    ]
+
+
 def _contains_phrase(haystack: list[str], needle: list[str]) -> bool:
     """True if ``needle`` occurs as a contiguous token subsequence."""
-    if not needle:
-        return False
-    limit = len(haystack) - len(needle)
-    for start in range(0, limit + 1):
-        if haystack[start : start + len(needle)] == needle:
-            return True
-    return False
+    return bool(_phrase_starts(haystack, needle))
+
+
+def contains_phrase(text: str, phrase: str) -> bool:
+    """Public, normalisation-aware phrase test (token-boundary matching).
+
+    Used by the DesignSpec semantic validators to check caveat phrasing
+    flexibly, sharing this module's NFKC/casefold/punctuation handling."""
+    return _contains_phrase(_tokens(text), _phrase_tokens(phrase))
 
 
 def _asserts_claim(text: str, claim_phrases: tuple[str, ...]) -> bool:
-    """True if a claim phrase is ASSERTED — appears in a sentence that carries
-    no negation. The required construction caveats legitimately mention these
-    phrases while NEGATING them ("not a sewing pattern", "does not guarantee
-    ... constructed exactly as shown"), and the negation can sit far from the
-    phrase, so negation is checked at sentence scope rather than a fixed
-    window."""
+    """True if a claim phrase is ASSERTED rather than negated.
+
+    Negation is SCOPE-AWARE: within a sentence a claim phrase is treated as
+    negated only when a negation token precedes it (any distance before, but
+    strictly before its start). This distinguishes:
+
+    - "This is a sewing pattern, not merely a mood board."  (asserted — the
+      negation follows the claim) → rejected;
+    - "This is not a sewing pattern."                        (negation before
+      the claim) → allowed.
+
+    An unbounded-but-preceding scope (rather than a fixed window) also lets a
+    legitimate caveat keep its distance, e.g. "does not guarantee that the
+    garment can be constructed exactly as shown"."""
     for sentence in re.split(r"[.!?\n]+", text):
         tokens = _tokens(sentence)
         if not tokens:
             continue
-        if any(token in _NEGATIONS for token in tokens):
-            continue  # a negated sentence is a disclaimer, not a claim
-        if any(_contains_phrase(tokens, _phrase_tokens(p)) for p in claim_phrases):
-            return True
+        negation_positions = [i for i, token in enumerate(tokens) if token in _NEGATIONS]
+        first_negation = negation_positions[0] if negation_positions else None
+        for phrase in claim_phrases:
+            for start in _phrase_starts(tokens, _phrase_tokens(phrase)):
+                # Asserted unless a negation appears before the phrase start.
+                if first_negation is None or start < first_negation:
+                    return True
     return False
 
 

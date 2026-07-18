@@ -110,6 +110,54 @@ gated behind `DEMO_MODE=false` + `ALLOW_PAID_AI_CALLS=true` + a non-empty key
 and model + explicit `--confirm-live`; without `--confirm-live` it makes zero
 calls.
 
+### Integrity hardening
+
+A follow-up commit closed the remaining integrity gaps without changing the
+contract or the two-request budget:
+
+- **One central live gate.** `structured_design_generation_is_available()` is
+  the single definition — both environment gates AND a non-empty stripped
+  `ANTHROPIC_API_KEY` AND an `ANTHROPIC_MODEL` that fits the persisted
+  `design_spec_model` bound. The provider factory fails closed (before any
+  client construction) on a missing key/model, and the `generate_spec`
+  command's `--confirm-live` is an additional opt-in on top of this gate, never
+  a second, weaker definition. The SDK client is created once and cached per
+  provider instance, inside a safe error boundary that maps a
+  configuration/initialisation failure to a generic domain error carrying no
+  key or model value.
+- **Pre-spend contract validation.** After the canonical selections are built
+  they are validated through `SourceSelections.model_validate(...)`; a
+  questionnaire that cannot satisfy the DesignSpec contract is a controlled
+  `unsupported_questionnaire_contract` (`DesignNotReady`) before any provider
+  is selected — never a Pydantic traceback, and neither the input nor the
+  questionnaire is surfaced.
+- **Stale-input protection.** A deterministic input snapshot (questionnaire
+  version id, normalised answers, ordered inspiration ids) is captured before
+  spending. No transaction or row lock is held across the (network) call — only
+  the session-level advisory lock. After a valid result and before persistence,
+  the Design is re-fetched, completion + inspiration-eligibility are re-run and
+  the snapshot recomputed; any change raises `DesignChangedDuringGeneration`,
+  persists nothing, does not retry Anthropic and never overwrites the newer
+  draft.
+- **Honest token accounting.** Usage is summed across every returned response
+  of the operation (an invalid-then-valid pair stores the sum); if any response
+  lacks a dimension the persisted total for that dimension is null rather than a
+  misleading partial. Provider/model identity must stay consistent across
+  attempts.
+- **Scanner hardening.** Token normalisation treats underscores as separators
+  (`[\W_]+`) so `Manish_Malhotra` cannot bypass a multi-token name, and
+  sewing-pattern / constructibility claim detection is scope-aware: a negation
+  excuses a claim only when it precedes the claim phrase in the sentence, so
+  "this is a sewing pattern, not a mood board" is rejected while "this is not a
+  sewing pattern" is allowed.
+- **DesignSpec semantic invariants.** A model validator requires the two
+  construction caveats to be present (flexible phrasing, not one exact
+  sentence) and enforces regional consistency: `cultural_context.regional_
+  direction` is null exactly when `regional_style` is null or
+  `no_specific_direction`, and non-empty when a real direction is selected. A
+  semantic failure is treated like any other invalid output and may use the one
+  allowed retry.
+
 ## Consequences
 
 - The design brief is now a validated, provenance-tracked artefact ready for

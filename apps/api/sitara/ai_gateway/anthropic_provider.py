@@ -45,16 +45,27 @@ class AnthropicStructuredDesignProvider:
         # An injected client (fakes in tests) bypasses lazy real-client
         # creation entirely.
         self._injected_client = client
+        # One lazily-created SDK client is cached per provider instance so the
+        # single allowed retry reuses it rather than constructing a new client.
+        self._cached_client = None
 
     def _client(self):
         if self._injected_client is not None:
             return self._injected_client
-        # Lazy: only reached after all policy gates passed.
-        return anthropic.Anthropic(
-            api_key=settings.ANTHROPIC_API_KEY,
-            max_retries=0,
-            timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
-        )
+        if self._cached_client is None:
+            # Lazy: only reached after all policy gates passed. Client
+            # construction is inside a safe error boundary so a configuration
+            # or SDK-initialisation failure becomes a generic domain error —
+            # never a traceback that could carry the key or model value.
+            try:
+                self._cached_client = anthropic.Anthropic(
+                    api_key=settings.ANTHROPIC_API_KEY,
+                    max_retries=0,
+                    timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
+                )
+            except Exception:
+                raise StructuredDesignProviderError("client_initialisation") from None
+        return self._cached_client
 
     def generate(self, request: StructuredDesignRequest) -> StructuredDesignResult:
         client = self._client()

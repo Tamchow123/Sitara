@@ -17,27 +17,23 @@ import uuid as uuid_module
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from sitara.ai_gateway.policy import PaidGenerationDisabled
+from sitara.ai_gateway.policy import (
+    PaidGenerationDisabled,
+    structured_design_generation_is_available,
+)
 from sitara.ai_gateway.structured_design import StructuredDesignProviderError
 from sitara.designs.models import Design
 from sitara.generation.context import DesignNotReady
 from sitara.generation.fixture_provider import FixtureStructuredDesignProvider
 from sitara.generation.input_safety import UnsafeUserTextError
 from sitara.generation.services import (
+    DesignChangedDuringGeneration,
     GenerationFailed,
     GenerationLocked,
     GenerationRefused,
+    ProviderIdentityChanged,
     generate_design_spec_for_design,
 )
-
-
-def _live_gates_open() -> bool:
-    return (
-        (not settings.DEMO_MODE)
-        and bool(settings.ALLOW_PAID_AI_CALLS)
-        and bool(settings.ANTHROPIC_API_KEY.strip())
-        and bool(settings.ANTHROPIC_MODEL.strip())
-    )
 
 
 class Command(BaseCommand):
@@ -77,10 +73,12 @@ class Command(BaseCommand):
             provider = FixtureStructuredDesignProvider(fixture_name=options["fixture"])
             self.stdout.write("Offline fixture mode: no network calls will be made.")
         elif options["confirm_live"]:
-            if not _live_gates_open():
+            # The environment gate is the ONE central definition; --confirm-live
+            # is only an additional explicit opt-in on top of it.
+            if not structured_design_generation_is_available():
                 raise CommandError(
                     "live generation requires DEMO_MODE=false, ALLOW_PAID_AI_CALLS=true, "
-                    "a non-empty ANTHROPIC_API_KEY and ANTHROPIC_MODEL"
+                    "a non-empty ANTHROPIC_API_KEY and a valid ANTHROPIC_MODEL"
                 )
             provider = None  # the service selects the gated live provider
             self.stdout.write("Live mode: at most 2 Anthropic requests may occur.")
@@ -100,6 +98,8 @@ class Command(BaseCommand):
             GenerationLocked,
             GenerationRefused,
             GenerationFailed,
+            DesignChangedDuringGeneration,
+            ProviderIdentityChanged,
             UnsafeUserTextError,
             PaidGenerationDisabled,
             StructuredDesignProviderError,

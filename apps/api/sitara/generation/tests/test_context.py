@@ -1,10 +1,16 @@
 """Trusted generation-context construction and pre-spend gates."""
 
+import copy
+
 import pytest
 
+from sitara.designs.models import Design, DesignSession
 from sitara.generation.context import DesignNotReady, build_generation_context
+from sitara.generation.services import generate_design_spec_for_design
+from sitara.questionnaire.models import QuestionnaireVersion
 from sitara.questionnaire.services import activate_questionnaire_version
 
+from . import fakes
 from .factory import make_active_v1, make_complete_design, v1_schema
 
 pytestmark = pytest.mark.django_db
@@ -97,6 +103,90 @@ class TestPreSpendGates:
             build_generation_context(design)
         assert excinfo.value.code == "incomplete"
         assert "inspiration_asset_ids" in (excinfo.value.field_errors or {})
+
+
+def _questions(schema: dict) -> dict:
+    return {q["id"]: q for step in schema["steps"] for q in step["questions"]}
+
+
+def _remove_question(schema: dict, question_id: str) -> None:
+    for step in schema["steps"]:
+        step["questions"] = [q for q in step["questions"] if q["id"] != question_id]
+
+
+def _design_for(schema: dict, answers: dict) -> Design:
+    version = QuestionnaireVersion.objects.create(version=1, status="active", schema=schema)
+    return Design.objects.create(
+        design_session=DesignSession.objects.create(),
+        questionnaire_version=version,
+        answers=answers,
+    )
+
+
+# Minimal answers that satisfy the v1 completion gate (only required questions).
+_BASE = {
+    "garment_type": "lehenga",
+    "ceremony": "nikah",
+    "silhouette": "flared_lehenga",
+    "colour_palette": ["ivory"],
+    "embellishment_styles": ["zardozi"],
+}
+
+
+class TestUnsupportedQuestionnaireContract:
+    """A structurally usable questionnaire that cannot satisfy the DesignSpec
+    source-selection contract is refused BEFORE any provider call, with a
+    controlled code — never a Pydantic traceback."""
+
+    def _assert_unsupported(self, design):
+        provider = fakes.SequenceProvider([])
+        with pytest.raises(DesignNotReady) as excinfo:
+            generate_design_spec_for_design(design, provider=provider)
+        assert excinfo.value.code == "unsupported_questionnaire_contract"
+        assert provider.calls == 0
+
+    def test_omitted_garment_type(self):
+        schema = copy.deepcopy(v1_schema())
+        _remove_question(schema, "garment_type")
+        answers = {k: v for k, v in _BASE.items() if k != "garment_type"}
+        self._assert_unsupported(_design_for(schema, answers))
+
+    def test_renamed_ceremony(self):
+        schema = copy.deepcopy(v1_schema())
+        _questions(schema)  # touch for clarity
+        for step in schema["steps"]:
+            for question in step["questions"]:
+                if question["id"] == "ceremony":
+                    question["id"] = "event"
+        answers = {k: v for k, v in _BASE.items() if k != "ceremony"}
+        answers["event"] = "nikah"
+        self._assert_unsupported(_design_for(schema, answers))
+
+    def test_hidden_required_source_field(self):
+        schema = copy.deepcopy(v1_schema())
+        # Hide silhouette (a required source field) whenever garment_type=lehenga.
+        schema["rules"].append(
+            {
+                "id": "hide_silhouette_for_lehenga",
+                "when": {
+                    "question_id": "garment_type",
+                    "operator": "equals",
+                    "values": ["lehenga"],
+                },
+                "then": {"action": "hide", "question_id": "silhouette"},
+            }
+        )
+        answers = {k: v for k, v in _BASE.items() if k != "silhouette"}
+        self._assert_unsupported(_design_for(schema, answers))
+
+    def test_incompatible_field_type(self):
+        schema = copy.deepcopy(v1_schema())
+        # colour_palette becomes a single-choice, so it can never satisfy the
+        # contract's non-empty list.
+        _questions(schema)["colour_palette"]["type"] = "single_choice"
+        answers = dict(_BASE)
+        answers["colour_palette"] = "ivory"
+        self._assert_unsupported(_design_for(schema, answers))
 
 
 def test_v1_schema_has_the_source_selection_fields():

@@ -159,6 +159,54 @@ class TestSourceSelectionsStrict:
             DesignSpec.model_validate(data)
 
 
+class TestSemanticInvariants:
+    def test_missing_concept_only_caveat_is_rejected(self):
+        data = a_valid_spec_dict()
+        # Keep a no-guarantee caveat but drop the concept-only one.
+        data["construction_caveats"] = ["It does not guarantee exact constructibility."]
+        with pytest.raises(ValidationError):
+            DesignSpec.model_validate(data)
+
+    def test_missing_no_guarantee_caveat_is_rejected(self):
+        data = a_valid_spec_dict()
+        data["construction_caveats"] = ["This is a concept visualisation, not a sewing pattern."]
+        with pytest.raises(ValidationError):
+            DesignSpec.model_validate(data)
+
+    def test_flexible_original_phrasing_is_accepted(self):
+        data = a_valid_spec_dict()
+        data["construction_caveats"] = [
+            "Offered as a concept visualisation for inspiration.",
+            "There is no guarantee of exact constructibility.",
+        ]
+        DesignSpec.model_validate(data)  # must not raise
+
+    def test_real_regional_style_requires_regional_direction(self):
+        data = a_valid_spec_dict()  # nikah fixture: regional_style="pakistani"
+        data["cultural_context"]["regional_direction"] = None
+        with pytest.raises(ValidationError):
+            DesignSpec.model_validate(data)
+
+    def test_null_regional_style_forbids_regional_direction(self):
+        data = a_valid_spec_dict()
+        data["source_selections"]["regional_style"] = None
+        # regional_direction is still populated → inconsistent.
+        with pytest.raises(ValidationError):
+            DesignSpec.model_validate(data)
+
+    def test_no_specific_direction_forbids_regional_direction(self):
+        data = a_valid_spec_dict()
+        data["source_selections"]["regional_style"] = "no_specific_direction"
+        with pytest.raises(ValidationError):
+            DesignSpec.model_validate(data)
+
+    def test_no_specific_direction_with_null_direction_is_accepted(self):
+        data = a_valid_spec_dict()
+        data["source_selections"]["regional_style"] = "no_specific_direction"
+        data["cultural_context"]["regional_direction"] = None
+        DesignSpec.model_validate(data)  # must not raise
+
+
 class TestMalformedShapes:
     @pytest.mark.parametrize(
         "path,value",

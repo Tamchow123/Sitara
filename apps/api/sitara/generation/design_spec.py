@@ -15,11 +15,50 @@ Phase 12 results page.
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
+
+from .input_safety import contains_phrase
 
 # Versions the persisted JSON STRUCTURE of a DesignSpec. Bump only with a new
 # schema file (schemas/design_spec_vN.json) and a migration strategy.
 DESIGN_SPEC_SCHEMA_VERSION = 1
+
+# The canonical "no broad regional direction" machine value. When the user
+# picks this (or nothing) the cultural_context regional direction must stay
+# null; any real regional_style requires a non-empty regional direction.
+NO_REGIONAL_DIRECTION = "no_specific_direction"
+
+# Flexible phrasing used to recognise the two REQUIRED construction caveats.
+# Matched with token-boundary awareness (see input_safety.contains_phrase), so
+# original prose and recorded fixtures alike satisfy them without demanding one
+# exact English sentence.
+_CONCEPT_ONLY_PHRASES = (
+    "concept visualisation",
+    "concept visualization",
+    "concept only",
+    "not a sewing pattern",
+    "not a pattern",
+)
+_NO_CONSTRUCT_GUARANTEE_PHRASES = (
+    "does not guarantee",
+    "not guarantee",
+    "no guarantee",
+    "not guaranteed",
+    "cannot be constructed",
+    "not guaranteed to be constructible",
+)
+
+
+def _any_caveat_mentions(caveats: list[str], phrases: tuple[str, ...]) -> bool:
+    return any(contains_phrase(caveat, phrase) for caveat in caveats for phrase in phrases)
+
 
 # Versions the TRUSTED system instructions and context format (Part B's system
 # prompt + context builder). It must change whenever the system prompt, the
@@ -160,6 +199,34 @@ class DesignSpec(BaseModel):
         if isinstance(value, bool):
             raise ValueError("schema_version must be the integer 1, not a boolean")
         return value
+
+    @model_validator(mode="after")
+    def _enforce_semantic_invariants(self) -> "DesignSpec":
+        # The two required caveats must actually be present (flexible phrasing).
+        if not _any_caveat_mentions(self.construction_caveats, _CONCEPT_ONLY_PHRASES):
+            raise ValueError(
+                "construction_caveats must include an explicit concept-only / "
+                "not-a-sewing-pattern caveat"
+            )
+        if not _any_caveat_mentions(self.construction_caveats, _NO_CONSTRUCT_GUARANTEE_PHRASES):
+            raise ValueError(
+                "construction_caveats must include an explicit "
+                "no-constructibility-guarantee caveat"
+            )
+        # Regional direction must agree with the selected regional style.
+        regional_style = self.source_selections.regional_style
+        has_direction = regional_style is not None and regional_style != NO_REGIONAL_DIRECTION
+        if has_direction and self.cultural_context.regional_direction is None:
+            raise ValueError(
+                "cultural_context.regional_direction must be non-empty when a "
+                "regional style is selected"
+            )
+        if not has_direction and self.cultural_context.regional_direction is not None:
+            raise ValueError(
+                "cultural_context.regional_direction must be null when no regional "
+                "style is selected"
+            )
+        return self
 
 
 def design_spec_json_schema() -> dict:

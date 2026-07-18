@@ -34,13 +34,33 @@ class TestGating:
         with pytest.raises(PaidGenerationDisabled):
             get_structured_design_generation_provider()
 
-    def test_both_gates_open_returns_provider_without_network(self, settings):
+    def test_both_gates_open_and_configured_returns_provider_without_network(self, settings):
         settings.DEMO_MODE = False
         settings.ALLOW_PAID_AI_CALLS = True
+        settings.ANTHROPIC_API_KEY = "sk-ant-test-not-a-real-key"
+        settings.ANTHROPIC_MODEL = "claude-sonnet-4-6"
         provider = get_structured_design_generation_provider()
         # Constructed but NOT connected — no network client created yet.
         assert isinstance(provider, AnthropicStructuredDesignProvider)
         assert provider.name == "anthropic"
+
+    def test_missing_key_refuses_before_constructing_a_client(self, settings):
+        # Gates open and the capability exists, but no API key is configured:
+        # the factory must fail closed BEFORE any Anthropic client is built.
+        settings.DEMO_MODE = False
+        settings.ALLOW_PAID_AI_CALLS = True
+        settings.ANTHROPIC_API_KEY = ""
+        settings.ANTHROPIC_MODEL = "claude-sonnet-4-6"
+        with pytest.raises(PaidGenerationDisabled):
+            get_structured_design_generation_provider()
+
+    def test_model_exceeding_field_bound_refuses(self, settings):
+        settings.DEMO_MODE = False
+        settings.ALLOW_PAID_AI_CALLS = True
+        settings.ANTHROPIC_API_KEY = "sk-ant-test-not-a-real-key"
+        settings.ANTHROPIC_MODEL = "m" * 101
+        with pytest.raises(PaidGenerationDisabled):
+            get_structured_design_generation_provider()
 
 
 @pytest.mark.django_db(transaction=True)

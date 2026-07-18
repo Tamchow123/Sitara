@@ -41,6 +41,12 @@ STRUCTURED_DESIGN_PROVIDER_IMPLEMENTED = True
 # The paid IMAGE-generation provider does not exist yet (a later phase).
 IMAGE_PROVIDER_IMPLEMENTED = False
 
+# Upper bound for a configured model identifier — it must fit the persisted
+# ``DesignVersion.design_spec_model`` column (max_length=100), or a successful
+# generation could not be recorded. Kept as a literal so this policy module
+# stays free of a domain-model import.
+_ANTHROPIC_MODEL_MAX_LENGTH = 100
+
 
 class PaidGenerationDisabled(Exception):
     """Raised whenever a paid provider would be required but is not allowed
@@ -77,12 +83,29 @@ def generation_is_available() -> bool:
     return policy.paid_calls_permitted and IMAGE_PROVIDER_IMPLEMENTED
 
 
+def _anthropic_config_ready() -> bool:
+    """The live Anthropic configuration is complete: a non-empty API key (after
+    stripping) and a non-empty model that fits the persisted model-field bound.
+    Never logs or returns the key or model value."""
+    key = (settings.ANTHROPIC_API_KEY or "").strip()
+    model = (settings.ANTHROPIC_MODEL or "").strip()
+    return bool(key) and bool(model) and len(model) <= _ANTHROPIC_MODEL_MAX_LENGTH
+
+
 def structured_design_generation_is_available() -> bool:
-    """INTERNAL: whether the gated Anthropic structured-TEXT (DesignSpec)
-    generation may run — environment authorisation AND the code-level
-    structured-design capability. Not surfaced to the public config."""
+    """INTERNAL, and the SINGLE definition of the live structured-generation
+    gate: environment authorisation (both gates open) AND the code-level
+    structured-design capability AND a complete Anthropic configuration (a
+    non-empty key and a valid model). A configured key alone is never enough,
+    and this stays False in demo mode or when paid calls are disabled. Not
+    surfaced to the public config. The management command's ``--confirm-live``
+    is an ADDITIONAL explicit opt-in, never a substitute for this gate."""
     policy = GenerationPolicy.from_settings()
-    return policy.paid_calls_permitted and STRUCTURED_DESIGN_PROVIDER_IMPLEMENTED
+    return (
+        policy.paid_calls_permitted
+        and STRUCTURED_DESIGN_PROVIDER_IMPLEMENTED
+        and _anthropic_config_ready()
+    )
 
 
 def _refuse(policy: GenerationPolicy, implemented: bool, capability_label: str) -> Exception:
@@ -122,6 +145,18 @@ def get_structured_design_generation_provider():
     only when ``generate`` is invoked (i.e. after every gate has passed)."""
     policy = GenerationPolicy.from_settings()
     if not structured_design_generation_is_available():
+        if (
+            policy.paid_calls_permitted
+            and STRUCTURED_DESIGN_PROVIDER_IMPLEMENTED
+            and not _anthropic_config_ready()
+        ):
+            # Gates open and the capability exists, but the key/model are not
+            # configured. Fail closed BEFORE constructing any network client;
+            # the message names the reason but never the key or model value.
+            raise PaidGenerationDisabled(
+                "paid generation refused: the Anthropic configuration is incomplete "
+                "(a non-empty API key and a valid model are required)"
+            )
         raise _refuse(
             policy, STRUCTURED_DESIGN_PROVIDER_IMPLEMENTED, "structured design generation"
         )

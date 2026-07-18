@@ -56,6 +56,33 @@ def blocked_designer_result(source_selections: dict) -> StructuredDesignResult:
     return _with_payload(payload)
 
 
+def semantic_invalid_result(source_selections: dict) -> StructuredDesignResult:
+    # Field bounds are satisfied, but the required construction caveats are
+    # absent → the DesignSpec model_validator rejects it (retryable).
+    payload = build_fixture_spec(source_selections)
+    payload["construction_caveats"] = ["Please review this idea with a tailor before proceeding."]
+    return _with_payload(payload)
+
+
+def result_with_usage(
+    source_selections: dict,
+    *,
+    input_tokens,
+    output_tokens,
+    valid: bool = True,
+) -> StructuredDesignResult:
+    """A result carrying explicit per-attempt usage. ``valid=False`` yields an
+    invalid (retryable) response that still reports token usage."""
+    return StructuredDesignResult(
+        payload=build_fixture_spec(source_selections) if valid else None,
+        provider="fake",
+        model="fake-model",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        stop_reason="end_turn" if valid else "parse_error",
+    )
+
+
 def refusal_result() -> StructuredDesignResult:
     return StructuredDesignResult(
         payload=None,
@@ -107,3 +134,20 @@ class RaisingProvider:
     def generate(self, request):
         self.calls += 1
         raise self._exc
+
+
+class MutatingProvider:
+    """Applies a side effect DURING generate() (simulating a concurrent draft
+    edit while the network call is in flight), then returns a valid result."""
+
+    name = "fake"
+
+    def __init__(self, source_selections, on_generate):
+        self._source_selections = source_selections
+        self._on_generate = on_generate
+        self.calls = 0
+
+    def generate(self, request):
+        self.calls += 1
+        self._on_generate()
+        return valid_result(self._source_selections)
