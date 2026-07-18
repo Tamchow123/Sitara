@@ -98,19 +98,32 @@ class DesignVersionAdmin(admin.ModelAdmin):
 
 @admin.register(GenerationAttempt)
 class GenerationAttemptAdmin(admin.ModelAdmin):
-    list_display = ("id", "design_version", "status", "error_code", "created_at", "completed_at")
+    list_display = ("id", "design", "design_version", "status", "error_code", "created_at")
     list_filter = ("status", "created_at")
-    search_fields = ("id", "idempotency_key", "design_version__design__id")
+    search_fields = ("id", "idempotency_key", "design__id", "design_version__id")
     readonly_fields = (
         "id",
+        "design",
         "design_version",
         "idempotency_key",
+        "celery_task_id",
         "status",
         "error_code",
-        "created_at",
-        "updated_at",
         "started_at",
         "completed_at",
+        "image_provider",
+        "image_model",
+        "image_prediction_id",
+        "image_seed",
+        "image_submission_in_flight",
+        "image_parameters",
+        "staged_image_storage_key",
+        "staged_image_sha256",
+        "staged_image_size_bytes",
+        "staged_image_width",
+        "staged_image_height",
+        "created_at",
+        "updated_at",
     )
     ordering = ("-created_at",)
 

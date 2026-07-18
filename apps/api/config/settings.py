@@ -278,6 +278,21 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 
+# Explicit task routing (Phase 10): the durable generation task runs on its own
+# ``generation`` queue so it never blocks (or is blocked by) the default
+# ``celery`` queue, which stays available for the health ping. The worker
+# process listens to BOTH queues (see compose.yaml). Enqueue also passes the
+# queue explicitly, so routing is correct even if this table is missed.
+CELERY_TASK_ROUTES = {
+    "sitara.generation.tasks.generate_design_attempt": {"queue": "generation"},
+}
+# Deterministic, bounded task behaviour: acknowledge late (redeliver on worker
+# loss) and never let a result linger unboundedly. Per-task time limits and the
+# no-whole-pipeline-retry policy live on the task itself.
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+
 # Django cache (rate limiting) — Redis DB 1, separate from Celery's DB 0.
 # Uses Django's built-in Redis cache backend; no extra client package.
 REDIS_CACHE_URL = os.getenv("REDIS_CACHE_URL", "redis://localhost:6379/1")
@@ -325,9 +340,13 @@ SPECTACULAR_SETTINGS = {
         "an indistinguishable 404. Authentication is a Django server-side "
         "session (HttpOnly cookie) coordinated with a CSRF token; the "
         "browser calls the API same-origin.\n\n"
-        "AI generation is demo/provider gated and is **not** part of this "
-        "contract yet — no generation, questionnaire-answer submission, "
-        "inspiration selection or provider endpoints are documented here."
+        "AI generation is asynchronous and **fail-closed gated**: the "
+        "documented generation endpoint enqueues a durable job and its "
+        "private job-status endpoint reports lifecycle progress, but live "
+        "paid generation stays disabled unless the operator explicitly "
+        "enables every provider gate (LIVE_GENERATION_ENABLED defaults to "
+        "false). Questionnaire-answer submission, inspiration selection and "
+        "provider internals remain outside this contract."
     ),
     "OAS_VERSION": "3.0.3",
     "COMPONENT_SPLIT_REQUEST": True,
@@ -393,13 +412,32 @@ STORAGES = {
 DEMO_MODE = env_bool("DEMO_MODE", default=True)
 ALLOW_PAID_AI_CALLS = env_bool("ALLOW_PAID_AI_CALLS", default=False)
 
-DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro")
-FAST_IMAGE_MODEL = os.getenv("FAST_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro")
+# Stripped at assignment so validation, persistence and provider submission
+# all use ONE canonical value (a padded env value can never diverge from the
+# value that was validated).
+DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro").strip()
+FAST_IMAGE_MODEL = os.getenv("FAST_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro").strip()
 
 # Tokens may be present in the environment; their presence NEVER enables
 # provider calls (see sitara.ai_gateway.policy). Never log or return them.
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
+
+# With the paid gates OPEN, a placeholder-marked provider credential is a
+# misconfiguration, not an absent optional secret: refuse startup naming only
+# the setting (the value is never echoed). Blank credentials stay permissible
+# — availability simply remains False — and closed gates skip this entirely.
+if not DEMO_MODE and ALLOW_PAID_AI_CALLS:
+    for _credential_name, _credential_value in (
+        ("ANTHROPIC_API_KEY", ANTHROPIC_API_KEY),
+        ("REPLICATE_API_TOKEN", REPLICATE_API_TOKEN),
+    ):
+        _lowered = _credential_value.lower()
+        if any(marker in _lowered for marker in _PLACEHOLDER_MARKERS):
+            raise ImproperlyConfigured(
+                f"{_credential_name} must not be a placeholder value when "
+                "paid AI calls are enabled"
+            )
 
 # ---------------------------------------------------------------------------
 # Structured DesignSpec generation (Phase 8). Safe development/test defaults;
@@ -414,6 +452,39 @@ if not ANTHROPIC_MODEL:
 DESIGN_SPEC_MAX_INPUT_CHARS = env_positive_int("DESIGN_SPEC_MAX_INPUT_CHARS", 20_000)
 DESIGN_SPEC_MAX_OUTPUT_TOKENS = env_positive_int("DESIGN_SPEC_MAX_OUTPUT_TOKENS", 4096)
 ANTHROPIC_TIMEOUT_SECONDS = env_positive_int("ANTHROPIC_TIMEOUT_SECONDS", 60)
+
+# ---------------------------------------------------------------------------
+# Gated Replicate image rendering (Phase 10 Part B). Fail-closed by default:
+# LIVE_GENERATION_ENABLED gates the public end-to-end generation API and
+# defaults to false, so accidental paid generation is impossible even with both
+# provider gates open and a token present. It does NOT weaken the existing
+# standalone Anthropic management-command gates. The model name is never
+# exposed via the public config endpoint. Numeric values are strict positive
+# integers; malformed configuration refuses startup without echoing values.
+# ---------------------------------------------------------------------------
+LIVE_GENERATION_ENABLED = env_bool("LIVE_GENERATION_ENABLED", default=False)
+REPLICATE_TIMEOUT_SECONDS = env_positive_int("REPLICATE_TIMEOUT_SECONDS", 30)
+REPLICATE_POLL_INTERVAL_SECONDS = env_positive_int("REPLICATE_POLL_INTERVAL_SECONDS", 2)
+REPLICATE_POLL_TIMEOUT_SECONDS = env_positive_int("REPLICATE_POLL_TIMEOUT_SECONDS", 180)
+GENERATION_RAW_MAX_BYTES = env_positive_int("GENERATION_RAW_MAX_BYTES", 20_000_000)
+GENERATION_RAW_MAX_PIXELS = env_positive_int("GENERATION_RAW_MAX_PIXELS", 40_000_000)
+
+# The poll interval must be strictly smaller than the overall poll timeout, or
+# the pipeline could never poll more than once before giving up.
+if REPLICATE_POLL_INTERVAL_SECONDS >= REPLICATE_POLL_TIMEOUT_SECONDS:
+    raise ImproperlyConfigured(
+        "REPLICATE_POLL_INTERVAL_SECONDS must be strictly less than "
+        "REPLICATE_POLL_TIMEOUT_SECONDS"
+    )
+
+# The configured image model must be non-empty and fit the persisted
+# GenerationAttempt.image_model column bound (100). Validated on the SAME
+# canonical (stripped-at-assignment) value the pipeline persists and submits.
+# Never echo the value.
+if not DEFAULT_IMAGE_MODEL or len(DEFAULT_IMAGE_MODEL) > 100:
+    raise ImproperlyConfigured(
+        "DEFAULT_IMAGE_MODEL must be a non-empty model identifier of at most 100 characters"
+    )
 
 # Product limits surfaced via /api/v1/config/public.
 MAX_INSPIRATION_IMAGES = 3

@@ -385,6 +385,23 @@ def _replace_inspirations(design: Design, inspiration_asset_ids) -> None:
     )
 
 
+def _design_editability(locked: Design) -> tuple[bool, bool]:
+    """(ordinary_editable, recovery_edit) for an already-locked Design.
+
+    A design with ANY DesignVersion is never draft-editable — regardless of its
+    lifecycle status. This covers legacy Phase 8/9 designs whose version was
+    created by the management command while the status stayed ``draft``: their
+    persisted answers are the immutable inputs of that version's spec and
+    prompt, and editing them would silently desynchronise the draft from the
+    version a later image-only generation resumes. Ordinary edits therefore
+    require ``draft`` AND no version; a recovery edit additionally allows a
+    ``generation_failed`` design that never produced a version."""
+    has_version = DesignVersion.objects.filter(design=locked).exists()
+    ordinary = locked.status == Design.Status.DRAFT and not has_version
+    recovery = locked.status == Design.Status.GENERATION_FAILED and not has_version
+    return ordinary, recovery
+
+
 def update_design_draft(
     design: Design,
     *,
@@ -403,11 +420,26 @@ def update_design_draft(
     no partial update (answers saved but inspirations failed, or vice versa)
     can ever occur.
 
+    Editability (Phase 10 lifecycle): ordinary edits require ``draft`` status
+    AND no DesignVersion (a version — even one created while the status was
+    still draft, as the Phase 8/9 commands did — freezes the design's inputs);
+    a recovery edit is additionally allowed while it is ``generation_failed``
+    with no DesignVersion, and the FIRST successful such edit returns the
+    design to ``draft``. Everything else is rejected with the safe
+    ``design_not_editable`` code and never touches an existing DesignVersion.
+
     Raises :class:`DraftUpdateError` (controlled, safe) or
     :class:`~sitara.questionnaire.answer_validation.QuestionnaireAnswerError`
-    (per-question), both mapped to a 400 by the view."""
+    (per-question), both mapped by the view."""
     with transaction.atomic():
         locked = Design.objects.select_for_update().get(pk=design.pk)
+
+        is_ordinary_editable, is_recovery = _design_editability(locked)
+        if not is_ordinary_editable and not is_recovery:
+            raise DraftUpdateError(
+                "design_not_editable",
+                "This design can no longer be edited.",
+            )
 
         if title is not UNSET:
             locked.title = title
@@ -437,6 +469,12 @@ def update_design_draft(
 
         if inspiration_asset_ids is not UNSET:
             _replace_inspirations(locked, inspiration_asset_ids)
+
+        if is_recovery:
+            # A successful recovery edit clears the failed state so the design
+            # can be completed and re-generated.
+            locked.status = Design.Status.DRAFT
+            locked.save(update_fields=["status", "updated_at"])
 
         return locked
 

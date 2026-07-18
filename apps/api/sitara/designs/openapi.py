@@ -11,6 +11,8 @@ from rest_framework import serializers
 
 from sitara.questionnaire.openapi import QuestionnaireSchemaSerializer
 
+from .models import GenerationAttempt
+
 
 class DesignListItemSerializer(serializers.Serializer):
     """A compact list row — no questionnaire schema, no inspiration records."""
@@ -73,3 +75,27 @@ class DesignDetailResponseSerializer(serializers.Serializer):
 
 class DesignValidationSuccessSerializer(serializers.Serializer):
     valid = serializers.BooleanField()
+
+
+class GenerationJobSerializer(serializers.Serializer):
+    """The stable public shape of one generation job (Phase 10).
+
+    Deliberately excludes every provider/storage provenance field (provider,
+    model, prediction id, seed, parameters, storage key, image hash/size and
+    the Celery task id) — only the lifecycle is public."""
+
+    id = serializers.UUIDField()
+    design_id = serializers.UUIDField()
+    design_version_id = serializers.UUIDField(allow_null=True)
+    # Derived from the model so the documented enum can never drift from the
+    # actual lifecycle values (and their DB constraints).
+    status = serializers.ChoiceField(choices=GenerationAttempt.Status.values)
+    error_code = serializers.CharField(allow_null=True)
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+    started_at = serializers.DateTimeField(allow_null=True)
+    completed_at = serializers.DateTimeField(allow_null=True)
+
+
+class GenerationJobResponseSerializer(serializers.Serializer):
+    job = GenerationJobSerializer()

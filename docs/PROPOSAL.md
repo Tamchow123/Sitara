@@ -118,7 +118,7 @@ Storage: Django storages — local FileSystemStorage in dev,
 **Boundaries and rules:**
 - Next.js is a pure client of the DRF API. Server components may fetch public data (catalogue, showcase) for SEO; mutations go through the same API.
 - **Sessions & CSRF are Django-standard:** Django issues the session cookie and the CSRF token; the anonymous DesignSession is associated with the Django session; unsafe requests include the CSRF token. The browser always talks to the API under the same public origin at `/api/` (Next.js rewrite in dev, reverse-proxy in prod), so cross-origin browser API requests — and the CORS surface they'd need — are avoided. No custom auth cookie exists.
-- **All paid provider calls live in Celery tasks** behind `generation/providers/` — one Anthropic wrapper, one Replicate wrapper; nothing else imports the SDKs (CI-enforced). Wrappers refuse to execute unless `ALLOW_PROVIDER_CALLS=true` *and* real keys are present; test settings and demo mode never set it. This is the single enforcement point for the zero-cost guarantees and cost logging.
+- **All paid provider calls live behind the fail-closed `sitara.ai_gateway` wrappers** — one Anthropic wrapper, one Replicate wrapper; nothing else imports the SDKs. Wrappers refuse to execute unless `DEMO_MODE=false` *and* `ALLOW_PAID_AI_CALLS=true` *and* real keys are present (the older `ALLOW_PROVIDER_CALLS` name is superseded); test settings and demo mode never open them. This is the single enforcement point for the zero-cost guarantees and cost logging.
 - **The generation pipeline is three separated concerns**, never one uncontrolled model response:
   1. *Input safety* — deterministic server-side validation/denylist before any call (FR11).
   2. *Spec generation* — one Claude structured-output call constrained to the DesignSpec JSON schema (generated from a Pydantic model). No Markdown-fence stripping, no regex JSON repair, no arbitrary prompt fragments in the response contract. Django re-validates the returned spec against the same Pydantic model before persisting.
@@ -225,7 +225,7 @@ Base: `/api/v1/`, always reached same-origin (dev rewrite / prod reverse-proxy p
 
 **Abuse.**
 - Content: strict input validation before any spend (FR11); modest-styling presentation defaults in the builder; schema-constrained spec limits free-text influence channels.
-- Cost: throttles (session + IP), daily generation count limits, idempotency keys, hard cost ceiling on live generation, and the structural `ALLOW_PROVIDER_CALLS` gate. Demo mode cannot spend by construction.
+- Cost: throttles (session + IP), daily generation count limits, idempotency keys, hard cost ceiling on live generation, and the structural `DEMO_MODE=false` + `ALLOW_PAID_AI_CALLS=true` gate. Demo mode cannot spend by construction.
 - Prompt injection: free text is delimited untrusted data in the Claude call and only reaches FLUX via sanitised, slot-limited fragments in the deterministic builder — user text cannot override instructions in either stage.
 
 ---
@@ -233,7 +233,7 @@ Base: `/api/v1/`, always reached same-origin (dev rewrite / prod reverse-proxy p
 ## 12. Cost-Control Strategy
 
 - **Single choke point:** two provider wrappers, invoked only from Celery tasks; each records tokens/cost onto GenerationAttempt. No wrapper, no spend. CI greps that nothing outside `generation/providers/` imports the SDKs.
-- **Structural zero-spend guarantees:** wrappers raise unless `ALLOW_PROVIDER_CALLS=true` *and* real keys exist. Test settings never set it → **paid calls in automated tests are impossible, asserted by a test that expects the raise**. Demo mode never reaches the wrappers at all (demo pipeline is a separate fixture-backed code path).
+- **Structural zero-spend guarantees:** wrappers raise unless `DEMO_MODE=false` *and* `ALLOW_PAID_AI_CALLS=true` *and* real keys exist. Test settings never open them → **paid calls in automated tests are impossible, asserted by tests that expect the raise and deny sockets**. Demo mode never reaches the wrappers at all (demo pipeline is a separate fixture-backed code path).
 - **Demo mode = $0 by definition** (FR8). No rate-limited-paid tier is ever called "demo".
 - **Live generation controls** (Phase 16): `LIVE_GENERATION_ENABLED` flag; per-session and per-IP throttles; daily generation count limit; hard daily cost ceiling enforced by **atomic reserve-before-spend** in Redis (Lua script / atomic transaction, no check-then-increment race — details in Phase 16). Rate/count exhaustion → `429 generation_limit_reached`; ceiling exhaustion → `503 live_generation_budget_exhausted`; both degrade the UI to the showcase gallery — never a 5xx surprise.
 - **Cheap by default:** model tiers per env (`REPLICATE_IMAGE_MODEL`, optional cheaper `REPLICATE_IMAGE_MODEL_FAST`); tight `max_tokens` on the single spec call; spec persisted before the image stage so retries never re-spend text; idempotency keys stop double-clicks.

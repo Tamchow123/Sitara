@@ -330,3 +330,117 @@ class TestGenerationSettings:
         assert result.returncode != 0
         assert "DESIGN_SPEC_MAX_OUTPUT_TOKENS" in result.stderr
         assert "not-a-number" not in result.stderr
+
+
+class TestImageGenerationSettings:
+    """Phase 10 Replicate/image settings parse strictly and fail closed,
+    never echoing the supplied value."""
+
+    def test_poll_interval_not_less_than_timeout_refuses_startup(self):
+        result = load_settings(
+            {
+                "REPLICATE_POLL_INTERVAL_SECONDS": "180",
+                "REPLICATE_POLL_TIMEOUT_SECONDS": "30",
+            }
+        )
+        assert result.returncode != 0
+        assert "REPLICATE_POLL_INTERVAL_SECONDS" in result.stderr
+        assert "REPLICATE_POLL_TIMEOUT_SECONDS" in result.stderr
+
+    def test_poll_interval_less_than_timeout_loads(self):
+        result = load_settings(
+            {
+                "REPLICATE_POLL_INTERVAL_SECONDS": "2",
+                "REPLICATE_POLL_TIMEOUT_SECONDS": "180",
+            }
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_blank_image_model_refuses_startup(self):
+        result = load_settings({"DEFAULT_IMAGE_MODEL": "   "})
+        assert result.returncode != 0
+        assert "DEFAULT_IMAGE_MODEL" in result.stderr
+        assert "ImproperlyConfigured" in result.stderr
+
+    def test_padded_image_model_is_canonicalised_at_assignment(self):
+        # The value is stripped ONCE at assignment, so validation, persistence
+        # and provider submission all see the same canonical identifier — a
+        # padded env value can never diverge from what was validated.
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import config.settings as s; print('MODEL=['+s.DEFAULT_IMAGE_MODEL+']')",
+            ],
+            cwd=API_ROOT,
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "DEFAULT_IMAGE_MODEL": "  black-forest-labs/flux-1.1-pro  ",
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "MODEL=[black-forest-labs/flux-1.1-pro]" in result.stdout
+
+    def test_padded_but_stripped_valid_image_model_loads(self):
+        # Raw length may exceed the cap through padding alone; the canonical
+        # (stripped) value is what must satisfy the bound.
+        padded = " " * 60 + "black-forest-labs/flux-1.1-pro" + " " * 60
+        result = load_settings({"DEFAULT_IMAGE_MODEL": padded})
+        assert result.returncode == 0, result.stderr
+
+    def test_oversized_image_model_refuses_startup(self):
+        oversized = "m" * 101
+        result = load_settings({"DEFAULT_IMAGE_MODEL": oversized})
+        assert result.returncode != 0
+        assert "DEFAULT_IMAGE_MODEL" in result.stderr
+        assert oversized not in result.stderr  # never echo the rejected value
+
+    def test_valid_image_model_loads(self):
+        result = load_settings({"DEFAULT_IMAGE_MODEL": "black-forest-labs/flux-1.1-pro"})
+        assert result.returncode == 0, result.stderr
+
+    def test_malformed_replicate_timeout_refuses_startup(self):
+        result = load_settings({"REPLICATE_TIMEOUT_SECONDS": "not-a-number"})
+        assert result.returncode != 0
+        assert "REPLICATE_TIMEOUT_SECONDS" in result.stderr
+        assert "not-a-number" not in result.stderr
+
+
+class TestPaidGateCredentialValidation:
+    """With the paid gates OPEN, placeholder-marked provider credentials are a
+    misconfiguration and refuse startup (naming only the setting, never the
+    value); with the gates closed they stay permissible."""
+
+    def test_open_gates_reject_placeholder_replicate_token(self):
+        result = load_settings(
+            {
+                "DEMO_MODE": "false",
+                "ALLOW_PAID_AI_CALLS": "true",
+                "REPLICATE_API_TOKEN": "__REPLACE_ME__",
+            }
+        )
+        assert result.returncode != 0
+        assert "REPLICATE_API_TOKEN" in result.stderr
+        assert "ImproperlyConfigured" in result.stderr
+        assert "__REPLACE_ME__" not in result.stderr  # value never echoed
+
+    def test_open_gates_reject_placeholder_anthropic_key(self):
+        result = load_settings(
+            {
+                "DEMO_MODE": "false",
+                "ALLOW_PAID_AI_CALLS": "true",
+                "ANTHROPIC_API_KEY": "change-me-key",
+            }
+        )
+        assert result.returncode != 0
+        assert "ANTHROPIC_API_KEY" in result.stderr
+        assert "change-me-key" not in result.stderr
+
+    def test_closed_gates_permit_placeholder_token(self):
+        # Gates closed (defaults): a placeholder in the environment is inert —
+        # availability simply stays False (see policy tests).
+        result = load_settings({"REPLICATE_API_TOKEN": "__REPLACE_ME__"})
+        assert result.returncode == 0, result.stderr

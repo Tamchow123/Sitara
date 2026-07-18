@@ -8,6 +8,7 @@ import uuid
 import pytest
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 
 from sitara.accounts.models import User
 from sitara.designs.models import Design, DesignSession, DesignVersion, GenerationAttempt
@@ -30,7 +31,7 @@ class TestUuidPrimaryKeys:
     def test_all_domain_models_use_generated_uuid_primary_keys(self):
         design = make_design()
         version = DesignVersion.objects.create(design=design, version_number=1)
-        attempt = GenerationAttempt.objects.create(design_version=version)
+        attempt = GenerationAttempt.objects.create(design=design, design_version=version)
         for instance in (design.design_session, design, version, attempt):
             assert isinstance(instance.pk, uuid.UUID)
         # Generated, not reused between rows.
@@ -54,13 +55,17 @@ class TestDefaults:
         assert second.answers == {}
 
     def test_generation_attempt_defaults(self):
-        version = DesignVersion.objects.create(design=make_design(), version_number=1)
-        attempt = GenerationAttempt.objects.create(design_version=version)
+        design = make_design()
+        attempt = GenerationAttempt.objects.create(design=design)
         attempt.refresh_from_db()
         assert attempt.status == GenerationAttempt.Status.QUEUED
         assert attempt.error_code == ""
         assert attempt.started_at is None
         assert attempt.completed_at is None
+        assert attempt.design_version_id is None
+        assert attempt.image_seed is None
+        assert attempt.image_parameters is None
+        assert attempt.staged_image_storage_key == ""
         assert isinstance(attempt.idempotency_key, uuid.UUID)
 
     def test_design_session_starts_unclaimed(self):
@@ -105,13 +110,109 @@ class TestVersionConstraints:
 
 
 class TestGenerationAttemptConstraints:
-    def test_idempotency_key_is_globally_unique(self):
-        version = DesignVersion.objects.create(design=make_design(), version_number=1)
-        other = DesignVersion.objects.create(design=make_design(), version_number=1)
+    def test_idempotency_key_is_unique_per_design(self):
+        design = make_design()
         key = uuid.uuid4()
-        GenerationAttempt.objects.create(design_version=version, idempotency_key=key)
+        GenerationAttempt.objects.create(
+            design=design,
+            idempotency_key=key,
+            status="failed",
+            error_code="queue_unavailable",
+            completed_at=timezone.now(),
+        )
         with pytest.raises(IntegrityError), transaction.atomic():
-            GenerationAttempt.objects.create(design_version=other, idempotency_key=key)
+            GenerationAttempt.objects.create(design=design, idempotency_key=key)
+
+    def test_same_idempotency_key_allowed_on_different_designs(self):
+        key = uuid.uuid4()
+        GenerationAttempt.objects.create(design=make_design(), idempotency_key=key)
+        GenerationAttempt.objects.create(design=make_design(), idempotency_key=key)
+        assert GenerationAttempt.objects.filter(idempotency_key=key).count() == 2
+
+    def test_only_one_in_progress_attempt_per_design(self):
+        design = make_design()
+        GenerationAttempt.objects.create(design=design, status="running_text")
+        with pytest.raises(IntegrityError), transaction.atomic():
+            GenerationAttempt.objects.create(design=design, status="queued")
+
+    def test_terminal_attempts_do_not_block_a_new_in_progress_one(self):
+        design = make_design()
+        version = DesignVersion.objects.create(design=design, version_number=1)
+        GenerationAttempt.objects.create(
+            design=design,
+            design_version=version,
+            status="succeeded",
+            staged_image_storage_key="generation-staging/x/raw.webp",
+            staged_image_sha256="a" * 64,
+            staged_image_size_bytes=100,
+            staged_image_width=768,
+            staged_image_height=1024,
+            completed_at=timezone.now(),
+        )
+        GenerationAttempt.objects.create(design=design, status="queued")
+        assert GenerationAttempt.objects.filter(design=design).count() == 2
+
+    def test_invalid_status_is_rejected(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            GenerationAttempt.objects.create(design=make_design(), status="banana")
+
+    def test_negative_seed_is_rejected(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            GenerationAttempt.objects.create(design=make_design(), image_seed=-1)
+
+    def test_zero_seed_is_allowed(self):
+        attempt = GenerationAttempt.objects.create(design=make_design(), image_seed=0)
+        assert attempt.image_seed == 0
+
+    @pytest.mark.parametrize("bad_hash", ["x", "a" * 63, "g" * 64, "A" * 64])
+    def test_malformed_sha256_is_rejected(self, bad_hash):
+        # A supplied staged hash must be exactly 64 lowercase hex characters.
+        with pytest.raises(IntegrityError), transaction.atomic():
+            GenerationAttempt.objects.create(
+                design=make_design(),
+                status="failed",
+                error_code="image_staging_failed",
+                completed_at=timezone.now(),
+                staged_image_storage_key="generation-staging/x/raw.webp",
+                staged_image_sha256=bad_hash,
+                staged_image_size_bytes=10,
+                staged_image_width=1,
+                staged_image_height=1,
+            )
+
+    def test_partial_staged_metadata_is_rejected(self):
+        # Key present but the rest absent violates the all-or-none constraint.
+        with pytest.raises(IntegrityError), transaction.atomic():
+            GenerationAttempt.objects.create(
+                design=make_design(),
+                status="failed",
+                error_code="image_staging_failed",
+                completed_at=timezone.now(),
+                staged_image_storage_key="generation-staging/x/raw.webp",
+            )
+
+    def test_succeeded_requires_version_and_staged_metadata(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            GenerationAttempt.objects.create(
+                design=make_design(), status="succeeded", completed_at=timezone.now()
+            )
+
+    def test_failed_requires_error_code_and_completed_at(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            GenerationAttempt.objects.create(design=make_design(), status="failed")
+
+
+class TestDesignStatusConstraint:
+    def test_invalid_design_status_is_rejected(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Design.objects.create(design_session=DesignSession.objects.create(), status="bogus")
+
+    def test_lifecycle_statuses_are_accepted(self):
+        for value in ("draft", "generating", "generated", "generation_failed"):
+            design = Design.objects.create(
+                design_session=DesignSession.objects.create(), status=value
+            )
+            assert design.status == value
 
 
 class TestCascades:
@@ -119,7 +220,7 @@ class TestCascades:
         session = DesignSession.objects.create(user=user)
         design = Design.objects.create(design_session=session)
         version = DesignVersion.objects.create(design=design, version_number=1)
-        GenerationAttempt.objects.create(design_version=version)
+        GenerationAttempt.objects.create(design=design, design_version=version)
         return session, design, version
 
     def test_deleting_a_user_cascades_their_design_sessions_and_children(self):

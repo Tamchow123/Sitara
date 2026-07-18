@@ -18,18 +18,29 @@ atomic, row-locked transaction); views stay thin. Inaccessible designs are
 """
 
 import logging
+import uuid
 
 from django.db import transaction
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.exceptions import ParseError
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from sitara.generation.pipeline import (
+    DesignAlreadyGenerated,
+    DesignIncomplete,
+    DesignNotGeneratable,
+    GenerationInProgress,
+    GenerationUnavailable,
+    QueueUnavailable,
+    enqueue_design_generation,
+)
 from sitara.questionnaire.answer_validation import QuestionnaireAnswerError
 from sitara.schema import (
     CSRF_HEADER_PARAMETER,
@@ -37,13 +48,15 @@ from sitara.schema import (
     ValidationErrorEnvelopeSerializer,
 )
 
+from .jobs import public_job_payload
 from .models import Design
 from .openapi import (
     DesignDetailResponseSerializer,
     DesignListResponseSerializer,
     DesignValidationSuccessSerializer,
+    GenerationJobResponseSerializer,
 )
-from .ownership import accessible_designs
+from .ownership import accessible_designs, accessible_generation_attempts
 from .serializers import (
     DesignWriteSerializer,
     design_detail_payload,
@@ -95,6 +108,11 @@ def _validation_failed(errors: dict) -> Response:
 def _draft_error(exc: DraftUpdateError) -> Response:
     if exc.field_errors:
         return _validation_failed(exc.field_errors)
+    # A design that is no longer draft-editable (generating, generated, or a
+    # failed run that already linked a DesignVersion) is a state conflict, not
+    # a validation error.
+    if exc.code == "design_not_editable":
+        return _error(exc.code, exc.message, status.HTTP_409_CONFLICT)
     return _error(exc.code, exc.message, status.HTTP_400_BAD_REQUEST)
 
 
@@ -267,12 +285,21 @@ class DesignDetailView(APIView):
             404: OpenApiResponse(
                 ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
             ),
+            409: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "design_not_editable: the design is no longer a draft "
+                    "(generating, generated, or a failed run with a version)."
+                ),
+            ),
         },
         summary="Update a design",
         description=(
             "Partial draft update: title, questionnaire version (assignable "
             "once), answers (draft-validated) and inspiration selections "
-            "(replaced as one ordered set). " + _OWNERSHIP_NOTE
+            "(replaced as one ordered set). Only a draft — or a "
+            "generation_failed design with no version, which returns to draft "
+            "— may be edited. " + _OWNERSHIP_NOTE
         ),
     )
     def patch(self, request, design_id: str):
@@ -339,3 +366,176 @@ class DesignValidateView(APIView):
         if errors:
             return _validation_failed(errors)
         return Response({"valid": True}, headers=NO_STORE)
+
+
+_IDEMPOTENCY_KEY_PARAMETER = OpenApiParameter(
+    name="Idempotency-Key",
+    type=str,
+    location=OpenApiParameter.HEADER,
+    required=True,
+    description=(
+        "A client-generated UUID that makes the request idempotent PER DESIGN: "
+        "repeating it returns the same job and queues no additional work."
+    ),
+)
+
+_GENERATION_TAGS = ["Generation"]
+
+
+def _read_idempotency_key(request) -> tuple[uuid.UUID | None, Response | None]:
+    raw = request.headers.get("Idempotency-Key")
+    if not raw:
+        return None, _error(
+            "invalid_idempotency_key",
+            "A valid Idempotency-Key header (UUID) is required.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        return uuid.UUID(str(raw)), None
+    except (ValueError, AttributeError, TypeError):
+        return None, _error(
+            "invalid_idempotency_key",
+            "A valid Idempotency-Key header (UUID) is required.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class DesignGenerateView(APIView):
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+    # JSON only — a form/multipart submission is a 415, never parsed into an
+    # empty body that would enqueue paid work outside the documented contract.
+    parser_classes = [JSONParser]
+
+    @extend_schema(
+        operation_id="designs_generate",
+        tags=_GENERATION_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER, _IDEMPOTENCY_KEY_PARAMETER],
+        request=None,
+        responses={
+            202: GenerationJobResponseSerializer,
+            400: ValidationErrorEnvelopeSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "generation_in_progress / design_already_generated / design_not_generatable."
+                ),
+            ),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="generation_unavailable / queue_unavailable.",
+            ),
+        },
+        summary="Start a design generation job",
+        description=(
+            "Enqueues one asynchronous generation job for a complete design and "
+            "returns 202 with the public job payload and a same-origin Location "
+            "header. Requires an Idempotency-Key UUID header; a repeated key "
+            "returns the same job and queues no extra work. Accepts no body or "
+            "exactly {}. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def post(self, request, design_id: str):
+        # Ownership filter FIRST, UUID lookup second — indistinguishable 404.
+        design = accessible_designs(request).filter(pk=design_id).first()
+        if design is None:
+            return _not_found()
+
+        key, key_failure = _read_idempotency_key(request)
+        if key_failure is not None:
+            return key_failure
+
+        # Accept EITHER a genuinely empty request body OR exactly the JSON
+        # object {}. Anything else — including JSON null (which parses to
+        # None), arrays and scalars — is rejected, so no out-of-contract shape
+        # can enqueue paid work. The raw-body check runs BEFORE parsing so an
+        # empty body never reaches the JSON parser.
+        if request.body:
+            body, parse_failure = _parse_body(request)
+            if parse_failure is not None:
+                return parse_failure
+            if not isinstance(body, dict) or body != {}:
+                return _error(
+                    "validation_failed",
+                    "This endpoint accepts no body or exactly {}.",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            attempt, _created = enqueue_design_generation(design, idempotency_key=key)
+        except DesignIncomplete as exc:
+            return _validation_failed(exc.field_errors)
+        except GenerationInProgress:
+            return _error(
+                "generation_in_progress",
+                "A generation job is already in progress for this design.",
+                status.HTTP_409_CONFLICT,
+            )
+        except DesignAlreadyGenerated:
+            return _error(
+                "design_already_generated",
+                "This design has already been generated.",
+                status.HTTP_409_CONFLICT,
+            )
+        except DesignNotGeneratable:
+            return _error(
+                "design_not_generatable",
+                "This design cannot be generated.",
+                status.HTTP_409_CONFLICT,
+            )
+        except GenerationUnavailable:
+            return _error(
+                "generation_unavailable",
+                "Generation is not currently available.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except QueueUnavailable:
+            return _error(
+                "queue_unavailable",
+                "The generation queue is temporarily unavailable. Try again shortly.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        response = Response(
+            public_job_payload(attempt), status=status.HTTP_202_ACCEPTED, headers=NO_STORE
+        )
+        # Same-origin relative Location — never the internal Django host.
+        response["Location"] = f"/api/v1/jobs/{attempt.id}/"
+        return response
+
+
+class GenerationJobView(APIView):
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        operation_id="jobs_retrieve",
+        tags=_GENERATION_TAGS,
+        responses={
+            200: GenerationJobResponseSerializer,
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+        },
+        summary="Retrieve a generation job",
+        description=(
+            "Returns the public job payload (status, ids, timestamps, stable "
+            "error code) for a job the caller owns. No prompt, DesignSpec, image "
+            "URL or provider/storage provenance is ever exposed. Available even "
+            "when live generation is currently disabled. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def get(self, request, job_id: str):
+        # Ownership filter FIRST (no workspace is created for an unknown
+        # anonymous caller), UUID lookup second — indistinguishable 404.
+        attempt = accessible_generation_attempts(request).filter(pk=job_id).first()
+        if attempt is None:
+            return _not_found()
+        return Response(public_job_payload(attempt), headers=NO_STORE)

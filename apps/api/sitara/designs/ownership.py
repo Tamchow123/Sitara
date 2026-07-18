@@ -10,7 +10,7 @@ then rejected with 403 — that would confirm the UUID exists.
 
 from django.db.models import QuerySet
 
-from .models import Design
+from .models import Design, GenerationAttempt
 from .services import resolve_current_design_session
 
 
@@ -29,3 +29,14 @@ def accessible_designs(request) -> QuerySet[Design]:
     if current is None:
         return Design.objects.none()
     return Design.objects.filter(design_session=current)
+
+
+def accessible_generation_attempts(request) -> QuerySet[GenerationAttempt]:
+    """Generation jobs the current request may see.
+
+    A job inherits its Design's private ownership, so the accessible set is
+    exactly the attempts whose design is in ``accessible_designs``. Like every
+    other private lookup, this is applied BEFORE the UUID lookup so an
+    inaccessible or nonexistent job is one indistinguishable 404 — the job
+    endpoint never reveals whether a foreign UUID exists."""
+    return GenerationAttempt.objects.filter(design__in=accessible_designs(request))

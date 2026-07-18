@@ -69,6 +69,14 @@ class Design(models.Model):
 
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"
+        # Phase 10 lifecycle: a design moves draft -> generating on a
+        # successful enqueue, generating -> generated on successful raw-image
+        # staging, and generating -> generation_failed on terminal pipeline
+        # failure. A failed design with no DesignVersion may be edited again,
+        # which returns it to draft (see services.update_design_draft).
+        GENERATING = "generating", "Generating"
+        GENERATED = "generated", "Generated"
+        GENERATION_FAILED = "generation_failed", "Generation failed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     design_session = models.ForeignKey(
@@ -95,6 +103,14 @@ class Design(models.Model):
     class Meta:
         # Newest designs first everywhere; id breaks same-instant ties.
         ordering = ["-created_at", "-id"]
+        constraints = [
+            # Final backstop restricting the lifecycle field to the known
+            # values; the application services own the transitions.
+            models.CheckConstraint(
+                condition=Q(status__in=["draft", "generating", "generated", "generation_failed"]),
+                name="designs_design_status_valid",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.title or f"Untitled design {self.id}"
@@ -251,10 +267,19 @@ class DesignVersion(models.Model):
 
 
 class GenerationAttempt(models.Model):
-    """Durable state reserved for the later asynchronous generation work.
+    """One durable asynchronous generation job for a Design (Phase 10).
 
-    Phase 4 stores no prompts, no credentials and no raw provider error
-    bodies — ``error_code`` is limited to stable machine-readable codes."""
+    The attempt exists BEFORE the DesignSpec/DesignVersion do — it is created
+    ``queued`` at enqueue time and the pipeline links a ``design_version``
+    later. It therefore belongs to its ``design`` (required) and carries a
+    nullable ``design_version`` link.
+
+    Everything image-related here is PRIVATE provenance (provider, model,
+    prediction id, seed, server-authored reproducibility parameters) and the
+    raw provider output is staged into private storage — none of it is ever
+    exposed through the job API. ``error_code`` is limited to the stable
+    machine codes in :mod:`sitara.generation.errors`; no prompt, answer,
+    output URL, provider error body or credential is ever stored here."""
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"
@@ -263,20 +288,161 @@ class GenerationAttempt(models.Model):
         SUCCEEDED = "succeeded", "Succeeded"
         FAILED = "failed", "Failed"
 
+    # The statuses that count as an in-progress job (at most one per Design).
+    IN_PROGRESS_STATUSES = (Status.QUEUED, Status.RUNNING_TEXT, Status.RUNNING_IMAGE)
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # Required owner: the attempt inherits the Design's private ownership.
+    design = models.ForeignKey(Design, on_delete=models.CASCADE, related_name="generation_attempts")
+    # Linked once the pipeline creates (or resumes) the DesignVersion. SET_NULL
+    # so deleting a version never destroys the attempt's audit row.
     design_version = models.ForeignKey(
-        DesignVersion, on_delete=models.CASCADE, related_name="generation_attempts"
+        DesignVersion,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="generation_attempts",
     )
-    idempotency_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    # Unique PER DESIGN (see the constraint below), not globally: the same
+    # client-supplied key may legitimately recur for a different design.
+    idempotency_key = models.UUIDField(default=uuid.uuid4, editable=False)
+    # The deterministic Celery task id (the attempt UUID as a string). Blank
+    # until the task is submitted; never a broker URL or credential.
+    celery_task_id = models.CharField(max_length=255, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
     error_code = models.CharField(max_length=64, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
+    # --- Private provider-submission provenance (image + text; never exposed) ---
+    image_provider = models.CharField(max_length=32, blank=True)
+    image_model = models.CharField(max_length=100, blank=True)
+    image_prediction_id = models.CharField(max_length=128, blank=True)
+    # A cryptographically-generated non-negative seed, persisted once before
+    # provider submission and reused for every retry. Zero is allowed.
+    image_seed = models.BigIntegerField(null=True, blank=True)
+    # Set True in the same transaction that persists the seed/parameters, just
+    # BEFORE the provider create-prediction call, and cleared only once the
+    # outcome is known (prediction id persisted, or a definitely-pre-acceptance
+    # failure). If a crash leaves this True with no prediction id, a resume must
+    # treat the submission as ambiguous and never blindly resubmit — conservative
+    # spend semantics across the best-effort create boundary.
+    image_submission_in_flight = models.BooleanField(default=False)
+    # Durable TEXT-submission marker (review hardening): set in its own
+    # transaction BEFORE the paid Anthropic request and cleared only when the
+    # outcome is known (version linked, or a definitively-answered provider
+    # outcome). If a crash leaves this True with no linked version, a resumed
+    # delivery must treat the text submission as ambiguous and never repeat
+    # the paid request or resend the prompt content automatically.
+    text_submission_in_flight = models.BooleanField(default=False)
+    # Server-authored reproducibility parameters ONLY (aspect ratio, output
+    # format/quality, safety tolerance, prompt upsampling). Never the prompt,
+    # a token, an output URL, provider error body, answers or image bytes.
+    image_parameters = models.JSONField(null=True, blank=True)
+
+    # --- Raw staged provider output (private) ------------------------------
+    # Provider output is temporary, so a successful raw image is copied into
+    # private storage. These five fields are all-or-none. The FINAL design
+    # image key lives on DesignVersion.image_storage_key and is populated in a
+    # later phase — never here.
+    staged_image_storage_key = models.CharField(max_length=255, blank=True)
+    staged_image_sha256 = models.CharField(max_length=64, blank=True)
+    staged_image_size_bytes = models.BigIntegerField(null=True, blank=True)
+    staged_image_width = models.PositiveIntegerField(null=True, blank=True)
+    staged_image_height = models.PositiveIntegerField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            # Idempotency is scoped to the Design: a repeated key for the SAME
+            # design replays the same attempt; the same key for a DIFFERENT
+            # design is unrelated.
+            models.UniqueConstraint(
+                fields=["design", "idempotency_key"],
+                name="designs_attempt_idempotency_unique_per_design",
+            ),
+            # At most one in-progress attempt per Design. A partial unique
+            # index over queued/running_text/running_image.
+            models.UniqueConstraint(
+                fields=["design"],
+                condition=Q(status__in=["queued", "running_text", "running_image"]),
+                name="designs_attempt_single_in_progress_per_design",
+            ),
+            models.CheckConstraint(
+                condition=Q(
+                    status__in=[
+                        "queued",
+                        "running_text",
+                        "running_image",
+                        "succeeded",
+                        "failed",
+                    ]
+                ),
+                name="designs_attempt_status_valid",
+            ),
+            # Seed, when present, is non-negative (zero allowed).
+            models.CheckConstraint(
+                condition=Q(image_seed__isnull=True) | Q(image_seed__gte=0),
+                name="designs_attempt_seed_non_negative",
+            ),
+            # A supplied staged hash must be a real SHA-256: exactly 64
+            # lowercase hex characters (spec: "SHA-256: exactly 64 when
+            # supplied"). Blank means not staged.
+            models.CheckConstraint(
+                condition=Q(staged_image_sha256="")
+                | Q(staged_image_sha256__regex=r"^[0-9a-f]{64}$"),
+                name="designs_attempt_sha256_shape",
+            ),
+            # Staged size/dimensions, when present, are strictly positive.
+            models.CheckConstraint(
+                condition=(
+                    Q(staged_image_size_bytes__isnull=True) | Q(staged_image_size_bytes__gt=0)
+                )
+                & (Q(staged_image_width__isnull=True) | Q(staged_image_width__gt=0))
+                & (Q(staged_image_height__isnull=True) | Q(staged_image_height__gt=0)),
+                name="designs_attempt_staged_dimensions_positive",
+            ),
+            # Staged metadata is all-or-none: key, hash, size, width and height
+            # are all populated together or all absent.
+            models.CheckConstraint(
+                condition=(
+                    Q(staged_image_storage_key="")
+                    & Q(staged_image_sha256="")
+                    & Q(staged_image_size_bytes__isnull=True)
+                    & Q(staged_image_width__isnull=True)
+                    & Q(staged_image_height__isnull=True)
+                )
+                | (
+                    ~Q(staged_image_storage_key="")
+                    & ~Q(staged_image_sha256="")
+                    & Q(staged_image_size_bytes__isnull=False)
+                    & Q(staged_image_width__isnull=False)
+                    & Q(staged_image_height__isnull=False)
+                ),
+                name="designs_attempt_staged_all_or_none",
+            ),
+            # A succeeded attempt must carry a DesignVersion, staged image
+            # metadata, a blank error code and a completion timestamp.
+            models.CheckConstraint(
+                condition=~Q(status="succeeded")
+                | (
+                    Q(design_version__isnull=False)
+                    & ~Q(staged_image_storage_key="")
+                    & Q(error_code="")
+                    & Q(completed_at__isnull=False)
+                ),
+                name="designs_attempt_succeeded_requirements",
+            ),
+            # A failed attempt must carry a non-empty stable error code and a
+            # completion timestamp.
+            models.CheckConstraint(
+                condition=~Q(status="failed") | (~Q(error_code="") & Q(completed_at__isnull=False)),
+                name="designs_attempt_failed_requirements",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"GenerationAttempt {self.id} ({self.status})"

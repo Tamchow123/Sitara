@@ -37,6 +37,8 @@ EXPECTED_OPERATIONS = frozenset(
         ("/api/v1/designs/{design_id}/", "get"),
         ("/api/v1/designs/{design_id}/", "patch"),
         ("/api/v1/designs/{design_id}/validate/", "post"),
+        ("/api/v1/designs/{design_id}/generate/", "post"),
+        ("/api/v1/jobs/{job_id}/", "get"),
         ("/api/v1/questionnaire/active/", "get"),
         ("/api/v1/inspiration-assets/", "get"),
         ("/api/v1/inspiration-assets/{asset_id}/image/", "get"),
@@ -53,6 +55,7 @@ UNSAFE_OPERATIONS = frozenset(
         ("/api/v1/designs/", "post"),
         ("/api/v1/designs/{design_id}/", "patch"),
         ("/api/v1/designs/{design_id}/validate/", "post"),
+        ("/api/v1/designs/{design_id}/generate/", "post"),
     }
 )
 
