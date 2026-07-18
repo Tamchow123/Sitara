@@ -26,6 +26,15 @@ from .structured_design import (
     StructuredDesignResult,
 )
 
+# Categories whose spend question stays UNRESOLVED. "timeout" and
+# "connection" both wrap httpx transport failures that can fire AFTER the
+# request bytes were sent (APITimeoutError subclasses APIConnectionError and
+# "connection" is the catch-all for read/write/protocol errors), and an
+# unclassified APIError proves nothing — fail closed for all three. The
+# remaining categories are definitive API answers (auth, permission,
+# rate-limit, server status), which resolve the spend question.
+_AMBIGUOUS_CATEGORIES = frozenset({"timeout", "connection", "unknown"})
+
 _ANTHROPIC_ERROR_CATEGORIES = (
     (anthropic.APITimeoutError, "timeout"),
     (anthropic.AuthenticationError, "authentication"),
@@ -70,7 +79,10 @@ class AnthropicStructuredDesignProvider:
                 # retry rather than a terminal provider error.
                 raise
             except Exception:
-                raise StructuredDesignProviderError("client_initialisation") from None
+                # No request was ever sent — provably spend-free.
+                raise StructuredDesignProviderError(
+                    "client_initialisation", ambiguous_acceptance=False
+                ) from None
         return self._cached_client
 
     def generate(self, request: StructuredDesignRequest) -> StructuredDesignResult:
@@ -90,7 +102,10 @@ class AnthropicStructuredDesignProvider:
             # as retryable (payload=None); no body is captured.
             return self._result(None, None, None, "parse_error", refused=False)
         except tuple(cls for cls, _ in _ANTHROPIC_ERROR_CATEGORIES) as exc:
-            raise StructuredDesignProviderError(self._categorise(exc)) from None
+            category = self._categorise(exc)
+            raise StructuredDesignProviderError(
+                category, ambiguous_acceptance=category in _AMBIGUOUS_CATEGORIES
+            ) from None
 
         stop_reason = getattr(message, "stop_reason", None)
         usage = getattr(message, "usage", None)

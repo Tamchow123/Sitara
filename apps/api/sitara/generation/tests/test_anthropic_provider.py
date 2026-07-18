@@ -112,3 +112,34 @@ class TestErrorMapping:
         with pytest.raises(StructuredDesignProviderError) as excinfo:
             provider.generate(_request())
         assert excinfo.value.category == category
+        # Transport failures (timeout/connection/unknown) can fire AFTER the
+        # request bytes were sent — the gateway marks them AMBIGUOUS so the
+        # pipeline never clears the text-submission marker for them.
+        assert excinfo.value.ambiguous_acceptance is True
+
+    def test_client_initialisation_failure_is_not_ambiguous(self, monkeypatch):
+        # A client that never constructed provably sent no request — the
+        # gateway marks it non-ambiguous so a $0-spend failure never strands
+        # the design behind the fail-closed guard.
+        def _broken_constructor(**kwargs):
+            raise RuntimeError("sdk construction exploded")
+
+        monkeypatch.setattr(anthropic, "Anthropic", _broken_constructor)
+        provider = AnthropicStructuredDesignProvider()  # no injected client
+        with pytest.raises(StructuredDesignProviderError) as excinfo:
+            provider.generate(_request())
+        assert excinfo.value.category == "client_initialisation"
+        assert excinfo.value.ambiguous_acceptance is False
+
+    def test_definitive_api_answers_are_not_ambiguous(self):
+        # An HTTP status response is the provider's definitive answer: the
+        # spend question is resolved, so the gateway clears ambiguity.
+        request = httpx.Request("POST", "https://x")
+        response = httpx.Response(429, request=request)
+        exc = anthropic.RateLimitError("rate limited", response=response, body=None)
+        messages = _FakeMessages(exc=exc)
+        provider = AnthropicStructuredDesignProvider(client=_client(messages))
+        with pytest.raises(StructuredDesignProviderError) as excinfo:
+            provider.generate(_request())
+        assert excinfo.value.category == "rate_limit"
+        assert excinfo.value.ambiguous_acceptance is False

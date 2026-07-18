@@ -423,6 +423,22 @@ FAST_IMAGE_MODEL = os.getenv("FAST_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
 
+# With the paid gates OPEN, a placeholder-marked provider credential is a
+# misconfiguration, not an absent optional secret: refuse startup naming only
+# the setting (the value is never echoed). Blank credentials stay permissible
+# — availability simply remains False — and closed gates skip this entirely.
+if not DEMO_MODE and ALLOW_PAID_AI_CALLS:
+    for _credential_name, _credential_value in (
+        ("ANTHROPIC_API_KEY", ANTHROPIC_API_KEY),
+        ("REPLICATE_API_TOKEN", REPLICATE_API_TOKEN),
+    ):
+        _lowered = _credential_value.lower()
+        if any(marker in _lowered for marker in _PLACEHOLDER_MARKERS):
+            raise ImproperlyConfigured(
+                f"{_credential_name} must not be a placeholder value when "
+                "paid AI calls are enabled"
+            )
+
 # ---------------------------------------------------------------------------
 # Structured DesignSpec generation (Phase 8). Safe development/test defaults;
 # the model name is NEVER exposed via the public config endpoint. Numeric

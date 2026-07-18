@@ -218,11 +218,18 @@ class QueueUnavailable(Exception):
 
 
 class _TerminalGenerationError(Exception):
-    """A terminal pipeline failure carrying one stable error code."""
+    """A terminal pipeline failure carrying one stable error code.
 
-    def __init__(self, code: str):
+    ``clear_text_marker`` requests that ``text_submission_in_flight`` be
+    cleared IN THE SAME atomic write that terminalises the attempt — never as
+    a separate commit, so a crash can never land between a cleared marker and
+    the terminal state (which would make an already-answered paid request
+    silently resumable)."""
+
+    def __init__(self, code: str, *, clear_text_marker: bool = False):
         assert errors.is_valid_error_code(code), code
         self.code = code
+        self.clear_text_marker = clear_text_marker
         super().__init__(code)
 
 
@@ -358,17 +365,22 @@ def enqueue_design_generation(
         #    never confirmed either way; a poll/download outage terminated an
         #    attempt whose prediction was live; a crash landed after
         #    submission). ALL such attempts must block whenever provider spend
-        #    MAY have occurred: an accepted prediction id, or a still-set
-        #    in-flight submission marker. The marker is persisted BEFORE the
-        #    create call in the same transaction, so with neither present the
-        #    provider was provably never invoked and a fresh attempt risks no
-        #    paid output. Only the provider-CONFIRMED outcomes in
+        #    MAY have occurred: an accepted prediction id, a still-set image
+        #    in-flight submission marker, or a still-set TEXT in-flight
+        #    submission marker (the Anthropic request window). Each marker is
+        #    persisted BEFORE its provider call, so with none present neither
+        #    provider was ever invoked and a fresh attempt risks no paid
+        #    output. Only the provider-CONFIRMED outcomes in
         #    ``_SPEND_RESOLVED_CODES`` keep the spec's recovery path open —
         #    every other code fails closed by default.
         unresolved_spend = (
             GenerationAttempt.objects.filter(design=locked, status=_Status.FAILED)
             .exclude(error_code__in=_SPEND_RESOLVED_CODES)
-            .filter(Q(image_submission_in_flight=True) | ~Q(image_prediction_id=""))
+            .filter(
+                Q(image_submission_in_flight=True)
+                | ~Q(image_prediction_id="")
+                | Q(text_submission_in_flight=True)
+            )
             .exists()
         )
         if (
@@ -528,7 +540,7 @@ def run_generation_attempt(
             logger.warning("generation soft time limit reached attempt=%s", attempt.id)
             raise GenerationRetry(errors.INTERNAL_GENERATION_ERROR) from exc
         except _TerminalGenerationError as exc:
-            _finalise_failure(attempt, exc.code)
+            _finalise_failure(attempt, exc.code, clear_text_marker=exc.clear_text_marker)
             return GenerationAttempt.objects.get(pk=attempt.pk)
         except Exception as exc:  # noqa: BLE001 - deliberate task boundary
             logger.warning(
@@ -603,29 +615,61 @@ def _run_text_stage(design, attempt, structured_provider) -> DesignVersion:
         from sitara.ai_gateway.policy import get_structured_design_generation_provider
 
         provider = get_structured_design_generation_provider()
+
+    # Crash-window guard (mirrors ``_ensure_prediction``): a prior delivery
+    # began a text submission (marker set) but never linked a version — the
+    # provider MAY have accepted and billed the request, and the private
+    # prompt content must never be resent automatically. Fail conservatively;
+    # the marker is submission evidence for the enqueue guard. The marker
+    # itself is persisted inside ``services._generate_valid_spec`` immediately
+    # BEFORE each paid request, so pre-call validation failures (unsafe user
+    # text, lock contention, readiness) can never leave it set.
+    if attempt.text_submission_in_flight:
+        raise _TerminalGenerationError(errors.STRUCTURED_SUBMISSION_AMBIGUOUS)
+
     try:
         version = generate_design_spec_for_design(design, provider=provider, attempt=attempt)
     except GenerationRefused as exc:
-        raise _TerminalGenerationError(errors.STRUCTURED_PROVIDER_REFUSED) from exc
+        # The provider ANSWERED (a refusal): spend resolved; the marker is
+        # cleared atomically with the terminal write.
+        raise _TerminalGenerationError(
+            errors.STRUCTURED_PROVIDER_REFUSED, clear_text_marker=True
+        ) from exc
     except DesignChangedDuringGeneration as exc:
-        raise _TerminalGenerationError(errors.DESIGN_CHANGED) from exc
+        # Domain outcome; any request concluded.
+        raise _TerminalGenerationError(errors.DESIGN_CHANGED, clear_text_marker=True) from exc
     except DesignNotReady as exc:
-        # A concurrent path having already generated a version is a "changed"
-        # condition, not incompleteness; keep the codes distinguishable.
+        # Raised by domain validation strictly BEFORE the marker is set (the
+        # marker lives immediately before provider.generate); clearing is a
+        # harmless no-op kept for symmetry. A concurrent path having already
+        # generated a version is a "changed" condition, not incompleteness.
         code = (
             errors.DESIGN_CHANGED
             if getattr(exc, "code", None) == "already_generated"
             else errors.DESIGN_INCOMPLETE
         )
-        raise _TerminalGenerationError(code) from exc
+        raise _TerminalGenerationError(code, clear_text_marker=True) from exc
     except (GenerationFailed, ProviderIdentityChanged) as exc:
-        raise _TerminalGenerationError(errors.STRUCTURED_GENERATION_FAILED) from exc
+        # Responses were RECEIVED; spend resolved.
+        raise _TerminalGenerationError(
+            errors.STRUCTURED_GENERATION_FAILED, clear_text_marker=True
+        ) from exc
     except StructuredDesignProviderError as exc:
         # A classified Anthropic transport/API failure is a KNOWN structured
-        # generation failure, never an unclassified internal error. (The
-        # provider re-raises SoftTimeLimitExceeded before classification, so
-        # worker interruptions still propagate as retryable above this.)
-        raise _TerminalGenerationError(errors.STRUCTURED_GENERATION_FAILED) from exc
+        # generation failure, never an unclassified internal error. Ambiguity
+        # is decided by the GATEWAY (it knows the SDK's exception semantics;
+        # the default is ambiguous — fail closed): an ambiguous acceptance
+        # keeps the marker set and terminalises as ambiguous IMMEDIATELY (the
+        # same taxonomy as the image side); a definitive answer resolves the
+        # spend question, clearing the marker atomically with the terminal
+        # write, and keeps the recovery path open.
+        if exc.ambiguous_acceptance:
+            raise _TerminalGenerationError(errors.STRUCTURED_SUBMISSION_AMBIGUOUS) from exc
+        raise _TerminalGenerationError(
+            errors.STRUCTURED_GENERATION_FAILED, clear_text_marker=True
+        ) from exc
+    # Success: the marker was cleared atomically with the version linkage in
+    # services._finalise_atomic; nothing further to write here.
     attempt.refresh_from_db()
     return version
 
@@ -1056,7 +1100,7 @@ def _finalise_success(attempt) -> None:
         )
 
 
-def _finalise_failure(attempt, code: str) -> None:
+def _finalise_failure(attempt, code: str, *, clear_text_marker: bool = False) -> None:
     with transaction.atomic():
         locked = GenerationAttempt.objects.select_for_update().get(pk=attempt.pk)
         if locked.status in (_Status.SUCCEEDED, _Status.FAILED):
@@ -1064,7 +1108,14 @@ def _finalise_failure(attempt, code: str) -> None:
         locked.status = _Status.FAILED
         locked.error_code = code
         locked.completed_at = timezone.now()
-        locked.save(update_fields=["status", "error_code", "completed_at", "updated_at"])
+        update_fields = ["status", "error_code", "completed_at", "updated_at"]
+        if clear_text_marker:
+            # A definitively-answered text submission clears its marker IN
+            # THIS SAME atomic write — a crash can never land between a
+            # cleared marker and the terminal state.
+            locked.text_submission_in_flight = False
+            update_fields.append("text_submission_in_flight")
+        locked.save(update_fields=update_fields)
         # Preserve any linked DesignVersion, prompt, prediction id and staged
         # data — never delete or rewrite newer design work.
         Design.objects.filter(pk=locked.design_id).update(

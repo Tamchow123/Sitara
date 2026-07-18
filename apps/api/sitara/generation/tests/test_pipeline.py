@@ -1299,7 +1299,10 @@ class TestStageAErrorMappings:
 
         class _FailingStructured:
             def generate(self, request):
-                raise StructuredDesignProviderError("api_error")
+                # A definitive answer (ambiguous transport failures map to
+                # structured_submission_ambiguous instead — covered by
+                # TestTextSubmissionCrashWindow).
+                raise StructuredDesignProviderError("server", ambiguous_acceptance=False)
 
         design = make_complete_design()
         attempt = _queued_attempt(design)
@@ -1430,6 +1433,287 @@ class TestSubmissionCrashWindow:
         assert result.status == _Status.SUCCEEDED
         assert healthy.create_calls == 1
         assert healthy.last_request.seed == 0
+
+
+class TestTextSubmissionCrashWindow:
+    """Round-4 CDX-001: the paid Anthropic request has the same durable
+    submission-marker discipline as the image create — a worker loss inside
+    the submission window must never repeat the request or resend the prompt
+    automatically, and unresolved text spend blocks regeneration."""
+
+    class _CrashingStructured:
+        name = "fake"
+
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, request):
+            self.calls += 1
+            raise RuntimeError("worker killed mid text submission")
+
+    def test_crash_during_text_submission_never_resubmits(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        crashing = self._CrashingStructured()
+        result = _run(attempt, structured=crashing)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.INTERNAL_GENERATION_ERROR
+        assert result.text_submission_in_flight is True  # left set
+        assert result.design_version_id is None
+        assert crashing.calls == 1
+        # Redelivery with a healthy provider must NOT submit again: the
+        # marker with no linked version resolves as ambiguous.
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            status=_Status.RUNNING_TEXT, error_code="", completed_at=None
+        )
+        healthy = FixtureStructuredDesignProvider()
+        again = _run(attempt, structured=healthy)
+        assert again.status == _Status.FAILED
+        assert again.error_code == errors.STRUCTURED_SUBMISSION_AMBIGUOUS
+        assert healthy._calls == 0
+
+    def test_text_ambiguous_blocks_regeneration(self):
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import DesignAlreadyGenerated, enqueue_design_generation
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, structured=self._CrashingStructured())
+        assert result.text_submission_in_flight is True
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+                )
+
+    def test_refusal_clears_marker_and_readmits(self):
+        # The provider ANSWERED (a refusal): spend resolved, marker cleared,
+        # and a fresh idempotency key keeps the documented recovery path.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import enqueue_design_generation
+
+        from .fakes import SequenceProvider, refusal_result
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, structured=SequenceProvider([refusal_result()]))
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.STRUCTURED_PROVIDER_REFUSED
+        assert result.text_submission_in_flight is False
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            new_attempt, created = enqueue_design_generation(
+                design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+            )
+        assert created is True
+
+    def test_transport_timeout_leaves_marker_and_blocks(self):
+        # A timeout may fire AFTER the request was sent (accepted, billable):
+        # the marker stays set and the evidence-gated guard blocks.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.ai_gateway.structured_design import StructuredDesignProviderError
+        from sitara.generation.pipeline import DesignAlreadyGenerated, enqueue_design_generation
+
+        from .fakes import RaisingProvider
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, structured=RaisingProvider(StructuredDesignProviderError("timeout")))
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.STRUCTURED_SUBMISSION_AMBIGUOUS
+        assert result.text_submission_in_flight is True
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+                )
+
+    def test_definitive_api_error_clears_marker_and_readmits(self):
+        # A rate-limit (or any definitive API answer) resolves the spend
+        # question: the marker clears and a fresh key may retry.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.ai_gateway.structured_design import StructuredDesignProviderError
+        from sitara.generation.pipeline import enqueue_design_generation
+
+        from .fakes import RaisingProvider
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(
+            attempt,
+            structured=RaisingProvider(
+                StructuredDesignProviderError("rate_limit", ambiguous_acceptance=False)
+            ),
+        )
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.STRUCTURED_GENERATION_FAILED
+        assert result.text_submission_in_flight is False
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            new_attempt, created = enqueue_design_generation(
+                design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+            )
+        assert created is True
+
+    def test_success_clears_marker(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt)
+        assert result.status == _Status.SUCCEEDED
+        assert result.text_submission_in_flight is False
+
+    def test_connection_failure_is_ambiguous_and_blocks(self):
+        # "connection" is the SDK's non-timeout transport catch-all and can
+        # fire AFTER the request bytes were sent — the GATEWAY leaves it
+        # ambiguous (its fail-closed default) and the guard blocks.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.ai_gateway.structured_design import StructuredDesignProviderError
+        from sitara.generation.pipeline import DesignAlreadyGenerated, enqueue_design_generation
+
+        from .fakes import RaisingProvider
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(
+            attempt, structured=RaisingProvider(StructuredDesignProviderError("connection"))
+        )
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.STRUCTURED_SUBMISSION_AMBIGUOUS
+        assert result.text_submission_in_flight is True
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+                )
+
+    def test_soft_time_limit_mid_text_submission_keeps_the_marker(self):
+        # Mirrors the image-side mid-create interruption test: a soft-limit
+        # kill inside the Anthropic request window keeps the marker, and the
+        # redelivery resolves as ambiguous without a second request.
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        from sitara.generation.pipeline import GenerationRetry
+
+        class _Interrupted:
+            name = "fake"
+
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, request):
+                self.calls += 1
+                raise SoftTimeLimitExceeded()
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        interrupted = _Interrupted()
+        with pytest.raises(GenerationRetry):
+            _run(attempt, structured=interrupted)
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.RUNNING_TEXT  # non-terminal
+        assert attempt.text_submission_in_flight is True
+        assert interrupted.calls == 1
+        healthy = FixtureStructuredDesignProvider()
+        again = _run(attempt, structured=healthy)
+        assert again.status == _Status.FAILED
+        assert again.error_code == errors.STRUCTURED_SUBMISSION_AMBIGUOUS
+        assert healthy._calls == 0
+
+    def test_design_changed_during_generation_clears_marker(self):
+        # POST-response freshness failure: the request CONCLUDED, so the
+        # spend question is resolved and the marker clears.
+        from sitara.generation.context import build_generation_context
+
+        from .fakes import MutatingProvider
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        ss = build_generation_context(design).source_selections
+
+        def edit_answers():
+            changed = dict(design.answers)
+            changed["colour_palette"] = ["ivory"]
+            Design.objects.filter(pk=design.pk).update(answers=changed)
+
+        result = _run(attempt, structured=MutatingProvider(ss, edit_answers))
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.DESIGN_CHANGED
+        assert result.text_submission_in_flight is False
+
+    def test_invalid_responses_clear_marker(self):
+        # Both requests RETURNED (invalid twice): spend resolved; marker
+        # clears and the recovery path stays open.
+        from .fakes import SequenceProvider, malformed_result
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(
+            attempt, structured=SequenceProvider([malformed_result(), malformed_result()])
+        )
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.STRUCTURED_GENERATION_FAILED
+        assert result.text_submission_in_flight is False
+
+    def test_pre_provider_domain_failure_never_sets_marker(self):
+        # DesignNotReady(already_generated) is raised BEFORE any request (the
+        # marker now lives immediately before provider.generate), so the
+        # marker is never touched.
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        # A raw attempt WITHOUT the resume-version link forces the text stage,
+        # which the service rejects pre-request (a version already exists).
+        orphan = GenerationAttempt.objects.create(design=design, status=_Status.QUEUED)
+        counting = FixtureStructuredDesignProvider()
+        result = _run(orphan, structured=counting)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.DESIGN_CHANGED
+        assert result.text_submission_in_flight is False
+        assert counting._calls == 0  # provider never invoked
+
+    def test_unsafe_user_text_failure_is_recoverable(self):
+        # Round-4 FUNC-001: a pre-request input-safety rejection spends
+        # nothing and must never strand the design — the marker is untouched
+        # and a fresh idempotency key readmits after the user fixes the text.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import enqueue_design_generation
+
+        design = make_complete_design()
+        design.answers = {
+            **design.answers,
+            "final_notes": "Please copy https://example.com/dress exactly.",
+        }
+        design.save(update_fields=["answers"])
+        attempt = _queued_attempt(design)
+        counting = FixtureStructuredDesignProvider()
+        result = _run(attempt, structured=counting)
+        assert result.status == _Status.FAILED
+        assert result.text_submission_in_flight is False
+        assert counting._calls == 0  # rejected before any request
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            new_attempt, created = enqueue_design_generation(
+                design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+            )
+        assert created is True
 
 
 class TestSoftTimeLimit:

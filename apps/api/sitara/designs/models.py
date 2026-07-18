@@ -314,7 +314,7 @@ class GenerationAttempt(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
-    # --- Private image provenance (never exposed) --------------------------
+    # --- Private provider-submission provenance (image + text; never exposed) ---
     image_provider = models.CharField(max_length=32, blank=True)
     image_model = models.CharField(max_length=100, blank=True)
     image_prediction_id = models.CharField(max_length=128, blank=True)
@@ -328,6 +328,13 @@ class GenerationAttempt(models.Model):
     # treat the submission as ambiguous and never blindly resubmit — conservative
     # spend semantics across the best-effort create boundary.
     image_submission_in_flight = models.BooleanField(default=False)
+    # Durable TEXT-submission marker (review hardening): set in its own
+    # transaction BEFORE the paid Anthropic request and cleared only when the
+    # outcome is known (version linked, or a definitively-answered provider
+    # outcome). If a crash leaves this True with no linked version, a resumed
+    # delivery must treat the text submission as ambiguous and never repeat
+    # the paid request or resend the prompt content automatically.
+    text_submission_in_flight = models.BooleanField(default=False)
     # Server-authored reproducibility parameters ONLY (aspect ratio, output
     # format/quality, safety tolerance, prompt upsampling). Never the prompt,
     # a token, an output URL, provider error body, answers or image bytes.

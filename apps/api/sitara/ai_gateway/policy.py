@@ -79,13 +79,28 @@ class GenerationPolicy:
         return (not self.demo_mode) and self.allow_paid_ai_calls
 
 
+# Case-insensitive markers that always indicate an UNCONFIGURED value (the
+# same markers config.settings uses for production validation). A
+# placeholder-marked credential or model is treated as ABSENT — never as
+# complete configuration — so the availability gates fail closed.
+_PLACEHOLDER_MARKERS = ("change-me", "__replace_me__")
+
+
+def _looks_placeholder(value: str) -> bool:
+    lowered = value.lower()
+    return any(marker in lowered for marker in _PLACEHOLDER_MARKERS)
+
+
 def _image_config_ready() -> bool:
-    """The live Replicate configuration is complete: a non-empty API token
-    (after stripping) and a non-empty model that fits the persisted model-field
-    bound. Never logs or returns the token or model value."""
+    """The live Replicate configuration is complete: a non-empty,
+    non-placeholder API token (after stripping) and a non-empty,
+    non-placeholder model that fits the persisted model-field bound. Never
+    logs or returns the token or model value."""
     token = (settings.REPLICATE_API_TOKEN or "").strip()
     model = (settings.DEFAULT_IMAGE_MODEL or "").strip()
-    return bool(token) and bool(model) and len(model) <= _IMAGE_MODEL_MAX_LENGTH
+    if not token or not model or len(model) > _IMAGE_MODEL_MAX_LENGTH:
+        return False
+    return not (_looks_placeholder(token) or _looks_placeholder(model))
 
 
 def image_generation_is_available() -> bool:
@@ -137,12 +152,15 @@ def get_image_generation_provider_async():
 
 
 def _anthropic_config_ready() -> bool:
-    """The live Anthropic configuration is complete: a non-empty API key (after
-    stripping) and a non-empty model that fits the persisted model-field bound.
-    Never logs or returns the key or model value."""
+    """The live Anthropic configuration is complete: a non-empty,
+    non-placeholder API key (after stripping) and a non-empty,
+    non-placeholder model that fits the persisted model-field bound. Never
+    logs or returns the key or model value."""
     key = (settings.ANTHROPIC_API_KEY or "").strip()
     model = (settings.ANTHROPIC_MODEL or "").strip()
-    return bool(key) and bool(model) and len(model) <= _ANTHROPIC_MODEL_MAX_LENGTH
+    if not key or not model or len(model) > _ANTHROPIC_MODEL_MAX_LENGTH:
+        return False
+    return not (_looks_placeholder(key) or _looks_placeholder(model))
 
 
 def structured_design_generation_is_available() -> bool:

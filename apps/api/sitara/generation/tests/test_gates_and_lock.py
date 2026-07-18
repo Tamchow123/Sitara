@@ -62,6 +62,32 @@ class TestGating:
         with pytest.raises(PaidGenerationDisabled):
             get_structured_design_generation_provider()
 
+    def test_placeholder_credentials_are_never_ready(self, settings):
+        # Round-4 CDX-002: a placeholder-marked credential or model is treated
+        # as ABSENT configuration — the availability gates stay closed even
+        # with both explicit gates open.
+        from sitara.ai_gateway.policy import (
+            image_generation_is_available,
+            structured_design_generation_is_available,
+        )
+
+        settings.DEMO_MODE = False
+        settings.ALLOW_PAID_AI_CALLS = True
+        settings.ANTHROPIC_MODEL = "claude-sonnet-4-6"
+        settings.DEFAULT_IMAGE_MODEL = "black-forest-labs/flux-1.1-pro"
+        settings.ANTHROPIC_API_KEY = "change-me-key"
+        settings.REPLICATE_API_TOKEN = "__REPLACE_ME__"
+        assert structured_design_generation_is_available() is False
+        assert image_generation_is_available() is False
+        # A placeholder MODEL is equally unconfigured.
+        settings.ANTHROPIC_API_KEY = "sk-ant-test-not-a-real-key"
+        settings.REPLICATE_API_TOKEN = "r8-test-not-a-real-token"
+        settings.DEFAULT_IMAGE_MODEL = "change-me-model"
+        assert image_generation_is_available() is False
+        # Genuine-looking values are ready (both gates + config complete).
+        settings.DEFAULT_IMAGE_MODEL = "black-forest-labs/flux-1.1-pro"
+        assert image_generation_is_available() is True
+
 
 @pytest.mark.django_db(transaction=True)
 def test_lock_contention_blocks_before_provider():
@@ -95,3 +121,13 @@ def test_lock_contention_blocks_before_provider():
     finally:
         release.set()
         thread.join(timeout=10)
+
+
+def test_placeholder_marker_lists_stay_in_sync():
+    # The startup validation (config.settings) and the runtime availability
+    # gates (policy) each hold a frozen copy of the placeholder markers; a
+    # marker added to one and not the other would silently split enforcement.
+    import config.settings as settings_module
+    from sitara.ai_gateway import policy
+
+    assert tuple(policy._PLACEHOLDER_MARKERS) == tuple(settings_module._PLACEHOLDER_MARKERS)

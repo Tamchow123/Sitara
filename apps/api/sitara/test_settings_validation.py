@@ -407,3 +407,40 @@ class TestImageGenerationSettings:
         assert result.returncode != 0
         assert "REPLICATE_TIMEOUT_SECONDS" in result.stderr
         assert "not-a-number" not in result.stderr
+
+
+class TestPaidGateCredentialValidation:
+    """With the paid gates OPEN, placeholder-marked provider credentials are a
+    misconfiguration and refuse startup (naming only the setting, never the
+    value); with the gates closed they stay permissible."""
+
+    def test_open_gates_reject_placeholder_replicate_token(self):
+        result = load_settings(
+            {
+                "DEMO_MODE": "false",
+                "ALLOW_PAID_AI_CALLS": "true",
+                "REPLICATE_API_TOKEN": "__REPLACE_ME__",
+            }
+        )
+        assert result.returncode != 0
+        assert "REPLICATE_API_TOKEN" in result.stderr
+        assert "ImproperlyConfigured" in result.stderr
+        assert "__REPLACE_ME__" not in result.stderr  # value never echoed
+
+    def test_open_gates_reject_placeholder_anthropic_key(self):
+        result = load_settings(
+            {
+                "DEMO_MODE": "false",
+                "ALLOW_PAID_AI_CALLS": "true",
+                "ANTHROPIC_API_KEY": "change-me-key",
+            }
+        )
+        assert result.returncode != 0
+        assert "ANTHROPIC_API_KEY" in result.stderr
+        assert "change-me-key" not in result.stderr
+
+    def test_closed_gates_permit_placeholder_token(self):
+        # Gates closed (defaults): a placeholder in the environment is inert —
+        # availability simply stays False (see policy tests).
+        result = load_settings({"REPLICATE_API_TOKEN": "__REPLACE_ME__"})
+        assert result.returncode == 0, result.stderr

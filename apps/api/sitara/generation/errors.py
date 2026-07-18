@@ -20,6 +20,12 @@ DESIGN_CHANGED = "design_changed"
 
 # Structured (Anthropic) stage.
 STRUCTURED_GENERATION_FAILED = "structured_generation_failed"
+# The provider MAY have accepted (and billed) a text request that was never
+# confirmed either way (crash or ambiguous transport failure between
+# submission and version linkage). Spend is unresolved, so — like every code
+# outside ``pipeline._SPEND_RESOLVED_CODES`` — the enqueue guard blocks
+# regeneration whenever the failed attempt carries submission evidence.
+STRUCTURED_SUBMISSION_AMBIGUOUS = "structured_submission_ambiguous"
 STRUCTURED_PROVIDER_REFUSED = "structured_provider_refused"
 
 # Prompt stage.
@@ -60,6 +66,7 @@ GENERATION_ERROR_CODES = frozenset(
         DESIGN_INCOMPLETE,
         DESIGN_CHANGED,
         STRUCTURED_GENERATION_FAILED,
+        STRUCTURED_SUBMISSION_AMBIGUOUS,
         STRUCTURED_PROVIDER_REFUSED,
         PROMPT_BUILD_FAILED,
         IMAGE_PROVIDER_UNAVAILABLE,

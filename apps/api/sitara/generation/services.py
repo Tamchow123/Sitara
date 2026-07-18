@@ -24,7 +24,7 @@ from pydantic import ValidationError
 
 from sitara.ai_gateway.policy import get_structured_design_generation_provider
 from sitara.ai_gateway.structured_design import StructuredDesignRequest
-from sitara.designs.models import Design
+from sitara.designs.models import Design, GenerationAttempt
 from sitara.designs.services import (
     create_next_design_version_locked,
     design_completion_errors,
@@ -176,11 +176,18 @@ def scan_design_spec_or_raise(spec: DesignSpec) -> None:
     scan_design_spec(spec)
 
 
-def _generate_valid_spec(provider, context: GenerationContext, design_id):
+def _generate_valid_spec(provider, context: GenerationContext, design_id, generation_attempt=None):
     """Make at most MAX_PROVIDER_REQUESTS controlled requests. Returns
     (spec, usage, attempts) where ``usage`` aggregates token counts across
     EVERY returned response (both attempts). A provider transport error or
-    refusal aborts immediately (no retry)."""
+    refusal aborts immediately (no retry).
+
+    When a Phase 10 ``generation_attempt`` is supplied, its durable
+    ``text_submission_in_flight`` marker is persisted immediately BEFORE each
+    paid request — so ONLY a genuinely in-flight submission can ever leave it
+    set (pre-call validation failures never touch it), and a worker loss
+    inside the request window is visible to the redelivery. The pipeline
+    clears it on definitive outcomes."""
     responses: list = []  # every StructuredDesignResult actually returned
     attempts = 0
     for attempt in range(1, MAX_PROVIDER_REQUESTS + 1):
@@ -192,6 +199,11 @@ def _generate_valid_spec(provider, context: GenerationContext, design_id):
             max_output_tokens=settings.DESIGN_SPEC_MAX_OUTPUT_TOKENS,
             attempt=attempt,
         )
+        if generation_attempt is not None:
+            GenerationAttempt.objects.filter(pk=generation_attempt.pk).update(
+                text_submission_in_flight=True, updated_at=timezone.now()
+            )
+            generation_attempt.text_submission_in_flight = True
         result = provider.generate(request)  # StructuredDesignProviderError propagates
         responses.append(result)
         if result.refused:
@@ -264,7 +276,13 @@ def _finalise_atomic(
                     "the attempt does not belong to this design; no version was linked"
                 )
             attempt.design_version = version
-            attempt.save(update_fields=["design_version", "updated_at"])
+            # Clear the text-submission marker in the SAME transaction as the
+            # version linkage: the submission window closed with a durable
+            # outcome, and there is no crash window between the two writes.
+            attempt.text_submission_in_flight = False
+            attempt.save(
+                update_fields=["design_version", "text_submission_in_flight", "updated_at"]
+            )
     return version
 
 
@@ -294,7 +312,9 @@ def generate_design_spec_for_design(design, *, provider=None, attempt=None):
                 "already_generated", "This design already has a generated version."
             )
         selected = provider if provider is not None else get_structured_design_generation_provider()
-        spec, usage, spec_attempts = _generate_valid_spec(selected, context, design.id)
+        spec, usage, spec_attempts = _generate_valid_spec(
+            selected, context, design.id, generation_attempt=attempt
+        )
 
         # Freshness re-check AND persistence in ONE short transaction under the
         # Design row lock: re-run completion + inspiration-eligibility

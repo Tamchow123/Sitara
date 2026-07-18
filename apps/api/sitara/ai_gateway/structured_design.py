@@ -50,10 +50,21 @@ class StructuredDesignProviderError(Exception):
     """A provider transport/API failure (auth, permission, rate limit,
     timeout, connection or server error). Carries only a generic category —
     never a provider error body — and is NEVER retried (spend may already have
-    occurred)."""
+    occurred).
 
-    def __init__(self, category: str):
+    ``ambiguous_acceptance`` carries the same MEANING as
+    :class:`ImageProviderError`'s field (True = the request MAY have been
+    accepted and billed; False = definitively resolved), but the DEFAULTS
+    deliberately differ: this class defaults to True (fail closed) so an
+    unclassified raise can never read as spend-safe, while the image-side
+    class defaults to False and every raise site sets the flag explicitly.
+    Only the GATEWAY, which knows the SDK's exception semantics, may set it
+    False (a definitive API answer, or a failure provably before any request
+    was sent)."""
+
+    def __init__(self, category: str, *, ambiguous_acceptance: bool = True):
         self.category = category
+        self.ambiguous_acceptance = ambiguous_acceptance
         super().__init__(f"structured design provider error: {category}")
 
 

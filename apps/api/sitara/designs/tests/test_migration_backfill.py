@@ -24,7 +24,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 _APP = "designs"
 _FROM = [(_APP, "0004_designversion_image_prompt_and_more")]
 _TO = [(_APP, "0005_generationattempt_async_pipeline")]
-_LATEST = [(_APP, "0006_generationattempt_designs_attempt_sha256_shape")]
+_LATEST = [(_APP, "0007_generationattempt_text_submission_in_flight")]
 
 
 class TestBackfill:
