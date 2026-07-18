@@ -133,6 +133,22 @@ _URL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Raw HTML tags and Markdown formatting. DesignSpec narrative is plain prose;
+# markup is model-authored formatting we REJECT (letting DesignSpec generation
+# use its existing single retry) rather than silently strip and change meaning.
+# Deliberately conservative: a bare ``<``/``>`` in prose (e.g. "a < b"), a single
+# hyphen/underscore, and ordinary parenthetical text are all accepted — only
+# recognisable tags and formatting syntax match.
+_MARKUP_PATTERNS = (
+    re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*[^<>]*>"),  # <b> </b> <script> <img ...>
+    re.compile(r"\*\*"),  # **bold**
+    re.compile(r"__+"),  # __bold__ (two or more underscores; single is allowed)
+    re.compile(r"~~"),  # ~~strikethrough~~
+    re.compile(r"\[[^\]]*\]\([^)]*\)"),  # [label](url) markdown link
+    re.compile(r"(?m)^\s{0,3}#{1,6}(?:\s|$)"),  # # heading … ###### heading
+    re.compile(r"`"),  # inline / fenced code backticks
+)
+
 # Clause boundaries used to keep negation scope tight (see ``_asserts_claim``).
 # Punctuation that separates clauses within a sentence...
 _CLAUSE_PUNCTUATION = re.compile(r"[,;:]")
@@ -164,6 +180,7 @@ class RejectionCategory(str, Enum):
     PROMPT_LEAKAGE = "prompt_leakage"
     SEWING_PATTERN_CLAIM = "sewing_pattern_claim"
     CONSTRUCTIBILITY_CLAIM = "constructibility_claim"
+    MARKUP = "markup_or_formatting"
 
 
 class GeneratedContentRejected(Exception):
@@ -297,12 +314,17 @@ def scan_generated_text(text: str) -> None:
         raise GeneratedContentRejected(RejectionCategory.URL)
 
     tokens = _tokens(text)
+    # Designer/imitation/leakage checks run BEFORE the markup check so a name
+    # written with markdown emphasis (e.g. ``Manish__Malhotra``) is still
+    # reported as a designer reference, not generic markup.
     if any(_contains_phrase(tokens, _phrase_tokens(name)) for name in _DESIGNER_BRAND_NAMES):
         raise GeneratedContentRejected(RejectionCategory.DESIGNER_OR_BRAND)
     if any(_contains_phrase(tokens, _phrase_tokens(p)) for p in _IMITATION_PHRASES):
         raise GeneratedContentRejected(RejectionCategory.IMITATION_PHRASE)
     if any(_contains_phrase(tokens, _phrase_tokens(p)) for p in _PROMPT_LEAKAGE_PHRASES):
         raise GeneratedContentRejected(RejectionCategory.PROMPT_LEAKAGE)
+    if any(pattern.search(text) for pattern in _MARKUP_PATTERNS):
+        raise GeneratedContentRejected(RejectionCategory.MARKUP)
     if _asserts_claim(text, _SEWING_PATTERN_CLAIMS):
         raise GeneratedContentRejected(RejectionCategory.SEWING_PATTERN_CLAIM)
     if _asserts_claim(text, _CONSTRUCTIBILITY_CLAIMS):

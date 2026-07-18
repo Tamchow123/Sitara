@@ -545,6 +545,18 @@
               "question_id": "silhouette",
               "values": ["straight_kameez", "a_line_kameez"]
             }
+          },
+          {
+            "id": "none_hides_embellishment_density",
+            "when": {
+              "question_id": "embellishment_styles",
+              "operator": "equals",
+              "values": ["none"]
+            },
+            "then": {
+              "action": "hide",
+              "question_id": "embellishment_density"
+            }
           }
         ]
       }

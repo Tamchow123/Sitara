@@ -76,6 +76,17 @@
               { "value": "none", "label": "No embellishment" }
             ],
             "constraints": { "min_items": 1, "max_items": 3, "exclusive_values": ["none"] }
+          },
+          {
+            "id": "embellishment_density",
+            "type": "single_choice",
+            "label": "How much embellishment?",
+            "required": false,
+            "options": [
+              { "value": "minimal", "label": "Minimal" },
+              { "value": "balanced", "label": "Balanced" },
+              { "value": "heavy", "label": "Heavy" }
+            ]
           }
         ]
       },
@@ -161,6 +172,15 @@
           "question_id": "silhouette",
           "values": ["gharara_construction"]
         }
+      },
+      {
+        "id": "none_hides_embellishment_density",
+        "when": {
+          "question_id": "embellishment_styles",
+          "operator": "equals",
+          "values": ["none"]
+        },
+        "then": { "action": "hide", "question_id": "embellishment_density" }
       }
     ]
   },
@@ -348,6 +368,33 @@
       },
       "valid": false,
       "error_questions": ["colour_palette"]
+    },
+    {
+      "name": "density_visible_with_normal_styles",
+      "require_complete": false,
+      "answers": {
+        "garment_type": "lehenga",
+        "embellishment_styles": ["zardozi"],
+        "embellishment_density": "heavy"
+      },
+      "valid": true
+    },
+    {
+      "name": "none_hides_density_rejects_supplied_density",
+      "require_complete": false,
+      "answers": {
+        "garment_type": "lehenga",
+        "embellishment_styles": ["none"],
+        "embellishment_density": "heavy"
+      },
+      "valid": false,
+      "error_questions": ["embellishment_density"]
+    },
+    {
+      "name": "none_without_density_is_valid",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "embellishment_styles": ["none"] },
+      "valid": true
     }
   ]
 }

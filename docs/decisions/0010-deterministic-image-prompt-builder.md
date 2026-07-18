@@ -94,23 +94,48 @@ result **every DesignSpec valid under the Pydantic schema builds to at most
 `IMAGE_PROMPT_MAX_CHARS`** (proved by near-maximum fixtures of several shapes),
 and the fully assembled prompt is never sliced.
 
+Word-boundary truncation is TOTAL: it never emits a partial token. When a
+narrative field's first token alone exceeds the available limit there is no safe
+boundary, so the whole (non-mandatory) piece is omitted rather than cut
+mid-word. Mandatory canonical machine values are bounded by the schema and are
+never routed through truncation.
+
 The generated-content safety scan runs before interpolation and again on the
-finished prompt (blocked designer/brand, imitation phrasing, URLs, prompt
-leakage, untrusted-section delimiters and control characters). Both scans, the
-defensive revalidation and any length overrun surface as a single controlled
+finished prompt: blocked designer/brand, imitation phrasing, URLs, prompt
+leakage, untrusted-section delimiters, control characters, and **raw HTML tags
+or Markdown formatting** (`<tag>`, `**bold**`, `__bold__`, `[label](url)`,
+`# headings`, fenced/inline code). Markup is rejected rather than silently
+stripped, so DesignSpec generation can fall back on its existing single retry
+instead of changing model-authored meaning; a bare `<`/`>`, single
+hyphen/underscore and ordinary parenthetical prose remain accepted. Both scans,
+the defensive revalidation and any length overrun surface as a single controlled
 `ImagePromptBuildError` — `build_image_prompt` never raises
 `GeneratedContentRejected` and never echoes the rejected text.
 
 ### Canonical selections are authoritative
 
 Generated narrative may not contradict an explicit machine selection. When
-`embellishment_styles` is exactly `["none"]`, the builder renders a clear
-unembellished direction and omits the generated techniques, density, placement
-and motifs; when `embellishment_density` is `"minimal"`, a small deterministic
-word-boundary rule neutralises heavy/dense/opulent/lavish/richly-worked wording
-in the generated embellishment narrative. The canonical ordered selections
-always remain present, and a non-`none` selection is never silently transformed
-into `none`.
+`embellishment_styles` is exactly `["none"]`, `"none"` is authoritative: the
+builder echoes the selection, renders ONE clear unembellished instruction, and
+omits **both** the generated embellishment-plan content (techniques, density,
+placement, motifs) **and** the `embellishment_density` line — even when a stale
+persisted density is `minimal`, `balanced` or `heavy`. The presentation wording
+also switches to an unembellished variant that describes the plain textile,
+fabric colour, texture, drape and garment detail rather than asking for
+embroidery detail, so the fixed wording can never contradict a `none` choice
+(non-`none` designs keep the embroidery-aware presentation). When
+`embellishment_density` is `"minimal"`, a small deterministic word-boundary rule
+neutralises heavy/dense/opulent/lavish/richly-worked wording in the generated
+embellishment narrative. The canonical ordered selections always remain present,
+and a non-`none` selection is never silently transformed into `none`.
+
+The questionnaire enforces the same authority at source: a schema-derived
+compatibility rule (`none_hides_embellishment_density`, `equals ["none"] → hide`)
+hides `embellishment_density` when `"none"` is chosen, so the existing Phase 7
+rule machinery clears a stale density on the frontend and Django rejects a
+supplied hidden `embellishment_density` answer. The rule is data in the
+questionnaire schema, interpreted generically by both languages — never
+hard-coded — and is exercised by the shared cross-language contract.
 
 ### What the prompt never contains
 
@@ -147,9 +172,12 @@ manifest first and **refuses** to overwrite it when the rendered combined hash
 changed while `PROMPT_BUILDER_VERSION` did not — a deliberate version bump is
 required. After a bump it rewrites the snapshots and manifest; an unchanged hash
 is a no-op. Normal tests run comparison-only and never write files, so silent
-wording drift cannot slip past review. `PROMPT_BUILDER_VERSION` is `2.0.0` from
-this hardening (bounded rendering and canonical-selection authority changed the
-`none`-embellishment output).
+wording drift cannot slip past review. `PROMPT_BUILDER_VERSION` is `3.0.0`:
+`2.0.0` introduced bounded rendering and canonical-selection authority; `3.0.0`
+finalised the no-embellishment rules (dropping the density line and switching to
+the unembellished presentation), made truncation total and added HTML/Markdown
+rejection — each changing the `none`-embellishment snapshot and requiring the
+version bump.
 
 ## Consequences
 

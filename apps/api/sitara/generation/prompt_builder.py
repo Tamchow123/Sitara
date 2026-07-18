@@ -46,7 +46,7 @@ from .input_safety import scan_design_spec, scan_generated_text
 # regeneration command REFUSES to overwrite committed snapshots unless this
 # value changes (see prompt_snapshots.evaluate_regeneration); the persisted
 # provenance records this value.
-PROMPT_BUILDER_VERSION = "2.0.0"
+PROMPT_BUILDER_VERSION = "3.0.0"
 
 # Hard upper bound on the assembled prompt. Guaranteed by construction: the
 # mandatory content is reserved first and generated narrative is budgeted into
@@ -80,6 +80,18 @@ _PRESENTATION = (
     "studio background. Render an original, non-branded textile and embroidery "
     "design with natural anatomy and coherent, naturally posed hands, lit by "
     "soft, even lighting that shows the true fabric colour and embroidery detail."
+)
+
+# Presentation for an unembellished garment (embellishment_styles == ["none"]).
+# Same positive framing and safeguards, but it does NOT ask for embroidery
+# detail — it directs attention to the plain textile, colour, texture, drape and
+# garment construction instead, so it never contradicts the "none" selection.
+_PRESENTATION_UNEMBELLISHED = (
+    "Present the concept as a full-length studio fashion photograph with the "
+    "entire garment visible from head to hem, set against a clean, uncluttered "
+    "studio background. Render an original, non-branded textile design with "
+    "natural anatomy and coherent, naturally posed hands, lit by soft, even "
+    "lighting that shows the true fabric colour, texture, drape and garment detail."
 )
 
 # Very small, source-controlled garment-integrity cues for the categories with
@@ -154,16 +166,23 @@ def _slot(text: str, cap: int) -> str:
 
 
 def _truncate_at_word(text: str, limit: int) -> str:
-    """Truncate ``text`` to at most ``limit`` characters at a word boundary."""
-    if limit <= 0:
+    """Truncate ``text`` to at most ``limit`` characters at a word boundary.
+
+    TOTAL: never returns a partial token. When the first token alone exceeds
+    ``limit`` there is no safe word boundary, so the whole (non-mandatory
+    narrative) piece is omitted by returning ``""`` — the builder then drops the
+    empty piece. Mandatory canonical machine values are bounded by the schema and
+    are never routed through this helper."""
+    if limit <= 0 or not text:
         return ""
     if len(text) <= limit:
         return text
-    truncated = text[:limit]
-    boundary = truncated.rfind(" ")
-    if boundary > 0:
-        truncated = truncated[:boundary]
-    return truncated.rstrip()
+    boundary = text.rfind(" ", 0, limit + 1)
+    if boundary <= 0:
+        # The first token alone exceeds the limit → omit rather than emit a
+        # partial token.
+        return ""
+    return text[:boundary].rstrip()
 
 
 def _join_items(items: list[str]) -> str:
@@ -275,6 +294,20 @@ def _embellishment(spec: DesignSpec) -> list[_Piece]:
     ss = spec.source_selections
     ep = spec.embellishment_plan
     pieces = []
+    # Canonical authority: exactly ["none"] means no embellishment. "none" wins
+    # over any persisted density (minimal/balanced/heavy is NOT rendered), and
+    # ALL generated embellishment-plan content is omitted — the canonical
+    # selection is echoed and ONE clear unembellished instruction is given.
+    if ss.embellishment_styles == [_NONE_EMBELLISHMENT]:
+        pieces.append(_mandatory("The selected embellishment styles, in order, are none"))
+        pieces.append(
+            _mandatory(
+                "The design carries no surface embellishment; render the fabric "
+                "plain and unworked"
+            )
+        )
+        return pieces
+
     if ss.embellishment_density:
         pieces.append(_mandatory(f"Embellishment density: {_readable(ss.embellishment_density)}"))
     if ss.embellishment_styles:
@@ -284,16 +317,6 @@ def _embellishment(spec: DesignSpec) -> list[_Piece]:
                 f"{_readable_list(ss.embellishment_styles)}"
             )
         )
-    # Canonical authority: ["none"] means no embellishment. Omit ALL generated
-    # techniques/density/placement/motifs and render an unembellished direction.
-    if ss.embellishment_styles == [_NONE_EMBELLISHMENT]:
-        pieces.append(
-            _mandatory(
-                "The design carries no surface embellishment; render the fabric "
-                "plain and unworked"
-            )
-        )
-        return pieces
 
     minimal = ss.embellishment_density == "minimal"
 
@@ -430,7 +453,11 @@ def build_image_prompt(spec: DesignSpec) -> str:
         raise ImagePromptBuildError("design spec failed the safety scan") from exc
 
     sections = [list(builder(spec)) for builder in _SECTION_BUILDERS]
-    sections.append([_Piece(_PRESENTATION, mandatory=True)])
+    # Unembellished designs use presentation wording that does not ask for
+    # embroidery detail, so the fixed wording never contradicts a "none" choice.
+    unembellished = spec.source_selections.embellishment_styles == [_NONE_EMBELLISHMENT]
+    presentation = _PRESENTATION_UNEMBELLISHED if unembellished else _PRESENTATION
+    sections.append([_Piece(presentation, mandatory=True)])
 
     mandatory_len = sum(len(p.text) for section in sections for p in section if p.mandatory)
     natural_total = sum(len(p.text) for section in sections for p in section if not p.mandatory)

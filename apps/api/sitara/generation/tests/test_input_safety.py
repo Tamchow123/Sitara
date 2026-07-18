@@ -92,6 +92,50 @@ class TestSafeTextIsNotFalselyRejected:
     def test_ordinary_bridalwear_prose_passes(self, text):
         scan_generated_text(text)  # must not raise
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "A soft, hand-finished piece (fully lined) — elegant: warm yet restrained.",
+            "The choli has full_sleeves and a high_neckline coverage preference.",
+            "Sizes range so a < b in fit; keep 2 > 1 layers of net.",
+            "A hyphenated raw-silk, tone-on-tone border.",
+        ],
+    )
+    def test_ordinary_punctuation_is_not_treated_as_markup(self, text):
+        scan_generated_text(text)  # must not raise
+
+
+class TestMarkupIsRejected:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "A neat <b>bold</b> hem.",
+            "Danger <script>alert(1)</script> here.",
+            "Make it **bold** please.",
+            "Make it __bold__ please.",
+            "See [the look](page-two) for detail.",
+            "# Heading note",
+            "Use ```fenced code``` here.",
+            "Inline `code` sample.",
+        ],
+    )
+    def test_html_and_markdown_are_rejected_as_markup(self, text):
+        with pytest.raises(GeneratedContentRejected) as excinfo:
+            scan_generated_text(text)
+        assert excinfo.value.category == RejectionCategory.MARKUP
+
+    def test_designer_in_markdown_emphasis_is_still_a_designer_reference(self):
+        # A designer name written with markdown underscores must report as a
+        # designer reference, not as generic markup.
+        with pytest.raises(GeneratedContentRejected) as excinfo:
+            scan_generated_text("A look __Sabyasachi__ would love.")
+        assert excinfo.value.category == RejectionCategory.DESIGNER_OR_BRAND
+
+    def test_markup_rejection_never_echoes_text(self):
+        with pytest.raises(GeneratedContentRejected) as excinfo:
+            scan_generated_text("A <secretmarker>x</secretmarker> detail.")
+        assert "secretmarker" not in str(excinfo.value).lower()
+
 
 class TestImitationAndLeakage:
     def test_in_the_style_of_is_rejected(self):

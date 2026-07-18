@@ -219,6 +219,57 @@ class TestDeterminismAndBounds:
 
         assert _slot("  a\r\n b\t c  ", 100) == "a b c"
 
+    def test_truncate_omits_a_single_oversized_token(self):
+        from sitara.generation.prompt_builder import _truncate_at_word
+
+        # One 400-character token with no interior space cannot be cut at a word
+        # boundary → omitted entirely, never a partial token.
+        assert _truncate_at_word("x" * 400, 300) == ""
+
+    def test_truncate_keeps_only_whole_leading_words(self):
+        from sitara.generation.prompt_builder import _truncate_at_word
+
+        text = "y" * 290 + " and more words follow here"
+        result = _truncate_at_word(text, 300)
+        # The long first token is kept whole, plus the words that still fit; the
+        # result always ends at a word boundary (never a partial token).
+        assert result == "y" * 290 + " and more"
+        assert result.split()[0] == "y" * 290
+        assert result == text[: len(result)] and text[len(result)] == " "
+
+    def test_truncate_is_total_on_unicode_words(self):
+        from sitara.generation.prompt_builder import _truncate_at_word
+
+        result = _truncate_at_word("café café café café", 12)
+        assert result == "café café"  # whole words only, no split accents
+        assert "caf " not in result
+
+    def test_single_long_token_narrative_is_omitted_not_partially_rendered(self):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["garment_breakdown"]["overall_form"] = "z" * 400  # one 400-char token
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert len(prompt) <= IMAGE_PROMPT_MAX_CHARS
+        assert "z" * 50 not in prompt  # no partial token leaked
+
+    def test_maximum_spec_with_untokenised_narrative_stays_bounded(self):
+        # Every narrative string a single oversized token: all narrative is
+        # omitted, the prompt is still valid and within the cap.
+        overrides = {
+            "garment_breakdown": {
+                "overall_form": "a" * 400,
+                "garment_components": ["b" * 400 for _ in range(8)],
+                "silhouette": "c" * 400,
+                "drape_or_layering": "d" * 400,
+                "key_proportions": "e" * 400,
+            },
+            "concept_summary": "f" * 700,
+        }
+        spec = DesignSpec.model_validate(_max_spec_dict(**overrides))
+        prompt = build_image_prompt(spec)
+        assert len(prompt) <= IMAGE_PROMPT_MAX_CHARS
+        for filler in ("a" * 40, "b" * 40, "f" * 40):
+            assert filler not in prompt
+
 
 class TestContentInclusionAndExclusion:
     def test_coverage_machine_selections_survive(self):
@@ -317,30 +368,39 @@ class TestGarmentIntegrityCues:
 class TestCanonicalSelectionAuthority:
     _HEAVY = ("heavy", "densely", "dense", "opulent", "lavish", "richly")
 
-    def test_none_selection_omits_generated_embellishment_narrative(self):
-        # Schema-valid but adversarial: styles=["none"] with heavy zardozi
-        # narrative. The generated techniques/density/placement/motifs must be
-        # omitted and a clear unembellished direction rendered instead.
+    def test_none_plus_heavy_density_produces_no_contradictory_direction(self):
+        # Schema-valid but adversarial: styles=["none"] with a persisted HEAVY
+        # density and heavy/embroidery narrative. "none" is authoritative, so the
+        # density line is dropped, generated embellishment content is omitted, the
+        # presentation switches to the unembellished wording, and no "heavy",
+        # "density", "embroidery" or "embroidered" direction survives.
         data = _spec_dict("nikah_lehenga_head_drape")
         data["source_selections"]["embellishment_styles"] = ["none"]
-        data["source_selections"]["embellishment_density"] = "none"
+        data["source_selections"]["embellishment_density"] = "heavy"
+        # Neutralise the only other rendered mention of embroidery (colour story).
+        data["colour_story"]["placement"] = (
+            "Ivory leads across the skirt and choli, with gold as the accent along the border."
+        )
         data["embellishment_plan"] = {
-            "techniques": ["SENTINELEMB heavy densely worked zardozi across the whole bodice"],
-            "density": "SENTINELEMB an opulent, lavish, richly worked dense surface throughout.",
+            "techniques": ["SENTINELEMB heavy densely worked embroidery across the whole bodice"],
+            "density": "SENTINELEMB an opulent, lavish, richly worked dense embroidered surface.",
             "placement": ["SENTINELEMB all over, densely covered"],
-            "motifs": ["SENTINELEMB opulent heavy jaal"],
-            "restraint_notes": "SENTINELEMB no restraint; richly worked everywhere.",
+            "motifs": ["SENTINELEMB opulent heavy embroidered jaal"],
+            "restraint_notes": "SENTINELEMB no restraint; richly embroidered everywhere.",
         }
         prompt = build_image_prompt(DesignSpec.model_validate(data))
         lowered = prompt.lower()
         assert "no surface embellishment" in lowered
-        # Every generated embellishment fragment (which carried the heavy words)
-        # is omitted, so none of it — or its heavy wording — reaches the prompt.
         assert "SENTINELEMB" not in prompt
-        for word in self._HEAVY:
+        for word in (*self._HEAVY, "density", "embroidery", "embroidered"):
             assert word not in lowered
-        # Canonical selection still present.
+        # Canonical selection still present; unembellished presentation used.
         assert "in order, are none" in lowered
+        assert "texture, drape and garment detail" in lowered
+
+    def test_non_none_retains_embroidery_presentation(self):
+        prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
+        assert prompt.rstrip().endswith("embroidery detail.")
 
     def test_minimal_density_strips_heavy_directions_from_narrative(self):
         data = _spec_dict("nikah_lehenga_head_drape")
@@ -403,3 +463,36 @@ class TestSafetyIsEnforced:
         bad["title"] = "x"  # too short
         with pytest.raises(ImagePromptBuildError):
             build_image_prompt(bad)
+
+    @pytest.mark.parametrize(
+        "note",
+        [
+            "A neat <b>bold</b> detail on the hem.",
+            "Careful with <script>alert(1)</script> here.",
+            "Make it **bold** across the bodice.",
+            "Make it __bold__ across the bodice.",
+            "See the [reference look](https://example.com) note.",
+            "# Heading style note for the panel.",
+            "Use ```code fenced``` styling for the border.",
+        ],
+    )
+    def test_html_and_markdown_are_rejected(self, note):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["styling_notes"] = [note]
+        with pytest.raises(ImagePromptBuildError):
+            build_image_prompt(DesignSpec.model_validate(data))
+
+    def test_markup_rejection_never_leaks_the_text(self):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["styling_notes"] = ["A <secretmarker>tag</secretmarker> detail."]
+        with pytest.raises(ImagePromptBuildError) as excinfo:
+            build_image_prompt(DesignSpec.model_validate(data))
+        assert "secretmarker" not in str(excinfo.value).lower()
+
+    def test_ordinary_punctuation_is_accepted(self):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["styling_notes"] = [
+            "It's a soft, hand-finished piece (fully lined) — truly elegant: restrained yet warm."
+        ]
+        # Must build without raising; the note's punctuation is not markup.
+        assert build_image_prompt(DesignSpec.model_validate(data))

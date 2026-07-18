@@ -147,6 +147,68 @@ describe("clearStaleAnswers", () => {
   });
 });
 
+describe("none embellishment hides density", () => {
+  // A self-contained schema mirroring the fixture rule
+  // `none_hides_embellishment_density` (equals ["none"] → hide density).
+  const embSchema: QuestionnaireSchema = {
+    schema_version: 1,
+    key: "emb",
+    title: "Emb",
+    steps: [
+      {
+        id: "embellishment",
+        title: "Embellishment",
+        questions: [
+          {
+            id: "embellishment_styles",
+            type: "multi_choice",
+            label: "Styles",
+            required: false,
+            options: [
+              { value: "zardozi", label: "Zardozi" },
+              { value: "none", label: "None" },
+            ],
+            constraints: { exclusive_values: ["none"] },
+          },
+          {
+            id: "embellishment_density",
+            type: "single_choice",
+            label: "Density",
+            required: false,
+            options: [
+              { value: "minimal", label: "Minimal" },
+              { value: "heavy", label: "Heavy" },
+            ],
+          },
+        ],
+      },
+    ],
+    rules: [
+      {
+        id: "none_hides_embellishment_density",
+        when: { question_id: "embellishment_styles", operator: "equals", values: ["none"] },
+        then: { action: "hide", question_id: "embellishment_density" },
+      },
+    ],
+  };
+
+  it("keeps density visible for a normal style selection", () => {
+    const visibility = visibleQuestions(embSchema, { embellishment_styles: ["zardozi"] });
+    expect(visibility.embellishment_density).toBe(true);
+  });
+
+  it("clears a stale heavy density when styles change to none", () => {
+    const before = { embellishment_styles: ["zardozi"], embellishment_density: "heavy" };
+    // Switch to none: density becomes hidden and must be cleared.
+    const after = clearStaleAnswers(embSchema, {
+      ...before,
+      embellishment_styles: ["none"],
+    });
+    expect(after.embellishment_styles).toEqual(["none"]);
+    expect(after.embellishment_density).toBeUndefined();
+  });
+});
+
 describe("resumeStepIndex", () => {
   it("returns the first incomplete step", () => {
     expect(resumeStepIndex(schema, {})).toBe(0);
