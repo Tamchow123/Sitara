@@ -80,6 +80,27 @@ class TestPublicConfig:
         for forbidden in ("ANTHROPIC", "REPLICATE", "S3_", "SECRET", "bucket"):
             assert forbidden not in text
 
+    def test_fully_open_gates_report_enabled_without_exposing_the_model(self, client, settings):
+        # With every gate open (Phase 10), generation IS available — but the
+        # public payload still exposes only the safe key set, never the model,
+        # provider or any token.
+        settings.DEMO_MODE = False
+        settings.ALLOW_PAID_AI_CALLS = True
+        settings.LIVE_GENERATION_ENABLED = True
+        settings.ANTHROPIC_API_KEY = "sk-ant-test-not-a-real-key"
+        settings.ANTHROPIC_MODEL = "claude-sonnet-4-6"
+        settings.REPLICATE_API_TOKEN = "r8_test_not_a_real_token"
+        settings.DEFAULT_IMAGE_MODEL = "black-forest-labs/flux-1.1-pro"
+        body = client.get(reverse("config-public")).json()
+        assert body["generation_enabled"] is True
+        assert set(body) == {
+            "demo_mode",
+            "generation_enabled",
+            "max_inspiration_images",
+            "max_refinements",
+        }
+        assert "flux" not in client.get(reverse("config-public")).content.decode()
+
 
 class TestReadinessLoggingSafety:
     """Connection-library exceptions routinely embed credentials; readiness

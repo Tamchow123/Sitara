@@ -19,16 +19,28 @@ flight; that discipline lives in :mod:`sitara.generation.pipeline`.
 from celery import shared_task
 from celery.utils.log import get_task_logger
 
-from .pipeline import GenerationRetry, fail_attempt, run_generation_attempt
+from .pipeline import (
+    GenerationRetry,
+    build_pipeline_config,
+    fail_attempt,
+    pipeline_budget_seconds,
+    run_generation_attempt,
+)
 
 logger = get_task_logger(__name__)
 
 # Bounded transient retry policy (safe, classified transients only).
 MAX_TRANSIENT_RETRIES = 5
 RETRY_COUNTDOWN_SECONDS = 5
-# Bounded execution time — a generation must never run unbounded.
-SOFT_TIME_LIMIT_SECONDS = 240
-HARD_TIME_LIMIT_SECONDS = 300
+
+# Bounded execution time — a generation must never run unbounded, but the limit
+# must exceed the pipeline's configured stage budget so a slow-but-succeeding
+# render is not killed. The soft margin absorbs scheduling/DB overhead; the
+# hard limit adds a further grace period before a SIGKILL.
+_SOFT_MARGIN_SECONDS = 60
+_HARD_MARGIN_SECONDS = 60
+SOFT_TIME_LIMIT_SECONDS = pipeline_budget_seconds() + _SOFT_MARGIN_SECONDS
+HARD_TIME_LIMIT_SECONDS = SOFT_TIME_LIMIT_SECONDS + _HARD_MARGIN_SECONDS
 
 
 @shared_task(
@@ -40,9 +52,13 @@ HARD_TIME_LIMIT_SECONDS = 300
     time_limit=HARD_TIME_LIMIT_SECONDS,
 )
 def generate_design_attempt(self, attempt_id):
-    """Run one generation attempt; bounded-retry only on classified transients."""
+    """Run one generation attempt; bounded-retry only on classified transients.
+
+    Live factories (the gated Replicate provider and the hardened downloader)
+    are resolved inside the pipeline when no double is injected; the config is
+    built from Django settings (model, poll bounds, size caps)."""
     try:
-        run_generation_attempt(attempt_id)
+        run_generation_attempt(attempt_id, config=build_pipeline_config())
     except GenerationRetry as exc:
         if self.request.retries >= MAX_TRANSIENT_RETRIES:
             logger.warning(

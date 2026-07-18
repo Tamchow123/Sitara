@@ -238,6 +238,29 @@ class TestImageFailures:
         assert result.error_code == errors.IMAGE_POLL_TIMEOUT
         assert image.cancel_calls == 1
 
+    def test_wall_clock_deadline_bounds_polling_before_attempt_count(self, monkeypatch):
+        # Even with a high attempt count, a wall-clock deadline stops polling
+        # once elapsed — so slow status calls cannot exceed REPLICATE_POLL_TIMEOUT.
+        import sitara.generation.pipeline as pipeline_module
+
+        # First _monotonic() sets the deadline base (0); the next check reports a
+        # time already past the 100s deadline, so the loop breaks after one poll.
+        times = iter([0.0] + [500.0] * 20)
+        monkeypatch.setattr(pipeline_module, "_monotonic", lambda: next(times))
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        image = FakeImageProvider(poll_actions=[PREDICTION_PROCESSING])
+        result = _run(
+            attempt,
+            image=image,
+            config=PipelineConfig(poll_max_attempts=90, poll_timeout_seconds=100.0),
+        )
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_POLL_TIMEOUT
+        # The deadline broke the loop long before the 90-attempt count.
+        assert image.get_calls == 1
+        assert image.cancel_calls == 1
+
     def test_error_codes_are_all_in_the_allowlist(self):
         design = make_complete_design()
         attempt = _queued_attempt(design)
@@ -261,6 +284,15 @@ class TestStagingResume:
 class TestDuplicateDelivery:
     def test_missing_attempt_is_a_safe_noop(self):
         assert run_generation_attempt(uuid.uuid4()) is None
+
+    def test_malformed_attempt_id_is_a_logged_noop(self, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="sitara.generation.pipeline"):
+            assert run_generation_attempt("not-a-uuid") is None
+        assert any("not a valid UUID" in record.message for record in caplog.records)
+        # The raw value is never echoed.
+        assert "not-a-uuid" not in caplog.text
 
 
 class _CrashAfterCreateProvider(FakeImageProvider):
@@ -399,6 +431,55 @@ class TestCrossDesignGuard:
 
 def _current_status(attempt_id):
     return GenerationAttempt.objects.values_list("status", flat=True).get(pk=attempt_id)
+
+
+class TestLiveFactories:
+    """The live provider/downloader factories are fail-closed and wire config
+    correctly. These are the only path to the real gated provider in production,
+    so their own bodies must be exercised (tests otherwise inject fakes)."""
+
+    def test_live_image_provider_with_gate_closed_is_terminal(self, settings):
+        settings.DEMO_MODE = True  # paid-image gate closed
+        from sitara.generation.pipeline import _live_image_provider, _TerminalGenerationError
+
+        with pytest.raises(_TerminalGenerationError) as exc:
+            _live_image_provider(PipelineConfig())
+        assert exc.value.code == errors.IMAGE_PROVIDER_UNAVAILABLE
+
+    def test_run_attempt_without_injected_provider_fails_closed(self, settings):
+        # Reaching the image stage with no injected provider and a closed gate
+        # ends the attempt with a controlled image_provider_unavailable.
+        settings.DEMO_MODE = True
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = run_generation_attempt(
+            attempt.id,
+            structured_provider=FixtureStructuredDesignProvider(),
+            image_provider=None,  # resolve the live factory (fails closed)
+            image_downloader=synthetic_webp_downloader,
+            storage=InMemoryStorage(),
+            seed_factory=lambda: 0,
+            config=_FAST,
+        )
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_PROVIDER_UNAVAILABLE
+
+    def test_live_image_downloader_wires_config_and_settings(self, settings, monkeypatch):
+        settings.REPLICATE_TIMEOUT_SECONDS = 30
+        from sitara.generation import pipeline as pipeline_module
+
+        recorded = {}
+
+        def _fake_download(url, *, max_bytes, timeout_seconds):
+            recorded["args"] = (url, max_bytes, timeout_seconds)
+            return b"bytes"
+
+        monkeypatch.setattr(
+            "sitara.generation.image_download.download_replicate_output", _fake_download
+        )
+        downloader = pipeline_module._live_image_downloader(PipelineConfig(raw_max_bytes=999))
+        assert downloader("https://replicate.delivery/x/raw.webp") == b"bytes"
+        assert recorded["args"] == ("https://replicate.delivery/x/raw.webp", 999, 30)
 
 
 @pytest.mark.django_db(transaction=True)

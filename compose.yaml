@@ -43,6 +43,17 @@ x-api-environment: &api-environment
   DESIGN_SPEC_MAX_INPUT_CHARS: ${DESIGN_SPEC_MAX_INPUT_CHARS:-20000}
   DESIGN_SPEC_MAX_OUTPUT_TOKENS: ${DESIGN_SPEC_MAX_OUTPUT_TOKENS:-4096}
   ANTHROPIC_TIMEOUT_SECONDS: ${ANTHROPIC_TIMEOUT_SECONDS:-60}
+  # Gated Replicate image rendering (Phase 10). LIVE_GENERATION_ENABLED gates
+  # the public end-to-end generation API and defaults to false, so accidental
+  # paid generation is impossible even with both provider gates open. Live
+  # rendering additionally requires DEMO_MODE=false + ALLOW_PAID_AI_CALLS=true
+  # and a real REPLICATE_API_TOKEN. Numeric values are strict positive integers.
+  LIVE_GENERATION_ENABLED: ${LIVE_GENERATION_ENABLED:-false}
+  REPLICATE_TIMEOUT_SECONDS: ${REPLICATE_TIMEOUT_SECONDS:-30}
+  REPLICATE_POLL_INTERVAL_SECONDS: ${REPLICATE_POLL_INTERVAL_SECONDS:-2}
+  REPLICATE_POLL_TIMEOUT_SECONDS: ${REPLICATE_POLL_TIMEOUT_SECONDS:-180}
+  GENERATION_RAW_MAX_BYTES: ${GENERATION_RAW_MAX_BYTES:-20000000}
+  GENERATION_RAW_MAX_PIXELS: ${GENERATION_RAW_MAX_PIXELS:-40000000}
   # Application-level cap on versions per design (initial concept + one
   # refinement). Strict positive integer; invalid values refuse startup.
   MAX_DESIGN_VERSIONS: ${MAX_DESIGN_VERSIONS:-2}

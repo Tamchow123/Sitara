@@ -96,10 +96,10 @@ class TestGenerationCapability:
     ALL_GATE_COMBINATIONS = [(True, False), (True, True), (False, False), (False, True)]
 
     def test_capability_flags_are_code_level(self):
-        # Structured-text generation is implemented in Phase 8; end-to-end
-        # image generation is not.
+        # Structured-text (Phase 8) and image generation (Phase 10 Part B) are
+        # both implemented; the public gate stays closed via LIVE_GENERATION_ENABLED.
         assert STRUCTURED_DESIGN_PROVIDER_IMPLEMENTED is True
-        assert IMAGE_PROVIDER_IMPLEMENTED is False
+        assert IMAGE_PROVIDER_IMPLEMENTED is True
 
     @pytest.mark.parametrize("demo,allow", ALL_GATE_COMBINATIONS)
     def test_structured_generation_availability_needs_both_gates(self, settings, demo, allow):

@@ -3,8 +3,8 @@
 Companion to [PROPOSAL.md](PROPOSAL.md). Each phase lists: **Scope / Non-goals / Commands / Automated tests / Manual checkpoint / Suggested commit.** Phases are sequential; a phase's checkpoint gates the next.
 
 Standing rules across all phases:
-- Paid provider calls happen only inside `generation/providers/` wrappers, gated by `ALLOW_PROVIDER_CALLS=true` + real keys. Automated tests and CI can never spend money.
-- `DEMO_MODE` is strictly zero-cost and deterministic; live generation is separately gated by `LIVE_GENERATION_ENABLED`.
+- Paid provider calls happen only inside the fail-closed `sitara.ai_gateway` wrappers, gated by `DEMO_MODE=false` + `ALLOW_PAID_AI_CALLS=true` + real keys (the older `ALLOW_PROVIDER_CALLS` name is superseded). Automated tests and CI can never spend money.
+- `DEMO_MODE` is strictly zero-cost and deterministic; the public end-to-end generation API is separately gated by `LIVE_GENERATION_ENABLED`.
 - All provider model names are environment variables; none are hard-coded.
 - Section references (§) point at PROPOSAL.md.
 
@@ -124,6 +124,37 @@ Standing rules across all phases:
 - **Automated tests:** full task pipeline on fakes/recorded fixtures with zero live calls (asserted); idempotency (duplicate key → same job); double-generate → 409; transient image-stage failure retries without re-calling the text stage (fixture call-count assertion); permanent failure sets `failed` + `error_code`.
 - **Manual checkpoint:** one budgeted end-to-end live run: questionnaire → spec → prompt → FLUX image on disk; kill the worker mid-job and confirm safe failure state and safe retry.
 - **Commit:** `feat(generation): async Celery pipeline with Replicate image rendering`
+
+> **Delivered (ADR 0011)** as two commits — `feat(generation): add durable
+> asynchronous generation jobs` (Part A) and `feat(generation): add gated
+> Replicate image rendering` (Part B). Part A adds the Design lifecycle
+> (`draft`/`generating`/`generated`/`generation_failed` with recovery editing),
+> the reshaped `GenerationAttempt` (design FK, nullable version, per-Design
+> idempotency, provenance/staging fields and DB constraints incl. one
+> in-progress attempt per design, with a non-destructive backfill migration), a
+> stable error-code allowlist, the enqueue service (short row-locked
+> transaction, idempotent replay, availability/completeness gating,
+> `transaction.on_commit` submission with a deterministic task id, post-commit
+> broker-failure quarantine), a resumable `run_generation_attempt` state machine
+> behind a Celery `generation`-queue task (two-int advisory lock, atomic
+> attempt↔DesignVersion linkage, submit-once marker, seed reuse, bounded
+> transient retries, `SoftTimeLimitExceeded` handling), `POST
+> /designs/<uuid>/generate/` + `GET /jobs/<uuid>/` (AllowAny + ownership-first
+> 404, CSRF, Idempotency-Key, no-store, no provenance leak), the OpenAPI/typed
+> client + narrow CSRF-aware frontend wrappers, and zero-network fixtures — no
+> live provider call is reachable. Part B adds `replicate==1.0.7` (hash-locked),
+> the strict Replicate/timeout/size settings, the capability gates
+> (`image_generation_is_available` + a `LIVE_GENERATION_ENABLED`-gated public
+> `generation_is_available`), the lazy gated `ReplicateImageProvider` (public
+> async `predictions.create/get/cancel` only — no `run()`/webhooks/version),
+> seed persistence, the best-effort prediction-creation boundary, the hardened
+> `*.replicate.delivery` HTTPS download boundary (host/redirect/credential/byte
+> and Pillow/pixel checks), private raw staging, the offline
+> `run_generation_fixture` command, and a socket-denied provider/e2e test suite
+> including a worker-restart resume. `DesignVersion.image_storage_key` stays
+> blank (Phase 11 owns final ingest). The **paid live checkpoint remains
+> pending** (no budgeted spend authorised); live generation must not be publicly
+> enabled before the Phase 16 rate-limit/cost-ceiling safeguards.
 
 ## Phase 11 — Permanent image storage
 - **Scope:** django-storages abstraction finalised; WebP transcode + thumbnail on ingest; storage layout per §10; S3-compatible backend config (exercised against MinIO in compose, or a real bucket); signed-URL issuance for design images with short expiry; shareability caveat documented in code comments and `docs/`.

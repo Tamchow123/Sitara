@@ -128,7 +128,14 @@ Current safety gates are:
 ```text
 DEMO_MODE=true
 ALLOW_PAID_AI_CALLS=false
+LIVE_GENERATION_ENABLED=false
 ```
+
+`LIVE_GENERATION_ENABLED` gates the PUBLIC end-to-end generation API and must
+stay false by default. A present token, both provider gates open, and complete
+provider configuration are still not enough for the public API — the operator
+must also set `LIVE_GENERATION_ENABLED`. Live generation must not be publicly
+enabled before the Phase 16 rate-limit and cost-ceiling safeguards exist.
 
 Rules:
 

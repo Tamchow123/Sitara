@@ -1,4 +1,4 @@
-"""Durable asynchronous generation pipeline (Phase 10, Part A).
+"""Durable asynchronous generation pipeline (Phase 10, Parts A & B).
 
 Two public entry points:
 
@@ -12,25 +12,29 @@ Two public entry points:
   resubmitted, and an already-staged object is verified rather than
   regenerated.
 
-No paid provider is ever constructed here in Part A: the image provider,
-downloader and storage are INJECTED (fakes in tests, the offline command's
-fixtures, and — in Part B — the gated Replicate provider). A non-blocking
-PostgreSQL advisory lock (in the two-integer lock space, distinct from the
-Design-level spec lock's bigint space) guarantees duplicate broker delivery
-never executes one attempt twice. Logs carry only operation names, row UUIDs
-and exception types — never a prompt, answer, output URL, storage key or
-provider error body.
+The image provider, downloader and storage are INJECTED (fakes in tests, the
+offline command's fixtures). When not injected, the LIVE factories at the bottom
+of this module resolve the gated Replicate provider and the hardened downloader
+(Part B) — always fail-closed, constructing no network client unless every gate
+passes. A non-blocking PostgreSQL advisory lock (in the two-integer lock space,
+distinct from the Design-level spec lock's bigint space) guarantees duplicate
+broker delivery never executes one attempt twice. Logs carry only operation
+names, row UUIDs and exception types — never a prompt, answer, output URL,
+storage key or provider error body.
 """
 
 import contextlib
 import hashlib
 import io
 import logging
+import math
 import secrets
 import time
+import uuid
 from dataclasses import dataclass
 
 from celery.exceptions import SoftTimeLimitExceeded
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import connection, transaction
@@ -50,6 +54,7 @@ from sitara.designs.services import design_completion_errors
 
 from . import errors
 from .context import DesignNotReady
+from .image_download import MAX_REDIRECTS
 from .prompt_builder import ImagePromptBuildError
 from .prompt_service import ImagePromptImmutable, build_and_store_image_prompt
 from .services import (
@@ -69,6 +74,10 @@ _Status = GenerationAttempt.Status
 # space the Design spec lock uses — so the two locks can never collide.
 _ATTEMPT_LOCK_NAMESPACE = 0x51A  # arbitrary fixed namespace
 
+# Monotonic clock for the poll wall-clock deadline, indirected so tests can
+# inject a deterministic clock.
+_monotonic = time.monotonic
+
 # The reviewed Phase 2 rendering profile and safe pipeline bounds. Part B wires
 # the environment-driven values (model, timeouts, size caps) into this config
 # from Django settings; the defaults here keep Part A self-contained and make
@@ -82,8 +91,10 @@ DEFAULT_PROMPT_UPSAMPLING = False
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    """Tunable, injectable pipeline parameters. Part A defaults keep tests fast
-    and bounded; Part B builds this from Django settings for live rendering."""
+    """Tunable, injectable pipeline parameters. The image PROFILE defaults are
+    the reviewed Phase 2 rendering settings; ``build_pipeline_config`` fills the
+    model/timeout/size values from Django settings for live rendering, while
+    tests keep the fast defaults."""
 
     model: str = ""
     aspect_ratio: str = DEFAULT_ASPECT_RATIO
@@ -93,8 +104,56 @@ class PipelineConfig:
     prompt_upsampling: bool = DEFAULT_PROMPT_UPSAMPLING
     poll_interval_seconds: float = 0.0
     poll_max_attempts: int = 90
+    # Wall-clock bound (seconds) on the whole poll loop; 0 disables it (tests
+    # bound by attempt count alone). When set, polling stops once this many
+    # seconds elapse regardless of per-call latency, so REPLICATE_POLL_TIMEOUT
+    # is a TRUE bound even if individual status requests are slow.
+    poll_timeout_seconds: float = 0.0
     raw_max_bytes: int = 20_000_000
     raw_max_pixels: int = 40_000_000
+
+
+def build_pipeline_config() -> "PipelineConfig":
+    """Build the live pipeline configuration from Django settings.
+
+    The environment-driven values (model, poll interval/timeout, size caps) come
+    from settings; the reviewed Phase 2 image profile (aspect ratio 3:4, WebP,
+    quality/safety/upsampling) stays on the PipelineConfig defaults. Polling is
+    bounded by BOTH an attempt count (``ceil(timeout/interval)``, so total sleep
+    is at most ``(attempts-1)*interval < timeout``) AND a wall-clock deadline of
+    ``timeout`` seconds, so slow individual status calls cannot push total
+    polling past REPLICATE_POLL_TIMEOUT."""
+    interval = settings.REPLICATE_POLL_INTERVAL_SECONDS
+    timeout = settings.REPLICATE_POLL_TIMEOUT_SECONDS
+    max_attempts = max(1, math.ceil(timeout / interval)) if interval > 0 else 1
+    return PipelineConfig(
+        model=settings.DEFAULT_IMAGE_MODEL,
+        poll_interval_seconds=float(interval),
+        poll_max_attempts=max_attempts,
+        poll_timeout_seconds=float(timeout),
+        raw_max_bytes=settings.GENERATION_RAW_MAX_BYTES,
+        raw_max_pixels=settings.GENERATION_RAW_MAX_PIXELS,
+    )
+
+
+def pipeline_budget_seconds() -> int:
+    """The worst-case wall-clock budget of one attempt's stages, from the SAME
+    settings the stages use — colocated with :func:`build_pipeline_config` so all
+    settings-derived pipeline timing lives in one place. The Celery task derives
+    its soft/hard time limits from this so a legitimately slow render is never
+    interrupted mid-flight.
+
+    Stages: the text stage may make up to two Anthropic requests; the image
+    stage submits (one REPLICATE_TIMEOUT), polls under a REPLICATE_POLL_TIMEOUT
+    wall-clock deadline plus one in-flight status call that may run up to
+    REPLICATE_TIMEOUT past it, then downloads over a bounded multi-hop budget."""
+    text = 2 * settings.ANTHROPIC_TIMEOUT_SECONDS
+    download = settings.REPLICATE_TIMEOUT_SECONDS * (MAX_REDIRECTS + 1)
+    image = (
+        # submit + one trailing in-flight poll call + the poll wall-clock bound
+        2 * settings.REPLICATE_TIMEOUT_SECONDS + settings.REPLICATE_POLL_TIMEOUT_SECONDS + download
+    )
+    return text + image
 
 
 # ---------------------------------------------------------------------------
@@ -199,13 +258,21 @@ def _mark_queue_unavailable(attempt: GenerationAttempt) -> None:
         )
 
 
-def enqueue_design_generation(design, *, idempotency_key, enqueue_task=None):
+def enqueue_design_generation(
+    design, *, idempotency_key, enqueue_task=None, require_availability=True
+):
     """Create or idempotently replay one queued attempt for ``design``.
 
     Returns ``(attempt, created)``. ``created`` is False for an idempotent
     replay of an existing key. The whole decision runs in one short transaction
     under the Design row lock; the Celery task is submitted with
     ``transaction.on_commit`` so a worker never observes an uncommitted attempt.
+
+    ``require_availability`` gates on the public ``generation_is_available()``
+    flag and MUST stay True for every request originating from the public API.
+    The offline fixture management command sets it False because it injects
+    zero-network fixture providers and never makes a paid call — the completeness
+    and concurrency checks still run.
 
     Raises GenerationUnavailable / DesignIncomplete / GenerationInProgress /
     DesignAlreadyGenerated / DesignNotGeneratable during the transaction (no
@@ -239,8 +306,8 @@ def enqueue_design_generation(design, *, idempotency_key, enqueue_task=None):
         if existing is not None:
             return existing, False
 
-        # 2. New key: enforce availability BEFORE any work.
-        if not generation_is_available():
+        # 2. New key: enforce availability BEFORE any work (public API only).
+        if require_availability and not generation_is_available():
             raise GenerationUnavailable("live generation is not currently available")
 
         # 3. Re-run authoritative completeness (questionnaire + inspiration).
@@ -351,6 +418,20 @@ def run_generation_attempt(
     Re-raises :class:`GenerationRetry` for a classified transient failure so the
     Celery task can bound-retry without repeating earlier stages."""
     config = config or PipelineConfig()
+    # The Celery task passes the attempt id as a string; the advisory-lock key
+    # derivation needs a UUID. Coerce once here (a malformed id is a safe no-op).
+    if not isinstance(attempt_id, uuid.UUID):
+        try:
+            attempt_id = uuid.UUID(str(attempt_id))
+        except (ValueError, AttributeError, TypeError) as exc:
+            # Unreachable in production (the task id is always the attempt UUID),
+            # but never silently no-op: log the type so a future mis-call is
+            # diagnosable. The raw value is never echoed.
+            logger.warning(
+                "generation attempt id is not a valid UUID exception_type=%s",
+                type(exc).__name__,
+            )
+            return None
     with _attempt_advisory_lock(attempt_id) as acquired:
         if not acquired:
             logger.info(
@@ -634,14 +715,23 @@ def _poll(provider, prediction_id, config):
     (bounded task retry, same prediction). A timeout attempts cancellation and
     ends the attempt as ``image_poll_timeout``. No lock or transaction is held
     while polling/sleeping."""
-    for _ in range(max(config.poll_max_attempts, 1)):
+    attempts = max(config.poll_max_attempts, 1)
+    # A wall-clock deadline (when configured) makes REPLICATE_POLL_TIMEOUT a true
+    # bound regardless of per-call latency: polling stops once it elapses even if
+    # individual status calls are slow. Tests leave it 0 and bound by count.
+    deadline = _monotonic() + config.poll_timeout_seconds if config.poll_timeout_seconds else None
+    for index in range(attempts):
         try:
             prediction = provider.get_prediction(prediction_id)
         except ImageProviderError as exc:
             raise GenerationRetry(errors.IMAGE_PROVIDER_UNAVAILABLE) from exc
         if prediction.is_terminal:
             return prediction
-        if config.poll_interval_seconds:
+        if deadline is not None and _monotonic() >= deadline:
+            break
+        # Sleep only between polls, never after the final one — so total sleep
+        # is bounded by (attempts - 1) * interval, strictly below the timeout.
+        if config.poll_interval_seconds and index < attempts - 1:
             time.sleep(config.poll_interval_seconds)
     # Timed out: best-effort cancellation, then a terminal timeout.
     with contextlib.suppress(Exception):
@@ -771,14 +861,33 @@ def _generate_seed() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Live provider factories — Part A has none (image rendering is Part B). These
-# are replaced in Part B by the gated Replicate provider and secure downloader.
+# Live provider factories (Phase 10 Part B): the gated Replicate provider and
+# the hardened output downloader. Both fail closed — if the paid-image gate is
+# not open they map to a terminal image_provider_unavailable rather than
+# constructing any network client.
 # ---------------------------------------------------------------------------
 
 
 def _live_image_provider(config):
-    raise _TerminalGenerationError(errors.IMAGE_PROVIDER_UNAVAILABLE)
+    from sitara.ai_gateway.policy import (
+        PaidGenerationDisabled,
+        get_image_generation_provider_async,
+    )
+
+    try:
+        return get_image_generation_provider_async()
+    except PaidGenerationDisabled as exc:
+        raise _TerminalGenerationError(errors.IMAGE_PROVIDER_UNAVAILABLE) from exc
 
 
 def _live_image_downloader(config):
-    raise _TerminalGenerationError(errors.IMAGE_PROVIDER_UNAVAILABLE)
+    from .image_download import download_replicate_output
+
+    def _download(url):
+        return download_replicate_output(
+            url,
+            max_bytes=config.raw_max_bytes,
+            timeout_seconds=settings.REPLICATE_TIMEOUT_SECONDS,
+        )
+
+    return _download

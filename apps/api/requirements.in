@@ -35,6 +35,12 @@ pydantic==2.13.4
 # Provider calls are fail-closed: a present key never enables a call, tests
 # inject a fake client, and CI never instantiates a real network client.
 anthropic==0.116.0
+# Replicate client for gated FLUX image rendering (Phase 10). Same fail-closed
+# discipline as Anthropic: a present token never enables a call, the client is
+# created lazily only after every gate passes, tests inject fakes, and CI never
+# reaches Replicate (socket-denied). Only public async-prediction SDK
+# interfaces are used (no replicate.run(), no experimental replicate.use()).
+replicate==1.0.7
 
 # Development / CI
 pytest==8.3.4

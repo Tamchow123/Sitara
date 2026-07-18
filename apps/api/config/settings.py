@@ -430,6 +430,38 @@ DESIGN_SPEC_MAX_INPUT_CHARS = env_positive_int("DESIGN_SPEC_MAX_INPUT_CHARS", 20
 DESIGN_SPEC_MAX_OUTPUT_TOKENS = env_positive_int("DESIGN_SPEC_MAX_OUTPUT_TOKENS", 4096)
 ANTHROPIC_TIMEOUT_SECONDS = env_positive_int("ANTHROPIC_TIMEOUT_SECONDS", 60)
 
+# ---------------------------------------------------------------------------
+# Gated Replicate image rendering (Phase 10 Part B). Fail-closed by default:
+# LIVE_GENERATION_ENABLED gates the public end-to-end generation API and
+# defaults to false, so accidental paid generation is impossible even with both
+# provider gates open and a token present. It does NOT weaken the existing
+# standalone Anthropic management-command gates. The model name is never
+# exposed via the public config endpoint. Numeric values are strict positive
+# integers; malformed configuration refuses startup without echoing values.
+# ---------------------------------------------------------------------------
+LIVE_GENERATION_ENABLED = env_bool("LIVE_GENERATION_ENABLED", default=False)
+REPLICATE_TIMEOUT_SECONDS = env_positive_int("REPLICATE_TIMEOUT_SECONDS", 30)
+REPLICATE_POLL_INTERVAL_SECONDS = env_positive_int("REPLICATE_POLL_INTERVAL_SECONDS", 2)
+REPLICATE_POLL_TIMEOUT_SECONDS = env_positive_int("REPLICATE_POLL_TIMEOUT_SECONDS", 180)
+GENERATION_RAW_MAX_BYTES = env_positive_int("GENERATION_RAW_MAX_BYTES", 20_000_000)
+GENERATION_RAW_MAX_PIXELS = env_positive_int("GENERATION_RAW_MAX_PIXELS", 40_000_000)
+
+# The poll interval must be strictly smaller than the overall poll timeout, or
+# the pipeline could never poll more than once before giving up.
+if REPLICATE_POLL_INTERVAL_SECONDS >= REPLICATE_POLL_TIMEOUT_SECONDS:
+    raise ImproperlyConfigured(
+        "REPLICATE_POLL_INTERVAL_SECONDS must be strictly less than "
+        "REPLICATE_POLL_TIMEOUT_SECONDS"
+    )
+
+# The configured image model must be non-empty and fit the persisted
+# GenerationAttempt.image_model column bound (100). Never echo the value.
+_DEFAULT_IMAGE_MODEL_STRIPPED = (DEFAULT_IMAGE_MODEL or "").strip()
+if not _DEFAULT_IMAGE_MODEL_STRIPPED or len(_DEFAULT_IMAGE_MODEL_STRIPPED) > 100:
+    raise ImproperlyConfigured(
+        "DEFAULT_IMAGE_MODEL must be a non-empty model identifier of at most 100 characters"
+    )
+
 # Product limits surfaced via /api/v1/config/public.
 MAX_INSPIRATION_IMAGES = 3
 MAX_REFINEMENTS = 1
