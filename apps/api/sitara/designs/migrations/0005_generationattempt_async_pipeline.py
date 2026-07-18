@@ -47,6 +47,11 @@ def normalise_legacy_attempts(apps, schema_editor):
       single-in-progress rule) keep ONLY the newest in-progress row; older
       ones become ``failed``/``internal_generation_error`` (superseded).
 
+    Additionally, every legacy ``error_code`` is sanitised against a frozen
+    copy of the stable allowlist (unknown codes on failed rows become the
+    generic internal code; stray codes on non-failed rows are cleared) so no
+    unvetted legacy text can surface through the public job API.
+
     Frozen logic: only historical models, stable literal codes, and
     timezone-aware timestamps."""
     from django.utils import timezone
@@ -72,6 +77,43 @@ def normalise_legacy_attempts(apps, schema_editor):
         attempt.error_code = attempt.error_code or "internal_generation_error"
         attempt.completed_at = attempt.completed_at or attempt.updated_at or now
         attempt.save(update_fields=["error_code", "completed_at"])
+
+    # Legacy error codes are sanitised against a FROZEN copy of the Phase 10
+    # stable allowlist so no unvetted legacy text can ever surface through the
+    # public job API: a failed row with an unknown code becomes the generic
+    # internal code; a stray code on a non-failed row is cleared.
+    stable_codes = {
+        "queue_unavailable",
+        "generation_unavailable",
+        "design_incomplete",
+        "design_changed",
+        "structured_generation_failed",
+        "structured_provider_refused",
+        "prompt_build_failed",
+        "image_provider_unavailable",
+        "image_submission_ambiguous",
+        "image_prediction_failed",
+        "image_prediction_canceled",
+        "image_prediction_aborted",
+        "image_poll_timeout",
+        "image_download_failed",
+        "image_output_invalid",
+        "image_staging_failed",
+        "image_staging_unverified",
+        "internal_generation_error",
+    }
+    for attempt in (
+        GenerationAttempt.objects.filter(status="failed")
+        .exclude(error_code__in=stable_codes)
+        .iterator()
+    ):
+        attempt.error_code = "internal_generation_error"
+        attempt.save(update_fields=["error_code"])
+    for attempt in GenerationAttempt.objects.exclude(status="failed").exclude(
+        error_code=""
+    ).iterator():
+        attempt.error_code = ""
+        attempt.save(update_fields=["error_code"])
 
     # Duplicate in-progress attempts -> keep the newest per design.
     in_progress = ("queued", "running_text", "running_image")

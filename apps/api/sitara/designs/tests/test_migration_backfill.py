@@ -6,14 +6,18 @@ model state, not the current ORM), that migration 0005:
 - backfills the new required ``design`` FK from ``design_version.design_id``
   for every legacy GenerationAttempt row; and
 - normalises legacy shapes that would violate the NEW constraints (a
-  ``succeeded`` attempt without staged metadata; duplicate in-progress
+  ``succeeded`` attempt without staged metadata; a ``failed`` attempt with a
+  blank error code or missing completion timestamp; duplicate in-progress
   attempts per design) into preserved, constraint-compatible terminal audit
-  rows — so applying the constraints can never abort a deployment.
+  rows — so applying the constraints can never abort a deployment; and
+- sanitises every legacy ``error_code`` against the frozen stable allowlist
+  so no unvetted legacy text can surface through the public job API.
 """
 
 import pytest
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
+from django.utils import timezone
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -82,9 +86,20 @@ class TestBackfill:
         legacy_failed = GenerationAttempt.objects.create(design_version=version, status="failed")
         assert legacy_failed.error_code == ""
         assert legacy_failed.completed_at is None
-        # Two in-progress attempts for ONE design (legal pre-Phase-10).
+        # Legacy failed row with an UNVETTED code (the old schema imposed no
+        # allowlist) — must never survive into the public job API.
+        legacy_garbage = GenerationAttempt.objects.create(
+            design_version=version,
+            status="failed",
+            error_code="Raw legacy provider text!",
+            completed_at=timezone.now(),
+        )
+        # Two in-progress attempts for ONE design (legal pre-Phase-10). The
+        # surviving newest one carries a stray code that must be cleared.
         older = GenerationAttempt.objects.create(design_version=version, status="queued")
-        newer = GenerationAttempt.objects.create(design_version=version, status="running_text")
+        newer = GenerationAttempt.objects.create(
+            design_version=version, status="running_text", error_code="stray-code"
+        )
 
         try:
             executor = MigrationExecutor(connection)
@@ -92,12 +107,18 @@ class TestBackfill:
             executor.migrate(_TO)  # must NOT abort on the new constraints
             new_apps = executor.loader.project_state(_TO).apps
             NewAttempt = new_apps.get_model(_APP, "GenerationAttempt")
-            # All four rows preserved.
+            # All five rows preserved.
             assert (
                 NewAttempt.objects.filter(
-                    pk__in=[legacy_succeeded.pk, legacy_failed.pk, older.pk, newer.pk]
+                    pk__in=[
+                        legacy_succeeded.pk,
+                        legacy_failed.pk,
+                        legacy_garbage.pk,
+                        older.pk,
+                        newer.pk,
+                    ]
                 ).count()
-                == 4
+                == 5
             )
             # The impossible legacy 'succeeded' became a terminal audit row.
             normalised = NewAttempt.objects.get(pk=legacy_succeeded.pk)
@@ -109,6 +130,12 @@ class TestBackfill:
             assert backfilled_failed.status == "failed"
             assert backfilled_failed.error_code == "internal_generation_error"
             assert backfilled_failed.completed_at is not None
+            # The unvetted legacy code was sanitised to the generic code.
+            sanitised = NewAttempt.objects.get(pk=legacy_garbage.pk)
+            assert sanitised.error_code == "internal_generation_error"
+            # The surviving in-progress row's stray code was cleared.
+            survivor = NewAttempt.objects.get(pk=newer.pk)
+            assert survivor.error_code == ""
             # Exactly one in-progress attempt survives (the newest).
             in_progress = NewAttempt.objects.filter(
                 design=design.pk, status__in=["queued", "running_text", "running_image"]

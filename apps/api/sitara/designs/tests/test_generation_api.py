@@ -283,6 +283,44 @@ class TestJobRetrieval:
         assert response["Cache-Control"] == "no-store"
         assert response.json()["job"]["id"] == job_id
 
+    def test_unvetted_persisted_error_code_is_masked(self):
+        # Defence in depth at the public boundary: a persisted code outside
+        # the stable allowlist (legacy data or manual intervention) is
+        # reported as the generic internal code — never echoed.
+        client = csrf_client()
+        token = bootstrap_csrf(client)
+        design_id = _complete_design(client, token)
+        job_id = _post_generate(client, design_id, token=token).json()["job"]["id"]
+        from django.utils import timezone
+
+        GenerationAttempt.objects.filter(pk=job_id).update(
+            status="failed",
+            error_code="Raw legacy provider text!",
+            completed_at=timezone.now(),
+        )
+        response = client.get(_job_url(job_id))
+        assert response.status_code == 200
+        assert response.json()["job"]["error_code"] == "internal_generation_error"
+
+    def test_valid_persisted_error_code_is_returned_unmasked(self):
+        # The pass-through side of the masking boundary: a genuine stable
+        # code must reach the client EXACTLY (an inverted validity check
+        # would collapse every real failure into the generic code).
+        from django.utils import timezone
+
+        client = csrf_client()
+        token = bootstrap_csrf(client)
+        design_id = _complete_design(client, token)
+        job_id = _post_generate(client, design_id, token=token).json()["job"]["id"]
+        GenerationAttempt.objects.filter(pk=job_id).update(
+            status="failed",
+            error_code="image_prediction_failed",
+            completed_at=timezone.now(),
+        )
+        response = client.get(_job_url(job_id))
+        assert response.status_code == 200
+        assert response.json()["job"]["error_code"] == "image_prediction_failed"
+
     def test_foreign_job_is_404(self):
         owner = csrf_client()
         token = bootstrap_csrf(owner)

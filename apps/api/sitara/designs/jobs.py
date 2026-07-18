@@ -9,6 +9,8 @@ in one function means no view can accidentally widen it.
 
 from rest_framework import serializers
 
+from sitara.generation import errors as generation_errors
+
 from .models import GenerationAttempt
 
 # One shared DRF field for ISO-8601 timestamps, matching the rest of the API.
@@ -17,6 +19,18 @@ _DATETIME = serializers.DateTimeField()
 
 def _iso(value):
     return _DATETIME.to_representation(value) if value is not None else None
+
+
+def _public_error_code(code: str) -> str | None:
+    """Defence in depth on the allowlist boundary: a persisted code outside
+    the stable set (only possible via legacy data or manual intervention —
+    migration 0005 normalises legacy rows) is reported as the generic
+    internal code rather than echoed."""
+    if not code:
+        return None
+    if not generation_errors.is_valid_error_code(code):
+        return generation_errors.INTERNAL_GENERATION_ERROR
+    return code
 
 
 def public_job_payload(attempt: GenerationAttempt) -> dict:
@@ -33,7 +47,7 @@ def public_job_payload(attempt: GenerationAttempt) -> dict:
                 str(attempt.design_version_id) if attempt.design_version_id else None
             ),
             "status": attempt.status,
-            "error_code": attempt.error_code or None,
+            "error_code": _public_error_code(attempt.error_code),
             "created_at": _iso(attempt.created_at),
             "updated_at": _iso(attempt.updated_at),
             "started_at": _iso(attempt.started_at),

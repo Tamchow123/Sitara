@@ -28,9 +28,8 @@ from sitara.generation.image_fixtures import (
     synthetic_webp_downloader,
 )
 from sitara.generation.pipeline import (
-    _ATTEMPT_LOCK_NAMESPACE,
     PipelineConfig,
-    _attempt_lock_key,
+    _attempt_lock_keys,
     run_generation_attempt,
 )
 
@@ -535,6 +534,46 @@ class TestStagingRecovery:
         assert result.status == _Status.SUCCEEDED
         assert provider.create_calls == 0
         assert provider.get_calls == 0
+
+    def test_verified_resume_finalises_with_gates_closed(self, settings):
+        # Round-3 CDX-002: provider resolution is DEFERRED — a resume that
+        # only needs storage verification must finalise already-paid output
+        # even when the live gates are closed (no provider or downloader is
+        # ever constructed on this path).
+        settings.DEMO_MODE = True  # paid-image gate closed
+        from sitara.generation.image_fixtures import make_synthetic_webp
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        data = make_synthetic_webp()
+        key = "generation-staging/gated-resume/raw.webp"
+        retry = GenerationAttempt.objects.create(
+            design=design,
+            design_version_id=attempt.design_version_id,
+            status=_Status.RUNNING_IMAGE,
+            staged_image_storage_key=key,
+            staged_image_sha256=hashlib.sha256(data).hexdigest(),
+            staged_image_size_bytes=len(data),
+            staged_image_width=768,
+            staged_image_height=1024,
+        )
+        storage = InMemoryStorage()
+        storage._objects[key] = data
+        result = run_generation_attempt(
+            retry.id,
+            structured_provider=FixtureStructuredDesignProvider(),
+            image_provider=None,  # would fail closed if it were resolved
+            image_downloader=None,
+            storage=storage,
+            seed_factory=lambda: 0,
+            config=_FAST,
+        )
+        assert result.status == _Status.SUCCEEDED
 
     def test_transient_storage_error_during_verification_is_retryable(self):
         # A storage blip during resume-verification must be a bounded retry —
@@ -1197,9 +1236,17 @@ class TestPromptReuseAsIs:
 
 
 class TestUnknownProviderStatus:
-    def test_unknown_terminal_status_fails_closed(self):
+    def test_unknown_terminal_status_fails_closed_and_blocks_regeneration(self):
         # CDX-006: only an explicit `succeeded` may proceed to download; an
-        # unknown/novel provider state is untrusted and fails closed.
+        # unknown/novel provider state is untrusted and fails closed. It also
+        # proves NOTHING about the accepted (billed) prediction's fate, so it
+        # lands on internal_generation_error — an UNRESOLVED code — and the
+        # evidence-bearing row (persisted prediction id) blocks a fresh key.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import DesignAlreadyGenerated, enqueue_design_generation
+
         design = make_complete_design()
         attempt = _queued_attempt(design)
         downloads = []
@@ -1208,15 +1255,20 @@ class TestUnknownProviderStatus:
             downloads.append(url)
             return b"never used"
 
-        result = _run(
-            attempt,
-            image=FakeImageProvider(poll_actions=["blocked"]),
-            downloader=counting_downloader,
-        )
+        provider = FakeImageProvider(poll_actions=["blocked"])
+        result = _run(attempt, image=provider, downloader=counting_downloader)
         assert result.status == _Status.FAILED
-        assert result.error_code == errors.IMAGE_OUTPUT_INVALID
+        assert result.error_code == errors.INTERNAL_GENERATION_ERROR
         assert downloads == []  # nothing downloaded, nothing staged
         assert result.staged_image_storage_key == ""
+        assert result.image_prediction_id  # the billed submission
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+                )
+        assert provider.create_calls == 1
 
 
 class TestPixelCap:
@@ -1623,14 +1675,30 @@ class TestLiveFactories:
         assert recorded["args"] == ("https://replicate.delivery/x/raw.webp", 999, 30)
 
 
+def test_lock_keys_consume_both_uuid_slices_independently():
+    # Two attempt ids sharing their FIRST four bytes must still derive
+    # different lock keys (the second slice differs) — the exact collision
+    # this change eliminates. A regression slicing bytes[:4] twice would
+    # make these tuples equal.
+    import uuid as uuid_module
+
+    shared_prefix = bytes.fromhex("00112233")
+    a = uuid_module.UUID(bytes=shared_prefix + bytes.fromhex("44556677") + bytes(8))
+    b = uuid_module.UUID(bytes=shared_prefix + bytes.fromhex("8899aabb") + bytes(8))
+    keys_a = _attempt_lock_keys(a)
+    keys_b = _attempt_lock_keys(b)
+    assert keys_a[0] == keys_b[0]  # shared first slice
+    assert keys_a[1] != keys_b[1]  # second slice genuinely consulted
+    assert keys_a != keys_b
+
+
 @pytest.mark.django_db(transaction=True)
 def test_duplicate_delivery_is_serialised_by_the_advisory_lock():
     """A second (duplicate) delivery whose advisory lock is already held by
     another session performs NO work and returns None."""
     design = make_complete_design()
     attempt = _queued_attempt(design)
-    namespace = _ATTEMPT_LOCK_NAMESPACE
-    key = _attempt_lock_key(attempt.id)
+    key_high, key_low = _attempt_lock_keys(attempt.id)
 
     holding = threading.Event()
     release = threading.Event()
@@ -1640,10 +1708,10 @@ def test_duplicate_delivery_is_serialised_by_the_advisory_lock():
 
         try:
             with thread_connection.cursor() as cursor:
-                cursor.execute("SELECT pg_advisory_lock(%s, %s)", [namespace, key])
+                cursor.execute("SELECT pg_advisory_lock(%s, %s)", [key_high, key_low])
                 holding.set()
                 release.wait(timeout=10)
-                cursor.execute("SELECT pg_advisory_unlock(%s, %s)", [namespace, key])
+                cursor.execute("SELECT pg_advisory_unlock(%s, %s)", [key_high, key_low])
         finally:
             thread_connection.close()
 

@@ -95,11 +95,6 @@ _SPEND_RESOLVED_CODES = (
     errors.IMAGE_STAGING_FAILED,
 )
 
-# Advisory-lock namespace for attempt execution locks. Uses the TWO-integer
-# lock space, which PostgreSQL keeps entirely separate from the single-bigint
-# space the Design spec lock uses — so the two locks can never collide.
-_ATTEMPT_LOCK_NAMESPACE = 0x51A  # arbitrary fixed namespace
-
 # Monotonic clock for the poll wall-clock deadline, indirected so tests can
 # inject a deterministic clock.
 _monotonic = time.monotonic
@@ -418,9 +413,18 @@ def enqueue_design_generation(
 # ---------------------------------------------------------------------------
 
 
-def _attempt_lock_key(attempt_id) -> int:
-    # A signed 32-bit key from the attempt UUID for the two-int advisory lock.
-    return int.from_bytes(attempt_id.bytes[:4], "big", signed=True)
+def _attempt_lock_keys(attempt_id) -> tuple[int, int]:
+    """Two signed 32-bit keys from the attempt UUID's FIRST EIGHT bytes for
+    the two-int advisory-lock space (64 bits of entropy). A single 32-bit key
+    under a fixed namespace would make attempts sharing their first four UUID
+    bytes contend and be mistaken for duplicate deliveries. The Design spec
+    lock uses the single-bigint form, which PostgreSQL tags with a different
+    lock ``objsubid`` (1) than the two-int form used here (2) — the two key
+    spaces do not overlap; no other two-int locks exist in this codebase."""
+    return (
+        int.from_bytes(attempt_id.bytes[:4], "big", signed=True),
+        int.from_bytes(attempt_id.bytes[4:8], "big", signed=True),
+    )
 
 
 @contextlib.contextmanager
@@ -444,15 +448,15 @@ def _attempt_advisory_lock(attempt_id):
     connections with ``conn_max_age=60`` and no connection pooler, so a dead
     worker's session — and its lock — is released promptly rather than lingering
     behind a pooler."""
-    key = _attempt_lock_key(attempt_id)
+    key_high, key_low = _attempt_lock_keys(attempt_id)
     with connection.cursor() as cursor:
-        cursor.execute("SELECT pg_try_advisory_lock(%s, %s)", [_ATTEMPT_LOCK_NAMESPACE, key])
+        cursor.execute("SELECT pg_try_advisory_lock(%s, %s)", [key_high, key_low])
         acquired = bool(cursor.fetchone()[0])
         try:
             yield acquired
         finally:
             if acquired:
-                cursor.execute("SELECT pg_advisory_unlock(%s, %s)", [_ATTEMPT_LOCK_NAMESPACE, key])
+                cursor.execute("SELECT pg_advisory_unlock(%s, %s)", [key_high, key_low])
 
 
 # ---------------------------------------------------------------------------
@@ -737,10 +741,6 @@ def _recover_staged_object(store, attempt, config) -> bool:
 def _run_image_stage(
     attempt, version, image_provider, image_downloader, storage, seed_factory, config
 ) -> None:
-    provider = image_provider if image_provider is not None else _live_image_provider(config)
-    downloader = (
-        image_downloader if image_downloader is not None else _live_image_downloader(config)
-    )
     store = storage if storage is not None else default_storage
 
     _set_status(attempt, _Status.RUNNING_IMAGE)
@@ -763,6 +763,15 @@ def _run_image_stage(
     if _recover_staged_object(store, attempt, config):
         return
 
+    # Provider/downloader resolution is DEFERRED until a provider operation is
+    # actually required: the verify/recover paths above must finalise already-
+    # paid output even when the live gates are closed (a closed gate would
+    # otherwise fail the resume terminally before touching storage).
+    provider = image_provider if image_provider is not None else _live_image_provider(config)
+    downloader = (
+        image_downloader if image_downloader is not None else _live_image_downloader(config)
+    )
+
     prediction_id = _ensure_prediction(attempt, version, provider, seed_factory, config)
     prediction = _poll(provider, prediction_id, config)
 
@@ -774,9 +783,12 @@ def _run_image_stage(
         raise _TerminalGenerationError(errors.IMAGE_PREDICTION_ABORTED)
     if prediction.status != PREDICTION_SUCCEEDED:
         # Provider status is untrusted external data: an unknown, empty or
-        # novel terminal state fails CLOSED — only an explicit `succeeded`
-        # may proceed to download/staging.
-        raise _TerminalGenerationError(errors.IMAGE_OUTPUT_INVALID)
+        # novel state proves NOTHING about the accepted prediction's fate, so
+        # it must never land on a spend-RESOLVED code (which would readmit a
+        # second billed submission). internal_generation_error keeps the
+        # enqueue guard blocking — the persisted prediction id is submission
+        # evidence — until the state is understood.
+        raise _TerminalGenerationError(errors.INTERNAL_GENERATION_ERROR)
 
     output_url = prediction.output_url
     if not output_url:
