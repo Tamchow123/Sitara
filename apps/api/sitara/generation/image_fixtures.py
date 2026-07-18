@@ -39,6 +39,14 @@ def make_synthetic_webp(width: int = 768, height: int = 1024) -> bytes:
     return buffer.getvalue()
 
 
+def make_synthetic_png(width: int = 768, height: int = 1024) -> bytes:
+    """A locally-generated valid PNG (exercises non-webp staging branches)."""
+    image = Image.new("RGB", (width, height), (90, 60, 40))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def synthetic_webp_downloader(_output_url: str) -> bytes:
     """A downloader that ignores the URL and returns local synthetic WebP."""
     return make_synthetic_webp()

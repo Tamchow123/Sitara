@@ -385,18 +385,21 @@ def _replace_inspirations(design: Design, inspiration_asset_ids) -> None:
     )
 
 
-def _recovery_editable(locked: Design) -> bool:
-    """Whether a non-``draft`` design may still be edited.
+def _design_editability(locked: Design) -> tuple[bool, bool]:
+    """(ordinary_editable, recovery_edit) for an already-locked Design.
 
-    Only a ``generation_failed`` design that never produced a DesignVersion is
-    recoverable: the user may fix their inputs and try again. A design that has
-    ANY DesignVersion (generating, generated, or a failed run that still linked
-    an incomplete version) is no longer draft-editable — its version is
-    immutable historical work and must never be modified or removed."""
-    return (
-        locked.status == Design.Status.GENERATION_FAILED
-        and not DesignVersion.objects.filter(design=locked).exists()
-    )
+    A design with ANY DesignVersion is never draft-editable — regardless of its
+    lifecycle status. This covers legacy Phase 8/9 designs whose version was
+    created by the management command while the status stayed ``draft``: their
+    persisted answers are the immutable inputs of that version's spec and
+    prompt, and editing them would silently desynchronise the draft from the
+    version a later image-only generation resumes. Ordinary edits therefore
+    require ``draft`` AND no version; a recovery edit additionally allows a
+    ``generation_failed`` design that never produced a version."""
+    has_version = DesignVersion.objects.filter(design=locked).exists()
+    ordinary = locked.status == Design.Status.DRAFT and not has_version
+    recovery = locked.status == Design.Status.GENERATION_FAILED and not has_version
+    return ordinary, recovery
 
 
 def update_design_draft(
@@ -417,11 +420,12 @@ def update_design_draft(
     no partial update (answers saved but inspirations failed, or vice versa)
     can ever occur.
 
-    Editability (Phase 10 lifecycle): ordinary edits are allowed only while the
-    design is ``draft``; a recovery edit is additionally allowed while it is
-    ``generation_failed`` with no DesignVersion, and the FIRST successful such
-    edit returns the design to ``draft``. Every other state (generating,
-    generated, or failed-with-a-version) is rejected with the safe
+    Editability (Phase 10 lifecycle): ordinary edits require ``draft`` status
+    AND no DesignVersion (a version — even one created while the status was
+    still draft, as the Phase 8/9 commands did — freezes the design's inputs);
+    a recovery edit is additionally allowed while it is ``generation_failed``
+    with no DesignVersion, and the FIRST successful such edit returns the
+    design to ``draft``. Everything else is rejected with the safe
     ``design_not_editable`` code and never touches an existing DesignVersion.
 
     Raises :class:`DraftUpdateError` (controlled, safe) or
@@ -430,9 +434,8 @@ def update_design_draft(
     with transaction.atomic():
         locked = Design.objects.select_for_update().get(pk=design.pk)
 
-        is_draft = locked.status == Design.Status.DRAFT
-        is_recovery = not is_draft and _recovery_editable(locked)
-        if not is_draft and not is_recovery:
+        is_ordinary_editable, is_recovery = _design_editability(locked)
+        if not is_ordinary_editable and not is_recovery:
             raise DraftUpdateError(
                 "design_not_editable",
                 "This design can no longer be edited.",

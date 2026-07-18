@@ -39,6 +39,15 @@ class TestServiceEditability:
             update_design_draft(design, title="nope")
         assert exc.value.code == "design_not_editable"
 
+    def test_draft_with_existing_version_is_not_editable(self):
+        # Legacy Phase 8/9 shape: the management command created a version
+        # while the status stayed draft. The version freezes the inputs.
+        design = _design(Design.Status.DRAFT)
+        DesignVersion.objects.create(design=design, version_number=1)
+        with pytest.raises(DraftUpdateError) as exc:
+            update_design_draft(design, title="nope")
+        assert exc.value.code == "design_not_editable"
+
     def test_generating_is_not_editable(self):
         design = _design(Design.Status.GENERATING)
         with pytest.raises(DraftUpdateError) as exc:
@@ -53,6 +62,18 @@ class TestServiceEditability:
 
 
 class TestPatchApiConflict:
+    def test_patch_on_draft_with_version_returns_409(self):
+        client = csrf_client()
+        token = bootstrap_csrf(client)
+        created = send_json(client, "post", "/api/v1/designs/", {"title": "legacy"}, token=token)
+        design_id = created.json()["id"]
+        DesignVersion.objects.create(design_id=design_id, version_number=1)
+        response = send_json(
+            client, "patch", f"/api/v1/designs/{design_id}/", {"title": "edit"}, token=token
+        )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "design_not_editable"
+
     def test_patch_on_generated_design_returns_409(self):
         client = csrf_client()
         token = bootstrap_csrf(client)

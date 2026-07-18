@@ -167,6 +167,46 @@ class TestConcurrencyAndState:
                     design, idempotency_key=uuid.uuid4(), enqueue_task=_Recorder()
                 )
 
+    def test_staged_output_on_a_failed_attempt_rejects_as_generated(self):
+        # CDX-009: already-paid raw output exists (the attempt later failed
+        # terminally) — a new key must NOT create a second prediction.
+        from django.utils import timezone as tz
+
+        design = make_complete_design()
+        design.status = Design.Status.GENERATION_FAILED
+        design.save(update_fields=["status"])
+        version = DesignVersion.objects.create(design=design, version_number=1)
+        GenerationAttempt.objects.create(
+            design=design,
+            design_version=version,
+            status=_Status.FAILED,
+            error_code="internal_generation_error",
+            completed_at=tz.now(),
+            staged_image_storage_key="generation-staging/x/raw.webp",
+            staged_image_sha256="a" * 64,
+            staged_image_size_bytes=10,
+            staged_image_width=1,
+            staged_image_height=1,
+        )
+        with mock.patch(_AVAILABLE, return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design, idempotency_key=uuid.uuid4(), enqueue_task=_Recorder()
+                )
+
+    def test_final_image_key_on_the_version_rejects_as_generated(self):
+        design = make_complete_design()
+        design.status = Design.Status.GENERATION_FAILED
+        design.save(update_fields=["status"])
+        DesignVersion.objects.create(
+            design=design, version_number=1, image_storage_key="designs/final/key.webp"
+        )
+        with mock.patch(_AVAILABLE, return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design, idempotency_key=uuid.uuid4(), enqueue_task=_Recorder()
+                )
+
     def test_multiple_versions_reject_as_not_generatable(self):
         from sitara.generation.pipeline import DesignNotGeneratable
 

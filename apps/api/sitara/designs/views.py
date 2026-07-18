@@ -27,6 +27,7 @@ from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_sche
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.exceptions import ParseError
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -403,6 +404,9 @@ def _read_idempotency_key(request) -> tuple[uuid.UUID | None, Response | None]:
 class DesignGenerateView(APIView):
     authentication_classes = [SessionAuthentication]
     permission_classes = [AllowAny]
+    # JSON only — a form/multipart submission is a 415, never parsed into an
+    # empty body that would enqueue paid work outside the documented contract.
+    parser_classes = [JSONParser]
 
     @extend_schema(
         operation_id="designs_generate",
@@ -448,15 +452,21 @@ class DesignGenerateView(APIView):
         if key_failure is not None:
             return key_failure
 
-        body, parse_failure = _parse_body(request)
-        if parse_failure is not None:
-            return parse_failure
-        if body not in (None, {}):
-            return _error(
-                "validation_failed",
-                "This endpoint accepts no body or exactly {}.",
-                status.HTTP_400_BAD_REQUEST,
-            )
+        # Accept EITHER a genuinely empty request body OR exactly the JSON
+        # object {}. Anything else — including JSON null (which parses to
+        # None), arrays and scalars — is rejected, so no out-of-contract shape
+        # can enqueue paid work. The raw-body check runs BEFORE parsing so an
+        # empty body never reaches the JSON parser.
+        if request.body:
+            body, parse_failure = _parse_body(request)
+            if parse_failure is not None:
+                return parse_failure
+            if not isinstance(body, dict) or body != {}:
+                return _error(
+                    "validation_failed",
+                    "This endpoint accepts no body or exactly {}.",
+                    status.HTTP_400_BAD_REQUEST,
+                )
 
         try:
             attempt, _created = enqueue_design_generation(design, idempotency_key=key)

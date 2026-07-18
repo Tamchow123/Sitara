@@ -1,14 +1,22 @@
-"""Celery task registration, routing and settings (Phase 10)."""
+"""Celery task registration, routing, settings and retry exhaustion (Phase 10)."""
 
 import math
 from unittest import mock
 
+import pytest
 from django.conf import settings
 
 from config.celery import app
-from sitara.generation import tasks
+from sitara.designs.models import Design, GenerationAttempt
+from sitara.generation import errors, tasks
 from sitara.generation.image_download import MAX_REDIRECTS
-from sitara.generation.pipeline import build_pipeline_config, pipeline_budget_seconds
+from sitara.generation.pipeline import (
+    GenerationRetry,
+    build_pipeline_config,
+    pipeline_budget_seconds,
+)
+
+from .factory import make_complete_design
 
 _TASK_NAME = "sitara.generation.tasks.generate_design_attempt"
 
@@ -37,6 +45,71 @@ class TestTaskRegistration:
         # is also supplied.
         assert run.call_args.args[0] == "00000000-0000-0000-0000-000000000000"
         assert "config" in run.call_args.kwargs
+
+
+@pytest.mark.django_db
+class TestTransientRetryExhaustion:
+    def test_exhausted_retries_persist_the_classified_code(self):
+        # The task boundary converts exhausted GenerationRetry redeliveries
+        # into a terminal row carrying the SAME classified code — the wiring
+        # the fail-closed enqueue guard depends on (image_staging_unverified
+        # must never degrade to a different code on exhaustion).
+        design = make_complete_design()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        attempt = GenerationAttempt.objects.create(
+            design=design, status=GenerationAttempt.Status.RUNNING_IMAGE
+        )
+        retryable = GenerationRetry(errors.IMAGE_STAGING_UNVERIFIED)
+        with mock.patch.object(tasks, "run_generation_attempt", side_effect=retryable):
+            tasks.generate_design_attempt.push_request(retries=tasks.MAX_TRANSIENT_RETRIES)
+            try:
+                tasks.generate_design_attempt.run(str(attempt.id))
+            finally:
+                tasks.generate_design_attempt.pop_request()
+        attempt.refresh_from_db()
+        assert attempt.status == GenerationAttempt.Status.FAILED
+        assert attempt.error_code == errors.IMAGE_STAGING_UNVERIFIED
+        design.refresh_from_db()
+        assert design.status == Design.Status.GENERATION_FAILED
+
+    def test_unexhausted_transient_requests_a_bounded_retry(self):
+        # Below the bound the task re-raises via self.retry (a Retry signal in
+        # eager/apply mode) and must NOT touch the attempt row.
+        from celery.exceptions import Retry
+
+        design = make_complete_design()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        attempt = GenerationAttempt.objects.create(
+            design=design, status=GenerationAttempt.Status.RUNNING_IMAGE
+        )
+        retryable = GenerationRetry(errors.IMAGE_STAGING_UNVERIFIED)
+        with (
+            mock.patch.object(tasks, "run_generation_attempt", side_effect=retryable),
+            mock.patch.object(tasks, "fail_attempt") as fail_spy,
+        ):
+            # called_directly=False + is_eager=True make self.retry raise the
+            # Retry signal without attempting a real broker publish.
+            tasks.generate_design_attempt.push_request(
+                retries=0,
+                id=str(attempt.id),
+                called_directly=False,
+                is_eager=True,
+                args=[str(attempt.id)],
+                kwargs={},
+            )
+            try:
+                with pytest.raises(Retry):
+                    tasks.generate_design_attempt.run(str(attempt.id))
+            finally:
+                tasks.generate_design_attempt.pop_request()
+        # The exhaustion path was never entered — isolated from Celery's
+        # eager-retry replay semantics, not only inferred from row state.
+        fail_spy.assert_not_called()
+        attempt.refresh_from_db()
+        assert attempt.status == GenerationAttempt.Status.RUNNING_IMAGE
+        assert attempt.error_code == ""
 
 
 class TestTaskTimeLimits:

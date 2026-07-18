@@ -102,19 +102,27 @@ class ReplicateImageProvider:
             # handler retries; the persisted image_submission_in_flight marker
             # then resolves the resume conservatively (ambiguous, no resubmit).
             raise
+        except _PRE_ACCEPTANCE_CREATE_ERRORS:
+            # The connection was never established — provably pre-acceptance,
+            # so a bounded retry may safely resubmit.
+            raise ImageProviderError("create_pre_acceptance") from None
         except _AMBIGUOUS_CREATE_ERRORS:
             # The request may already have been accepted — never resubmit.
             raise ImageProviderError("create_ambiguous", ambiguous_acceptance=True) from None
-        except _PRE_ACCEPTANCE_CREATE_ERRORS:
-            raise ImageProviderError("create_pre_acceptance") from None
-        except Exception as exc:
-            # Any other create failure (SDK/API error): conservatively treat a
-            # bare timeout as ambiguous, otherwise pre-acceptance. Never capture
-            # the provider error body.
-            if _looks_like_timeout(exc):
-                raise ImageProviderError("create_ambiguous", ambiguous_acceptance=True) from None
-            raise ImageProviderError("create_failed") from None
-        return self._to_prediction(prediction, request.model)
+        except Exception:
+            # ANY other create failure defaults to AMBIGUOUS: an SDK/parse
+            # error can occur AFTER the provider accepted (and billed) the
+            # request, so only the provably-pre-acceptance transports above may
+            # ever retry. Never capture the provider error body.
+            raise ImageProviderError("create_ambiguous", ambiguous_acceptance=True) from None
+        result = self._to_prediction(prediction, request.model)
+        if not result.prediction_id or len(result.prediction_id) > 128:
+            # The provider accepted the request but returned no usable id (or
+            # one that cannot be persisted/polled). Without an id the outcome
+            # can never be reconciled — resolve conservatively as ambiguous
+            # rather than let a retry create a second billed prediction.
+            raise ImageProviderError("create_ambiguous", ambiguous_acceptance=True)
+        return result
 
     def get_prediction(self, prediction_id: str) -> ImagePrediction:
         client = self._client()
@@ -147,11 +155,6 @@ class ReplicateImageProvider:
             status=status,
             output_url=output_url,
         )
-
-
-def _looks_like_timeout(exc: Exception) -> bool:
-    name = type(exc).__name__.lower()
-    return "timeout" in name
 
 
 def _extract_output_url(output):

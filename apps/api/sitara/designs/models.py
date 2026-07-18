@@ -381,6 +381,14 @@ class GenerationAttempt(models.Model):
                 condition=Q(image_seed__isnull=True) | Q(image_seed__gte=0),
                 name="designs_attempt_seed_non_negative",
             ),
+            # A supplied staged hash must be a real SHA-256: exactly 64
+            # lowercase hex characters (spec: "SHA-256: exactly 64 when
+            # supplied"). Blank means not staged.
+            models.CheckConstraint(
+                condition=Q(staged_image_sha256="")
+                | Q(staged_image_sha256__regex=r"^[0-9a-f]{64}$"),
+                name="designs_attempt_sha256_shape",
+            ),
             # Staged size/dimensions, when present, are strictly positive.
             models.CheckConstraint(
                 condition=(

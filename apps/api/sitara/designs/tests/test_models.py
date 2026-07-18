@@ -164,6 +164,22 @@ class TestGenerationAttemptConstraints:
         attempt = GenerationAttempt.objects.create(design=make_design(), image_seed=0)
         assert attempt.image_seed == 0
 
+    @pytest.mark.parametrize("bad_hash", ["x", "a" * 63, "g" * 64, "A" * 64])
+    def test_malformed_sha256_is_rejected(self, bad_hash):
+        # A supplied staged hash must be exactly 64 lowercase hex characters.
+        with pytest.raises(IntegrityError), transaction.atomic():
+            GenerationAttempt.objects.create(
+                design=make_design(),
+                status="failed",
+                error_code="image_staging_failed",
+                completed_at=timezone.now(),
+                staged_image_storage_key="generation-staging/x/raw.webp",
+                staged_image_sha256=bad_hash,
+                staged_image_size_bytes=10,
+                staged_image_width=1,
+                staged_image_height=1,
+            )
+
     def test_partial_staged_metadata_is_rejected(self):
         # Key present but the rest absent violates the all-or-none constraint.
         with pytest.raises(IntegrityError), transaction.atomic():

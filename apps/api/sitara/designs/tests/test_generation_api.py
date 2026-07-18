@@ -144,6 +144,54 @@ class TestGenerateRejections:
         response = _post_generate(client, design_id, token=token, body={"foo": 1})
         assert response.status_code == 400
 
+    def _raw_post(self, client, design_id, token, raw_body, content_type="application/json"):
+        return client.post(
+            _generate_url(design_id),
+            data=raw_body,
+            content_type=content_type,
+            REMOTE_ADDR=unique_ip(),
+            HTTP_X_CSRFTOKEN=token,
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+
+    @pytest.mark.parametrize("raw_body", ["null", "[]", '"x"', "0", "[{}]"])
+    def test_non_object_json_bodies_are_rejected(self, raw_body):
+        # Only no body or exactly {} may enqueue paid work — JSON null (which
+        # parses to None), arrays and scalars are all out of contract.
+        client = csrf_client()
+        token = bootstrap_csrf(client)
+        design_id = _complete_design(client, token)
+        response = self._raw_post(client, design_id, token, raw_body)
+        assert response.status_code == 400, response.content
+        assert GenerationAttempt.objects.filter(design_id=design_id).count() == 0
+
+    def test_form_encoded_body_is_rejected_as_unsupported_media(self):
+        client = csrf_client()
+        token = bootstrap_csrf(client)
+        design_id = _complete_design(client, token)
+        response = self._raw_post(
+            client, design_id, token, "a=1", content_type="application/x-www-form-urlencoded"
+        )
+        assert response.status_code == 415
+        assert GenerationAttempt.objects.filter(design_id=design_id).count() == 0
+
+    def test_truly_empty_body_is_accepted(self):
+        client = csrf_client()
+        token = bootstrap_csrf(client)
+        design_id = _complete_design(client, token)
+        with mock.patch(_AVAILABLE, return_value=True):
+            # A genuinely empty body (zero bytes) with the JSON content type —
+            # the test client's default multipart encoding would not be empty.
+            response = client.post(
+                _generate_url(design_id),
+                data="",
+                content_type="application/json",
+                REMOTE_ADDR=unique_ip(),
+                HTTP_X_CSRFTOKEN=token,
+                HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+            )
+        assert response.status_code == 202, response.content
+
     def test_inaccessible_design_is_404(self):
         client = csrf_client()
         token = bootstrap_csrf(client)

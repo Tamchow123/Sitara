@@ -38,6 +38,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import connection, transaction
+from django.db.models import Q
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 
@@ -45,6 +46,7 @@ from sitara.ai_gateway.image_generation import (
     PREDICTION_ABORTED,
     PREDICTION_CANCELED,
     PREDICTION_FAILED,
+    PREDICTION_SUCCEEDED,
     ImageGenerationRequest,
     ImageProviderError,
 )
@@ -68,6 +70,29 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 _Status = GenerationAttempt.Status
+
+# Terminal codes whose provider-spend question is RESOLVED, keeping the
+# documented recovery path (a new idempotency key retrying only the image
+# stage) open: a provider-REPORTED terminal failure/cancel/abort (polled from
+# the provider itself), and output that was OBTAINED and CONFIRMED unusable
+# (invalid bytes/bounds, or staged content that failed verification) — there
+# regeneration is the only possible remedy. EVERY OTHER terminal code on a
+# failed attempt carrying submission evidence (an accepted prediction id, or
+# the in-flight marker persisted before the create call) blocks regeneration
+# BY DEFAULT — fail closed: the spend question is unresolved (ambiguous
+# acceptance, unverified staged output, a poll or download outage against a
+# live prediction, our own poll DEADLINE whose best-effort cancellation is
+# never confirmed and whose prediction may still complete and bill, or an
+# unclassified crash after submission), so a fresh attempt could double-bill.
+# This default also covers any FUTURE terminal code without per-code
+# enumeration. Operator resolution/reconciliation arrives with Phase 16.
+_SPEND_RESOLVED_CODES = (
+    errors.IMAGE_PREDICTION_FAILED,
+    errors.IMAGE_PREDICTION_CANCELED,
+    errors.IMAGE_PREDICTION_ABORTED,
+    errors.IMAGE_OUTPUT_INVALID,
+    errors.IMAGE_STAGING_FAILED,
+)
 
 # Advisory-lock namespace for attempt execution locks. Uses the TWO-integer
 # lock space, which PostgreSQL keeps entirely separate from the single-bigint
@@ -312,10 +337,49 @@ def enqueue_design_generation(
         ).exists():
             raise GenerationInProgress("a generation job is already in progress for this design")
 
-        # 5. Determine the starting point from persisted state.
+        # 5. Determine the starting point from persisted state. A completed
+        #    version or an already-staged raw image rejects as generated (spec
+        #    §5) — even when the attempt that produced it later terminally
+        #    failed for an unrelated reason, the paid output exists and must
+        #    never be regenerated. EXCEPTION: an attempt that terminally failed
+        #    verification (``image_staging_failed``) has CONFIRMED-unusable
+        #    staged data — blocking on it would permanently strand the design
+        #    with no usable image, so a fresh attempt may proceed (its own
+        #    deterministic key is distinct; the bad object stays orphaned for
+        #    later cleanup). ``image_staging_unverified`` (bounded retries
+        #    exhausted; content state UNKNOWN, possibly-valid paid output)
+        #    deliberately does NOT qualify for the exception — it fails closed
+        #    and keeps blocking regeneration until an operator intervenes.
+        staged_elsewhere = (
+            GenerationAttempt.objects.filter(design=locked)
+            .exclude(staged_image_storage_key="")
+            .exclude(status=_Status.FAILED, error_code=errors.IMAGE_STAGING_FAILED)
+            .exists()
+        )
+        #    An attempt whose spend question is UNRESOLVED can end with an
+        #    EMPTY staged key (retries ran out while staging paid output for
+        #    the first time; the provider may have accepted a create that was
+        #    never confirmed either way; a poll/download outage terminated an
+        #    attempt whose prediction was live; a crash landed after
+        #    submission). ALL such attempts must block whenever provider spend
+        #    MAY have occurred: an accepted prediction id, or a still-set
+        #    in-flight submission marker. The marker is persisted BEFORE the
+        #    create call in the same transaction, so with neither present the
+        #    provider was provably never invoked and a fresh attempt risks no
+        #    paid output. Only the provider-CONFIRMED outcomes in
+        #    ``_SPEND_RESOLVED_CODES`` keep the spec's recovery path open —
+        #    every other code fails closed by default.
+        unresolved_spend = (
+            GenerationAttempt.objects.filter(design=locked, status=_Status.FAILED)
+            .exclude(error_code__in=_SPEND_RESOLVED_CODES)
+            .filter(Q(image_submission_in_flight=True) | ~Q(image_prediction_id=""))
+            .exists()
+        )
         if (
             locked.status == Design.Status.GENERATED
             or GenerationAttempt.objects.filter(design=locked, status=_Status.SUCCEEDED).exists()
+            or staged_elsewhere
+            or unresolved_spend
         ):
             raise DesignAlreadyGenerated("this design has already been generated")
         versions = list(DesignVersion.objects.filter(design=locked).order_by("version_number"))
@@ -324,6 +388,9 @@ def enqueue_design_generation(
             # initial async pipeline never resumes into that.
             raise DesignNotGeneratable("this design cannot be generated")
         resume_version = versions[0] if versions else None
+        if resume_version is not None and resume_version.image_storage_key:
+            # A final ingested image (Phase 11) means the design is complete.
+            raise DesignAlreadyGenerated("this design has already been generated")
 
         # 6. Create the queued attempt (resuming an incomplete version if any).
         attempt = GenerationAttempt.objects.create(
@@ -553,14 +620,111 @@ def _run_text_stage(design, attempt, structured_provider) -> DesignVersion:
 
 
 def _run_prompt_stage(version: DesignVersion) -> DesignVersion:
+    # An existing prompt is immutable audit data and is reused AS-IS (spec §12:
+    # "existing image prompt means skip prompt persistence"; §20: the provider
+    # receives the exact persisted DesignVersion.image_prompt). It is never
+    # rebuilt — rebuilding under a newer builder version would either be a
+    # no-op or an immutability conflict, and neither may touch the audit trail.
+    if version.image_prompt:
+        return version
     try:
         return build_and_store_image_prompt(version)
-    except ImagePromptImmutable:
-        # An identical prompt already exists (resume) — keep the existing one.
-        version.refresh_from_db()
-        return version
+    except ImagePromptImmutable as exc:
+        # Unreachable now (we only build when no prompt exists), kept as a
+        # fail-closed defence: an immutability conflict is a terminal build
+        # failure, never a licence to submit stale or divergent prompt data.
+        raise _TerminalGenerationError(errors.PROMPT_BUILD_FAILED) from exc
     except ImagePromptBuildError as exc:
         raise _TerminalGenerationError(errors.PROMPT_BUILD_FAILED) from exc
+
+
+# The verified image formats a staged object may carry, in probe order.
+_STAGED_EXTENSIONS = ("webp", "png", "jpg")
+
+
+def _staged_key(attempt_id, extension: str) -> str:
+    return f"generation-staging/{attempt_id}/raw.{extension}"
+
+
+def _read_staged_object(store, key: str, config) -> bytes:
+    """Bounded read of a staged object.
+
+    A TRANSIENT storage failure (connection blip, backend restart) is a
+    bounded :class:`GenerationRetry` — the staged object is durable and no
+    spend is at risk, so retrying is unambiguously safe and a blip must never
+    permanently strand the attempt. The retry (and therefore the code the task
+    persists on retry EXHAUSTION) uses ``image_staging_unverified``: the
+    content state is unknown, not confirmed bad, so the enqueue guard keeps
+    blocking regeneration for it. Terminal ``image_staging_failed`` is
+    reserved for CONFIRMED bad content (empty or over the byte cap)."""
+    try:
+        with store.open(key, "rb") as handle:
+            data = handle.read(config.raw_max_bytes + 1)
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as exc:  # noqa: BLE001 - backend-specific transport errors
+        raise GenerationRetry(errors.IMAGE_STAGING_UNVERIFIED) from exc
+    if not data or len(data) > config.raw_max_bytes:
+        raise _TerminalGenerationError(errors.IMAGE_STAGING_FAILED)
+    return bytes(data)
+
+
+def _staged_object_exists(store, key: str) -> bool:
+    """Existence probe with the same transient-vs-terminal discipline as
+    :func:`_read_staged_object` (a transport failure is a bounded retry with
+    the unverified code, never a confirmed staging failure)."""
+    try:
+        return bool(store.exists(key))
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as exc:  # noqa: BLE001 - backend-specific transport errors
+        raise GenerationRetry(errors.IMAGE_STAGING_UNVERIFIED) from exc
+
+
+def _verify_persisted_staging(store, attempt, config) -> None:
+    """Metadata says the image is staged — verify the object really exists and
+    matches the recorded SHA-256 before the attempt may finalise as succeeded.
+    A CONFIRMED missing or divergent object fails safely (never a false
+    success); a transient storage failure retries via ``_staged_object_exists``
+    / ``_read_staged_object``."""
+    key = attempt.staged_image_storage_key
+    if not _staged_object_exists(store, key):
+        raise _TerminalGenerationError(errors.IMAGE_STAGING_FAILED)
+    data = _read_staged_object(store, key, config)
+    if hashlib.sha256(data).hexdigest() != attempt.staged_image_sha256:
+        raise _TerminalGenerationError(errors.IMAGE_STAGING_FAILED)
+
+
+def _recover_staged_object(store, attempt, config) -> bool:
+    """Recover a staged object whose metadata transaction never committed.
+
+    A crash between ``store.save`` and ``_persist_staged`` leaves a fully
+    staged private object with no metadata. The deterministic per-attempt key
+    is written only by this pipeline (server-generated UUID path, private
+    bucket), so a verified image found there IS this attempt's paid output —
+    recover it instead of re-downloading (the provider's temporary URL may
+    have expired) or resubmitting. Returns True when recovered."""
+    for extension in _STAGED_EXTENSIONS:
+        key = _staged_key(attempt.id, extension)
+        if not _staged_object_exists(store, key):
+            continue
+        data = _read_staged_object(store, key, config)
+        try:
+            verified_extension, width, height = _verify_image(data, config)
+        except _TerminalGenerationError as exc:
+            # A non-image or bounds-violating object at OUR deterministic key
+            # is a staging-integrity failure (conflicting content), not bad
+            # provider output — fail safely, never finalise on it.
+            raise _TerminalGenerationError(errors.IMAGE_STAGING_FAILED) from exc
+        if verified_extension != extension:
+            # The object's real format contradicts its key — conflicting
+            # content; never finalise on it.
+            raise _TerminalGenerationError(errors.IMAGE_STAGING_FAILED)
+        sha256 = hashlib.sha256(data).hexdigest()
+        _persist_staged(attempt, key, sha256, len(data), width, height)
+        attempt.refresh_from_db()
+        return True
+    return False
 
 
 def _run_image_stage(
@@ -575,9 +739,21 @@ def _run_image_stage(
     _set_status(attempt, _Status.RUNNING_IMAGE)
     attempt.refresh_from_db()
 
-    # Resume: an already-staged object means the image is done; finalisation
-    # follows without another provider call.
+    # Resume with persisted metadata: VERIFY the staged object still exists and
+    # matches before finalising — never a false success on missing/corrupt data.
     if attempt.staged_image_storage_key:
+        _verify_persisted_staging(store, attempt, config)
+        return
+
+    # Recovery: the object may have been staged just before a crash that lost
+    # the metadata write. Probe the deterministic keys BEFORE any provider
+    # operation so already-paid output is never lost to an expired URL. The
+    # probe deliberately runs even when a prediction id is already persisted:
+    # the save-then-crash window occurs AFTER submission (id set, object
+    # staged, metadata lost), so skipping the probe there would re-download —
+    # and lose the output when the provider's temporary URL has expired. A few
+    # existence checks per redelivery are cheap next to that loss.
+    if _recover_staged_object(store, attempt, config):
         return
 
     prediction_id = _ensure_prediction(attempt, version, provider, seed_factory, config)
@@ -589,6 +765,11 @@ def _run_image_stage(
         raise _TerminalGenerationError(errors.IMAGE_PREDICTION_CANCELED)
     if prediction.status == PREDICTION_ABORTED:
         raise _TerminalGenerationError(errors.IMAGE_PREDICTION_ABORTED)
+    if prediction.status != PREDICTION_SUCCEEDED:
+        # Provider status is untrusted external data: an unknown, empty or
+        # novel terminal state fails CLOSED — only an explicit `succeeded`
+        # may proceed to download/staging.
+        raise _TerminalGenerationError(errors.IMAGE_OUTPUT_INVALID)
 
     output_url = prediction.output_url
     if not output_url:
@@ -597,7 +778,7 @@ def _run_image_stage(
     data = _download(downloader, output_url, config)
     extension, width, height = _verify_image(data, config)
     sha256 = hashlib.sha256(data).hexdigest()
-    key = _stage_raw_image(store, attempt.id, extension, data, sha256)
+    key = _stage_raw_image(store, attempt.id, extension, data, sha256, config)
     _persist_staged(attempt, key, sha256, len(data), width, height)
 
 
@@ -686,6 +867,12 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
         )
         attempt.image_submission_in_flight = False
         raise GenerationRetry(errors.IMAGE_PROVIDER_UNAVAILABLE) from exc
+
+    if not prediction.prediction_id or len(prediction.prediction_id) > 128:
+        # Defence in depth (the provider adapter already rejects this): an
+        # accepted create with no persistable id can never be reconciled —
+        # resolve conservatively as ambiguous; the marker stays set.
+        raise _TerminalGenerationError(errors.IMAGE_SUBMISSION_AMBIGUOUS)
 
     # Persist the accepted prediction id and clear the marker together; never
     # clear or replace the id afterwards.
@@ -777,22 +964,25 @@ def _verify_image(data: bytes, config) -> tuple[str, int, int]:
     return allowed[image_format], width, height
 
 
-def _stage_raw_image(store, attempt_id, extension: str, data: bytes, sha256: str) -> str:
+def _stage_raw_image(store, attempt_id, extension: str, data: bytes, sha256: str, config) -> str:
     """Copy verified raw output into private storage at a deterministic key.
 
     On task restart the deterministic object may already exist: a byte-identical
     object (same SHA-256) resumes finalisation without another provider call; a
     DIFFERENT object at the same key fails safely rather than being overwritten.
-    ``file_overwrite=False`` storage never silently replaces a distinct object."""
-    key = f"generation-staging/{attempt_id}/raw.{extension}"
-    if store.exists(key):
-        try:
-            with store.open(key, "rb") as existing:
-                existing_bytes = existing.read()
-        except SoftTimeLimitExceeded:
-            raise  # worker interruption — retryable, not a staging failure
-        except Exception as exc:  # noqa: BLE001
-            raise _TerminalGenerationError(errors.IMAGE_STAGING_FAILED) from exc
+    ``file_overwrite=False`` storage never silently replaces a distinct object.
+
+    Storage I/O here follows the shared transient-vs-confirmed discipline
+    (:func:`_staged_object_exists` / :func:`_read_staged_object`): the bytes
+    being staged belong to ALREADY-PAID provider output, so a transport
+    failure is a bounded ``image_staging_unverified`` retry — the redelivery
+    re-obtains the output via the recovery probe (completed save) or the
+    persisted prediction id (no save) — while terminal
+    ``image_staging_failed`` is reserved for CONFIRMED conflicts (a
+    hash-divergent existing object; a key-renaming backend)."""
+    key = _staged_key(attempt_id, extension)
+    if _staged_object_exists(store, key):
+        existing_bytes = _read_staged_object(store, key, config)
         if hashlib.sha256(existing_bytes).hexdigest() == sha256:
             return key  # identical object already staged — resume
         raise _TerminalGenerationError(errors.IMAGE_STAGING_FAILED)
@@ -802,12 +992,16 @@ def _stage_raw_image(store, attempt_id, extension: str, data: bytes, sha256: str
         # A worker interruption mid-save is retryable: the redelivery either
         # finds the completed object (byte-identical resume) or re-saves it.
         raise
-    except Exception as exc:  # noqa: BLE001
-        raise _TerminalGenerationError(errors.IMAGE_STAGING_FAILED) from exc
+    except Exception as exc:  # noqa: BLE001 - transport error: whether the
+        # object was persisted is unknown. Retrying is safe — the redelivery's
+        # probe finds a completed save (byte-identical resume) or re-saves.
+        raise GenerationRetry(errors.IMAGE_STAGING_UNVERIFIED) from exc
     if saved_key != key:
         # A non-overwriting backend renamed around an existing object — treat as
-        # a staging conflict rather than accept a mismatched key. Cleanup is
-        # best-effort, but a worker interruption still propagates (retryable).
+        # a staging conflict rather than accept a mismatched key. This is the
+        # backend's AUTHORITATIVE answer (a completed save), not a transport
+        # failure, so it stays terminal/confirmed. Cleanup is best-effort, but
+        # a worker interruption still propagates (retryable).
         try:
             store.delete(saved_key)
         except SoftTimeLimitExceeded:

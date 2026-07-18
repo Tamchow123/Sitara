@@ -27,6 +27,53 @@ def backfill_attempt_design(apps, schema_editor):
         attempt.save(update_fields=["design"])
 
 
+def normalise_legacy_attempts(apps, schema_editor):
+    """Make every valid pre-Phase-10 row satisfy the NEW constraints so adding
+    them can never abort a deployment (PostgreSQL validates existing rows).
+
+    Two legacy shapes were legal under the old schema but violate the new
+    invariants, and both are normalised into constraint-compatible TERMINAL
+    audit states — rows are preserved, never deleted:
+
+    - a ``succeeded`` attempt without staged-image metadata (no pre-Phase-10
+      code ever staged an image, so such a row cannot represent a real staged
+      output) becomes ``failed`` with the stable ``internal_generation_error``
+      code and a completion timestamp;
+    - multiple in-progress attempts for one design (the old schema had no
+      single-in-progress rule) keep ONLY the newest in-progress row; older
+      ones become ``failed``/``internal_generation_error`` (superseded).
+
+    Frozen logic: only historical models, stable literal codes, and
+    timezone-aware timestamps."""
+    from django.utils import timezone
+
+    GenerationAttempt = apps.get_model("designs", "GenerationAttempt")
+    now = timezone.now()
+
+    # Legacy "succeeded" without staged metadata -> terminal failed audit row.
+    for attempt in GenerationAttempt.objects.filter(
+        status="succeeded", staged_image_storage_key=""
+    ).iterator():
+        attempt.status = "failed"
+        attempt.error_code = "internal_generation_error"
+        attempt.completed_at = attempt.completed_at or attempt.updated_at or now
+        attempt.save(update_fields=["status", "error_code", "completed_at"])
+
+    # Duplicate in-progress attempts -> keep the newest per design.
+    in_progress = ("queued", "running_text", "running_image")
+    seen_designs: set = set()
+    for attempt in GenerationAttempt.objects.filter(status__in=in_progress).order_by(
+        "design_id", "-created_at"
+    ):
+        if attempt.design_id in seen_designs:
+            attempt.status = "failed"
+            attempt.error_code = "internal_generation_error"
+            attempt.completed_at = attempt.completed_at or now
+            attempt.save(update_fields=["status", "error_code", "completed_at"])
+        else:
+            seen_designs.add(attempt.design_id)
+
+
 def noop_reverse(apps, schema_editor):
     # Reversing only drops the column again (handled by the schema ops); the
     # backfill itself has nothing to undo.
@@ -76,6 +123,10 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.RunPython(backfill_attempt_design, noop_reverse),
+        # Flush the deferred FK checks queued by the backfill NOW — a later
+        # ALTER TABLE in this same transaction would otherwise abort with
+        # "cannot ALTER TABLE ... because it has pending trigger events".
+        migrations.RunSQL(sql="SET CONSTRAINTS ALL IMMEDIATE", reverse_sql=migrations.RunSQL.noop),
         migrations.AlterField(
             model_name="generationattempt",
             name="design",
@@ -165,6 +216,11 @@ class Migration(migrations.Migration):
             name="staged_image_height",
             field=models.PositiveIntegerField(blank=True, null=True),
         ),
+        # --- Legacy-row normalisation (BEFORE the new constraints, which
+        # PostgreSQL validates against existing rows) ---------------------------
+        migrations.RunPython(normalise_legacy_attempts, noop_reverse),
+        # Flush deferred checks again before the constraint ALTERs below.
+        migrations.RunSQL(sql="SET CONSTRAINTS ALL IMMEDIATE", reverse_sql=migrations.RunSQL.noop),
         # --- Constraints ------------------------------------------------------
         migrations.AddConstraint(
             model_name="generationattempt",

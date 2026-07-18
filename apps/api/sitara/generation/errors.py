@@ -27,6 +27,10 @@ PROMPT_BUILD_FAILED = "prompt_build_failed"
 
 # Image (Replicate) stage.
 IMAGE_PROVIDER_UNAVAILABLE = "image_provider_unavailable"
+# The provider MAY have accepted (and billed) a create call that was never
+# confirmed either way. Spend is unresolved, so — like every code outside
+# ``pipeline._SPEND_RESOLVED_CODES`` — the enqueue guard blocks regeneration
+# whenever the failed attempt carries submission evidence.
 IMAGE_SUBMISSION_AMBIGUOUS = "image_submission_ambiguous"
 IMAGE_PREDICTION_FAILED = "image_prediction_failed"
 IMAGE_PREDICTION_CANCELED = "image_prediction_canceled"
@@ -35,6 +39,14 @@ IMAGE_POLL_TIMEOUT = "image_poll_timeout"
 IMAGE_DOWNLOAD_FAILED = "image_download_failed"
 IMAGE_OUTPUT_INVALID = "image_output_invalid"
 IMAGE_STAGING_FAILED = "image_staging_failed"
+# Staged-output state could NOT be confirmed: transient storage failures
+# outlasted the bounded retry budget. Distinct from ``image_staging_failed``
+# (content CONFIRMED bad) because already-paid output may still be intact —
+# the enqueue guard keeps blocking regeneration for this code whenever
+# provider spend may have occurred (staged metadata, an accepted prediction
+# id, or a still-set in-flight submission marker on the failed attempt; see
+# ``pipeline._SPEND_RESOLVED_CODES`` for the confirmed-outcome allowlist).
+IMAGE_STAGING_UNVERIFIED = "image_staging_unverified"
 
 # Catch-all for anything unclassified — an unexpected exception becomes this,
 # never a raw message.
@@ -59,6 +71,7 @@ GENERATION_ERROR_CODES = frozenset(
         IMAGE_DOWNLOAD_FAILED,
         IMAGE_OUTPUT_INVALID,
         IMAGE_STAGING_FAILED,
+        IMAGE_STAGING_UNVERIFIED,
         INTERNAL_GENERATION_ERROR,
     }
 )

@@ -117,6 +117,33 @@ already-paid output).
   loss is deferred to Phase 16; the bounded task time limits, `conn_max_age`
   and idempotent writes limit the blast radius in the interim.
 
+## Amendment: unresolved-spend regeneration block (review hardening)
+
+The Phase 10 spec's recovery rule ("a new API request with a new idempotency
+key may link the same incomplete version and retry only the image stage")
+applies to spend-**resolved** terminal outcomes, enumerated in
+`pipeline._SPEND_RESOLVED_CODES`: a provider-reported terminal
+failure/cancel/abort polled from the provider itself
+(`image_prediction_failed`, `image_prediction_canceled`,
+`image_prediction_aborted`), and output that was obtained and confirmed
+unusable (`image_output_invalid`, `image_staging_failed`) — there
+regeneration is the only possible remedy. **Every other** terminal code
+on a failed attempt that carries submission evidence (an accepted prediction
+id, or the in-flight marker persisted before the create call) blocks
+regeneration by default — fail closed — because the spend question is
+unresolved: an ambiguous acceptance (`image_submission_ambiguous`),
+unverified staged paid output (`image_staging_unverified`), a poll or
+download outage against a live prediction (`image_provider_unavailable`,
+`image_download_failed`), our own poll deadline (`image_poll_timeout` — its
+best-effort cancellation is never confirmed, and the prediction may still
+complete and bill after the deadline), or an unclassified crash after
+submission (`internal_generation_error`). A fresh attempt would submit a second billed
+prediction while the first may already be paid. The cost-control
+non-negotiables take precedence over the generic retry sentence; an operator
+resolution path (and reconciliation) belongs to Phase 16. A failed attempt
+with **no** submission evidence provably never invoked the provider and
+remains freely retryable.
+
 ## Checkpoints
 
 The offline fixture checkpoint (zero network, `run_generation_fixture`) is

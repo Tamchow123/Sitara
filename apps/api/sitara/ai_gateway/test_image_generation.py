@@ -277,9 +277,11 @@ class TestReplicateContract:
         with pytest.raises(ImageProviderError):
             provider.get_prediction("p")
 
-    def test_generic_sdk_error_on_create_is_non_ambiguous(self, settings):
-        # A non-httpx, non-timeout SDK error means the request did not reach an
-        # accepted state — classify as pre-acceptance (safe to retry).
+    def test_generic_sdk_error_on_create_is_ambiguous(self, settings):
+        # An SDK error can occur AFTER the provider accepted (and billed) the
+        # request — e.g. while parsing the response. ONLY the provably
+        # pre-acceptance connect failures may ever retry; every other create
+        # exception resolves conservatively as ambiguous (never resubmit).
         _open_gates(settings)
 
         class _ReplicateError(Exception):
@@ -289,17 +291,43 @@ class TestReplicateContract:
         provider = ReplicateImageProvider(client=_FakeClient(preds))
         with pytest.raises(ImageProviderError) as exc:
             provider.create_prediction(_request())
-        assert exc.value.ambiguous_acceptance is False
+        assert exc.value.ambiguous_acceptance is True
 
     def test_generic_timeout_named_error_on_create_is_ambiguous(self, settings):
-        # An SDK exception whose class name contains "timeout" is treated as an
-        # ambiguous acceptance (conservative spend — never resubmit).
         _open_gates(settings)
 
         class _SDKTimeout(Exception):
             pass
 
         preds = _FakePredictions(create_error=_SDKTimeout("deadline"))
+        provider = ReplicateImageProvider(client=_FakeClient(preds))
+        with pytest.raises(ImageProviderError) as exc:
+            provider.create_prediction(_request())
+        assert exc.value.ambiguous_acceptance is True
+
+    def test_create_returning_no_id_is_ambiguous(self, settings):
+        # An accepted create whose response carries no usable prediction id can
+        # never be reconciled — resolve as ambiguous, never let a retry create
+        # a second billed prediction.
+        _open_gates(settings)
+        preds = _FakePredictions(create_result=_FakePrediction(id="", status="starting"))
+        provider = ReplicateImageProvider(client=_FakeClient(preds))
+        with pytest.raises(ImageProviderError) as exc:
+            provider.create_prediction(_request())
+        assert exc.value.ambiguous_acceptance is True
+
+    def test_create_returning_none_is_ambiguous(self, settings):
+        _open_gates(settings)
+        preds = _FakePredictions(create_result=None)
+        provider = ReplicateImageProvider(client=_FakeClient(preds))
+        with pytest.raises(ImageProviderError) as exc:
+            provider.create_prediction(_request())
+        assert exc.value.ambiguous_acceptance is True
+
+    def test_create_returning_overlong_id_is_ambiguous(self, settings):
+        # An id that cannot be persisted (column bound 128) cannot be polled.
+        _open_gates(settings)
+        preds = _FakePredictions(create_result=_FakePrediction(id="p" * 129, status="starting"))
         provider = ReplicateImageProvider(client=_FakeClient(preds))
         with pytest.raises(ImageProviderError) as exc:
             provider.create_prediction(_request())

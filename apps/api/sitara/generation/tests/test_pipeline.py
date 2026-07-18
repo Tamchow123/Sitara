@@ -3,6 +3,7 @@ providers. Fakes are injected for the structured provider, image provider,
 downloader and storage.
 """
 
+import hashlib
 import threading
 import uuid
 
@@ -23,6 +24,7 @@ from sitara.generation.image_fixtures import (
     FakeImageProvider,
     InMemoryStorage,
     invalid_bytes_downloader,
+    make_synthetic_png,
     synthetic_webp_downloader,
 )
 from sitara.generation.pipeline import (
@@ -280,10 +282,9 @@ class TestStagingResume:
 
     def test_existing_matching_object_at_the_deterministic_key_resumes(self):
         # Task-restart scenario: the raw object was already staged at the
-        # deterministic key before this run. A byte-identical object must be
-        # verified and reused — the run finishes without a staging conflict
-        # (InMemoryStorage.save raises on an existing key, so success itself
-        # proves the resume branch ran instead of a second save).
+        # deterministic key before this run. The RECOVERY PROBE
+        # (_recover_staged_object) finds and verifies it before any provider
+        # operation, so the run finishes without re-downloading or re-saving.
         from sitara.generation.image_fixtures import make_synthetic_webp
 
         design = make_complete_design()
@@ -295,6 +296,111 @@ class TestStagingResume:
         assert result.status == _Status.SUCCEEDED
         assert result.staged_image_storage_key == key
         assert storage.exists(key)
+
+    def test_stage_raw_image_resumes_on_matching_object_directly(self):
+        # The IN-BAND branch of _stage_raw_image (reached when an object
+        # appears between the recovery probe and the save — a concurrent
+        # redelivery race) must resume on byte-identical content without a
+        # second save, independent of the recovery probe.
+        from sitara.generation.image_fixtures import make_synthetic_webp
+        from sitara.generation.pipeline import _stage_raw_image
+
+        data = make_synthetic_webp()
+        sha = hashlib.sha256(data).hexdigest()
+        storage = InMemoryStorage()
+        key = "generation-staging/some-attempt/raw.webp"
+        storage._objects[key] = data
+        # InMemoryStorage.save raises on an existing key, so a successful
+        # return proves the resume branch ran instead of a second save.
+        assert _stage_raw_image(storage, "some-attempt", "webp", data, sha, _FAST) == key
+
+    def test_stage_raw_image_fails_on_conflicting_object_directly(self):
+        from sitara.generation.image_fixtures import make_synthetic_webp
+        from sitara.generation.pipeline import _stage_raw_image, _TerminalGenerationError
+
+        data = make_synthetic_webp()
+        sha = hashlib.sha256(data).hexdigest()
+        storage = InMemoryStorage()
+        key = "generation-staging/some-attempt/raw.webp"
+        storage._objects[key] = b"different bytes that must never be overwritten"
+        with pytest.raises(_TerminalGenerationError) as exc:
+            _stage_raw_image(storage, "some-attempt", "webp", data, sha, _FAST)
+        assert exc.value.code == errors.IMAGE_STAGING_FAILED
+        assert storage._objects[key] == b"different bytes that must never be overwritten"
+
+    def test_stage_raw_image_transient_exists_error_is_retryable_directly(self):
+        # The staged bytes are ALREADY-PAID output: a transport failure during
+        # the pre-save existence probe must be a bounded retry with the
+        # UNVERIFIED code, never a terminal (or unclassified) failure.
+        from sitara.generation.image_fixtures import make_synthetic_webp
+        from sitara.generation.pipeline import GenerationRetry, _stage_raw_image
+
+        class _FailingExists(InMemoryStorage):
+            def exists(self, key):
+                raise ConnectionError("storage blip")
+
+        data = make_synthetic_webp()
+        sha = hashlib.sha256(data).hexdigest()
+        with pytest.raises(GenerationRetry) as exc:
+            _stage_raw_image(_FailingExists(), "some-attempt", "webp", data, sha, _FAST)
+        assert exc.value.code == errors.IMAGE_STAGING_UNVERIFIED
+
+    def test_stage_raw_image_transient_readback_error_is_retryable_directly(self):
+        # exists()==True but the byte-identity read-back hits a transport
+        # error: the object was just confirmed durable, so retry — terminal is
+        # reserved for a CONFIRMED hash divergence.
+        from sitara.generation.image_fixtures import make_synthetic_webp
+        from sitara.generation.pipeline import GenerationRetry, _stage_raw_image
+
+        class _FailingOpen(InMemoryStorage):
+            def open(self, key, mode="rb"):
+                raise ConnectionError("storage blip")
+
+        data = make_synthetic_webp()
+        sha = hashlib.sha256(data).hexdigest()
+        storage = _FailingOpen()
+        key = "generation-staging/some-attempt/raw.webp"
+        storage._objects[key] = data
+        with pytest.raises(GenerationRetry) as exc:
+            _stage_raw_image(storage, "some-attempt", "webp", data, sha, _FAST)
+        assert exc.value.code == errors.IMAGE_STAGING_UNVERIFIED
+        assert storage._objects[key] == data  # untouched
+
+    def test_transient_save_error_during_staging_is_retryable(self):
+        # End-to-end: a storage blip while SAVING the freshly downloaded,
+        # already-billed image is a bounded retry; the redelivery reuses the
+        # persisted prediction id (create_calls stays 1 — never a second paid
+        # submission) and succeeds once storage recovers.
+        from sitara.generation.pipeline import GenerationRetry
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        class _BlippingSave(InMemoryStorage):
+            def __init__(self):
+                super().__init__()
+                self.save_calls = 0
+
+            def save(self, key, content):
+                self.save_calls += 1
+                if self.save_calls == 1:
+                    raise ConnectionError("storage blip")
+                return super().save(key, content)
+
+        storage = _BlippingSave()
+        provider = FakeImageProvider()
+        with pytest.raises(GenerationRetry) as exc:
+            _run(attempt, image=provider, storage=storage)
+        assert exc.value.code == errors.IMAGE_STAGING_UNVERIFIED
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.RUNNING_IMAGE
+        assert attempt.image_prediction_id  # persisted before the blip
+        assert provider.create_calls == 1
+        # Redelivery with healthy storage: same prediction, no new submission.
+        result = _run(attempt, image=provider, storage=storage)
+        assert result.status == _Status.SUCCEEDED
+        assert provider.create_calls == 1
+        assert result.staged_image_storage_key.startswith(f"generation-staging/{attempt.id}/")
 
     def test_backend_renaming_around_the_key_fails_safely(self):
         # A non-overwriting backend that saves under a DIFFERENT key than
@@ -339,8 +445,9 @@ class TestStagingResume:
         assert attempt.status == _Status.RUNNING_IMAGE  # retryable, not terminal
 
     def test_conflicting_object_at_the_deterministic_key_fails_safely(self):
-        # A DIFFERENT object at the deterministic key must never be
-        # overwritten — the attempt fails with image_staging_failed.
+        # A DIFFERENT (non-image) object at the deterministic key must never
+        # be overwritten or finalised on — the RECOVERY PROBE rejects it and
+        # the attempt fails with image_staging_failed.
         design = make_complete_design()
         attempt = _queued_attempt(design)
         storage = InMemoryStorage()
@@ -351,6 +458,765 @@ class TestStagingResume:
         assert result.error_code == errors.IMAGE_STAGING_FAILED
         # The pre-existing object is untouched.
         assert storage._objects[key] == b"a different object that must not be replaced"
+
+
+class TestStagingRecovery:
+    """CDX-004: paid output staged just before a crash (metadata lost) is
+    recovered without any provider operation; persisted metadata is verified
+    against the real object before an attempt may finalise.
+
+    Also owns the enqueue guard's spend-resolution boundary tests: codes in
+    ``_SPEND_RESOLVED_CODES`` keep the recovery path open, every other code
+    on an evidence-bearing failed attempt blocks regeneration (fail closed),
+    and evidence-free failures always readmit."""
+
+    def test_saved_object_without_metadata_is_recovered_without_provider_calls(self):
+        from sitara.generation.image_fixtures import make_synthetic_webp
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        # First get a linked version + prompt (fail the image stage cleanly),
+        # then simulate "object staged, metadata write lost, URL expired".
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        retry = GenerationAttempt.objects.create(
+            design=design, design_version_id=attempt.design_version_id, status=_Status.QUEUED
+        )
+        storage = InMemoryStorage()
+        storage._objects[f"generation-staging/{retry.id}/raw.webp"] = make_synthetic_webp()
+
+        def expired_url_downloader(_url):  # the temporary provider URL is gone
+            raise AssertionError("download must not be attempted during recovery")
+
+        provider = FakeImageProvider()
+        result = _run(retry, image=provider, downloader=expired_url_downloader, storage=storage)
+        assert result.status == _Status.SUCCEEDED
+        assert provider.create_calls == 0  # no provider operation at all
+        assert provider.get_calls == 0
+        assert result.staged_image_storage_key == f"generation-staging/{retry.id}/raw.webp"
+        assert len(result.staged_image_sha256) == 64
+
+    def test_metadata_with_matching_object_resumes_to_succeeded(self):
+        # SUCCESS branch of _verify_persisted_staging: valid persisted metadata
+        # whose object exists and matches finalises WITHOUT any provider or
+        # downloader operation.
+        from sitara.generation.image_fixtures import make_synthetic_webp
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        data = make_synthetic_webp()
+        key = "generation-staging/verified/raw.webp"
+        retry = GenerationAttempt.objects.create(
+            design=design,
+            design_version_id=attempt.design_version_id,
+            status=_Status.RUNNING_IMAGE,
+            staged_image_storage_key=key,
+            staged_image_sha256=hashlib.sha256(data).hexdigest(),
+            staged_image_size_bytes=len(data),
+            staged_image_width=768,
+            staged_image_height=1024,
+        )
+        storage = InMemoryStorage()
+        storage._objects[key] = data
+        provider = FakeImageProvider()
+
+        def never_download(_url):
+            raise AssertionError("downloader must not run on a verified resume")
+
+        result = _run(retry, image=provider, downloader=never_download, storage=storage)
+        assert result.status == _Status.SUCCEEDED
+        assert provider.create_calls == 0
+        assert provider.get_calls == 0
+
+    def test_transient_storage_error_during_verification_is_retryable(self):
+        # A storage blip during resume-verification must be a bounded retry —
+        # never a terminal failure that (with the enqueue guard) would strand
+        # the design permanently. The staged object is durable; retrying is safe.
+        from sitara.generation.image_fixtures import make_synthetic_webp
+        from sitara.generation.pipeline import GenerationRetry
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        data = make_synthetic_webp()
+        key = "generation-staging/blip/raw.webp"
+        retry = GenerationAttempt.objects.create(
+            design=design,
+            design_version_id=attempt.design_version_id,
+            status=_Status.RUNNING_IMAGE,
+            staged_image_storage_key=key,
+            staged_image_sha256=hashlib.sha256(data).hexdigest(),
+            staged_image_size_bytes=len(data),
+            staged_image_width=768,
+            staged_image_height=1024,
+        )
+
+        class _BlippingStorage(InMemoryStorage):
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+
+            def open(self, k, mode="rb"):
+                self.calls += 1
+                if self.calls == 1:
+                    raise ConnectionError("storage blip")
+                return super().open(k, mode)
+
+        storage = _BlippingStorage()
+        storage._objects[key] = data
+        # First delivery: the blip surfaces as a bounded retry, NOT terminal.
+        # The retry carries the UNVERIFIED code (content state unknown), never
+        # the confirmed image_staging_failed code the enqueue guard readmits.
+        with pytest.raises(GenerationRetry) as exc:
+            _run(retry, storage=storage)
+        assert exc.value.code == errors.IMAGE_STAGING_UNVERIFIED
+        retry.refresh_from_db()
+        assert retry.status == _Status.RUNNING_IMAGE
+        # Redelivery with healthy storage verifies and succeeds.
+        result = _run(retry, storage=storage)
+        assert result.status == _Status.SUCCEEDED
+
+    def test_transient_storage_error_during_recovery_probe_is_retryable(self):
+        # The pre-provider RECOVERY PROBE shares the transient discipline: a
+        # storage blip during its existence check is a bounded retry (never
+        # terminal), and the redelivery recovers the already-staged object
+        # without any provider operation — a blip must never strand paid
+        # output staged just before a metadata-losing crash.
+        from sitara.generation.image_fixtures import make_synthetic_webp
+        from sitara.generation.pipeline import GenerationRetry
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        retry = GenerationAttempt.objects.create(
+            design=design, design_version_id=attempt.design_version_id, status=_Status.QUEUED
+        )
+
+        class _BlippingExists(InMemoryStorage):
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+
+            def exists(self, key):
+                self.calls += 1
+                if self.calls == 1:
+                    raise ConnectionError("storage blip")
+                return super().exists(key)
+
+        storage = _BlippingExists()
+        storage._objects[f"generation-staging/{retry.id}/raw.webp"] = make_synthetic_webp()
+
+        def never_download(_url):
+            raise AssertionError("download must not be attempted during recovery")
+
+        provider = FakeImageProvider()
+        with pytest.raises(GenerationRetry) as exc:
+            _run(retry, image=provider, downloader=never_download, storage=storage)
+        assert exc.value.code == errors.IMAGE_STAGING_UNVERIFIED
+        retry.refresh_from_db()
+        assert retry.status == _Status.RUNNING_IMAGE
+        assert provider.create_calls == 0
+        # Redelivery with healthy storage recovers the paid output — still no
+        # provider operation of any kind.
+        result = _run(retry, image=provider, downloader=never_download, storage=storage)
+        assert result.status == _Status.SUCCEEDED
+        assert provider.create_calls == 0
+        assert provider.get_calls == 0
+
+    def test_design_can_be_regenerated_after_confirmed_staging_failure(self):
+        # An attempt whose staged data FAILED verification (error_code
+        # image_staging_failed) has confirmed-unusable output — it must not
+        # permanently block the design; a fresh idempotency key may retry.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from django.utils import timezone as tz
+
+        from sitara.generation.pipeline import enqueue_design_generation
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        # Simulate: metadata was persisted, then verification terminally
+        # failed (missing/corrupt object) — staged metadata remains, code is
+        # image_staging_failed.
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            error_code=errors.IMAGE_STAGING_FAILED,
+            completed_at=tz.now(),
+            staged_image_storage_key="generation-staging/unusable/raw.webp",
+            staged_image_sha256="b" * 64,
+            staged_image_size_bytes=10,
+            staged_image_width=1,
+            staged_image_height=1,
+        )
+        design.refresh_from_db()
+        # A new key is admitted (the confirmed-bad staging does not block) and
+        # resumes the existing version.
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            new_attempt, created = enqueue_design_generation(
+                design,
+                idempotency_key=uuid_module.uuid4(),
+                enqueue_task=lambda a: None,
+            )
+        assert created is True
+        assert new_attempt.design_version_id == attempt.design_version_id
+
+    def test_unverified_staging_exhaustion_keeps_blocking_regeneration(self):
+        # Retry-EXHAUSTED verification persists image_staging_unverified: the
+        # staged content state is UNKNOWN (the object may be a perfectly valid
+        # paid image behind a storage outage), so it must NOT qualify for the
+        # confirmed-bad readmission — a second paid generation stays blocked.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from django.utils import timezone as tz
+
+        from sitara.generation.pipeline import DesignAlreadyGenerated, enqueue_design_generation
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            error_code=errors.IMAGE_STAGING_UNVERIFIED,
+            completed_at=tz.now(),
+            staged_image_storage_key="generation-staging/unreachable/raw.webp",
+            staged_image_sha256="c" * 64,
+            staged_image_size_bytes=10,
+            staged_image_width=1,
+            staged_image_height=1,
+        )
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design,
+                    idempotency_key=uuid_module.uuid4(),
+                    enqueue_task=lambda a: None,
+                )
+
+    def test_unverified_exhaustion_with_empty_staged_key_still_blocks(self):
+        # REAL first-staging exhaustion path: the provider was billed (id
+        # persisted), the download succeeded, but store.save() blipped and the
+        # bounded retries ran out — the FAILED row has an EMPTY staged key.
+        # The guard must still block a second paid submission via the
+        # persisted prediction id.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import (
+            DesignAlreadyGenerated,
+            GenerationRetry,
+            enqueue_design_generation,
+            fail_attempt,
+        )
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        class _AlwaysFailingSave(InMemoryStorage):
+            def save(self, key, content):
+                raise ConnectionError("storage outage")
+
+        provider = FakeImageProvider()
+        with pytest.raises(GenerationRetry) as exc:
+            _run(attempt, image=provider, storage=_AlwaysFailingSave())
+        assert exc.value.code == errors.IMAGE_STAGING_UNVERIFIED
+        # Exhaustion wiring (proven at the task boundary in test_tasks.py)
+        # persists the classified code on the SAME attempt.
+        fail_attempt(attempt.id, errors.IMAGE_STAGING_UNVERIFIED)
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.FAILED
+        assert attempt.error_code == errors.IMAGE_STAGING_UNVERIFIED
+        assert attempt.staged_image_storage_key == ""  # never persisted
+        assert attempt.image_prediction_id  # the billed submission
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design,
+                    idempotency_key=uuid_module.uuid4(),
+                    enqueue_task=lambda a: None,
+                )
+        assert provider.create_calls == 1  # never a second paid submission
+
+    def test_unverified_exhaustion_with_inflight_marker_blocks(self):
+        # Crash window: the in-flight marker was set (submission may have been
+        # accepted) but no id was ever persisted; unverified exhaustion with
+        # an empty staged key must still block — spend may have occurred.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from django.utils import timezone as tz
+
+        from sitara.generation.pipeline import DesignAlreadyGenerated, enqueue_design_generation
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            error_code=errors.IMAGE_STAGING_UNVERIFIED,
+            completed_at=tz.now(),
+            image_prediction_id="",
+            image_submission_in_flight=True,
+        )
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design,
+                    idempotency_key=uuid_module.uuid4(),
+                    enqueue_task=lambda a: None,
+                )
+
+    def test_ambiguous_submission_blocks_regeneration(self):
+        # REAL path: the provider raises an ambiguous-acceptance error (the
+        # create MAY have been accepted and billed). The FAILED row carries
+        # the in-flight marker and must block a fresh idempotency key — the
+        # same unresolved-spend discipline as image_staging_unverified.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import DesignAlreadyGenerated, enqueue_design_generation
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        provider = FakeImageProvider(
+            create_error=ImageProviderError("boom", ambiguous_acceptance=True)
+        )
+        result = _run(attempt, image=provider)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_SUBMISSION_AMBIGUOUS
+        assert result.image_submission_in_flight is True
+        assert result.staged_image_storage_key == ""
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design,
+                    idempotency_key=uuid_module.uuid4(),
+                    enqueue_task=lambda a: None,
+                )
+        assert provider.create_calls == 1  # never a second paid submission
+
+    def test_confirmed_prediction_failure_still_readmits(self):
+        # BOUNDARY: image_prediction_failed is a provider-CONFIRMED outcome
+        # (the persisted id was polled to a terminal failed state). The spec's
+        # recovery path — a new idempotency key retrying only the image
+        # stage — must keep working for confirmed terminal failures.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import enqueue_design_generation
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_PREDICTION_FAILED
+        assert result.image_prediction_id  # id persisted — evidence alone
+        design.refresh_from_db()  # must NOT block a confirmed failure
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            new_attempt, created = enqueue_design_generation(
+                design,
+                idempotency_key=uuid_module.uuid4(),
+                enqueue_task=lambda a: None,
+            )
+        assert created is True
+        assert new_attempt.design_version_id == result.design_version_id
+
+    def test_poll_outage_with_live_prediction_blocks_regeneration(self):
+        # A poll-transport outage terminates an attempt whose prediction is
+        # LIVE (id persisted, billed, outcome never confirmed). Exhaustion
+        # persists image_provider_unavailable — not in the resolved set, so
+        # the evidence-bearing row must block a second paid submission.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import (
+            DesignAlreadyGenerated,
+            GenerationRetry,
+            enqueue_design_generation,
+            fail_attempt,
+        )
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        provider = FakeImageProvider(poll_actions=[ImageProviderError("status outage")])
+        with pytest.raises(GenerationRetry) as exc:
+            _run(attempt, image=provider)
+        assert exc.value.code == errors.IMAGE_PROVIDER_UNAVAILABLE
+        fail_attempt(attempt.id, errors.IMAGE_PROVIDER_UNAVAILABLE)  # exhaustion
+        attempt.refresh_from_db()
+        assert attempt.image_prediction_id  # the live, billed prediction
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+                )
+        assert provider.create_calls == 1
+
+    def test_pre_acceptance_unavailable_without_evidence_readmits(self):
+        # The SAME code raised pre-acceptance (marker cleared, no id) carries
+        # no submission evidence — the provider was provably never invoked,
+        # so exhaustion there must not strand the design.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import (
+            GenerationRetry,
+            enqueue_design_generation,
+            fail_attempt,
+        )
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        provider = FakeImageProvider(
+            create_error=ImageProviderError("connect", ambiguous_acceptance=False)
+        )
+        with pytest.raises(GenerationRetry):
+            _run(attempt, image=provider)
+        fail_attempt(attempt.id, errors.IMAGE_PROVIDER_UNAVAILABLE)  # exhaustion
+        attempt.refresh_from_db()
+        assert attempt.image_submission_in_flight is False  # cleared pre-acceptance
+        assert attempt.image_prediction_id == ""
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            new_attempt, created = enqueue_design_generation(
+                design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+            )
+        assert created is True
+
+    def test_post_submission_crash_blocks_regeneration(self):
+        # An unclassified crash after the provider accepted the create (the
+        # marker is still set; internal_generation_error) is unresolved spend
+        # — the fail-closed default must block a fresh key.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import DesignAlreadyGenerated, enqueue_design_generation
+
+        class _CrashAfterCreate(FakeImageProvider):
+            def create_prediction(self, request):
+                super().create_prediction(request)
+                raise RuntimeError("worker killed after provider accepted the request")
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        provider = _CrashAfterCreate()
+        result = _run(attempt, image=provider)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.INTERNAL_GENERATION_ERROR
+        assert result.image_submission_in_flight is True
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+                )
+        assert provider.create_calls == 1
+
+    def test_download_failure_after_successful_prediction_blocks(self):
+        # The prediction CONFIRMED succeeded (billed) but its output was never
+        # obtained — possibly still valid and recoverable. Readmitting would
+        # re-bill with certainty, so the evidence-bearing row blocks.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import DesignAlreadyGenerated, enqueue_design_generation
+
+        def failing_downloader(_url):
+            raise ConnectionError("download outage")
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        provider = FakeImageProvider()
+        result = _run(attempt, image=provider, downloader=failing_downloader)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_DOWNLOAD_FAILED
+        assert result.image_prediction_id
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+                )
+        assert provider.create_calls == 1
+
+    def test_poll_timeout_with_live_prediction_blocks_regeneration(self):
+        # Our own poll DEADLINE is not a provider-confirmed outcome: the
+        # cancellation is best-effort and never confirmed, and the prediction
+        # may still complete (and bill) after the deadline — so an
+        # evidence-bearing poll-timeout row must block a fresh key.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import DesignAlreadyGenerated, enqueue_design_generation
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        provider = FakeImageProvider(poll_actions=[PREDICTION_PROCESSING])
+        result = _run(attempt, image=provider)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_POLL_TIMEOUT
+        assert result.image_prediction_id  # the live, billed prediction
+        assert provider.cancel_calls == 1  # best-effort cancel WAS attempted
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            with pytest.raises(DesignAlreadyGenerated):
+                enqueue_design_generation(
+                    design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+                )
+        assert provider.create_calls == 1
+
+    @pytest.mark.parametrize(
+        ("poll_action", "expected_code"),
+        [
+            (PREDICTION_CANCELED, errors.IMAGE_PREDICTION_CANCELED),
+            (PREDICTION_ABORTED, errors.IMAGE_PREDICTION_ABORTED),
+        ],
+    )
+    def test_provider_reported_terminal_states_still_readmit(self, poll_action, expected_code):
+        # BOUNDARY: canceled/aborted are provider-REPORTED terminal outcomes
+        # polled from the provider itself — spend resolved, recovery path open
+        # despite the persisted (evidence-bearing) prediction id.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import enqueue_design_generation
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, image=FakeImageProvider(poll_actions=[poll_action]))
+        assert result.status == _Status.FAILED
+        assert result.error_code == expected_code
+        assert result.image_prediction_id
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            new_attempt, created = enqueue_design_generation(
+                design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+            )
+        assert created is True
+        assert new_attempt.design_version_id == result.design_version_id
+
+    def test_invalid_output_still_readmits(self):
+        # BOUNDARY: output was OBTAINED and CONFIRMED unusable — like
+        # image_staging_failed, regeneration is the only possible remedy, so
+        # the resolved-outcome allowlist keeps the recovery path open.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from sitara.generation.pipeline import enqueue_design_generation
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, downloader=invalid_bytes_downloader)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_OUTPUT_INVALID
+        assert result.image_prediction_id  # evidence alone must not block
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            new_attempt, created = enqueue_design_generation(
+                design, idempotency_key=uuid_module.uuid4(), enqueue_task=lambda a: None
+            )
+        assert created is True
+        assert new_attempt.design_version_id == result.design_version_id
+
+    def test_unverified_exhaustion_without_submission_evidence_readmits(self):
+        # BOUNDARY: no staged key, no prediction id, no in-flight marker —
+        # the marker is written BEFORE the create call, so the provider was
+        # provably never invoked and nothing paid exists. A fresh key may
+        # safely retry rather than stranding the design.
+        import uuid as uuid_module
+        from unittest import mock
+
+        from django.utils import timezone as tz
+
+        from sitara.generation.pipeline import enqueue_design_generation
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            error_code=errors.IMAGE_STAGING_UNVERIFIED,
+            completed_at=tz.now(),
+            image_prediction_id="",
+            image_submission_in_flight=False,
+        )
+        design.refresh_from_db()
+        with mock.patch("sitara.generation.pipeline.generation_is_available", return_value=True):
+            new_attempt, created = enqueue_design_generation(
+                design,
+                idempotency_key=uuid_module.uuid4(),
+                enqueue_task=lambda a: None,
+            )
+        assert created is True
+        assert new_attempt.design_version_id == attempt.design_version_id
+
+    def test_metadata_with_missing_object_fails_safely(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        retry = GenerationAttempt.objects.create(
+            design=design,
+            design_version_id=attempt.design_version_id,
+            status=_Status.RUNNING_IMAGE,
+            staged_image_storage_key="generation-staging/ghost/raw.webp",
+            staged_image_sha256="a" * 64,
+            staged_image_size_bytes=100,
+            staged_image_width=768,
+            staged_image_height=1024,
+        )
+        # Storage does NOT contain the object the metadata claims.
+        result = _run(retry, storage=InMemoryStorage())
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_STAGING_FAILED
+
+    def test_metadata_with_corrupt_object_fails_safely(self):
+        from sitara.generation.image_fixtures import make_synthetic_webp
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        key = "generation-staging/tampered/raw.webp"
+        retry = GenerationAttempt.objects.create(
+            design=design,
+            design_version_id=attempt.design_version_id,
+            status=_Status.RUNNING_IMAGE,
+            staged_image_storage_key=key,
+            staged_image_sha256="a" * 64,  # will not match the object below
+            staged_image_size_bytes=100,
+            staged_image_width=768,
+            staged_image_height=1024,
+        )
+        storage = InMemoryStorage()
+        storage._objects[key] = make_synthetic_webp()
+        result = _run(retry, storage=storage)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_STAGING_FAILED
+
+    def test_recovered_object_with_format_key_mismatch_fails_safely(self):
+        # A REAL image whose sniffed format contradicts its deterministic
+        # key's extension is conflicting content — CONFIRMED bad staging, so
+        # the attempt fails with the confirmed code and never finalises on it.
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        retry = GenerationAttempt.objects.create(
+            design=design, design_version_id=attempt.design_version_id, status=_Status.QUEUED
+        )
+        storage = InMemoryStorage()
+        # Valid PNG bytes sitting under the .webp key.
+        storage._objects[f"generation-staging/{retry.id}/raw.webp"] = make_synthetic_png()
+        result = _run(retry, storage=storage)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_STAGING_FAILED
+
+    def test_recovery_probes_past_a_missing_webp_key(self):
+        # The probe iterates the FULL extension order: output staged as PNG
+        # (no .webp object) is still found and recovered.
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        retry = GenerationAttempt.objects.create(
+            design=design, design_version_id=attempt.design_version_id, status=_Status.QUEUED
+        )
+        storage = InMemoryStorage()
+        key = f"generation-staging/{retry.id}/raw.png"
+        storage._objects[key] = make_synthetic_png()
+        provider = FakeImageProvider()
+        result = _run(retry, image=provider, storage=storage)
+        assert result.status == _Status.SUCCEEDED
+        assert result.staged_image_storage_key == key
+        assert provider.create_calls == 0
+
+
+class TestPromptReuseAsIs:
+    def test_resumed_version_uses_the_stored_prompt_verbatim(self):
+        # CDX-005: the persisted prompt is immutable audit data and is reused
+        # AS-IS on resume — never rebuilt, never an immutability conflict.
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        # Simulate a version whose prompt was stored by an OLDER builder.
+        DesignVersion.objects.filter(pk=attempt.design_version_id).update(
+            image_prompt="A historical prompt from an older builder.",
+            prompt_builder_version="2.0.0",
+        )
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        retry = GenerationAttempt.objects.create(
+            design=design, design_version_id=attempt.design_version_id, status=_Status.QUEUED
+        )
+        healthy = FakeImageProvider()
+        result = _run(retry, image=healthy)
+        assert result.status == _Status.SUCCEEDED
+        # The provider received the EXACT stored prompt (spec §20), and the
+        # audit fields were not rewritten.
+        assert healthy.last_request.prompt == "A historical prompt from an older builder."
+        version = DesignVersion.objects.get(pk=attempt.design_version_id)
+        assert version.prompt_builder_version == "2.0.0"
+
+
+class TestUnknownProviderStatus:
+    def test_unknown_terminal_status_fails_closed(self):
+        # CDX-006: only an explicit `succeeded` may proceed to download; an
+        # unknown/novel provider state is untrusted and fails closed.
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        downloads = []
+
+        def counting_downloader(url):
+            downloads.append(url)
+            return b"never used"
+
+        result = _run(
+            attempt,
+            image=FakeImageProvider(poll_actions=["blocked"]),
+            downloader=counting_downloader,
+        )
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_OUTPUT_INVALID
+        assert downloads == []  # nothing downloaded, nothing staged
+        assert result.staged_image_storage_key == ""
 
 
 class TestPixelCap:
@@ -450,6 +1316,29 @@ class TestSubmissionCrashWindow:
         assert again.status == _Status.FAILED
         assert again.error_code == errors.IMAGE_SUBMISSION_AMBIGUOUS
         assert healthy.create_calls == 0  # never resubmitted
+
+    def test_empty_prediction_id_from_provider_is_ambiguous(self):
+        # PIPELINE-layer defence in depth (distinct from the Replicate
+        # adapter's own guard): an accepted create returning an empty id can
+        # never be polled or reconciled — resolve conservatively as ambiguous
+        # with the in-flight marker left set (spend-safe; never resubmitted).
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, image=FakeImageProvider(prediction_id=""))
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_SUBMISSION_AMBIGUOUS
+        attempt.refresh_from_db()
+        assert attempt.image_submission_in_flight is True
+        assert attempt.image_prediction_id == ""
+
+    def test_overlong_prediction_id_from_provider_is_ambiguous(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, image=FakeImageProvider(prediction_id="x" * 129))
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_SUBMISSION_AMBIGUOUS
+        attempt.refresh_from_db()
+        assert attempt.image_submission_in_flight is True
 
     def test_pre_acceptance_transient_clears_marker_and_retries(self):
         design = make_complete_design()
