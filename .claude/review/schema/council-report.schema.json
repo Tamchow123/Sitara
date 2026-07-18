@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sitara.local/review/council-report.schema.json",
+  "title": "Council chair consolidated report",
+  "description": "Produced by the council chair after all reviewers complete. Used for both per-commit and full-phase councils.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scope", "decision", "reviewers_present", "deduplicated_findings", "remediation_plan"],
+  "properties": {
+    "scope": {
+      "type": "string",
+      "enum": ["per-commit", "full-phase"]
+    },
+    "slice_or_phase": { "type": "string" },
+    "base_sha": { "type": "string" },
+    "head_sha": { "type": "string" },
+    "staged_diff_hash": { "type": "string" },
+    "decision": {
+      "type": "string",
+      "enum": ["GOOD_TO_PROCEED", "PROCEED_WITH_MINOR_ISSUES", "CHANGES_REQUIRED", "BLOCKED_HIGH_PRIORITY"]
+    },
+    "reviewers_present": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "reviewers_missing": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "deduplicated_findings": {
+      "type": "array",
+      "items": { "$ref": "reviewer-finding.schema.json" }
+    },
+    "unrelated_observations": {
+      "type": "array",
+      "items": { "$ref": "reviewer-finding.schema.json" }
+    },
+    "remediation_plan": {
+      "type": "array",
+      "description": "Ordered remediation tasks, highest severity first.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["finding_id", "severity", "action"],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "severity": {
+            "type": "string",
+            "enum": ["P0_CRITICAL", "P1_MAJOR", "P2_MODERATE", "P3_MINOR"]
+          },
+          "raised_by": { "type": "string" },
+          "action": { "type": "string" }
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "P0_CRITICAL": { "type": "integer" },
+        "P1_MAJOR": { "type": "integer" },
+        "P2_MODERATE": { "type": "integer" },
+        "P3_MINOR": { "type": "integer" }
+      }
+    }
+  }
+}

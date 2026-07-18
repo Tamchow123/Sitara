@@ -1,0 +1,3 @@
+# Transient run-phase state — never commit live phase state.
+*
+!.gitignore
