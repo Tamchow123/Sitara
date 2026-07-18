@@ -144,3 +144,18 @@ class TestDownload:
             download_replicate_output(VALID, max_bytes=1000, timeout_seconds=5)
         assert "replicate.delivery" not in str(exc.value)
         assert VALID not in str(exc.value)
+
+    def test_soft_time_limit_mid_stream_propagates_not_wrapped(self, monkeypatch):
+        # A worker interruption while streaming must PROPAGATE from this
+        # module (the pipeline retries it) — never be wrapped into
+        # ImageDownloadError("transport_error"), which the pipeline would
+        # classify as a terminal image_download_failed.
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        class _InterruptedStream(_FakeStream):
+            def iter_bytes(self):
+                raise SoftTimeLimitExceeded()
+
+        _install(monkeypatch, [_InterruptedStream()])
+        with pytest.raises(SoftTimeLimitExceeded):
+            download_replicate_output(VALID, max_bytes=1000, timeout_seconds=5)

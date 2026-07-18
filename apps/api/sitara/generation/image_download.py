@@ -13,6 +13,7 @@ came from a provider prediction object.
 from urllib.parse import urlsplit
 
 import httpx
+from celery.exceptions import SoftTimeLimitExceeded
 
 # The only hosts a provider output may live on.
 _ALLOWED_HOST = "replicate.delivery"
@@ -66,6 +67,11 @@ def download_replicate_output(url: str, *, max_bytes: int, timeout_seconds: int)
                     return bytes(buffer)
             raise ImageDownloadError("too_many_redirects")
     except ImageDownloadError:
+        raise
+    except SoftTimeLimitExceeded:
+        # A worker interruption is not a download failure — propagate so the
+        # pipeline's top-level handler converts it to a bounded retry instead
+        # of a terminal image_download_failed.
         raise
     except Exception:  # noqa: BLE001 - varied httpx transport errors
         # Never surface the URL or provider error body.

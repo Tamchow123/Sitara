@@ -167,6 +167,19 @@ class TestConcurrencyAndState:
                     design, idempotency_key=uuid.uuid4(), enqueue_task=_Recorder()
                 )
 
+    def test_multiple_versions_reject_as_not_generatable(self):
+        from sitara.generation.pipeline import DesignNotGeneratable
+
+        design = make_complete_design()
+        DesignVersion.objects.create(design=design, version_number=1)
+        DesignVersion.objects.create(design=design, version_number=2)
+        with mock.patch(_AVAILABLE, return_value=True):
+            with pytest.raises(DesignNotGeneratable):
+                enqueue_design_generation(
+                    design, idempotency_key=uuid.uuid4(), enqueue_task=_Recorder()
+                )
+        assert GenerationAttempt.objects.count() == 0
+
     def test_resume_links_existing_incomplete_version(self, django_capture_on_commit_callbacks):
         design = make_complete_design()
         design.status = Design.Status.GENERATION_FAILED

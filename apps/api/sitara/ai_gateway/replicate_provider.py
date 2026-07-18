@@ -14,6 +14,7 @@ error bodies and dashboard URLs never leave this module.
 """
 
 import httpx
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 
 from .image_generation import (
@@ -63,6 +64,10 @@ class ReplicateImageProvider:
                     api_token=settings.REPLICATE_API_TOKEN,
                     timeout=httpx.Timeout(settings.REPLICATE_TIMEOUT_SECONDS),
                 )
+            except SoftTimeLimitExceeded:
+                # A worker interruption is never a provider failure — let the
+                # pipeline's top-level handler convert it to a bounded retry.
+                raise
             except Exception:
                 raise ImageProviderError("client_initialisation") from None
         return self._cached_client
@@ -90,6 +95,13 @@ class ReplicateImageProvider:
         }
         try:
             prediction = client.predictions.create(model=request.model, input=model_input)
+        except SoftTimeLimitExceeded:
+            # A worker soft-time-limit interruption mid-create must NEVER be
+            # classified as a safe pre-acceptance failure — the request may
+            # already have been accepted. Propagate so the pipeline's top-level
+            # handler retries; the persisted image_submission_in_flight marker
+            # then resolves the resume conservatively (ambiguous, no resubmit).
+            raise
         except _AMBIGUOUS_CREATE_ERRORS:
             # The request may already have been accepted — never resubmit.
             raise ImageProviderError("create_ambiguous", ambiguous_acceptance=True) from None
@@ -108,6 +120,8 @@ class ReplicateImageProvider:
         client = self._client()
         try:
             prediction = client.predictions.get(prediction_id)
+        except SoftTimeLimitExceeded:
+            raise  # worker interruption — top-level handler owns it
         except Exception:
             # Transient transport failure while polling — bounded retry, same id.
             raise ImageProviderError("poll_failed") from None
@@ -117,6 +131,8 @@ class ReplicateImageProvider:
         client = self._client()
         try:
             client.predictions.cancel(prediction_id)
+        except SoftTimeLimitExceeded:
+            raise  # worker interruption — top-level handler owns it
         except Exception:
             # Best-effort cancellation; never raises out of a timeout path.
             return
@@ -139,12 +155,20 @@ def _looks_like_timeout(exc: Exception) -> bool:
 
 
 def _extract_output_url(output):
-    """Extract a single output URL from the SDK output (str / FileOutput / list).
-    Never returns the raw SDK object."""
+    """Extract THE single output URL from the SDK output (str / FileOutput /
+    one-element list). Never returns the raw SDK object.
+
+    A succeeded prediction must contain exactly ONE output URL (phase spec
+    §24). A multi-element output list is an unexpected provider shape and
+    returns None — the pipeline then fails the attempt with a controlled
+    ``image_output_invalid`` instead of silently proceeding on an arbitrary
+    element."""
     if output is None:
         return None
     if isinstance(output, list | tuple):
-        output = output[0] if output else None
+        if len(output) != 1:
+            return None
+        output = output[0]
     if output is None:
         return None
     url = getattr(output, "url", None)

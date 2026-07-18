@@ -276,9 +276,125 @@ class TestStagingResume:
         _run(attempt, storage=storage)
         attempt.refresh_from_db()
         key = attempt.staged_image_storage_key
-        # A second attempt whose image is already staged at the deterministic
-        # key resumes finalisation rather than regenerating.
         assert storage.exists(key)
+
+    def test_existing_matching_object_at_the_deterministic_key_resumes(self):
+        # Task-restart scenario: the raw object was already staged at the
+        # deterministic key before this run. A byte-identical object must be
+        # verified and reused — the run finishes without a staging conflict
+        # (InMemoryStorage.save raises on an existing key, so success itself
+        # proves the resume branch ran instead of a second save).
+        from sitara.generation.image_fixtures import make_synthetic_webp
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        storage = InMemoryStorage()
+        key = f"generation-staging/{attempt.id}/raw.webp"
+        storage._objects[key] = make_synthetic_webp()  # identical bytes
+        result = _run(attempt, storage=storage)
+        assert result.status == _Status.SUCCEEDED
+        assert result.staged_image_storage_key == key
+        assert storage.exists(key)
+
+    def test_backend_renaming_around_the_key_fails_safely(self):
+        # A non-overwriting backend that saves under a DIFFERENT key than
+        # requested is a staging conflict: the renamed object is cleaned up
+        # best-effort and the attempt fails with image_staging_failed.
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        class _RenamingStorage(InMemoryStorage):
+            def save(self, key, content):
+                renamed = key + ".alt"
+                self._objects[renamed] = content.read()
+                return renamed
+
+        storage = _RenamingStorage()
+        result = _run(attempt, storage=storage)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_STAGING_FAILED
+        # Best-effort cleanup removed the mis-keyed object.
+        assert storage._objects == {}
+
+    def test_soft_time_limit_during_rename_cleanup_is_retryable(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        from sitara.generation.pipeline import GenerationRetry
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        class _RenamingInterruptedDelete(InMemoryStorage):
+            def save(self, key, content):
+                renamed = key + ".alt"
+                self._objects[renamed] = content.read()
+                return renamed
+
+            def delete(self, key):
+                raise SoftTimeLimitExceeded()
+
+        with pytest.raises(GenerationRetry):
+            _run(attempt, storage=_RenamingInterruptedDelete())
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.RUNNING_IMAGE  # retryable, not terminal
+
+    def test_conflicting_object_at_the_deterministic_key_fails_safely(self):
+        # A DIFFERENT object at the deterministic key must never be
+        # overwritten — the attempt fails with image_staging_failed.
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        storage = InMemoryStorage()
+        key = f"generation-staging/{attempt.id}/raw.webp"
+        storage._objects[key] = b"a different object that must not be replaced"
+        result = _run(attempt, storage=storage)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_STAGING_FAILED
+        # The pre-existing object is untouched.
+        assert storage._objects[key] == b"a different object that must not be replaced"
+
+
+class TestPixelCap:
+    def test_oversized_pixel_count_is_rejected_and_never_staged(self):
+        # Decompression-bomb guard: a valid image whose pixel count exceeds
+        # the configured cap is rejected as image_output_invalid, and nothing
+        # reaches storage. The synthetic image is 768x1024 (~786k pixels).
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        storage = InMemoryStorage()
+        result = _run(
+            attempt,
+            storage=storage,
+            config=PipelineConfig(poll_max_attempts=10, raw_max_pixels=1000),
+        )
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_OUTPUT_INVALID
+        assert result.staged_image_storage_key == ""
+        assert storage._objects == {}
+
+
+class TestStageAErrorMappings:
+    def test_design_changed_between_enqueue_and_execution(self):
+        # Stage A re-checks domain readiness: a design whose answers became
+        # incomplete after enqueue fails terminally with design_changed.
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        # Simulate post-enqueue corruption (QuerySet.update bypasses the
+        # service guards deliberately, as permitted for tests).
+        Design.objects.filter(pk=design.pk).update(answers={})
+        result = _run(attempt)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.DESIGN_CHANGED
+
+    def test_structured_provider_refusal_maps_to_stable_code(self):
+        from . import fakes
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        refusing = fakes.SequenceProvider([fakes.refusal_result()])
+        result = _run(attempt, structured=refusing)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.STRUCTURED_PROVIDER_REFUSED
+        assert refusing.calls == 1
 
 
 class TestDuplicateDelivery:
@@ -380,6 +496,126 @@ class TestSoftTimeLimit:
         attempt.refresh_from_db()
         assert attempt.status == _Status.RUNNING_IMAGE
         assert attempt.image_prediction_id  # prediction already submitted/persisted
+
+    def test_soft_time_limit_mid_create_is_retryable_and_keeps_the_marker(self):
+        # An interruption while predictions.create is in flight must NOT be
+        # classified as a safe pre-acceptance failure: the attempt stays
+        # in-progress with image_submission_in_flight SET, so the redelivery
+        # resolves conservatively (ambiguous — never a resubmission).
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        from sitara.generation.pipeline import GenerationRetry
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        class _TimeoutOnCreate(FakeImageProvider):
+            def create_prediction(self, request):
+                raise SoftTimeLimitExceeded()
+
+        with pytest.raises(GenerationRetry):
+            _run(attempt, image=_TimeoutOnCreate())
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.RUNNING_IMAGE  # not terminally failed
+        assert attempt.image_submission_in_flight is True  # marker preserved
+        assert attempt.image_prediction_id == ""
+        # Redelivery with a healthy provider must NOT resubmit: marker + no id
+        # resolves as ambiguous (conservative spend).
+        healthy = FakeImageProvider()
+        result = _run(attempt, image=healthy)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_SUBMISSION_AMBIGUOUS
+        assert healthy.create_calls == 0
+
+    def test_soft_time_limit_mid_download_is_retryable_not_terminal(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        from sitara.generation.pipeline import GenerationRetry
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        def interrupted_downloader(_url):
+            raise SoftTimeLimitExceeded()
+
+        image = FakeImageProvider()
+        with pytest.raises(GenerationRetry):
+            _run(attempt, image=image, downloader=interrupted_downloader)
+        attempt.refresh_from_db()
+        # Not image_download_failed: the attempt stays resumable with its
+        # persisted prediction id.
+        assert attempt.status == _Status.RUNNING_IMAGE
+        assert attempt.image_prediction_id
+        # Redelivery with a working downloader completes WITHOUT another
+        # prediction submission — the same output is re-downloaded.
+        result = _run(attempt, image=image)
+        assert result.status == _Status.SUCCEEDED
+        assert image.create_calls == 1
+
+    def test_soft_time_limit_mid_staging_is_retryable_not_terminal(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        from sitara.generation.pipeline import GenerationRetry
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        class _InterruptedStorage(InMemoryStorage):
+            def save(self, key, content):
+                raise SoftTimeLimitExceeded()
+
+        with pytest.raises(GenerationRetry):
+            _run(attempt, storage=_InterruptedStorage())
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.RUNNING_IMAGE  # not image_staging_failed
+        # Redelivery with working storage completes from the persisted markers.
+        result = _run(attempt)
+        assert result.status == _Status.SUCCEEDED
+
+    def test_soft_time_limit_during_staging_resume_read_is_retryable(self):
+        # The existing-object verify-on-resume branch (store.open) must also
+        # treat a worker interruption as retryable, never image_staging_failed.
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        from sitara.generation.image_fixtures import make_synthetic_webp
+        from sitara.generation.pipeline import GenerationRetry
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        class _InterruptedOpenStorage(InMemoryStorage):
+            def open(self, key, mode="rb"):
+                raise SoftTimeLimitExceeded()
+
+        storage = _InterruptedOpenStorage()
+        key = f"generation-staging/{attempt.id}/raw.webp"
+        storage._objects[key] = make_synthetic_webp()
+        with pytest.raises(GenerationRetry):
+            _run(attempt, storage=storage)
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.RUNNING_IMAGE
+
+    def test_soft_time_limit_during_timeout_cancellation_is_retryable(self):
+        # An interruption during the best-effort cancel call (poll-timeout
+        # branch) propagates as a bounded retry — redelivery polls the same
+        # prediction again — instead of being silently absorbed.
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        from sitara.generation.pipeline import GenerationRetry
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        class _InterruptedCancel(FakeImageProvider):
+            def cancel_prediction(self, prediction_id):
+                raise SoftTimeLimitExceeded()
+
+        image = _InterruptedCancel(poll_actions=[PREDICTION_PROCESSING])
+        with pytest.raises(GenerationRetry):
+            _run(attempt, image=image, config=PipelineConfig(poll_max_attempts=2))
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.RUNNING_IMAGE  # not image_poll_timeout
+        assert attempt.image_prediction_id
 
 
 class TestStatusTransitions:

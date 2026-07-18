@@ -168,6 +168,35 @@ class TestGenerateRejections:
         assert second.status_code == 409
         assert second.json()["error"]["code"] == "generation_in_progress"
 
+    def test_already_generated_design_returns_409_at_the_api(self):
+        from django.utils import timezone
+
+        from sitara.designs.models import DesignVersion
+
+        client = csrf_client()
+        token = bootstrap_csrf(client)
+        design_id = _complete_design(client, token)
+        first = _post_generate(client, design_id, token=token)
+        assert first.status_code == 202
+        # Complete the job out-of-band (as the worker would).
+        attempt_id = first.json()["job"]["id"]
+        version = DesignVersion.objects.create(design_id=design_id, version_number=1)
+        GenerationAttempt.objects.filter(pk=attempt_id).update(
+            design_version=version,
+            status="succeeded",
+            staged_image_storage_key="generation-staging/x/raw.webp",
+            staged_image_sha256="a" * 64,
+            staged_image_size_bytes=10,
+            staged_image_width=1,
+            staged_image_height=1,
+            completed_at=timezone.now(),
+        )
+        Design.objects.filter(pk=design_id).update(status=Design.Status.GENERATED)
+        # A NEW idempotency key on the completed design is a controlled 409.
+        response = _post_generate(client, design_id, token=token)
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "design_already_generated"
+
     def test_broker_failure_returns_503_queue_unavailable(self):
         from sitara.generation.pipeline import QueueUnavailable
 

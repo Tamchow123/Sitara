@@ -219,6 +219,30 @@ class TestReplicateContract:
         provider = ReplicateImageProvider(client=_FakeClient(preds))
         assert provider.get_prediction("p").output_url == "https://replicate.delivery/x/raw.webp"
 
+    def test_multi_url_output_is_rejected_not_truncated(self, settings):
+        # Spec §24: a succeeded prediction must contain EXACTLY ONE output URL.
+        # A multi-element list is an unexpected provider shape — never silently
+        # take the first element; the missing output_url makes the pipeline
+        # fail the attempt as image_output_invalid.
+        _open_gates(settings)
+        preds = _FakePredictions(
+            get_result=_FakePrediction(
+                status="succeeded",
+                output=[
+                    "https://replicate.delivery/x/raw.webp",
+                    "https://replicate.delivery/y/raw.webp",
+                ],
+            )
+        )
+        provider = ReplicateImageProvider(client=_FakeClient(preds))
+        assert provider.get_prediction("p").output_url is None
+
+    def test_empty_list_output_yields_no_url(self, settings):
+        _open_gates(settings)
+        preds = _FakePredictions(get_result=_FakePrediction(status="succeeded", output=[]))
+        provider = ReplicateImageProvider(client=_FakeClient(preds))
+        assert provider.get_prediction("p").output_url is None
+
     def test_cancel_calls_the_sdk(self, settings):
         _open_gates(settings)
         preds = _FakePredictions()
@@ -296,3 +320,113 @@ class TestReferenceImagesRejected:
     def test_non_empty_reference_collection_is_rejected_at_construction(self):
         with pytest.raises(ReferenceImagesNotEnabled):
             _request(reference_image_urls=("https://replicate.delivery/x",))
+
+
+class TestWorkerInterruption:
+    def test_soft_time_limit_propagates_from_create_not_misclassified(self, settings):
+        # A worker soft-time-limit interruption mid-create must propagate (the
+        # pipeline handles it as a retry) — NEVER be classified as a safe
+        # pre-acceptance create failure, which would clear the submit-once
+        # marker and permit a duplicate paid submission.
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        _open_gates(settings)
+        preds = _FakePredictions(create_error=SoftTimeLimitExceeded())
+        provider = ReplicateImageProvider(client=_FakeClient(preds))
+        with pytest.raises(SoftTimeLimitExceeded):
+            provider.create_prediction(_request())
+
+    def test_soft_time_limit_propagates_from_poll(self, settings):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        _open_gates(settings)
+
+        class _Interrupted:
+            def get(self, _id):
+                raise SoftTimeLimitExceeded()
+
+        provider = ReplicateImageProvider(client=_FakeClient(_Interrupted()))
+        with pytest.raises(SoftTimeLimitExceeded):
+            provider.get_prediction("p")
+
+    def test_soft_time_limit_propagates_from_cancel(self, settings):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        _open_gates(settings)
+
+        class _InterruptedCancel:
+            def cancel(self, _id):
+                raise SoftTimeLimitExceeded()
+
+        provider = ReplicateImageProvider(client=_FakeClient(_InterruptedCancel()))
+        # Propagates rather than being silently returned from (best-effort
+        # absorption applies to every OTHER failure only).
+        with pytest.raises(SoftTimeLimitExceeded):
+            provider.cancel_prediction("p")
+
+    def test_soft_time_limit_propagates_from_lazy_client_construction(self, settings, monkeypatch):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        _open_gates(settings)
+
+        def interrupted_client(**kwargs):
+            raise SoftTimeLimitExceeded()
+
+        monkeypatch.setattr("replicate.client.Client", interrupted_client)
+        provider = ReplicateImageProvider()  # no injected client — lazy path
+        with pytest.raises(SoftTimeLimitExceeded):
+            provider.get_prediction("p")
+
+    def test_soft_time_limit_propagates_from_anthropic_client_construction(
+        self, settings, monkeypatch
+    ):
+        # The twin structured-text provider gets the same guarantee: a worker
+        # interruption during client construction propagates, never becoming a
+        # terminal StructuredDesignProviderError.
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        from sitara.ai_gateway.anthropic_provider import AnthropicStructuredDesignProvider
+
+        def interrupted_client(**kwargs):
+            raise SoftTimeLimitExceeded()
+
+        monkeypatch.setattr("anthropic.Anthropic", interrupted_client)
+        provider = AnthropicStructuredDesignProvider()
+        with pytest.raises(SoftTimeLimitExceeded):
+            provider._client()
+
+
+class TestPinnedSdkContract:
+    """A genuine contract test against the REAL pinned replicate==1.0.7 SDK:
+    the adapter's calls must match the installed package's public signatures.
+    Pure introspection — no client use, no network (socket guard active)."""
+
+    def test_client_init_accepts_api_token_and_timeout(self):
+        import inspect
+
+        from replicate.client import Client
+
+        params = inspect.signature(Client.__init__).parameters
+        assert "api_token" in params
+        assert "timeout" in params
+
+    def test_predictions_namespace_supports_create_get_cancel(self):
+        import inspect
+
+        from replicate.prediction import Predictions
+
+        create_params = inspect.signature(Predictions.create).parameters
+        # The adapter calls create(model=..., input=...) — keyword form.
+        assert "model" in create_params
+        assert "input" in create_params
+        get_params = inspect.signature(Predictions.get).parameters
+        assert "id" in get_params
+        cancel_params = inspect.signature(Predictions.cancel).parameters
+        assert "id" in cancel_params
+
+    def test_prediction_object_exposes_the_fields_the_adapter_reads(self):
+        from replicate.prediction import Prediction
+
+        annotations = getattr(Prediction, "__annotations__", {})
+        for field in ("id", "status", "output", "model"):
+            assert field in annotations

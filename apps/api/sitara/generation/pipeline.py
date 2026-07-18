@@ -216,15 +216,6 @@ class GenerationRetry(Exception):
         super().__init__(code)
 
 
-class _PollTimedOut(Exception):
-    """Internal: polling exceeded the configured bound."""
-
-
-class _LiveImageProviderUnavailable(Exception):
-    """Internal: no live image provider/downloader exists yet (Part A). Part B
-    replaces the live factories with the gated Replicate implementations."""
-
-
 # ---------------------------------------------------------------------------
 # Enqueue service
 # ---------------------------------------------------------------------------
@@ -733,9 +724,16 @@ def _poll(provider, prediction_id, config):
         # is bounded by (attempts - 1) * interval, strictly below the timeout.
         if config.poll_interval_seconds and index < attempts - 1:
             time.sleep(config.poll_interval_seconds)
-    # Timed out: best-effort cancellation, then a terminal timeout.
-    with contextlib.suppress(Exception):
+    # Timed out: best-effort cancellation, then a terminal timeout. A worker
+    # interruption during the cancel call stays retryable (redelivery polls the
+    # same prediction again); every OTHER cancel failure is absorbed — the
+    # timeout classification does not depend on the cancel outcome.
+    try:
         provider.cancel_prediction(prediction_id)
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception:  # noqa: BLE001 - best-effort cancellation only
+        pass
     raise _TerminalGenerationError(errors.IMAGE_POLL_TIMEOUT)
 
 
@@ -743,6 +741,11 @@ def _download(downloader, output_url, config) -> bytes:
     try:
         data = downloader(output_url)
     except _TerminalGenerationError:
+        raise
+    except SoftTimeLimitExceeded:
+        # A worker interruption mid-download is NOT a terminal download
+        # failure — propagate so the top-level handler retries; the persisted
+        # prediction id lets the redelivery re-download the same output.
         raise
     except Exception as exc:  # noqa: BLE001 - downloader raises varied transport errors
         raise _TerminalGenerationError(errors.IMAGE_DOWNLOAD_FAILED) from exc
@@ -786,6 +789,8 @@ def _stage_raw_image(store, attempt_id, extension: str, data: bytes, sha256: str
         try:
             with store.open(key, "rb") as existing:
                 existing_bytes = existing.read()
+        except SoftTimeLimitExceeded:
+            raise  # worker interruption — retryable, not a staging failure
         except Exception as exc:  # noqa: BLE001
             raise _TerminalGenerationError(errors.IMAGE_STAGING_FAILED) from exc
         if hashlib.sha256(existing_bytes).hexdigest() == sha256:
@@ -793,13 +798,22 @@ def _stage_raw_image(store, attempt_id, extension: str, data: bytes, sha256: str
         raise _TerminalGenerationError(errors.IMAGE_STAGING_FAILED)
     try:
         saved_key = store.save(key, ContentFile(data))
+    except SoftTimeLimitExceeded:
+        # A worker interruption mid-save is retryable: the redelivery either
+        # finds the completed object (byte-identical resume) or re-saves it.
+        raise
     except Exception as exc:  # noqa: BLE001
         raise _TerminalGenerationError(errors.IMAGE_STAGING_FAILED) from exc
     if saved_key != key:
         # A non-overwriting backend renamed around an existing object — treat as
-        # a staging conflict rather than accept a mismatched key.
-        with contextlib.suppress(Exception):
+        # a staging conflict rather than accept a mismatched key. Cleanup is
+        # best-effort, but a worker interruption still propagates (retryable).
+        try:
             store.delete(saved_key)
+        except SoftTimeLimitExceeded:
+            raise
+        except Exception:  # noqa: BLE001 - best-effort cleanup only
+            pass
         raise _TerminalGenerationError(errors.IMAGE_STAGING_FAILED)
     return key
 
@@ -869,6 +883,9 @@ def _generate_seed() -> int:
 
 
 def _live_image_provider(config):
+    # ``config`` is accepted only for call-site symmetry with
+    # ``_live_image_downloader`` (which does read it); the model flows into the
+    # request separately via ``_ensure_prediction``'s ``config.model``.
     from sitara.ai_gateway.policy import (
         PaidGenerationDisabled,
         get_image_generation_provider_async,

@@ -14,6 +14,7 @@ bodies are never logged.
 """
 
 import anthropic
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from pydantic import ValidationError
 
@@ -63,6 +64,11 @@ class AnthropicStructuredDesignProvider:
                     max_retries=0,
                     timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
                 )
+            except SoftTimeLimitExceeded:
+                # A worker interruption is never a provider failure — let the
+                # async pipeline's top-level handler convert it to a bounded
+                # retry rather than a terminal provider error.
+                raise
             except Exception:
                 raise StructuredDesignProviderError("client_initialisation") from None
         return self._cached_client
