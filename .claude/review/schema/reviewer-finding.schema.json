@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sitara.local/review/reviewer-finding.schema.json",
+  "title": "Reviewer finding",
+  "description": "One structured finding produced by a council reviewer or by Codex.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "severity",
+    "confidence",
+    "file",
+    "lines",
+    "evidence",
+    "problem",
+    "why_it_matters",
+    "failure_scenario",
+    "recommended_fix",
+    "alternatives",
+    "trade_offs",
+    "verification",
+    "introduced_by_change"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Stable finding id, e.g. SEC-001, unique within a report."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["P0_CRITICAL", "P1_MAJOR", "P2_MODERATE", "P3_MINOR"]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["HIGH", "MEDIUM", "LOW"]
+    },
+    "file": {
+      "type": "string",
+      "description": "Repo-relative path, or the literal string GENERAL for non-file findings."
+    },
+    "lines": {
+      "type": "string",
+      "description": "Line or range, e.g. '42' or '42-58', or 'n/a'."
+    },
+    "evidence": { "type": "string", "description": "Exact code/output supporting the finding." },
+    "problem": { "type": "string" },
+    "why_it_matters": { "type": "string" },
+    "failure_scenario": {
+      "type": "string",
+      "description": "Concrete inputs/state -> wrong output, crash, or attack path."
+    },
+    "recommended_fix": { "type": "string" },
+    "alternatives": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Alternative fix options (may be empty)."
+    },
+    "trade_offs": { "type": "string" },
+    "verification": {
+      "type": "string",
+      "description": "Exact procedure/command that proves the fix works."
+    },
+    "introduced_by_change": {
+      "type": "boolean",
+      "description": "True if this defect was introduced by the current staged change."
+    },
+    "confirmed": {
+      "type": "boolean",
+      "description": "Set by the council chair after evidence review. Absent/true means it still counts."
+    }
+  }
+}

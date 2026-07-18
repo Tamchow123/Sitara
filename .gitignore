@@ -20,3 +20,9 @@ apps/web/out/
 # OS noise
 Thumbs.db
 .DS_Store
+
+# run-phase review-council transient state (config is committed; live state is not)
+.claude/review/runtime/*
+!.claude/review/runtime/.gitignore
+.claude/review/reports/*
+!.claude/review/reports/.gitignore
