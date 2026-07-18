@@ -3,7 +3,7 @@
     "info": {
         "title": "Sitara API",
         "version": "1.0.0",
-        "description": "Sitara is an AI-assisted South Asian bridalwear **concept visualisation** application (concept only — not sewing patterns or manufacturing specifications).\n\nDesigns are **private by default**: they are never public merely because their UUID is known, and every inaccessible design returns an indistinguishable 404. Authentication is a Django server-side session (HttpOnly cookie) coordinated with a CSRF token; the browser calls the API same-origin.\n\nAI generation is demo/provider gated and is **not** part of this contract yet — no generation, questionnaire-answer submission, inspiration selection or provider endpoints are documented here."
+        "description": "Sitara is an AI-assisted South Asian bridalwear **concept visualisation** application (concept only — not sewing patterns or manufacturing specifications).\n\nDesigns are **private by default**: they are never public merely because their UUID is known, and every inaccessible design returns an indistinguishable 404. Authentication is a Django server-side session (HttpOnly cookie) coordinated with a CSRF token; the browser calls the API same-origin.\n\nAI generation is asynchronous and **fail-closed gated**: the documented generation endpoint enqueues a durable job and its private job-status endpoint reports lifecycle progress, but live paid generation stays disabled unless the operator explicitly enables every provider gate (LIVE_GENERATION_ENABLED defaults to false). Questionnaire-answer submission, inspiration selection and provider internals remain outside this contract."
     },
     "paths": {
         "/api/v1/auth/csrf/": {

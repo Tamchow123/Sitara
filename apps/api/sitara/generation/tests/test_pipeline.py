@@ -1239,6 +1239,22 @@ class TestPixelCap:
 
 
 class TestStageAErrorMappings:
+    def test_classified_provider_error_maps_to_structured_generation_failed(self):
+        # A classified Anthropic transport/API failure is a KNOWN structured
+        # generation failure — it must persist structured_generation_failed,
+        # never the unclassified internal_generation_error.
+        from sitara.ai_gateway.structured_design import StructuredDesignProviderError
+
+        class _FailingStructured:
+            def generate(self, request):
+                raise StructuredDesignProviderError("api_error")
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, structured=_FailingStructured())
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.STRUCTURED_GENERATION_FAILED
+
     def test_design_changed_between_enqueue_and_execution(self):
         # Stage A re-checks domain readiness: a design whose answers became
         # incomplete after enqueue fails terminally with design_changed.

@@ -362,6 +362,35 @@ class TestImageGenerationSettings:
         assert "DEFAULT_IMAGE_MODEL" in result.stderr
         assert "ImproperlyConfigured" in result.stderr
 
+    def test_padded_image_model_is_canonicalised_at_assignment(self):
+        # The value is stripped ONCE at assignment, so validation, persistence
+        # and provider submission all see the same canonical identifier — a
+        # padded env value can never diverge from what was validated.
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import config.settings as s; print('MODEL=['+s.DEFAULT_IMAGE_MODEL+']')",
+            ],
+            cwd=API_ROOT,
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "DEFAULT_IMAGE_MODEL": "  black-forest-labs/flux-1.1-pro  ",
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "MODEL=[black-forest-labs/flux-1.1-pro]" in result.stdout
+
+    def test_padded_but_stripped_valid_image_model_loads(self):
+        # Raw length may exceed the cap through padding alone; the canonical
+        # (stripped) value is what must satisfy the bound.
+        padded = " " * 60 + "black-forest-labs/flux-1.1-pro" + " " * 60
+        result = load_settings({"DEFAULT_IMAGE_MODEL": padded})
+        assert result.returncode == 0, result.stderr
+
     def test_oversized_image_model_refuses_startup(self):
         oversized = "m" * 101
         result = load_settings({"DEFAULT_IMAGE_MODEL": oversized})

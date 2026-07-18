@@ -76,6 +76,12 @@ class TestBackfill:
         legacy_succeeded = GenerationAttempt.objects.create(
             design_version=version, status="succeeded"
         )
+        # Legacy failed row with the old optional defaults: blank error_code
+        # and no completed_at (both legal pre-Phase-10, both violating the new
+        # failed-requirements constraint).
+        legacy_failed = GenerationAttempt.objects.create(design_version=version, status="failed")
+        assert legacy_failed.error_code == ""
+        assert legacy_failed.completed_at is None
         # Two in-progress attempts for ONE design (legal pre-Phase-10).
         older = GenerationAttempt.objects.create(design_version=version, status="queued")
         newer = GenerationAttempt.objects.create(design_version=version, status="running_text")
@@ -86,16 +92,23 @@ class TestBackfill:
             executor.migrate(_TO)  # must NOT abort on the new constraints
             new_apps = executor.loader.project_state(_TO).apps
             NewAttempt = new_apps.get_model(_APP, "GenerationAttempt")
-            # All three rows preserved.
+            # All four rows preserved.
             assert (
-                NewAttempt.objects.filter(pk__in=[legacy_succeeded.pk, older.pk, newer.pk]).count()
-                == 3
+                NewAttempt.objects.filter(
+                    pk__in=[legacy_succeeded.pk, legacy_failed.pk, older.pk, newer.pk]
+                ).count()
+                == 4
             )
             # The impossible legacy 'succeeded' became a terminal audit row.
             normalised = NewAttempt.objects.get(pk=legacy_succeeded.pk)
             assert normalised.status == "failed"
             assert normalised.error_code == "internal_generation_error"
             assert normalised.completed_at is not None
+            # The legacy failed row gained the required code and timestamp.
+            backfilled_failed = NewAttempt.objects.get(pk=legacy_failed.pk)
+            assert backfilled_failed.status == "failed"
+            assert backfilled_failed.error_code == "internal_generation_error"
+            assert backfilled_failed.completed_at is not None
             # Exactly one in-progress attempt survives (the newest).
             in_progress = NewAttempt.objects.filter(
                 design=design.pk, status__in=["queued", "running_text", "running_image"]

@@ -340,9 +340,13 @@ SPECTACULAR_SETTINGS = {
         "an indistinguishable 404. Authentication is a Django server-side "
         "session (HttpOnly cookie) coordinated with a CSRF token; the "
         "browser calls the API same-origin.\n\n"
-        "AI generation is demo/provider gated and is **not** part of this "
-        "contract yet — no generation, questionnaire-answer submission, "
-        "inspiration selection or provider endpoints are documented here."
+        "AI generation is asynchronous and **fail-closed gated**: the "
+        "documented generation endpoint enqueues a durable job and its "
+        "private job-status endpoint reports lifecycle progress, but live "
+        "paid generation stays disabled unless the operator explicitly "
+        "enables every provider gate (LIVE_GENERATION_ENABLED defaults to "
+        "false). Questionnaire-answer submission, inspiration selection and "
+        "provider internals remain outside this contract."
     ),
     "OAS_VERSION": "3.0.3",
     "COMPONENT_SPLIT_REQUEST": True,
@@ -408,8 +412,11 @@ STORAGES = {
 DEMO_MODE = env_bool("DEMO_MODE", default=True)
 ALLOW_PAID_AI_CALLS = env_bool("ALLOW_PAID_AI_CALLS", default=False)
 
-DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro")
-FAST_IMAGE_MODEL = os.getenv("FAST_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro")
+# Stripped at assignment so validation, persistence and provider submission
+# all use ONE canonical value (a padded env value can never diverge from the
+# value that was validated).
+DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro").strip()
+FAST_IMAGE_MODEL = os.getenv("FAST_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro").strip()
 
 # Tokens may be present in the environment; their presence NEVER enables
 # provider calls (see sitara.ai_gateway.policy). Never log or return them.
@@ -455,9 +462,10 @@ if REPLICATE_POLL_INTERVAL_SECONDS >= REPLICATE_POLL_TIMEOUT_SECONDS:
     )
 
 # The configured image model must be non-empty and fit the persisted
-# GenerationAttempt.image_model column bound (100). Never echo the value.
-_DEFAULT_IMAGE_MODEL_STRIPPED = (DEFAULT_IMAGE_MODEL or "").strip()
-if not _DEFAULT_IMAGE_MODEL_STRIPPED or len(_DEFAULT_IMAGE_MODEL_STRIPPED) > 100:
+# GenerationAttempt.image_model column bound (100). Validated on the SAME
+# canonical (stripped-at-assignment) value the pipeline persists and submits.
+# Never echo the value.
+if not DEFAULT_IMAGE_MODEL or len(DEFAULT_IMAGE_MODEL) > 100:
     raise ImproperlyConfigured(
         "DEFAULT_IMAGE_MODEL must be a non-empty model identifier of at most 100 characters"
     )

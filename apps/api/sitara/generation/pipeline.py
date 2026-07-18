@@ -51,6 +51,7 @@ from sitara.ai_gateway.image_generation import (
     ImageProviderError,
 )
 from sitara.ai_gateway.policy import generation_is_available
+from sitara.ai_gateway.structured_design import StructuredDesignProviderError
 from sitara.designs.models import Design, DesignVersion, GenerationAttempt
 from sitara.designs.services import design_completion_errors
 
@@ -614,6 +615,12 @@ def _run_text_stage(design, attempt, structured_provider) -> DesignVersion:
         )
         raise _TerminalGenerationError(code) from exc
     except (GenerationFailed, ProviderIdentityChanged) as exc:
+        raise _TerminalGenerationError(errors.STRUCTURED_GENERATION_FAILED) from exc
+    except StructuredDesignProviderError as exc:
+        # A classified Anthropic transport/API failure is a KNOWN structured
+        # generation failure, never an unclassified internal error. (The
+        # provider re-raises SoftTimeLimitExceeded before classification, so
+        # worker interruptions still propagate as retryable above this.)
         raise _TerminalGenerationError(errors.STRUCTURED_GENERATION_FAILED) from exc
     attempt.refresh_from_db()
     return version

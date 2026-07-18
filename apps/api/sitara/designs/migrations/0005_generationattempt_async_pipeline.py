@@ -31,14 +31,18 @@ def normalise_legacy_attempts(apps, schema_editor):
     """Make every valid pre-Phase-10 row satisfy the NEW constraints so adding
     them can never abort a deployment (PostgreSQL validates existing rows).
 
-    Two legacy shapes were legal under the old schema but violate the new
-    invariants, and both are normalised into constraint-compatible TERMINAL
+    Three legacy shapes were legal under the old schema but violate the new
+    invariants, and all are normalised into constraint-compatible TERMINAL
     audit states — rows are preserved, never deleted:
 
     - a ``succeeded`` attempt without staged-image metadata (no pre-Phase-10
       code ever staged an image, so such a row cannot represent a real staged
       output) becomes ``failed`` with the stable ``internal_generation_error``
       code and a completion timestamp;
+    - a ``failed`` attempt with a blank ``error_code`` or a missing
+      ``completed_at`` (both optional pre-Phase-10) gains the stable
+      ``internal_generation_error`` code and/or a completion timestamp so the
+      new failed-requirements constraint can never reject it;
     - multiple in-progress attempts for one design (the old schema had no
       single-in-progress rule) keep ONLY the newest in-progress row; older
       ones become ``failed``/``internal_generation_error`` (superseded).
@@ -58,6 +62,16 @@ def normalise_legacy_attempts(apps, schema_editor):
         attempt.error_code = "internal_generation_error"
         attempt.completed_at = attempt.completed_at or attempt.updated_at or now
         attempt.save(update_fields=["status", "error_code", "completed_at"])
+
+    # Legacy "failed" rows missing the now-required code and/or timestamp.
+    from django.db.models import Q
+
+    for attempt in GenerationAttempt.objects.filter(
+        Q(status="failed") & (Q(error_code="") | Q(completed_at__isnull=True))
+    ).iterator():
+        attempt.error_code = attempt.error_code or "internal_generation_error"
+        attempt.completed_at = attempt.completed_at or attempt.updated_at or now
+        attempt.save(update_fields=["error_code", "completed_at"])
 
     # Duplicate in-progress attempts -> keep the newest per design.
     in_progress = ("queued", "running_text", "running_image")
