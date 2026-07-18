@@ -72,19 +72,45 @@ or upper leg, without a gharara knee joint), and saree (visibly draped fabric
 with a pallu over a blouse, not converted into a stitched gown). This is not a
 broad cultural rules engine and does not duplicate the questionnaire taxonomy.
 
-### Bounded narrative slots
+### Bounded narrative slots and a guaranteed global bound
 
 Every DesignSpec narrative string enters the prompt only through named, bounded
 slots. Each slot applies Unicode NFKC normalisation, converts CRLF/CR to LF,
 collapses internal whitespace, strips ends, truncates at a word boundary to a
 documented per-slot cap, and never inserts HTML, Markdown or control characters.
-Critical machine selections and coverage choices are rendered directly from
-short machine values and are never silently removed. The generated-content
-safety scan runs before interpolation and again on the finished prompt (blocked
-designer/brand, imitation phrasing, URLs, prompt leakage, untrusted-section
-delimiters and control characters). An unexpected length overrun is a controlled
-`ImagePromptBuildError` — the completed prompt is never sliced in a way that
-could drop its coverage or presentation sections.
+
+Per-slot caps alone cannot guarantee `IMAGE_PROMPT_MAX_CHARS` because the schema
+permits several eight-item narrative lists and eight fabric entries. Rendering
+therefore **reserves space for the mandatory content first** — garment and
+ceremony, the canonical silhouette, the garment-integrity cue, the canonical
+colour/fabric/embellishment selections, all canonical coverage preferences, the
+canonical dupatta/saree drape and the fixed presentation wording — and lets
+generated narrative consume only the remaining budget, shared across sections in
+fixed order proportionally to each section's natural size. When a section's
+narrative exceeds its budget, lower-priority generated details are
+deterministically shortened at a word boundary or omitted; canonical selections,
+coverage, garment-integrity and presentation content are never removed. As a
+result **every DesignSpec valid under the Pydantic schema builds to at most
+`IMAGE_PROMPT_MAX_CHARS`** (proved by near-maximum fixtures of several shapes),
+and the fully assembled prompt is never sliced.
+
+The generated-content safety scan runs before interpolation and again on the
+finished prompt (blocked designer/brand, imitation phrasing, URLs, prompt
+leakage, untrusted-section delimiters and control characters). Both scans, the
+defensive revalidation and any length overrun surface as a single controlled
+`ImagePromptBuildError` — `build_image_prompt` never raises
+`GeneratedContentRejected` and never echoes the rejected text.
+
+### Canonical selections are authoritative
+
+Generated narrative may not contradict an explicit machine selection. When
+`embellishment_styles` is exactly `["none"]`, the builder renders a clear
+unembellished direction and omits the generated techniques, density, placement
+and motifs; when `embellishment_density` is `"minimal"`, a small deterministic
+word-boundary rule neutralises heavy/dense/opulent/lavish/richly-worked wording
+in the generated embellishment narrative. The canonical ordered selections
+always remain present, and a non-`none` selection is never silently transformed
+into `none`.
 
 ### What the prompt never contains
 
@@ -112,6 +138,18 @@ builder must create a NEW DesignVersion rather than rewrite historical audit
 data). An offline `build_image_prompt` management command builds a version's
 prompt with zero provider calls and prints only safe provenance (UUID, builder
 version, character count; the prompt itself only with `--show-prompt`).
+
+### Enforced snapshot/version guard
+
+Golden snapshots are regenerated only through the
+`regenerate_image_prompt_snapshots` management command, which reads the committed
+manifest first and **refuses** to overwrite it when the rendered combined hash
+changed while `PROMPT_BUILDER_VERSION` did not — a deliberate version bump is
+required. After a bump it rewrites the snapshots and manifest; an unchanged hash
+is a no-op. Normal tests run comparison-only and never write files, so silent
+wording drift cannot slip past review. `PROMPT_BUILDER_VERSION` is `2.0.0` from
+this hardening (bounded rendering and canonical-selection authority changed the
+`none`-embellishment output).
 
 ## Consequences
 

@@ -19,28 +19,51 @@ DesignSpec's ``construction_caveats`` and ``image_alt_text`` are deliberately
 NOT rendered, and no provider metadata, token usage, database identifier,
 questionnaire label/schema, inspiration metadata or raw questionnaire free text
 can appear (the DesignSpec contract carries none of those into this builder).
+
+## Bounded rendering
+
+The DesignSpec schema permits several eight-item narrative lists and eight
+fabric entries, so per-slot caps alone cannot guarantee the global bound.
+Rendering therefore reserves space for the MANDATORY content first — garment
+and ceremony, the canonical silhouette, the garment-integrity cue, the canonical
+colour/fabric/embellishment selections, all canonical coverage preferences, the
+canonical dupatta/saree drape and the fixed presentation wording — and lets
+generated narrative consume only the remaining budget, shared across sections in
+fixed order. When a section's narrative exceeds its budget, lower-priority
+generated details are deterministically shortened at a word boundary or omitted;
+canonical selections, coverage, garment-integrity and presentation content are
+never removed, and the fully assembled prompt is never sliced.
 """
 
 import re
 import unicodedata
+from dataclasses import dataclass
 
 from .design_spec import DESIGN_SPEC_SCHEMA_VERSION, DesignSpec
 from .input_safety import scan_design_spec, scan_generated_text
 
-# Bump ONLY with a deliberate snapshot review and manifest update (see the
-# prompt-builder snapshot tests). The persisted provenance records this value.
-PROMPT_BUILDER_VERSION = "1.0.0"
+# Bump ONLY with a deliberate snapshot review and manifest update. The snapshot
+# regeneration command REFUSES to overwrite committed snapshots unless this
+# value changes (see prompt_snapshots.evaluate_regeneration); the persisted
+# provenance records this value.
+PROMPT_BUILDER_VERSION = "2.0.0"
 
-# Hard upper bound on the assembled prompt. The per-slot caps below keep a
-# realistic DesignSpec well within this; an unexpected overrun is a controlled
-# ImagePromptBuildError rather than a blind slice that could drop the coverage
-# or presentation sections.
+# Hard upper bound on the assembled prompt. Guaranteed by construction: the
+# mandatory content is reserved first and generated narrative is budgeted into
+# the remainder, so every DesignSpec valid under the Pydantic schema builds to
+# at most this many characters without slicing the finished prompt.
 IMAGE_PROMPT_MAX_CHARS = 6000
 
-# Documented per-slot character caps. Each generated narrative string is
-# normalised and truncated at a word boundary to at most its slot cap before
-# interpolation. Critical machine selections and coverage choices are rendered
-# directly from short machine values and are never subject to these caps.
+# Conservative reserve (from the narrative budget) for the whitespace that joins
+# pieces and sections. The total number of pieces is bounded by the schema, so
+# the real separator count stays well under this.
+_SEPARATOR_RESERVE = 128
+
+# Documented per-slot character caps. Each generated narrative string is first
+# normalised and truncated at a word boundary to at most its slot cap; section
+# budgeting may then shorten it further. Critical machine selections and coverage
+# choices are rendered directly from short machine values and are never subject
+# to these caps or to budgeting.
 _SUMMARY_CAP = 700
 _NARRATIVE_CAP = 300
 _LIST_ITEM_CAP = 200
@@ -77,6 +100,27 @@ _GARMENT_INTEGRITY_CUES = {
     ),
 }
 
+# The canonical machine value marking "no embellishment". When embellishment
+# styles is exactly this, generated embellishment narrative is omitted and a
+# clear unembellished direction is rendered instead.
+_NONE_EMBELLISHMENT = "none"
+
+# Deterministic neutralisation of heavy/dense directions in the GENERATED
+# embellishment narrative when the canonical density is "minimal", so generated
+# text cannot contradict the explicit selection. Applied only to embellishment
+# narrative — never to canonical machine selections. Order matters (multi-word
+# entries before their single-word components).
+_HEAVY_WORD_REPLACEMENTS = (
+    (re.compile(r"\brichly[- ]worked\b", re.IGNORECASE), "lightly worked"),
+    (re.compile(r"\bheavily\b", re.IGNORECASE), "lightly"),
+    (re.compile(r"\bheavy\b", re.IGNORECASE), "restrained"),
+    (re.compile(r"\bdensely\b", re.IGNORECASE), "lightly"),
+    (re.compile(r"\bdense\b", re.IGNORECASE), "light"),
+    (re.compile(r"\bopulent\b", re.IGNORECASE), "understated"),
+    (re.compile(r"\blavish\b", re.IGNORECASE), "understated"),
+    (re.compile(r"\brichly\b", re.IGNORECASE), "lightly"),
+)
+
 _WHITESPACE = re.compile(r"\s+")
 
 
@@ -85,6 +129,15 @@ class ImagePromptBuildError(Exception):
 
     Carries only a generic, safe message — never the prompt contents, spec
     narrative or any user data — so it is always safe to surface and log."""
+
+
+@dataclass
+class _Piece:
+    """One ordered fragment of a section. ``mandatory`` pieces are always kept in
+    full; narrative pieces may be shortened or omitted to honour the budget."""
+
+    text: str
+    mandatory: bool = False
 
 
 def _slot(text: str, cap: int) -> str:
@@ -97,9 +150,16 @@ def _slot(text: str, cap: int) -> str:
     normalised = unicodedata.normalize("NFKC", text)
     normalised = normalised.replace("\r\n", "\n").replace("\r", "\n")
     normalised = _WHITESPACE.sub(" ", normalised).strip()
-    if len(normalised) <= cap:
-        return normalised
-    truncated = normalised[:cap]
+    return _truncate_at_word(normalised, cap)
+
+
+def _truncate_at_word(text: str, limit: int) -> str:
+    """Truncate ``text`` to at most ``limit`` characters at a word boundary."""
+    if limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    truncated = text[:limit]
     boundary = truncated.rfind(" ")
     if boundary > 0:
         truncated = truncated[:boundary]
@@ -129,122 +189,147 @@ def _sentence(text: str) -> str:
     return text if text[-1] in ".!?" else text + "."
 
 
-def _garment_and_ceremony(spec: DesignSpec) -> str:
+def _neutralise_heavy(text: str) -> str:
+    """Replace heavy/dense directions with restrained equivalents (minimal
+    density). Deterministic, word-boundary, applied to generated narrative
+    only."""
+    for pattern, replacement in _HEAVY_WORD_REPLACEMENTS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _mandatory(text: str) -> _Piece:
+    return _Piece(_sentence(text), mandatory=True)
+
+
+def _narrative(text: str) -> _Piece:
+    return _Piece(_sentence(text), mandatory=False)
+
+
+def _garment_and_ceremony(spec: DesignSpec) -> list[_Piece]:
     ss = spec.source_selections
     garment = _readable(ss.garment_type)
     ceremony = _readable(ss.ceremony)
-    parts = [
-        _sentence(f"{_slot(spec.title, _NARRATIVE_CAP)}"),
-        _sentence(f"A South Asian bridal {garment} styled for a {ceremony} ceremony"),
-        _sentence(_slot(spec.concept_summary, _SUMMARY_CAP)),
-        _sentence(_slot(spec.garment_breakdown.overall_form, _NARRATIVE_CAP)),
+    pieces = [
+        _narrative(_slot(spec.title, _NARRATIVE_CAP)),
+        _mandatory(f"A South Asian bridal {garment} styled for a {ceremony} ceremony"),
+        _narrative(_slot(spec.concept_summary, _SUMMARY_CAP)),
+        _narrative(_slot(spec.garment_breakdown.overall_form, _NARRATIVE_CAP)),
     ]
     cue = _GARMENT_INTEGRITY_CUES.get(ss.garment_type)
     if cue:
-        parts.append(cue)
-    return " ".join(part for part in parts if part)
+        pieces.append(_Piece(cue, mandatory=True))
+    return pieces
 
 
-def _silhouette_and_components(spec: DesignSpec) -> str:
+def _silhouette_and_components(spec: DesignSpec) -> list[_Piece]:
     gb = spec.garment_breakdown
     silhouette = _readable(spec.source_selections.silhouette)
-    parts = [
-        _sentence(f"The silhouette is {silhouette}"),
-        _sentence(_slot(gb.silhouette, _NARRATIVE_CAP)),
+    pieces = [
+        _mandatory(f"The silhouette is {silhouette}"),
+        _narrative(_slot(gb.silhouette, _NARRATIVE_CAP)),
     ]
     components = _join_items(gb.garment_components)
     if components:
-        parts.append(_sentence(f"Its components include {components}"))
-    return " ".join(part for part in parts if part)
+        pieces.append(_narrative(f"Its components include {components}"))
+    return pieces
 
 
-def _drape_and_proportions(spec: DesignSpec) -> str:
+def _drape_and_proportions(spec: DesignSpec) -> list[_Piece]:
     gb = spec.garment_breakdown
-    return " ".join(
-        part
-        for part in (
-            _sentence(_slot(gb.drape_or_layering, _NARRATIVE_CAP)),
-            _sentence(_slot(gb.key_proportions, _NARRATIVE_CAP)),
-        )
-        if part
-    )
+    return [
+        _narrative(_slot(gb.drape_or_layering, _NARRATIVE_CAP)),
+        _narrative(_slot(gb.key_proportions, _NARRATIVE_CAP)),
+    ]
 
 
-def _colour(spec: DesignSpec) -> str:
+def _colour(spec: DesignSpec) -> list[_Piece]:
     cs = spec.colour_story
+    pieces = []
     colours = _readable_list(spec.source_selections.colour_palette)
-    parts = []
     if colours:
-        parts.append(_sentence(f"The colour palette, in order, is {colours}"))
-    parts.extend(
-        (
-            _sentence(_slot(cs.palette_summary, _NARRATIVE_CAP)),
-            _sentence(_slot(cs.placement, _NARRATIVE_CAP)),
-            _sentence(_slot(cs.rationale, _NARRATIVE_CAP)),
-        )
-    )
-    return " ".join(part for part in parts if part)
+        pieces.append(_mandatory(f"The colour palette, in order, is {colours}"))
+    pieces.append(_narrative(_slot(cs.palette_summary, _NARRATIVE_CAP)))
+    pieces.append(_narrative(_slot(cs.placement, _NARRATIVE_CAP)))
+    pieces.append(_narrative(_slot(cs.rationale, _NARRATIVE_CAP)))
+    return pieces
 
 
-def _fabrics(spec: DesignSpec) -> str:
+def _fabrics(spec: DesignSpec) -> list[_Piece]:
     ss = spec.source_selections
-    parts = []
+    pieces = []
     if ss.fabrics:
-        parts.append(_sentence(f"The selected fabrics, in order, are {_readable_list(ss.fabrics)}"))
+        pieces.append(
+            _mandatory(f"The selected fabrics, in order, are {_readable_list(ss.fabrics)}")
+        )
     for entry in spec.fabrics_and_texture:
         fabric = _slot(entry.fabric, _LIST_ITEM_CAP)
         placement = _slot(entry.placement, _LIST_ITEM_CAP)
         finish = _slot(entry.finish_and_movement, _LIST_ITEM_CAP)
         detail = ". ".join(bit for bit in (placement, finish) if bit)
-        parts.append(_sentence(f"{fabric}: {detail}" if detail else fabric))
-    return " ".join(part for part in parts if part)
+        pieces.append(_narrative(f"{fabric}: {detail}" if detail else fabric))
+    return pieces
 
 
-def _embellishment(spec: DesignSpec) -> str:
+def _embellishment(spec: DesignSpec) -> list[_Piece]:
     ss = spec.source_selections
     ep = spec.embellishment_plan
-    parts = []
+    pieces = []
     if ss.embellishment_density:
-        parts.append(_sentence(f"Embellishment density: {_readable(ss.embellishment_density)}"))
+        pieces.append(_mandatory(f"Embellishment density: {_readable(ss.embellishment_density)}"))
     if ss.embellishment_styles:
-        parts.append(
-            _sentence(
+        pieces.append(
+            _mandatory(
                 "The selected embellishment styles, in order, are "
                 f"{_readable_list(ss.embellishment_styles)}"
             )
         )
+    # Canonical authority: ["none"] means no embellishment. Omit ALL generated
+    # techniques/density/placement/motifs and render an unembellished direction.
+    if ss.embellishment_styles == [_NONE_EMBELLISHMENT]:
+        pieces.append(
+            _mandatory(
+                "The design carries no surface embellishment; render the fabric "
+                "plain and unworked"
+            )
+        )
+        return pieces
+
+    minimal = ss.embellishment_density == "minimal"
+
+    def narrate(text: str) -> str:
+        return _neutralise_heavy(text) if minimal else text
+
     techniques = _join_items(ep.techniques)
     if techniques:
-        parts.append(_sentence(f"Techniques: {techniques}"))
-    parts.append(_sentence(_slot(ep.density, _NARRATIVE_CAP)))
+        pieces.append(_narrative(narrate(f"Techniques: {techniques}")))
+    pieces.append(_narrative(narrate(_slot(ep.density, _NARRATIVE_CAP))))
     placement = _join_items(ep.placement)
     if placement:
-        parts.append(_sentence(f"Concentrated at {placement}"))
+        pieces.append(_narrative(narrate(f"Concentrated at {placement}")))
     motifs = _join_items(ep.motifs)
     if motifs:
-        parts.append(_sentence(f"Motifs: {motifs}"))
-    parts.append(_sentence(_slot(ep.restraint_notes, _NARRATIVE_CAP)))
-    return " ".join(part for part in parts if part)
+        pieces.append(_narrative(narrate(f"Motifs: {motifs}")))
+    pieces.append(_narrative(narrate(_slot(ep.restraint_notes, _NARRATIVE_CAP))))
+    return pieces
 
 
-def _coverage(spec: DesignSpec) -> str:
+def _coverage(spec: DesignSpec) -> list[_Piece]:
     ss = spec.source_selections
     cd = spec.coverage_and_drape
-    parts = []
+    pieces = []
     if ss.coverage_preferences:
-        parts.append(_sentence(f"Coverage preferences: {_readable_list(ss.coverage_preferences)}"))
-    parts.extend(
-        (
-            _sentence(f"Sleeves: {_slot(cd.sleeves, _NARRATIVE_CAP)}"),
-            _sentence(f"Neckline: {_slot(cd.neckline, _NARRATIVE_CAP)}"),
-            _sentence(f"Back and midriff: {_slot(cd.back_and_midriff, _NARRATIVE_CAP)}"),
-            _sentence(f"Head covering: {_slot(cd.head_covering, _NARRATIVE_CAP)}"),
+        pieces.append(
+            _mandatory(f"Coverage preferences: {_readable_list(ss.coverage_preferences)}")
         )
-    )
-    return " ".join(part for part in parts if part)
+    pieces.append(_narrative(f"Sleeves: {_slot(cd.sleeves, _NARRATIVE_CAP)}"))
+    pieces.append(_narrative(f"Neckline: {_slot(cd.neckline, _NARRATIVE_CAP)}"))
+    pieces.append(_narrative(f"Back and midriff: {_slot(cd.back_and_midriff, _NARRATIVE_CAP)}"))
+    pieces.append(_narrative(f"Head covering: {_slot(cd.head_covering, _NARRATIVE_CAP)}"))
+    return pieces
 
 
-def _dupatta_or_drape(spec: DesignSpec) -> str:
+def _dupatta_or_drape(spec: DesignSpec) -> list[_Piece]:
     ss = spec.source_selections
     cd = spec.coverage_and_drape
     selections = []
@@ -252,33 +337,33 @@ def _dupatta_or_drape(spec: DesignSpec) -> str:
         selections.append(f"dupatta style {_readable(ss.dupatta_style)}")
     if ss.saree_drape:
         selections.append(f"saree drape {_readable(ss.saree_drape)}")
-    parts = []
+    pieces = []
     if selections:
-        parts.append(_sentence("Drape: " + ", ".join(selections)))
-    parts.append(_sentence(_slot(cd.dupatta_or_saree_drape, _NARRATIVE_CAP)))
-    return " ".join(part for part in parts if part)
+        pieces.append(_mandatory("Drape: " + ", ".join(selections)))
+    pieces.append(_narrative(_slot(cd.dupatta_or_saree_drape, _NARRATIVE_CAP)))
+    return pieces
 
 
-def _cultural_and_styling(spec: DesignSpec) -> str:
+def _cultural_and_styling(spec: DesignSpec) -> list[_Piece]:
     cc = spec.cultural_context
-    parts = []
+    pieces = []
     if cc.regional_direction is not None:
-        parts.append(
-            _sentence(
+        pieces.append(
+            _narrative(
                 "Broad regional influence, offered as guidance rather than a "
                 f"universal rule: {_slot(cc.regional_direction, _NARRATIVE_CAP)}"
             )
         )
     interpretation = _join_items(cc.interpretation_notes)
     if interpretation:
-        parts.append(_sentence(f"Interpretation: {interpretation}"))
+        pieces.append(_narrative(f"Interpretation: {interpretation}"))
     safeguards = _join_items(cc.safeguards)
     if safeguards:
-        parts.append(_sentence(f"Safeguards: {safeguards}"))
+        pieces.append(_narrative(f"Safeguards: {safeguards}"))
     styling = _join_items(spec.styling_notes)
     if styling:
-        parts.append(_sentence(f"Styling cues: {styling}"))
-    return " ".join(part for part in parts if part)
+        pieces.append(_narrative(f"Styling cues: {styling}"))
+    return pieces
 
 
 # Fixed conceptual ordering — stable and snapshot-tested.
@@ -295,27 +380,74 @@ _SECTION_BUILDERS = (
 )
 
 
+def _apply_narrative_budget(sections: list[list[_Piece]], budget: int, natural_total: int) -> None:
+    """Shrink narrative pieces IN PLACE so their combined length ≤ ``budget``.
+
+    Each section receives a share of the budget proportional to its natural
+    narrative size; within a section, pieces are consumed in priority (reading)
+    order — earlier pieces are kept, a piece that does not fit is truncated at a
+    word boundary and the remaining lower-priority pieces are omitted. Mandatory
+    pieces are never touched."""
+    for section in sections:
+        section_natural = sum(len(p.text) for p in section if not p.mandatory)
+        if section_natural == 0:
+            continue
+        remaining = budget * section_natural // natural_total
+        for piece in section:
+            if piece.mandatory:
+                continue
+            if remaining <= 0:
+                piece.text = ""
+                continue
+            if len(piece.text) <= remaining:
+                remaining -= len(piece.text)
+            else:
+                piece.text = _truncate_at_word(piece.text, remaining)
+                remaining = 0
+
+
 def build_image_prompt(spec: DesignSpec) -> str:
     """Build the deterministic natural-language image prompt for ``spec``.
 
     Accepts a validated :class:`DesignSpec` (or any DesignSpec-compatible
     payload, revalidated defensively here). Runs the generated-content safety
-    scan before interpolation, renders the fixed section order, and runs a final
-    safety scan on the finished prompt. Raises :class:`ImagePromptBuildError` on
-    any unsafe content or an unexpected length overrun — never echoing the
-    prompt or spec text."""
+    scan before interpolation, reserves the mandatory content and budgets the
+    generated narrative into the remainder so the result never exceeds
+    :data:`IMAGE_PROMPT_MAX_CHARS`, then runs a final safety scan. Raises ONLY
+    :class:`ImagePromptBuildError` — never :class:`GeneratedContentRejected` —
+    and never echoes the prompt or spec text."""
     if not isinstance(spec, DesignSpec):
         try:
             spec = DesignSpec.model_validate(spec)
         except Exception as exc:  # controlled: never surface the payload
             raise ImagePromptBuildError("design spec failed validation") from exc
 
-    # Safety scan over every generated string BEFORE interpolation.
-    scan_design_spec(spec)
+    # Safety scan over every generated string BEFORE interpolation, wrapped so
+    # only ImagePromptBuildError escapes (the rejected text is never surfaced).
+    try:
+        scan_design_spec(spec)
+    except Exception as exc:
+        raise ImagePromptBuildError("design spec failed the safety scan") from exc
 
-    sections = [builder(spec) for builder in _SECTION_BUILDERS]
-    sections.append(_PRESENTATION)
-    prompt = "\n\n".join(section for section in sections if section.strip())
+    sections = [list(builder(spec)) for builder in _SECTION_BUILDERS]
+    sections.append([_Piece(_PRESENTATION, mandatory=True)])
+
+    mandatory_len = sum(len(p.text) for section in sections for p in section if p.mandatory)
+    natural_total = sum(len(p.text) for section in sections for p in section if not p.mandatory)
+    budget = IMAGE_PROMPT_MAX_CHARS - mandatory_len - _SEPARATOR_RESERVE
+    if budget < 0:
+        # Unreachable for a schema-valid DesignSpec (mandatory content is bounded
+        # well under the limit); a controlled error rather than an overrun.
+        raise ImagePromptBuildError("mandatory content exceeds the maximum length")
+    if natural_total > budget:
+        _apply_narrative_budget(sections, budget, natural_total)
+
+    rendered = []
+    for section in sections:
+        texts = [piece.text for piece in section if piece.text]
+        if texts:
+            rendered.append(" ".join(texts))
+    prompt = "\n\n".join(rendered)
 
     # Final safety scan on the finished prompt: blocked designer/brand,
     # imitation phrase, URL, prompt leakage, untrusted-section delimiter and
@@ -326,7 +458,7 @@ def build_image_prompt(spec: DesignSpec) -> str:
         raise ImagePromptBuildError("assembled image prompt failed the safety scan") from exc
 
     if len(prompt) > IMAGE_PROMPT_MAX_CHARS:
-        # Do NOT slice — a truncated prompt could drop coverage or presentation.
+        # Unreachable given the budget above; never slice a completed prompt.
         raise ImagePromptBuildError("assembled image prompt exceeded the maximum length")
     return prompt
 
