@@ -54,15 +54,19 @@ def _run(
     image=None,
     downloader=synthetic_webp_downloader,
     storage=None,
+    final=None,
     seed_factory=None,
     config=_FAST,
 ):
+    # ``final=None`` resolves the design_images alias (in-memory via the
+    # autouse conftest override) — the same default the live pipeline uses.
     return run_generation_attempt(
         attempt.id,
         structured_provider=structured or FixtureStructuredDesignProvider(),
         image_provider=image or FakeImageProvider(),
         image_downloader=downloader,
         storage=storage or InMemoryStorage(),
+        final_storage=final,
         seed_factory=seed_factory or (lambda: 0),
         config=config,
     )
@@ -83,8 +87,12 @@ class TestHappyPath:
         version = DesignVersion.objects.get(pk=result.design_version_id)
         assert version.design_spec is not None
         assert version.prompt_builder_version == "3.0.0"
-        # The FINAL design image key stays blank in Phase 10.
-        assert version.image_storage_key == ""
+        # Phase 11: success includes the canonical permanent ingest.
+        assert version.has_permanent_image
+        assert version.image_storage_key == (
+            f"design-images/{design.id}/{version.id}/original.webp"
+        )
+        assert version.image_processor_version == "1.0.0"
         # Staged raw image metadata is populated all-or-none.
         assert result.staged_image_storage_key.startswith(f"generation-staging/{attempt.id}/raw.")
         assert len(result.staged_image_sha256) == 64
@@ -2023,3 +2031,230 @@ def test_duplicate_delivery_is_serialised_by_the_advisory_lock():
     finally:
         release.set()
         thread.join(timeout=10)
+
+
+class TestPermanentIngestStage:
+    """Phase 11 stage E: success requires the canonical permanent ingest;
+    ingest failures never trigger provider work; a redelivery with complete
+    permanent metadata skips every provider stage."""
+
+    def test_success_occurs_only_after_final_ingest(self):
+        # A conflicting permanent object makes ingest fail terminally: the
+        # attempt must NOT be succeeded and the Design must be
+        # generation_failed, even though raw staging completed.
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import storages as storage_aliases
+
+        from sitara.media.ingest import build_design_image_keys
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        # Fail once at the image stage to obtain the linked version cheaply.
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        version_id = attempt.design_version_id
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        retry = GenerationAttempt.objects.create(
+            design=design, design_version_id=version_id, status=_Status.QUEUED
+        )
+        keys = build_design_image_keys(design.id, version_id)
+        storage_aliases["design_images"].save(keys.original, ContentFile(b"conflict"))
+        result = _run(retry)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_INGEST_FAILED
+        design.refresh_from_db()
+        assert design.status == Design.Status.GENERATION_FAILED
+        # Raw staging metadata and the staged recovery path are preserved.
+        assert result.staged_image_storage_key
+        version = DesignVersion.objects.get(pk=version_id)
+        assert not version.has_permanent_image
+
+    def test_transient_ingest_failure_retries_without_provider_calls(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        class _BlippingFinal(InMemoryStorage):
+            def __init__(self):
+                super().__init__()
+                self.exists_calls = 0
+
+            def exists(self, key):
+                self.exists_calls += 1
+                if self.exists_calls == 1:
+                    raise ConnectionError("storage blip")
+                return super().exists(key)
+
+        final = _BlippingFinal()
+        provider = FakeImageProvider()
+        staging = InMemoryStorage()
+        from sitara.generation.pipeline import GenerationRetry
+
+        with pytest.raises(GenerationRetry) as exc:
+            _run(attempt, image=provider, storage=staging, final=final)
+        assert exc.value.code == errors.IMAGE_INGEST_UNVERIFIED
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.RUNNING_IMAGE  # left in progress
+        assert provider.create_calls == 1
+        # Redelivery: storage recovered; NO further provider operations.
+        result = _run(attempt, image=provider, storage=staging, final=final)
+        assert result.status == _Status.SUCCEEDED
+        assert provider.create_calls == 1
+        assert provider.get_calls == 1  # only the original successful poll
+
+    def test_complete_permanent_metadata_skips_every_provider_stage(self):
+        # First run: full success (staging + ingest). Then simulate a crash
+        # BEFORE finalisation by rewinding the attempt status — the redelivery
+        # must reach succeeded with zero provider/downloader/reprocess work.
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        staging = InMemoryStorage()
+        _run(attempt, storage=staging)
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.SUCCEEDED
+        version = DesignVersion.objects.get(pk=attempt.design_version_id)
+        assert version.has_permanent_image
+        # Rewind terminal state (simulating a crash between the metadata
+        # commit and _finalise_success on a redelivered attempt).
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            status=_Status.RUNNING_IMAGE, completed_at=None
+        )
+        Design.objects.filter(pk=design.pk).update(status=Design.Status.GENERATING)
+
+        class _ExplodingProvider:
+            name = "must-not-run"
+
+            def create_prediction(self, request):
+                raise AssertionError("provider must not run")
+
+            def get_prediction(self, prediction_id):
+                raise AssertionError("provider must not run")
+
+            def cancel_prediction(self, prediction_id):
+                raise AssertionError("provider must not run")
+
+        def exploding_downloader(_url):
+            raise AssertionError("downloader must not run")
+
+        def exploding_staging_open(*args, **kwargs):
+            raise AssertionError("staging must not be read")
+
+        staging.open = exploding_staging_open  # staged source untouched too
+        result = _run(
+            attempt,
+            image=_ExplodingProvider(),
+            downloader=exploding_downloader,
+            storage=staging,
+        )
+        assert result.status == _Status.SUCCEEDED
+        design.refresh_from_db()
+        assert design.status == Design.Status.GENERATED
+        assert DesignVersion.objects.filter(design=design).count() == 1
+
+    def test_ingest_failure_after_retry_exhaustion_preserves_everything(self):
+        # fail_attempt with the unverified code (what the task does when the
+        # bounded retries run out) must preserve the version, prompt,
+        # prediction id, seed and staged metadata.
+        from sitara.generation.pipeline import GenerationRetry, fail_attempt
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        class _AlwaysBlipping(InMemoryStorage):
+            def exists(self, key):
+                raise ConnectionError("storage down")
+
+        with pytest.raises(GenerationRetry):
+            _run(attempt, final=_AlwaysBlipping())
+        fail_attempt(attempt.id, errors.IMAGE_INGEST_UNVERIFIED)
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.FAILED
+        assert attempt.error_code == errors.IMAGE_INGEST_UNVERIFIED
+        assert attempt.design_version_id is not None
+        assert attempt.image_prediction_id
+        assert attempt.image_seed is not None
+        assert attempt.staged_image_storage_key
+        version = DesignVersion.objects.get(pk=attempt.design_version_id)
+        assert version.image_prompt
+
+    def test_new_idempotency_key_is_blocked_while_recoverable_output_exists(self):
+        # Enqueue safeguard (spec §11): a failed ingest leaves staged (and
+        # possibly final) output — a NEW key must never create another paid
+        # image.
+        import uuid as uuid_module
+
+        from sitara.generation.pipeline import (
+            DesignAlreadyGenerated,
+            GenerationRetry,
+            enqueue_design_generation,
+            fail_attempt,
+        )
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        class _AlwaysBlipping(InMemoryStorage):
+            def exists(self, key):
+                raise ConnectionError("storage down")
+
+        with pytest.raises(GenerationRetry):
+            _run(attempt, final=_AlwaysBlipping())
+        fail_attempt(attempt.id, errors.IMAGE_INGEST_UNVERIFIED)
+        # require_availability=False isolates the guard under test (the gates
+        # are closed in the test environment, exactly like the offline
+        # fixture command's enqueue path).
+        with pytest.raises(DesignAlreadyGenerated):
+            enqueue_design_generation(
+                design, idempotency_key=uuid_module.uuid4(), require_availability=False
+            )
+
+    def test_version_with_permanent_image_blocks_new_enqueue(self):
+        import uuid as uuid_module
+
+        from sitara.generation.pipeline import (
+            DesignAlreadyGenerated,
+            enqueue_design_generation,
+        )
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt)
+        design.refresh_from_db()
+        with pytest.raises(DesignAlreadyGenerated):
+            enqueue_design_generation(
+                design, idempotency_key=uuid_module.uuid4(), require_availability=False
+            )
+
+    def test_staging_metadata_and_object_remain_after_success(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        staging = InMemoryStorage()
+        result = _run(attempt, storage=staging)
+        assert result.status == _Status.SUCCEEDED
+        assert result.staged_image_storage_key
+        assert result.staged_image_sha256
+        assert staging.exists(result.staged_image_storage_key)
+
+    def test_task_time_budget_includes_the_ingest_stage(self):
+        # REL-001: the Celery soft/hard limits derive from this budget; the
+        # new ingest stage's processing + storage round-trips must be part of
+        # it, or a legitimately slow ingest would soft-timeout at the same
+        # point on every bounded retry and exhaust.
+        from django.conf import settings as django_settings
+
+        from sitara.generation.image_download import MAX_REDIRECTS
+        from sitara.generation.pipeline import (
+            INGEST_STAGE_BUDGET_SECONDS,
+            pipeline_budget_seconds,
+        )
+
+        text = 2 * django_settings.ANTHROPIC_TIMEOUT_SECONDS
+        download = django_settings.REPLICATE_TIMEOUT_SECONDS * (MAX_REDIRECTS + 1)
+        image = (
+            2 * django_settings.REPLICATE_TIMEOUT_SECONDS
+            + django_settings.REPLICATE_POLL_TIMEOUT_SECONDS
+            + download
+        )
+        assert INGEST_STAGE_BUDGET_SECONDS >= 60
+        assert pipeline_budget_seconds() == text + image + INGEST_STAGE_BUDGET_SECONDS

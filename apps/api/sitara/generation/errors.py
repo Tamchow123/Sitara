@@ -54,6 +54,23 @@ IMAGE_STAGING_FAILED = "image_staging_failed"
 # ``pipeline._SPEND_RESOLVED_CODES`` for the confirmed-outcome allowlist).
 IMAGE_STAGING_UNVERIFIED = "image_staging_unverified"
 
+# Permanent ingest (Phase 11 stage E). Both codes occur AFTER paid output was
+# already staged, so NEITHER may ever cause automatic image resubmission or
+# admit another paid prediction (neither is in ``_SPEND_RESOLVED_CODES``, and
+# a failed ingest attempt still carries its staged metadata, which blocks the
+# enqueue guard). Recovery reruns ONLY storage verification/ingest — a bounded
+# task retry for the unverified code, or the ``ingest_design_image`` operator
+# command.
+# Transient or ambiguous permanent-storage availability; content state unknown.
+IMAGE_INGEST_UNVERIFIED = "image_ingest_unverified"
+# Confirmed corrupt, conflicting or invalid permanent content.
+IMAGE_INGEST_FAILED = "image_ingest_failed"
+
+# The ingest-stage terminal codes the operator recovery path may act on —
+# defined ONCE so the ``ingest_design_image`` command's admission gate and
+# ``pipeline.finalise_ingest_recovery``'s completion guard can never drift.
+INGEST_STAGE_ERROR_CODES = frozenset({IMAGE_INGEST_FAILED, IMAGE_INGEST_UNVERIFIED})
+
 # Catch-all for anything unclassified — an unexpected exception becomes this,
 # never a raw message.
 INTERNAL_GENERATION_ERROR = "internal_generation_error"
@@ -79,6 +96,8 @@ GENERATION_ERROR_CODES = frozenset(
         IMAGE_OUTPUT_INVALID,
         IMAGE_STAGING_FAILED,
         IMAGE_STAGING_UNVERIFIED,
+        IMAGE_INGEST_UNVERIFIED,
+        IMAGE_INGEST_FAILED,
         INTERNAL_GENERATION_ERROR,
     }
 )

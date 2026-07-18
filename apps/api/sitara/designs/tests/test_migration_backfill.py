@@ -24,7 +24,17 @@ pytestmark = pytest.mark.django_db(transaction=True)
 _APP = "designs"
 _FROM = [(_APP, "0004_designversion_image_prompt_and_more")]
 _TO = [(_APP, "0005_generationattempt_async_pipeline")]
-_LATEST = [(_APP, "0007_generationattempt_text_submission_in_flight")]
+
+
+def _latest():
+    """The CURRENT leaf of the designs migration graph, resolved dynamically.
+
+    A hard-coded 'latest' silently strands the shared test database at an old
+    schema once a later phase adds a migration — every transaction=True test
+    scheduled after this module then fails on missing columns (pytest-django
+    groups transactional tests together at the end of the session)."""
+    executor = MigrationExecutor(connection)
+    return executor.loader.graph.leaf_nodes(_APP)
 
 
 class TestBackfill:
@@ -59,7 +69,7 @@ class TestBackfill:
             # Leave the schema at the latest migration for subsequent tests.
             final_executor = MigrationExecutor(connection)
             final_executor.loader.build_graph()
-            final_executor.migrate(_LATEST)
+            final_executor.migrate(_latest())
 
     def test_legacy_rows_violating_new_constraints_are_normalised_not_lost(self):
         """Legacy shapes the OLD schema permitted must never abort the
@@ -148,4 +158,4 @@ class TestBackfill:
         finally:
             final_executor = MigrationExecutor(connection)
             final_executor.loader.build_graph()
-            final_executor.migrate(_LATEST)
+            final_executor.migrate(_latest())

@@ -195,11 +195,37 @@ class TestConcurrencyAndState:
                 )
 
     def test_final_image_key_on_the_version_rejects_as_generated(self):
+        # Phase 11: a version carrying a permanent ingested image can only
+        # exist with COMPLETE provenance (all-or-none constraint), so the
+        # guard scenario is built with the full valid shape.
+        from django.utils import timezone
+
         design = make_complete_design()
         design.status = Design.Status.GENERATION_FAILED
         design.save(update_fields=["status"])
         DesignVersion.objects.create(
-            design=design, version_number=1, image_storage_key="designs/final/key.webp"
+            design=design,
+            version_number=1,
+            design_spec={"schema_version": 1},
+            design_spec_schema_version=1,
+            design_spec_template_version="v1",
+            design_spec_provider="fixture",
+            design_spec_model="fixture-model",
+            design_spec_generated_at=timezone.now(),
+            image_prompt="A prompt.",
+            prompt_builder_version="3.0.0",
+            image_storage_key="design-images/d/v/original.webp",
+            image_sha256="a" * 64,
+            image_size_bytes=1000,
+            image_width=1536,
+            image_height=2048,
+            thumbnail_storage_key="design-images/d/v/thumbnail.webp",
+            thumbnail_sha256="b" * 64,
+            thumbnail_size_bytes=100,
+            thumbnail_width=384,
+            thumbnail_height=512,
+            image_processor_version="1.0.0",
+            image_ingested_at=timezone.now(),
         )
         with mock.patch(_AVAILABLE, return_value=True):
             with pytest.raises(DesignAlreadyGenerated):

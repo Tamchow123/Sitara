@@ -384,26 +384,114 @@ S3_SECRET_ACCESS_KEY = os.getenv("S3_SECRET_ACCESS_KEY", "sitara-minio-dev-passw
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "sitara-media")
 S3_REGION_NAME = os.getenv("S3_REGION_NAME", "us-east-1")
 
+# Shared private S3 options: no public-read ACL, signed query auth, no
+# silent overwrite, SigV4. Used by BOTH the default alias (catalogue images
+# and Phase 10 raw generation staging) and the s3 design_images alias below.
+_PRIVATE_S3_OPTIONS = {
+    "endpoint_url": S3_ENDPOINT_URL,
+    "access_key": S3_ACCESS_KEY_ID,
+    "secret_key": S3_SECRET_ACCESS_KEY,
+    "bucket_name": S3_BUCKET_NAME,
+    "region_name": S3_REGION_NAME,
+    # Private by default: no public-read ACL, signed query auth.
+    "default_acl": None,
+    "querystring_auth": True,
+    "file_overwrite": False,
+    "signature_version": "s3v4",
+}
+
 STORAGES = {
     "default": {
         "BACKEND": "storages.backends.s3.S3Storage",
-        "OPTIONS": {
-            "endpoint_url": S3_ENDPOINT_URL,
-            "access_key": S3_ACCESS_KEY_ID,
-            "secret_key": S3_SECRET_ACCESS_KEY,
-            "bucket_name": S3_BUCKET_NAME,
-            "region_name": S3_REGION_NAME,
-            # Private by default: no public-read ACL, signed query auth.
-            "default_acl": None,
-            "querystring_auth": True,
-            "file_overwrite": False,
-            "signature_version": "s3v4",
-        },
+        "OPTIONS": dict(_PRIVATE_S3_OPTIONS),
     },
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
     },
 }
+
+# ---------------------------------------------------------------------------
+# Permanent private design-image storage (Phase 11 Part A).
+#
+# The ``design_images`` alias is the ONLY storage permanent generated images
+# may use, always resolved at call time via
+# ``django.core.files.storage.storages["design_images"]`` (never a
+# module-level instance, so tests and environment overrides take effect).
+# Exactly two backends exist:
+#
+#   s3          production and local MinIO-compatible private storage;
+#   filesystem  offline development and deterministic ingest testing ONLY —
+#               it has no public base URL and signed browser delivery fails
+#               closed for it (no backend image proxy exists in Phase 11).
+#
+# The selection is STRICT and case-sensitive; unknown, blank or
+# differently-cased values refuse startup without echoing the supplied value.
+# ---------------------------------------------------------------------------
+
+ALLOWED_DESIGN_IMAGE_STORAGE_BACKENDS = ("s3", "filesystem")
+
+DESIGN_IMAGE_STORAGE_BACKEND = os.getenv("DESIGN_IMAGE_STORAGE_BACKEND", "s3")
+if DESIGN_IMAGE_STORAGE_BACKEND not in ALLOWED_DESIGN_IMAGE_STORAGE_BACKENDS:
+    raise ImproperlyConfigured(
+        "DESIGN_IMAGE_STORAGE_BACKEND must be exactly 's3' or 'filesystem' "
+        "(case-sensitive); the supplied value is not recognised"
+    )
+# The filesystem backend is development-only (its browser delivery is
+# deliberately unavailable), so production fails closed on it.
+if IS_PRODUCTION and DESIGN_IMAGE_STORAGE_BACKEND != "s3":
+    raise ImproperlyConfigured(
+        "DESIGN_IMAGE_STORAGE_BACKEND must be 's3' in production; the "
+        "filesystem backend is development-only"
+    )
+
+# Private directory for the filesystem backend — outside static files and any
+# publicly served media root; never exposed through a URL. Only validated (and
+# used) when the filesystem backend is selected.
+DESIGN_IMAGE_FILESYSTEM_ROOT = os.getenv(
+    "DESIGN_IMAGE_FILESYSTEM_ROOT", str(BASE_DIR / "private-design-images")
+)
+if DESIGN_IMAGE_STORAGE_BACKEND == "filesystem" and not DESIGN_IMAGE_FILESYSTEM_ROOT.strip():
+    raise ImproperlyConfigured(
+        "DESIGN_IMAGE_FILESYSTEM_ROOT must be a non-empty private directory "
+        "path when the filesystem backend is selected"
+    )
+
+if DESIGN_IMAGE_STORAGE_BACKEND == "s3":
+    STORAGES["design_images"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": dict(_PRIVATE_S3_OPTIONS),
+    }
+else:
+    STORAGES["design_images"] = {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {
+            "location": DESIGN_IMAGE_FILESYSTEM_ROOT,
+            # No public base URL: ``.url()`` raises instead of ever exposing
+            # a filesystem path through the API.
+            "base_url": None,
+            # Owner-only permissions where the platform supports them.
+            "directory_permissions_mode": 0o700,
+            "file_permissions_mode": 0o600,
+        },
+    }
+
+# Canonical design-image processing bounds (strict positive integers; errors
+# identify only the setting, never its value).
+DESIGN_IMAGE_MAX_EDGE = env_positive_int("DESIGN_IMAGE_MAX_EDGE", 2048)
+DESIGN_IMAGE_THUMBNAIL_EDGE = env_positive_int("DESIGN_IMAGE_THUMBNAIL_EDGE", 512)
+DESIGN_IMAGE_WEBP_QUALITY = env_positive_int("DESIGN_IMAGE_WEBP_QUALITY", 90)
+DESIGN_IMAGE_THUMBNAIL_QUALITY = env_positive_int("DESIGN_IMAGE_THUMBNAIL_QUALITY", 82)
+DESIGN_IMAGE_SIGNED_URL_TTL_SECONDS = env_positive_int("DESIGN_IMAGE_SIGNED_URL_TTL_SECONDS", 300)
+
+for _quality_name in ("DESIGN_IMAGE_WEBP_QUALITY", "DESIGN_IMAGE_THUMBNAIL_QUALITY"):
+    if not 1 <= globals()[_quality_name] <= 100:
+        raise ImproperlyConfigured(f"{_quality_name} must be between 1 and 100")
+if DESIGN_IMAGE_THUMBNAIL_EDGE > DESIGN_IMAGE_MAX_EDGE:
+    raise ImproperlyConfigured("DESIGN_IMAGE_THUMBNAIL_EDGE must not exceed DESIGN_IMAGE_MAX_EDGE")
+if not 30 <= DESIGN_IMAGE_SIGNED_URL_TTL_SECONDS <= 3600:
+    raise ImproperlyConfigured(
+        "DESIGN_IMAGE_SIGNED_URL_TTL_SECONDS must be between 30 and 3600 seconds"
+    )
 
 # ---------------------------------------------------------------------------
 # AI provider gates — fail closed.

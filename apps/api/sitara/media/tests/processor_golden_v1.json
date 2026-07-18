@@ -1,0 +1,53 @@
+{
+  "processor_version": "1.0.0",
+  "bounds": {
+    "max_edge": 2048,
+    "thumbnail_edge": 512,
+    "full_quality": 90,
+    "thumbnail_quality": 82,
+    "max_bytes": 20000000,
+    "max_pixels": 40000000
+  },
+  "fixtures": {
+    "webp_portrait": {
+      "original_sha256": "fd48b5942fbc3d240cd4587830f097600b361b80ba7a0e53f1024d11eb70547a",
+      "original_width": 768,
+      "original_height": 1024,
+      "original_size_bytes": 11178,
+      "thumbnail_sha256": "a6829497940cc76902babe1c1b79abad8a0f009b9109208cfdae9d18e69b7593",
+      "thumbnail_width": 384,
+      "thumbnail_height": 512,
+      "thumbnail_size_bytes": 5506
+    },
+    "png_large_landscape": {
+      "original_sha256": "8f551812faeaead9bd0b13c9dedb396426e9a855429aeb1be9553a28ea6b3e6b",
+      "original_width": 2048,
+      "original_height": 1365,
+      "original_size_bytes": 31572,
+      "thumbnail_sha256": "c6beb899921f9046cc31f22500584a5b37364cb395cfcdd004fa84bdad44ef66",
+      "thumbnail_width": 512,
+      "thumbnail_height": 341,
+      "thumbnail_size_bytes": 2202
+    },
+    "png_rgba": {
+      "original_sha256": "5fb0c8ce1309d3678ec5619d0a57a9737d5a347efd7c8d21cacf00970bc2cae7",
+      "original_width": 640,
+      "original_height": 800,
+      "original_size_bytes": 1234,
+      "thumbnail_sha256": "9bd3aa715b999bbc9cf7de5efc6624e1f6cc5b264b7b0760738d7412f5ad4c4e",
+      "thumbnail_width": 410,
+      "thumbnail_height": 512,
+      "thumbnail_size_bytes": 596
+    },
+    "jpeg_with_metadata": {
+      "original_sha256": "d77eced5533578b80e9405e5b6b36d7721b672b2e3cd6bd97d1cc1a8bae4cbce",
+      "original_width": 600,
+      "original_height": 800,
+      "original_size_bytes": 4744,
+      "thumbnail_sha256": "491023bf11cbc4e5aca03743f5bb9c448e774a5656c7b0746b7e60226ee801b4",
+      "thumbnail_width": 384,
+      "thumbnail_height": 512,
+      "thumbnail_size_bytes": 5876
+    }
+  }
+}

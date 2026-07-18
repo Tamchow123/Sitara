@@ -84,7 +84,16 @@ def test_end_to_end_generation_succeeds_via_eager_task(settings, monkeypatch):
     assert design.status == Design.Status.GENERATED
     assert DesignVersion.objects.filter(design=design).count() == 1
     version = DesignVersion.objects.get(design=design)
-    assert version.image_storage_key == ""  # final image key reserved for Phase 11
+    # Phase 11: success now includes the canonical permanent ingest.
+    assert version.has_permanent_image
+    assert version.image_storage_key == f"design-images/{design.id}/{version.id}/original.webp"
+    assert version.thumbnail_storage_key == f"design-images/{design.id}/{version.id}/thumbnail.webp"
+    from django.core.files.storage import storages as storage_aliases
+
+    final_store = storage_aliases["design_images"]
+    assert final_store.exists(version.image_storage_key)
+    assert final_store.exists(version.thumbnail_storage_key)
+    # Raw staging is retained after ingest (crash recovery; purge is Phase 16).
     assert attempt.staged_image_storage_key.startswith(f"generation-staging/{attempt.id}/raw.")
     assert storage.exists(attempt.staged_image_storage_key)
 
