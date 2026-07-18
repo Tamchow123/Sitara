@@ -137,6 +137,16 @@ supplied hidden `embellishment_density` answer. The rule is data in the
 questionnaire schema, interpreted generically by both languages — never
 hard-coded — and is exercised by the shared cross-language contract.
 
+Because published questionnaire schemas are immutable (ADR 0005), this rule does
+NOT edit the published, active `questionnaire_v1`; it ships as a new DRAFT
+`questionnaire_v2` (a distinct UUID, `version=2`, `status=draft`) whose schema is
+v1 plus exactly this one rule. v1 is restored byte-for-byte and guarded by a
+canonical-schema fingerprint test; v2 is loaded with `loaddata questionnaire_v2`
+and activated only through `activate_questionnaire_version`. Loading a draft
+never activates or retires anything, existing designs keep validating against
+their pinned historical schema, and v2 is not treated as active until an explicit
+activation checkpoint is performed.
+
 ### What the prompt never contains
 
 The DesignSpec's `construction_caveats` and `image_alt_text` are not rendered.

@@ -1,15 +1,15 @@
 [
   {
     "model": "questionnaire.questionnaireversion",
-    "pk": "3f7a2b9e-4c1d-4e8a-9b6f-1a2b3c4d5e6f",
+    "pk": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
     "fields": {
-      "version": 1,
-      "status": "active",
+      "version": 2,
+      "status": "draft",
       "created_by": null,
       "activated_by": null,
-      "activated_at": "2026-07-17T00:00:00Z",
-      "created_at": "2026-07-17T00:00:00Z",
-      "updated_at": "2026-07-17T00:00:00Z",
+      "activated_at": null,
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z",
       "schema": {
         "schema_version": 1,
         "key": "sitara_bridal_questionnaire_v1",
@@ -231,28 +231,94 @@
                 "help_text": "Pick up to four — the first choices carry the most weight.",
                 "required": true,
                 "options": [
-                  { "value": "ivory", "label": "Ivory" },
-                  { "value": "white", "label": "White" },
-                  { "value": "red", "label": "Red" },
-                  { "value": "maroon", "label": "Maroon" },
-                  { "value": "blush", "label": "Blush" },
-                  { "value": "pink", "label": "Pink" },
-                  { "value": "peach", "label": "Peach" },
-                  { "value": "orange", "label": "Orange" },
-                  { "value": "yellow", "label": "Yellow" },
-                  { "value": "green", "label": "Green" },
-                  { "value": "emerald", "label": "Emerald" },
-                  { "value": "teal", "label": "Teal" },
-                  { "value": "blue", "label": "Blue" },
-                  { "value": "navy", "label": "Navy" },
-                  { "value": "purple", "label": "Purple" },
-                  { "value": "gold", "label": "Gold" },
-                  { "value": "silver", "label": "Silver" },
-                  { "value": "champagne", "label": "Champagne" },
-                  { "value": "beige", "label": "Beige" },
-                  { "value": "brown", "label": "Brown" },
-                  { "value": "black", "label": "Black" },
-                  { "value": "multicolour", "label": "Multicolour" }
+                  {
+                    "value": "ivory",
+                    "label": "Ivory"
+                  },
+                  {
+                    "value": "white",
+                    "label": "White"
+                  },
+                  {
+                    "value": "red",
+                    "label": "Red"
+                  },
+                  {
+                    "value": "maroon",
+                    "label": "Maroon"
+                  },
+                  {
+                    "value": "blush",
+                    "label": "Blush"
+                  },
+                  {
+                    "value": "pink",
+                    "label": "Pink"
+                  },
+                  {
+                    "value": "peach",
+                    "label": "Peach"
+                  },
+                  {
+                    "value": "orange",
+                    "label": "Orange"
+                  },
+                  {
+                    "value": "yellow",
+                    "label": "Yellow"
+                  },
+                  {
+                    "value": "green",
+                    "label": "Green"
+                  },
+                  {
+                    "value": "emerald",
+                    "label": "Emerald"
+                  },
+                  {
+                    "value": "teal",
+                    "label": "Teal"
+                  },
+                  {
+                    "value": "blue",
+                    "label": "Blue"
+                  },
+                  {
+                    "value": "navy",
+                    "label": "Navy"
+                  },
+                  {
+                    "value": "purple",
+                    "label": "Purple"
+                  },
+                  {
+                    "value": "gold",
+                    "label": "Gold"
+                  },
+                  {
+                    "value": "silver",
+                    "label": "Silver"
+                  },
+                  {
+                    "value": "champagne",
+                    "label": "Champagne"
+                  },
+                  {
+                    "value": "beige",
+                    "label": "Beige"
+                  },
+                  {
+                    "value": "brown",
+                    "label": "Brown"
+                  },
+                  {
+                    "value": "black",
+                    "label": "Black"
+                  },
+                  {
+                    "value": "multicolour",
+                    "label": "Multicolour"
+                  }
                 ],
                 "constraints": {
                   "min_items": 1,
@@ -266,17 +332,50 @@
                 "help_text": "Optional — leave empty to let the concept choose.",
                 "required": false,
                 "options": [
-                  { "value": "silk", "label": "Silk" },
-                  { "value": "raw_silk", "label": "Raw silk" },
-                  { "value": "velvet", "label": "Velvet" },
-                  { "value": "organza", "label": "Organza" },
-                  { "value": "chiffon", "label": "Chiffon" },
-                  { "value": "georgette", "label": "Georgette" },
-                  { "value": "net", "label": "Net" },
-                  { "value": "brocade", "label": "Brocade" },
-                  { "value": "jamawar", "label": "Jamawar" },
-                  { "value": "tissue", "label": "Tissue" },
-                  { "value": "cotton_silk", "label": "Cotton silk" }
+                  {
+                    "value": "silk",
+                    "label": "Silk"
+                  },
+                  {
+                    "value": "raw_silk",
+                    "label": "Raw silk"
+                  },
+                  {
+                    "value": "velvet",
+                    "label": "Velvet"
+                  },
+                  {
+                    "value": "organza",
+                    "label": "Organza"
+                  },
+                  {
+                    "value": "chiffon",
+                    "label": "Chiffon"
+                  },
+                  {
+                    "value": "georgette",
+                    "label": "Georgette"
+                  },
+                  {
+                    "value": "net",
+                    "label": "Net"
+                  },
+                  {
+                    "value": "brocade",
+                    "label": "Brocade"
+                  },
+                  {
+                    "value": "jamawar",
+                    "label": "Jamawar"
+                  },
+                  {
+                    "value": "tissue",
+                    "label": "Tissue"
+                  },
+                  {
+                    "value": "cotton_silk",
+                    "label": "Cotton silk"
+                  }
                 ],
                 "constraints": {
                   "max_items": 3
@@ -295,24 +394,65 @@
                 "help_text": "Pick up to five, or choose \"No embellishment\" for an unadorned look.",
                 "required": true,
                 "options": [
-                  { "value": "zardozi", "label": "Zardozi" },
-                  { "value": "dabka", "label": "Dabka" },
-                  { "value": "nakshi", "label": "Nakshi" },
-                  { "value": "gota_patti", "label": "Gota patti" },
-                  { "value": "mirror_work", "label": "Mirror work" },
-                  { "value": "resham_threadwork", "label": "Resham threadwork" },
-                  { "value": "chikankari", "label": "Chikankari" },
-                  { "value": "sequins", "label": "Sequins" },
-                  { "value": "pearls", "label": "Pearls" },
-                  { "value": "crystals", "label": "Crystals" },
-                  { "value": "beads", "label": "Beadwork" },
-                  { "value": "applique", "label": "Appliqué" },
-                  { "value": "none", "label": "No embellishment" }
+                  {
+                    "value": "zardozi",
+                    "label": "Zardozi"
+                  },
+                  {
+                    "value": "dabka",
+                    "label": "Dabka"
+                  },
+                  {
+                    "value": "nakshi",
+                    "label": "Nakshi"
+                  },
+                  {
+                    "value": "gota_patti",
+                    "label": "Gota patti"
+                  },
+                  {
+                    "value": "mirror_work",
+                    "label": "Mirror work"
+                  },
+                  {
+                    "value": "resham_threadwork",
+                    "label": "Resham threadwork"
+                  },
+                  {
+                    "value": "chikankari",
+                    "label": "Chikankari"
+                  },
+                  {
+                    "value": "sequins",
+                    "label": "Sequins"
+                  },
+                  {
+                    "value": "pearls",
+                    "label": "Pearls"
+                  },
+                  {
+                    "value": "crystals",
+                    "label": "Crystals"
+                  },
+                  {
+                    "value": "beads",
+                    "label": "Beadwork"
+                  },
+                  {
+                    "value": "applique",
+                    "label": "Appliqué"
+                  },
+                  {
+                    "value": "none",
+                    "label": "No embellishment"
+                  }
                 ],
                 "constraints": {
                   "min_items": 1,
                   "max_items": 5,
-                  "exclusive_values": ["none"]
+                  "exclusive_values": [
+                    "none"
+                  ]
                 }
               },
               {
@@ -348,15 +488,42 @@
                 "help_text": "Choose any that matter to you — every option can be styled beautifully.",
                 "required": false,
                 "options": [
-                  { "value": "sleeveless", "label": "Sleeveless" },
-                  { "value": "short_sleeves", "label": "Short sleeves" },
-                  { "value": "elbow_sleeves", "label": "Elbow-length sleeves" },
-                  { "value": "three_quarter_sleeves", "label": "Three-quarter sleeves" },
-                  { "value": "full_sleeves", "label": "Full sleeves" },
-                  { "value": "high_neckline", "label": "High neckline" },
-                  { "value": "full_back", "label": "Full back coverage" },
-                  { "value": "full_midriff", "label": "Full midriff coverage" },
-                  { "value": "head_drape_preferred", "label": "Prefer the head covered" }
+                  {
+                    "value": "sleeveless",
+                    "label": "Sleeveless"
+                  },
+                  {
+                    "value": "short_sleeves",
+                    "label": "Short sleeves"
+                  },
+                  {
+                    "value": "elbow_sleeves",
+                    "label": "Elbow-length sleeves"
+                  },
+                  {
+                    "value": "three_quarter_sleeves",
+                    "label": "Three-quarter sleeves"
+                  },
+                  {
+                    "value": "full_sleeves",
+                    "label": "Full sleeves"
+                  },
+                  {
+                    "value": "high_neckline",
+                    "label": "High neckline"
+                  },
+                  {
+                    "value": "full_back",
+                    "label": "Full back coverage"
+                  },
+                  {
+                    "value": "full_midriff",
+                    "label": "Full midriff coverage"
+                  },
+                  {
+                    "value": "head_drape_preferred",
+                    "label": "Prefer the head covered"
+                  }
                 ],
                 "constraints": {
                   "max_items": 6
@@ -368,13 +535,34 @@
                 "label": "How should the dupatta be styled?",
                 "required": false,
                 "options": [
-                  { "value": "head_drape", "label": "Draped over the head" },
-                  { "value": "one_shoulder", "label": "Over one shoulder" },
-                  { "value": "both_shoulders", "label": "Across both shoulders" },
-                  { "value": "front_drape", "label": "Draped across the front" },
-                  { "value": "double_dupatta", "label": "Double dupatta" },
-                  { "value": "cape_drape", "label": "Cape-style drape" },
-                  { "value": "arm_drape", "label": "Resting along the arms" }
+                  {
+                    "value": "head_drape",
+                    "label": "Draped over the head"
+                  },
+                  {
+                    "value": "one_shoulder",
+                    "label": "Over one shoulder"
+                  },
+                  {
+                    "value": "both_shoulders",
+                    "label": "Across both shoulders"
+                  },
+                  {
+                    "value": "front_drape",
+                    "label": "Draped across the front"
+                  },
+                  {
+                    "value": "double_dupatta",
+                    "label": "Double dupatta"
+                  },
+                  {
+                    "value": "cape_drape",
+                    "label": "Cape-style drape"
+                  },
+                  {
+                    "value": "arm_drape",
+                    "label": "Resting along the arms"
+                  }
                 ]
               },
               {
@@ -437,7 +625,9 @@
             "when": {
               "question_id": "garment_type",
               "operator": "equals",
-              "values": ["saree"]
+              "values": [
+                "saree"
+              ]
             },
             "then": {
               "action": "show",
@@ -449,7 +639,9 @@
             "when": {
               "question_id": "garment_type",
               "operator": "equals",
-              "values": ["saree"]
+              "values": [
+                "saree"
+              ]
             },
             "then": {
               "action": "hide",
@@ -461,7 +653,9 @@
             "when": {
               "question_id": "garment_type",
               "operator": "not_in",
-              "values": ["saree"]
+              "values": [
+                "saree"
+              ]
             },
             "then": {
               "action": "hide",
@@ -473,12 +667,17 @@
             "when": {
               "question_id": "garment_type",
               "operator": "equals",
-              "values": ["saree"]
+              "values": [
+                "saree"
+              ]
             },
             "then": {
               "action": "restrict_options",
               "question_id": "silhouette",
-              "values": ["classic_saree_drape", "lehenga_style_saree"]
+              "values": [
+                "classic_saree_drape",
+                "lehenga_style_saree"
+              ]
             }
           },
           {
@@ -486,12 +685,16 @@
             "when": {
               "question_id": "garment_type",
               "operator": "equals",
-              "values": ["gharara"]
+              "values": [
+                "gharara"
+              ]
             },
             "then": {
               "action": "restrict_options",
               "question_id": "silhouette",
-              "values": ["gharara_construction"]
+              "values": [
+                "gharara_construction"
+              ]
             }
           },
           {
@@ -499,12 +702,16 @@
             "when": {
               "question_id": "garment_type",
               "operator": "equals",
-              "values": ["sharara"]
+              "values": [
+                "sharara"
+              ]
             },
             "then": {
               "action": "restrict_options",
               "question_id": "silhouette",
-              "values": ["sharara_construction"]
+              "values": [
+                "sharara_construction"
+              ]
             }
           },
           {
@@ -512,12 +719,18 @@
             "when": {
               "question_id": "garment_type",
               "operator": "equals",
-              "values": ["lehenga"]
+              "values": [
+                "lehenga"
+              ]
             },
             "then": {
               "action": "restrict_options",
               "question_id": "silhouette",
-              "values": ["flared_lehenga", "a_line_lehenga", "mermaid_lehenga"]
+              "values": [
+                "flared_lehenga",
+                "a_line_lehenga",
+                "mermaid_lehenga"
+              ]
             }
           },
           {
@@ -525,12 +738,17 @@
             "when": {
               "question_id": "garment_type",
               "operator": "equals",
-              "values": ["anarkali"]
+              "values": [
+                "anarkali"
+              ]
             },
             "then": {
               "action": "restrict_options",
               "question_id": "silhouette",
-              "values": ["floor_length_anarkali", "knee_length_anarkali"]
+              "values": [
+                "floor_length_anarkali",
+                "knee_length_anarkali"
+              ]
             }
           },
           {
@@ -538,12 +756,31 @@
             "when": {
               "question_id": "garment_type",
               "operator": "equals",
-              "values": ["shalwar_kameez"]
+              "values": [
+                "shalwar_kameez"
+              ]
             },
             "then": {
               "action": "restrict_options",
               "question_id": "silhouette",
-              "values": ["straight_kameez", "a_line_kameez"]
+              "values": [
+                "straight_kameez",
+                "a_line_kameez"
+              ]
+            }
+          },
+          {
+            "id": "none_hides_embellishment_density",
+            "when": {
+              "question_id": "embellishment_styles",
+              "operator": "equals",
+              "values": [
+                "none"
+              ]
+            },
+            "then": {
+              "action": "hide",
+              "question_id": "embellishment_density"
             }
           }
         ]
