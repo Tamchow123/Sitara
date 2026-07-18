@@ -584,12 +584,20 @@ outcome, changed areas, test results, unresolved issues, commit SHA(s), and CI s
 ## 28. Automated phase development — `/run-phase`
 
 `/run-phase <phase-identifier> <requirements-file-or-description>` is the **normal
-phase-development command**. It is the only command the user runs to start a phase; the
-full workflow and its parts are documented in `.claude/review/README.md`.
+phase-development command**. It is the only command the user runs to start a phase.
+
+The workflow is provided by the user-level phase-council installation under
+`~/.claude/` (skills `run-phase` and `resume-phase`, the six council reviewers and
+chair under `agents/phase-council/`, and phase-gated safety hooks registered in the
+user settings). This repository contributes only its own configuration in
+`.claude/phase-council.json` (base branch, protected branches, and the exact
+build/test/lint/format/typecheck commands from §20); runtime state and generated
+reports stay repository-local under `.claude/review/`. See
+`.claude/review/README.md` for the pointer map.
 
 Once started, Claude acts as the **phase orchestrator** and continues **without routine
 user intervention** through planning, implementation, per-commit review, fixing, committing,
-full-phase verification, independent Codex review, pushing and draft-PR creation, until it
+full-phase verification, pushing and draft-PR creation, until it
 reaches exactly one terminal state: `PR_READY`, `BLOCKED`, or `ABORTED_SAFELY`.
 
 Binding rules for the orchestrator (in addition to every rule above):
@@ -597,9 +605,7 @@ Binding rules for the orchestrator (in addition to every rule above):
 - **Every commit** created during a phase must pass the six-reviewer read-only council
   (functionality, clean-code, architecture, security, testing, reliability) plus the council
   chair, on the exact staged diff whose SHA-256 still matches the approved hash.
-- **Every phase** must pass the complete six-member council over the whole `base..HEAD` diff
-  **and** an independent read-only Codex review. Neither review system may approve based only
-  on the other's approval.
+- **Every phase** must pass the complete six-member council over the whole `base..HEAD` diff.
 - Reviewers and the chair are **read-only**; **only the orchestrator edits application files**.
 - Claude must **fix blocking findings automatically** (add regression tests, re-review) rather
   than accepting or downgrading them without evidence. Unresolved P3s are recorded as PR
@@ -612,7 +618,9 @@ Binding rules for the orchestrator (in addition to every rule above):
   5 full-phase cycles, 3 CI cycles, 3 attempts per finding.
 
 `/resume-phase` recovers an interrupted run from `.claude/review/runtime/active-phase.json`;
-it is not part of the normal workflow. A project Stop hook prevents ending the turn while an
-active phase is unfinished, and a PreToolUse git-guard hook blocks main-writes, force-pushes,
-history rewrites, hard resets, destructive cleans and PR merges. Neither hook is the workflow
-engine — the `run-phase` skill is; the hooks are deterministic safety nets.
+it is not part of the normal workflow. While a phase is active, the user-level Stop hook
+prevents ending the turn before the phase is finished, and the user-level PreToolUse
+git-guard hook blocks protected-branch writes, force-pushes, history rewrites, hard resets,
+destructive cleans, PR merges and unapproved commits. Both hooks are inert when no phase is
+active. Neither hook is the workflow engine — the `run-phase` skill is; the hooks are
+deterministic safety nets.

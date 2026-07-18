@@ -8,8 +8,6 @@
       "Skill",
       "Task",
       "Agent",
-      "Bash(node .claude/review/bin/phase.mjs:*)",
-      "Bash(node .claude/hooks/:*)",
       "Bash(date:*)",
       "Bash(mkdir:*)",
       "Bash(git status:*)",
@@ -42,8 +40,7 @@
       "Bash(gh pr list:*)",
       "Bash(gh run view:*)",
       "Bash(gh run list:*)",
-      "Bash(gh api:*)",
-      "Bash(codex exec:*)"
+      "Bash(gh api:*)"
     ],
     "deny": [
       "Bash(git push --force:*)",
@@ -70,29 +67,6 @@
       "Read(./**/.env)",
       "Edit(./.env)",
       "Write(./.env)"
-    ]
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node .claude/hooks/git-guard.mjs"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node .claude/hooks/stop-guard.mjs"
-          }
-        ]
-      }
     ]
   }
 }

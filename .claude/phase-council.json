@@ -1,0 +1,36 @@
+{
+  "base_branch": "main",
+  "remote": "origin",
+  "protected_branches": ["main"],
+  "commands": {
+    "build": [
+      "docker compose build api",
+      "docker compose exec web npm run build"
+    ],
+    "test": [
+      "docker compose exec api pytest",
+      "docker compose exec web npm test -- --run"
+    ],
+    "lint": [
+      "docker compose exec api ruff check .",
+      "docker compose exec web npm run lint"
+    ],
+    "format_check": [
+      "docker compose exec api ruff format --check ."
+    ],
+    "typecheck": [
+      "docker compose exec web npm run typecheck"
+    ],
+    "e2e": [],
+    "extra_checks": [
+      "docker compose config",
+      "docker compose exec api python manage.py check",
+      "docker compose exec api python manage.py makemigrations --check --dry-run",
+      "docker compose exec api python -m pip check"
+    ]
+  },
+  "codex_review": false,
+  "pr": {
+    "draft": true
+  }
+}
