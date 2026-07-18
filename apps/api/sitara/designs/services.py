@@ -233,6 +233,28 @@ def _resolve_for_create(request) -> DesignSession:
         return design_session
 
 
+def create_next_design_version_locked(locked_design: Design) -> DesignVersion:
+    """Create the next DesignVersion for an ALREADY-locked Design.
+
+    The caller MUST already be inside a ``transaction.atomic()`` block holding
+    a ``select_for_update()`` lock on ``locked_design`` — this lets a caller
+    that must first perform its own checks under that same lock (e.g. the
+    generation service's final freshness re-check) create the version without
+    opening a second, disconnected check/write sequence. Applies the same
+    application-level maximum and relies on the same uniqueness backstop."""
+    highest = (
+        DesignVersion.objects.filter(design=locked_design).aggregate(
+            highest=Max("version_number")
+        )["highest"]
+        or 0
+    )
+    if highest >= settings.MAX_DESIGN_VERSIONS:
+        raise DesignVersionLimitReached(
+            f"design already has the maximum of {settings.MAX_DESIGN_VERSIONS} versions"
+        )
+    return DesignVersion.objects.create(design=locked_design, version_number=highest + 1)
+
+
 def create_next_design_version(design: Design) -> DesignVersion:
     """Create the next DesignVersion under the application-level maximum.
 
@@ -241,17 +263,7 @@ def create_next_design_version(design: Design) -> DesignVersion:
     constraint on (design, version_number) remains the final backstop."""
     with transaction.atomic():
         locked = Design.objects.select_for_update().get(pk=design.pk)
-        highest = (
-            DesignVersion.objects.filter(design=locked).aggregate(highest=Max("version_number"))[
-                "highest"
-            ]
-            or 0
-        )
-        if highest >= settings.MAX_DESIGN_VERSIONS:
-            raise DesignVersionLimitReached(
-                f"design already has the maximum of {settings.MAX_DESIGN_VERSIONS} versions"
-            )
-        return DesignVersion.objects.create(design=locked, version_number=highest + 1)
+        return create_next_design_version_locked(locked)
 
 
 def _assign_questionnaire_version(design: Design, questionnaire_version_id) -> None:
@@ -477,6 +489,7 @@ __all__ = [
     "QuestionnaireAnswerError",
     "WorkspaceCoordinationError",
     "create_next_design_version",
+    "create_next_design_version_locked",
     "design_completion_errors",
     "inspiration_availability_errors",
     "resolve_current_design_session",

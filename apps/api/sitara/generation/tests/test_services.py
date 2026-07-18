@@ -275,6 +275,54 @@ class TestStaleInputProtection:
         assert DesignVersion.objects.filter(design=design).count() == 0
 
 
+class TestFinalPersistenceAtomicity:
+    """The final freshness re-check and DesignVersion creation happen in ONE
+    transaction under the Design row lock (Phase 9 Part A)."""
+
+    def test_snapshot_check_and_version_creation_share_one_transaction(self, monkeypatch):
+        from django.db import connection
+
+        from sitara.generation import services as gen_services
+
+        design = make_complete_design()
+        ss = _source_selections(design)
+        captured: dict = {}
+        real = gen_services.create_next_design_version_locked
+
+        def spy(locked):
+            # Version creation must run inside the atomic block, on the same
+            # locked Design row that the freshness check just validated.
+            captured["in_atomic"] = connection.in_atomic_block
+            captured["design_pk"] = locked.pk
+            return real(locked)
+
+        monkeypatch.setattr(gen_services, "create_next_design_version_locked", spy)
+        provider = fakes.SequenceProvider([fakes.valid_result(ss)])
+        version = generate_design_spec_for_design(design, provider=provider)
+
+        assert captured["in_atomic"] is True
+        assert captured["design_pk"] == design.pk
+        assert version.version_number == 1
+
+    def test_change_detected_at_final_lock_creates_no_version_and_no_retry(self):
+        # MutatingProvider commits a draft edit DURING the (un-transacted)
+        # provider call — i.e. before the final row lock. The finalise step
+        # locks the row, recomputes the snapshot, sees the change and rejects.
+        design = make_complete_design()
+        ss = _source_selections(design)
+
+        def edit_answers():
+            changed = dict(COMPLETE_ANSWERS)
+            changed["colour_palette"] = ["gold"]  # complete, but different
+            Design.objects.filter(pk=design.pk).update(answers=changed)
+
+        provider = fakes.MutatingProvider(ss, edit_answers)
+        with pytest.raises(DesignChangedDuringGeneration):
+            generate_design_spec_for_design(design, provider=provider)
+        assert provider.calls == 1  # no provider retry after a freshness failure
+        assert DesignVersion.objects.filter(design=design).count() == 0
+
+
 class TestTokenAggregation:
     def test_single_success_stores_its_usage(self):
         design = make_complete_design()

@@ -133,6 +133,28 @@ _URL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Clause boundaries used to keep negation scope tight (see ``_asserts_claim``).
+# Punctuation that separates clauses within a sentence...
+_CLAUSE_PUNCTUATION = re.compile(r"[,;:]")
+# ...and contrastive/additive conjunctions that also start a new clause. Only
+# conjunctions that do NOT themselves carry negation are included: "or"/"nor"
+# are deliberately excluded because they propagate a preceding negation to the
+# following clause ("not a sewing pattern nor a cutting pattern").
+_CLAUSE_CONJUNCTIONS = frozenset(
+    {
+        "and",
+        "but",
+        "yet",
+        "however",
+        "though",
+        "although",
+        "whereas",
+        "while",
+        "nevertheless",
+        "nonetheless",
+    }
+)
+
 
 class RejectionCategory(str, Enum):
     DESIGNER_OR_BRAND = "designer_or_brand_reference"
@@ -207,30 +229,57 @@ def contains_phrase(text: str, phrase: str) -> bool:
     return _contains_phrase(_tokens(text), _phrase_tokens(phrase))
 
 
+def _clauses(text: str) -> list[list[str]]:
+    """Split ``text`` into per-clause token lists.
+
+    Sentences are split on terminal punctuation, then each sentence is split on
+    clause punctuation (``, ; :``) and clause conjunctions (``and``, ``but`` …).
+    A negation only governs a claim inside the SAME clause, so an unrelated
+    earlier negation cannot excuse a later, separately-asserted claim
+    ("No embellishment is used, and this is a sewing pattern.")."""
+    clauses: list[list[str]] = []
+    for sentence in re.split(r"[.!?\n]+", text):
+        for part in _CLAUSE_PUNCTUATION.split(sentence):
+            current: list[str] = []
+            for token in _tokens(part):
+                if token in _CLAUSE_CONJUNCTIONS:
+                    if current:
+                        clauses.append(current)
+                    current = []
+                else:
+                    current.append(token)
+            if current:
+                clauses.append(current)
+    return clauses
+
+
 def _asserts_claim(text: str, claim_phrases: tuple[str, ...]) -> bool:
     """True if a claim phrase is ASSERTED rather than negated.
 
-    Negation is SCOPE-AWARE: within a sentence a claim phrase is treated as
-    negated only when a negation token precedes it (any distance before, but
-    strictly before its start). This distinguishes:
+    Negation is SCOPE-AWARE and CLAUSE-AWARE: a claim phrase is treated as
+    negated only when a negation token directly governs it — i.e. precedes it
+    within the SAME clause. A negation cannot reach across a clause boundary
+    (punctuation or a conjunction), so:
 
-    - "This is a sewing pattern, not merely a mood board."  (asserted — the
-      negation follows the claim) → rejected;
-    - "This is not a sewing pattern."                        (negation before
-      the claim) → allowed.
+    - "This is not a sewing pattern."                        → allowed (the
+      negation precedes the claim in one clause);
+    - "This is a sewing pattern, not merely a mood board."   → rejected (the
+      negation is in a different clause and follows the claim);
+    - "No embellishment is used, and this is a sewing pattern." → rejected (the
+      negation governs only its own clause, not the later claim);
+    - "This is not a mood board but is a sewing pattern."    → rejected (the
+      negation cannot cross the "but" clause boundary).
 
-    An unbounded-but-preceding scope (rather than a fixed window) also lets a
-    legitimate caveat keep its distance, e.g. "does not guarantee that the
+    Within a clause the negation may sit any distance before the claim, so a
+    legitimate caveat keeps its distance, e.g. "does not guarantee that the
     garment can be constructed exactly as shown"."""
-    for sentence in re.split(r"[.!?\n]+", text):
-        tokens = _tokens(sentence)
-        if not tokens:
-            continue
+    for tokens in _clauses(text):
         negation_positions = [i for i, token in enumerate(tokens) if token in _NEGATIONS]
         first_negation = negation_positions[0] if negation_positions else None
         for phrase in claim_phrases:
             for start in _phrase_starts(tokens, _phrase_tokens(phrase)):
-                # Asserted unless a negation appears before the phrase start.
+                # Asserted unless a negation appears before the phrase start
+                # inside this same clause.
                 if first_negation is None or start < first_negation:
                     return True
     return False

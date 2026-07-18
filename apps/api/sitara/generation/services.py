@@ -25,7 +25,10 @@ from pydantic import ValidationError
 from sitara.ai_gateway.policy import get_structured_design_generation_provider
 from sitara.ai_gateway.structured_design import StructuredDesignRequest
 from sitara.designs.models import Design
-from sitara.designs.services import create_next_design_version, design_completion_errors
+from sitara.designs.services import (
+    create_next_design_version_locked,
+    design_completion_errors,
+)
 
 from .context import DesignNotReady, GenerationContext, build_generation_context
 from .design_spec import DESIGN_SPEC_SCHEMA_VERSION, SPEC_TEMPLATE_VERSION, DesignSpec
@@ -217,9 +220,26 @@ def _generate_valid_spec(provider, context: GenerationContext, design_id):
     raise GenerationFailed(attempts)
 
 
-def _persist(design, spec: DesignSpec, usage: _AggregatedUsage) -> object:
+def _finalise_atomic(design, spec: DesignSpec, usage: _AggregatedUsage, input_snapshot: tuple):
+    """Re-check freshness and persist the DesignVersion in ONE transaction under
+    the Design row lock.
+
+    The provider call has already completed (no transaction/lock is held across
+    it). Here the Design row is locked with ``select_for_update()`` and, under
+    that SAME lock, completion + inspiration-eligibility validation is re-run,
+    the input snapshot is recomputed and compared, and the version is created
+    and populated. Because the lock spans the whole block, a concurrent draft
+    mutation (which also locks the row) can only commit BEFORE this block —
+    causing :class:`DesignChangedDuringGeneration` — or AFTER it commits; it can
+    never slip between the freshness check and version creation."""
     with transaction.atomic():
-        version = create_next_design_version(design)
+        locked = Design.objects.select_for_update().get(pk=design.pk)
+        if design_completion_errors(locked) or _input_snapshot(locked) != input_snapshot:
+            logger.warning("design spec discarded (inputs changed) design=%s", design.id)
+            raise DesignChangedDuringGeneration(
+                "the design changed during generation; no version was created"
+            )
+        version = create_next_design_version_locked(locked)
         version.design_spec = spec.model_dump(mode="json")
         version.design_spec_schema_version = DESIGN_SPEC_SCHEMA_VERSION
         version.design_spec_template_version = SPEC_TEMPLATE_VERSION
@@ -259,17 +279,14 @@ def generate_design_spec_for_design(design, *, provider=None):
         selected = provider if provider is not None else get_structured_design_generation_provider()
         spec, usage, attempts = _generate_valid_spec(selected, context, design.id)
 
-        # Freshness re-check AFTER a valid result but BEFORE persisting: re-fetch
-        # the Design, rerun completion + inspiration-eligibility validation, and
-        # compare the recomputed snapshot. Any change means the draft moved on
-        # during the call — persist nothing and never touch the newer draft.
-        fresh = Design.objects.get(pk=design.pk)
-        if design_completion_errors(fresh) or _input_snapshot(fresh) != input_snapshot:
-            logger.warning("design spec discarded (inputs changed) design=%s", design.id)
-            raise DesignChangedDuringGeneration(
-                "the design changed during generation; no version was created"
-            )
-        version = _persist(fresh, spec, usage)
+        # Freshness re-check AND persistence in ONE short transaction under the
+        # Design row lock: re-run completion + inspiration-eligibility
+        # validation, recompute and compare the input snapshot, and create the
+        # version — all while the row is locked so no concurrent draft edit can
+        # commit between the check and the write. Any change means the draft
+        # moved on during the (un-transacted) call — persist nothing, never
+        # touch the newer draft, and never retry the provider.
+        version = _finalise_atomic(design, spec, usage, input_snapshot)
     logger.info(
         "design spec generated design=%s version=%s attempts=%s provider=%s",
         design.id,

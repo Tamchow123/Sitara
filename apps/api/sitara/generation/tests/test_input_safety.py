@@ -183,6 +183,46 @@ class TestClaimsAreScopeAware:
     def test_negated_constructibility_disclaimers_are_allowed(self, text):
         scan_generated_text(text)  # must not raise
 
+    # A negation must only excuse a claim it DIRECTLY governs (same clause).
+    # An unrelated earlier negation, or one across a clause boundary
+    # (punctuation or a conjunction), must NOT let a later claim through.
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "This is not merely inspiration; it is a sewing pattern.",
+            "No embellishment is used, and this is a sewing pattern.",
+            "This is not a mood board but is a sewing pattern.",
+        ],
+    )
+    def test_negation_in_a_different_clause_does_not_excuse_sewing_pattern(self, text):
+        with pytest.raises(GeneratedContentRejected) as excinfo:
+            scan_generated_text(text)
+        assert excinfo.value.category == RejectionCategory.SEWING_PATTERN_CLAIM
+
+    def test_negation_across_clause_boundary_does_not_excuse_constructibility(self):
+        text = "The design is not plain; it can be constructed exactly as shown."
+        with pytest.raises(GeneratedContentRejected) as excinfo:
+            scan_generated_text(text)
+        assert excinfo.value.category == RejectionCategory.CONSTRUCTIBILITY_CLAIM
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "This is not a sewing pattern.",
+            "This concept does not guarantee constructibility.",
+            "It cannot be constructed exactly as shown.",
+            "It does not guarantee that the garment can be constructed exactly as shown.",
+        ],
+    )
+    def test_clause_local_negation_still_allows_legitimate_disclaimers(self, text):
+        scan_generated_text(text)  # must not raise
+
+    def test_rejection_never_echoes_the_bypass_text(self):
+        text = "No embellishment is used, and this is a sewing pattern."
+        with pytest.raises(GeneratedContentRejected) as excinfo:
+            scan_generated_text(text)
+        assert "sewing pattern" not in str(excinfo.value)
+
 
 class TestScanDesignSpec:
     @pytest.mark.parametrize("name", VALID_FIXTURES)
