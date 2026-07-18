@@ -243,9 +243,9 @@ def create_next_design_version_locked(locked_design: Design) -> DesignVersion:
     opening a second, disconnected check/write sequence. Applies the same
     application-level maximum and relies on the same uniqueness backstop."""
     highest = (
-        DesignVersion.objects.filter(design=locked_design).aggregate(
-            highest=Max("version_number")
-        )["highest"]
+        DesignVersion.objects.filter(design=locked_design).aggregate(highest=Max("version_number"))[
+            "highest"
+        ]
         or 0
     )
     if highest >= settings.MAX_DESIGN_VERSIONS:

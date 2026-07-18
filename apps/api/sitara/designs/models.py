@@ -177,6 +177,13 @@ class DesignVersion(models.Model):
     design_spec_input_tokens = models.PositiveIntegerField(null=True, blank=True)
     design_spec_output_tokens = models.PositiveIntegerField(null=True, blank=True)
     design_spec_generated_at = models.DateTimeField(null=True, blank=True)
+    # The deterministic image prompt built from the DesignSpec (Phase 9) and the
+    # builder version that produced it. Present exactly together (all-or-none
+    # constraint below) and only when a DesignSpec exists; both empty for legacy
+    # rows and for Phase 8 rows that predate prompt building. Never stores a
+    # provider call, model id, seed, negative prompt or reference-image data.
+    image_prompt = models.TextField(blank=True)
+    prompt_builder_version = models.CharField(max_length=32, blank=True)
     # Object-storage key only — never a URL; signed delivery is a later phase.
     image_storage_key = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -223,6 +230,19 @@ class DesignVersion(models.Model):
                 )
                 & (Q(design_spec_output_tokens__isnull=True) | Q(design_spec_output_tokens__gt=0)),
                 name="designs_designversion_spec_tokens_positive",
+            ),
+            # Image-prompt provenance is all-or-none: the prompt and the builder
+            # version are both empty or both populated.
+            models.CheckConstraint(
+                condition=(Q(image_prompt="") & Q(prompt_builder_version=""))
+                | (~Q(image_prompt="") & ~Q(prompt_builder_version="")),
+                name="designs_designversion_image_prompt_all_or_none",
+            ),
+            # An image prompt can only exist when a DesignSpec exists; legacy
+            # rows without a spec never carry a prompt.
+            models.CheckConstraint(
+                condition=Q(image_prompt="") | Q(design_spec__isnull=False),
+                name="designs_designversion_image_prompt_requires_spec",
             ),
         ]
 

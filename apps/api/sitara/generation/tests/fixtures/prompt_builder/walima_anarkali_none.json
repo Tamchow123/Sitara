@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "source_selections": {
+    "garment_type": "anarkali",
+    "ceremony": "walima",
+    "regional_style": "no_specific_direction",
+    "silhouette": "floor_length_anarkali",
+    "colour_palette": ["pistachio", "champagne"],
+    "fabrics": ["georgette"],
+    "embellishment_styles": ["none"],
+    "embellishment_density": "none",
+    "coverage_preferences": ["three_quarter_sleeves"],
+    "dupatta_style": "shoulder_drape",
+    "saree_drape": null
+  },
+  "title": "Unembellished pistachio anarkali for a walima",
+  "concept_summary": "A quiet, modern walima concept in a floor-length georgette anarkali kept entirely plain, letting the flowing silhouette and soft pistachio tone carry the look without any surface work.",
+  "garment_breakdown": {
+    "overall_form": "A high-waisted anarkali flaring to the floor over a churidar, with a soft dupatta.",
+    "garment_components": ["Floor-length anarkali", "Churidar", "Soft dupatta"],
+    "silhouette": "A fitted bodice releasing into a full, floor-sweeping flare.",
+    "drape_or_layering": "The dupatta falls across one shoulder in a single soft layer.",
+    "key_proportions": "A high empire line lengthens the flowing skirt of the anarkali."
+  },
+  "colour_story": {
+    "palette_summary": "A calm pistachio softened by warm champagne.",
+    "placement": "Pistachio fills the anarkali with champagne warming the dupatta.",
+    "rationale": "Muted pastels suit an understated evening walima."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Georgette",
+      "placement": "Anarkali and dupatta",
+      "finish_and_movement": "A light, fluid drape with a gentle, floating movement."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["No surface embellishment; the fabric is left plain"],
+    "density": "No added embellishment; the surface stays plain and unworked.",
+    "placement": ["No embellished zones; plain throughout"],
+    "motifs": ["No motifs; the fabric reads clean and minimal"],
+    "restraint_notes": "Deliberately unembellished for a clean, restrained silhouette."
+  },
+  "coverage_and_drape": {
+    "sleeves": "Three-quarter sleeves as requested.",
+    "neckline": "A simple round neckline.",
+    "back_and_midriff": "The anarkali fully covers the torso and back.",
+    "head_covering": "No head covering; the dupatta stays on the shoulder.",
+    "dupatta_or_saree_drape": "A single soft dupatta draped over one shoulder."
+  },
+  "cultural_context": {
+    "regional_direction": null,
+    "interpretation_notes": ["No broad regional direction was requested, so styling stays general."],
+    "safeguards": ["The plain treatment is honoured; no embellishment is invented."]
+  },
+  "styling_notes": ["Keep jewellery delicate to match the unembellished fabric."],
+  "construction_caveats": [
+    "This is a concept visualisation only and is not a sewing pattern.",
+    "It does not guarantee that the garment can be constructed exactly as shown."
+  ],
+  "image_alt_text": "A model in a plain pistachio floor-length anarkali with a soft dupatta over one shoulder for a walima."
+}

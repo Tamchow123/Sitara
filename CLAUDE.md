@@ -140,6 +140,7 @@ Rules:
 - All future provider access must go through the project’s fail-closed gateway/wrapper boundary, never directly from views, serializers, models, or frontend code.
 - Do not change the selected model without a scoped, documented evaluation and decision update.
 - Demo mode must use deterministic local fixtures and must remain structurally separate from paid-provider execution.
+- The image prompt is built only by the deterministic, versioned `build_image_prompt` code from a validated DesignSpec: one positive natural-language prompt, no negative prompt, no JSON prompt, no hard-coded model identifier and no provider call. It must never contain construction caveats, image alt text, inspiration metadata, raw questionnaire free text, provider metadata or a model id. Persisted `image_prompt`/`prompt_builder_version` are immutable audit data; a builder change requires a `PROMPT_BUILDER_VERSION` bump and a reviewed snapshot/manifest update.
 
 Use the current setting names from `config/settings.py`. Some older roadmap text contains superseded names; do not reintroduce old environment variables without an explicit migration decision.
 

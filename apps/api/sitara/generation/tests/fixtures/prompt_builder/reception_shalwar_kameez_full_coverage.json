@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "source_selections": {
+    "garment_type": "shalwar_kameez",
+    "ceremony": "reception",
+    "regional_style": "delhi",
+    "silhouette": "straight_kameez",
+    "colour_palette": ["champagne", "rose_gold"],
+    "fabrics": ["raw_silk"],
+    "embellishment_styles": ["tilla", "pearl"],
+    "embellishment_density": "minimal",
+    "coverage_preferences": ["full_sleeves", "high_neckline", "full_coverage"],
+    "dupatta_style": "head_drape",
+    "saree_drape": null
+  },
+  "title": "Champagne shalwar kameez for a reception",
+  "concept_summary": "A refined, fully covered reception concept with a long straight raw-silk kameez and a tapered shalwar, finished with fine rose-gold tilla and a head-draped dupatta for a modest, elegant line.",
+  "garment_breakdown": {
+    "overall_form": "A long straight kameez over a tapered shalwar, with a dupatta over the head.",
+    "garment_components": ["Long straight kameez", "Tapered shalwar", "Head dupatta"],
+    "silhouette": "A clean, columnar kameez falling straight over a slim shalwar.",
+    "drape_or_layering": "The dupatta is draped over the head and down both sides.",
+    "key_proportions": "The long kameez lengthens the line over the tapered shalwar."
+  },
+  "colour_story": {
+    "palette_summary": "A soft champagne warmed by rose gold.",
+    "placement": "Champagne fills the kameez with rose gold defining the fine work.",
+    "rationale": "Muted metallics read as understated evening reception tones."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Raw silk",
+      "placement": "Kameez and shalwar",
+      "finish_and_movement": "A crisp raw silk with a subtle texture and a clean, structured fall."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["Rose-gold tilla work", "Fine pearl detailing"],
+    "density": "Minimal, restrained work limited to borders and cuffs.",
+    "placement": ["Kameez hem", "Sleeve cuffs", "Neckline"],
+    "motifs": ["Slim tilla borders", "Scattered pearl accents"],
+    "restraint_notes": "The surface stays largely plain so the fine work reads clearly."
+  },
+  "coverage_and_drape": {
+    "sleeves": "Full-length sleeves as requested.",
+    "neckline": "A high, closed neckline for full coverage.",
+    "back_and_midriff": "The long kameez fully covers the torso, back and midriff.",
+    "head_covering": "The dupatta is worn over the head throughout.",
+    "dupatta_or_saree_drape": "A single dupatta draped over the head and down both sides."
+  },
+  "cultural_context": {
+    "regional_direction": "A broad Delhi formalwear influence guides the clean, covered elegance.",
+    "interpretation_notes": ["Treated as one broad direction rather than a strict rule."],
+    "safeguards": ["Modest, full coverage choices are honoured, not overridden."]
+  },
+  "styling_notes": ["Keep jewellery fine and rose-toned to match the tilla."],
+  "construction_caveats": [
+    "This is a concept visualisation only and is not a sewing pattern.",
+    "It does not guarantee that the garment can be constructed exactly as shown."
+  ],
+  "image_alt_text": "A model in a fully covered champagne shalwar kameez with a head-draped dupatta for a reception."
+}

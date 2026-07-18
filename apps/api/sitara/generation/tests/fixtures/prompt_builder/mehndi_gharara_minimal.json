@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "source_selections": {
+    "garment_type": "gharara",
+    "ceremony": "mehndi",
+    "regional_style": "lucknowi",
+    "silhouette": "gharara_set",
+    "colour_palette": ["yellow", "ivory"],
+    "fabrics": ["cotton_silk"],
+    "embellishment_styles": ["gota"],
+    "embellishment_density": "minimal",
+    "coverage_preferences": ["full_sleeves"],
+    "dupatta_style": "shoulder_drape",
+    "saree_drape": null
+  },
+  "title": "Sunshine yellow gharara for a mehndi",
+  "concept_summary": "A light, festive mehndi concept using a knee-length kameez over gharara legs, kept minimal and breezy with just fine gota edging so the daytime mood stays playful and unfussy.",
+  "garment_breakdown": {
+    "overall_form": "A knee-length kameez worn over wide gharara trousers with a light shoulder dupatta.",
+    "garment_components": ["Knee-length kameez", "Flared gharara trousers", "Light dupatta"],
+    "silhouette": "A soft kameez over legs that stay slim to the knee before opening into a full flare.",
+    "drape_or_layering": "The dupatta rests lightly over one shoulder and does not cover the head.",
+    "key_proportions": "The kameez length balances the dramatic knee-flare of the gharara legs."
+  },
+  "colour_story": {
+    "palette_summary": "A cheerful sunshine yellow warmed by an ivory ground.",
+    "placement": "Yellow leads across the kameez with ivory grounding the gharara legs.",
+    "rationale": "Bright yellow suits a daytime mehndi while ivory keeps it soft rather than loud."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Cotton silk",
+      "placement": "Kameez and gharara legs",
+      "finish_and_movement": "A light, breathable weave with an easy swing for daytime wear."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["Fine gota lace edging"],
+    "density": "Minimal, restrained work limited to slim edging lines.",
+    "placement": ["Kameez hem", "Sleeve cuffs"],
+    "motifs": ["Simple linear borders"],
+    "restraint_notes": "The surface is kept largely plain so the look stays light and festive."
+  },
+  "coverage_and_drape": {
+    "sleeves": "Full-length sleeves as requested.",
+    "neckline": "A comfortable square neckline for daytime.",
+    "back_and_midriff": "The kameez fully covers the torso to the knee.",
+    "head_covering": "No head covering; the dupatta stays on the shoulder.",
+    "dupatta_or_saree_drape": "A single light dupatta draped over one shoulder."
+  },
+  "cultural_context": {
+    "regional_direction": "A broad Lucknowi gharara influence guides the knee-flare construction and restraint.",
+    "interpretation_notes": ["Treated as a broad Awadhi-leaning direction rather than a strict rule."],
+    "safeguards": ["The gharara and sharara are kept distinct constructions, not conflated."]
+  },
+  "styling_notes": ["Pair with light floral jewellery suited to a mehndi."],
+  "construction_caveats": [
+    "This is a concept visualisation only and is not a sewing pattern.",
+    "It does not guarantee that the garment can be constructed exactly as shown."
+  ],
+  "image_alt_text": "A model in a yellow gharara set with a knee-length kameez and a light dupatta over one shoulder for a mehndi."
+}

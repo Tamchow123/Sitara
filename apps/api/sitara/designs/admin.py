@@ -84,6 +84,8 @@ class DesignVersionAdmin(admin.ModelAdmin):
         "design_spec_input_tokens",
         "design_spec_output_tokens",
         "design_spec_generated_at",
+        "image_prompt",
+        "prompt_builder_version",
         "image_storage_key",
         "created_at",
         "updated_at",

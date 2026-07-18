@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "source_selections": {
+    "garment_type": "saree",
+    "ceremony": "pheras",
+    "regional_style": "no_specific_direction",
+    "silhouette": "draped_saree",
+    "colour_palette": ["red", "gold"],
+    "fabrics": ["banarasi_silk"],
+    "embellishment_styles": ["zari", "kundan"],
+    "embellishment_density": "heavy",
+    "coverage_preferences": ["elbow_sleeves"],
+    "dupatta_style": null,
+    "saree_drape": "nivi_drape"
+  },
+  "title": "Deep red Banarasi saree for the pheras",
+  "concept_summary": "A traditional pheras concept in a richly woven red Banarasi saree with a heavy zari border and a pleated pallu over the shoulder, worn over a fitted blouse with kundan detailing.",
+  "garment_breakdown": {
+    "overall_form": "A draped nine-yard-style saree over a fitted blouse, with the pallu carried over the shoulder.",
+    "garment_components": ["Draped saree", "Fitted blouse", "Pleated pallu"],
+    "silhouette": "A body-skimming pleated drape that falls straight before the pallu sweeps over the shoulder.",
+    "drape_or_layering": "Classic pleats at the waist with the pallu pinned and carried over the left shoulder.",
+    "key_proportions": "The broad woven border anchors the hem while the pallu frames the upper body."
+  },
+  "colour_story": {
+    "palette_summary": "A deep ceremonial red carried by lustrous gold zari.",
+    "placement": "Red fills the body of the saree while gold defines the border and pallu.",
+    "rationale": "Red and gold read as classic bridal ceremony colours for the pheras."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Banarasi silk",
+      "placement": "Saree body, border and pallu",
+      "finish_and_movement": "A weighty woven silk with a rich sheen and a structured, sculptural drape."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["Woven zari brocade", "Kundan blouse detailing"],
+    "density": "A richly worked surface with dense woven zari across the border and pallu.",
+    "placement": ["Saree border", "Pallu", "Blouse yoke"],
+    "motifs": ["Traditional brocade butis", "Temple-edge border motifs"],
+    "restraint_notes": "The dense work is anchored to the border and pallu so the drape still reads clearly."
+  },
+  "coverage_and_drape": {
+    "sleeves": "Elbow-length blouse sleeves as requested.",
+    "neckline": "A round blouse neckline.",
+    "back_and_midriff": "A traditional drape leaves a natural midriff between blouse and saree.",
+    "head_covering": "No head covering is specified.",
+    "dupatta_or_saree_drape": "A pleated saree drape with the pallu carried over the left shoulder."
+  },
+  "cultural_context": {
+    "regional_direction": null,
+    "interpretation_notes": ["No broad regional direction was requested, so styling stays general."],
+    "safeguards": ["The saree is kept as a draped garment, not restyled as a stitched gown."]
+  },
+  "styling_notes": ["Pair with classic temple jewellery to suit the ceremony."],
+  "construction_caveats": [
+    "This is a concept visualisation and is not a sewing pattern.",
+    "It does not guarantee that the garment can be constructed exactly as shown."
+  ],
+  "image_alt_text": "A model in a red Banarasi saree with a gold zari border and a pleated pallu over the shoulder for the pheras."
+}

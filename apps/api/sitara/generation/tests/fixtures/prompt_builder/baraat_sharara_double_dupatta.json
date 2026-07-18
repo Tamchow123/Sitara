@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "source_selections": {
+    "garment_type": "sharara",
+    "ceremony": "baraat",
+    "regional_style": "pakistani",
+    "silhouette": "sharara_set",
+    "colour_palette": ["maroon", "gold"],
+    "fabrics": ["velvet", "silk"],
+    "embellishment_styles": ["zardozi", "dabka", "kora"],
+    "embellishment_density": "balanced",
+    "coverage_preferences": ["full_sleeves", "full_coverage"],
+    "dupatta_style": "double_dupatta",
+    "saree_drape": null
+  },
+  "title": "Deep maroon sharara for the baraat",
+  "concept_summary": "A stately baraat concept with a long velvet kameez over silk sharara trousers that flare from the waist, framed by a double dupatta with one drape over the head and one across the arms.",
+  "garment_breakdown": {
+    "overall_form": "A long kameez over sharara trousers, layered with two dupattas.",
+    "garment_components": ["Long kameez", "Waist-flared sharara trousers", "Head dupatta", "Arm dupatta"],
+    "silhouette": "A covered kameez over trousers that open into a full flare from the waist.",
+    "drape_or_layering": "One dupatta is set over the head and a second is carried across the arms.",
+    "key_proportions": "The long kameez balances the full sweep of the sharara trousers."
+  },
+  "colour_story": {
+    "palette_summary": "A rich maroon deepened by burnished gold.",
+    "placement": "Maroon dominates the kameez and trousers with gold framing the yoke and borders.",
+    "rationale": "Maroon and gold read as warm, formal winter baraat colours."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Velvet",
+      "placement": "Kameez",
+      "finish_and_movement": "A dense, matte pile with a substantial, structured fall."
+    },
+    {
+      "fabric": "Silk",
+      "placement": "Sharara trousers and dupattas",
+      "finish_and_movement": "A fluid silk that carries the trouser flare and the dupatta drape."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["Zardozi metal-thread work", "Dabka coiled-wire detailing", "Kora work"],
+    "density": "A balanced concentration of metalwork on the yoke and borders.",
+    "placement": ["Kameez yoke", "Trouser hem", "Dupatta borders"],
+    "motifs": ["Ornamental floral sprays", "Bordered vine motifs"],
+    "restraint_notes": "Solid maroon ground is preserved between the worked zones."
+  },
+  "coverage_and_drape": {
+    "sleeves": "Full-length sleeves as requested.",
+    "neckline": "A covered V-neckline set into a dense embroidered yoke.",
+    "back_and_midriff": "The long kameez fully covers the torso, back and midriff.",
+    "head_covering": "One dupatta is draped over the head throughout.",
+    "dupatta_or_saree_drape": "A double dupatta: one over the head and one across the arms."
+  },
+  "cultural_context": {
+    "regional_direction": "A broad Pakistani bridal influence guides the layered, covered formality.",
+    "interpretation_notes": ["Treated as one broad direction, not a rule for any community."],
+    "safeguards": ["The sharara is kept distinct from a gharara, flaring from the waist."]
+  },
+  "styling_notes": ["Pair with statement gold jewellery for the baraat."],
+  "construction_caveats": [
+    "This is a concept visualisation only and is not a sewing pattern.",
+    "It does not guarantee that the garment can be constructed exactly as shown."
+  ],
+  "image_alt_text": "A model in a maroon sharara set with a long kameez and a double dupatta for the baraat."
+}

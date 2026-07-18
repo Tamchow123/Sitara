@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "source_selections": {
+    "garment_type": "lehenga",
+    "ceremony": "nikah",
+    "regional_style": "pakistani",
+    "silhouette": "flared_lehenga",
+    "colour_palette": ["ivory", "gold"],
+    "fabrics": ["silk", "organza"],
+    "embellishment_styles": ["zardozi", "dabka"],
+    "embellishment_density": "balanced",
+    "coverage_preferences": ["full_sleeves", "high_neckline"],
+    "dupatta_style": "head_drape",
+    "saree_drape": null
+  },
+  "title": "Ivory and gold flared lehenga for a nikah",
+  "concept_summary": "A softly regal nikah concept built around a full-flared ivory lehenga with a fitted choli and a lightly draped dupatta over the head. Gold zardozi catches the light while the overall mood stays restrained and luminous.",
+  "garment_breakdown": {
+    "overall_form": "A fitted choli paired with a voluminous circular lehenga skirt and a matching dupatta.",
+    "garment_components": ["Fitted choli blouse", "Full-flared lehenga skirt", "Sheer draped dupatta"],
+    "silhouette": "A cleanly fitted upper body opening into a wide, evenly gathered floor-length flare.",
+    "drape_or_layering": "The dupatta is draped over the head and falls along both sides of the body.",
+    "key_proportions": "A close bodice, defined waist and a full skirt keep the proportions balanced and formal."
+  },
+  "colour_story": {
+    "palette_summary": "An ivory base lifted by warm gold, kept soft rather than high-contrast.",
+    "placement": "Ivory leads across the skirt and choli, with gold as the accent through the embroidery and border.",
+    "rationale": "Ivory reads calm and bridal for a nikah, while gold adds warmth without overwhelming the look."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Silk",
+      "placement": "Choli and lehenga skirt base",
+      "finish_and_movement": "A smooth, gently structured drape that holds the skirt's flare."
+    },
+    {
+      "fabric": "Organza",
+      "placement": "Dupatta",
+      "finish_and_movement": "A crisp, translucent layer that floats lightly over the head and shoulders."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["Zardozi metal-thread work", "Dabka coiled-wire detailing"],
+    "density": "A balanced amount of work concentrated at borders and the bodice rather than all over.",
+    "placement": ["Choli bodice", "Skirt hem border", "Dupatta edges"],
+    "motifs": ["Fine floral vines", "Small scattered buti motifs"],
+    "restraint_notes": "Open ivory ground is left between motifs so the metalwork stays elegant."
+  },
+  "coverage_and_drape": {
+    "sleeves": "Full-length fitted sleeves as requested.",
+    "neckline": "A modest higher neckline that keeps the chest covered.",
+    "back_and_midriff": "A short choli leaves a natural midriff, styled to sit comfortably with the skirt.",
+    "head_covering": "The dupatta is worn over the head throughout, honouring the stated preference.",
+    "dupatta_or_saree_drape": "A single dupatta draped over the head and down both sides."
+  },
+  "cultural_context": {
+    "regional_direction": "A broad Pakistani bridal influence guides the restraint and metalwork emphasis.",
+    "interpretation_notes": ["Treated as one broad regional direction, not a fixed rule for any community."],
+    "safeguards": ["No specific family, sect or regional tradition is presented as universal or definitive."]
+  },
+  "styling_notes": ["Keep jewellery warm-toned to echo the gold work.", "A centre-parted, covered hairstyle suits the head drape."],
+  "construction_caveats": [
+    "This is a concept visualisation, not a sewing pattern, and includes no measurements.",
+    "It does not guarantee that the garment can be constructed exactly as shown."
+  ],
+  "image_alt_text": "A model in an ivory flared lehenga with gold embroidery and a sheer dupatta draped over the head for a nikah."
+}
