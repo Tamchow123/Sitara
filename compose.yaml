@@ -141,7 +141,10 @@ services:
 
   celery:
     build: apps/api
-    command: ["celery", "-A", "config", "worker", "--loglevel=info"]
+    # Listen to BOTH the durable generation queue and the default celery queue
+    # (the latter keeps the health ping working). Explicit -Q so routing is
+    # unambiguous on every host (no native invocation on Windows).
+    command: ["celery", "-A", "config", "worker", "-Q", "generation,celery", "--loglevel=info"]
     environment: *api-environment
     depends_on:
       migrate:

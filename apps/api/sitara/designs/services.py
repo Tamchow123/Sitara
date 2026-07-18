@@ -385,6 +385,20 @@ def _replace_inspirations(design: Design, inspiration_asset_ids) -> None:
     )
 
 
+def _recovery_editable(locked: Design) -> bool:
+    """Whether a non-``draft`` design may still be edited.
+
+    Only a ``generation_failed`` design that never produced a DesignVersion is
+    recoverable: the user may fix their inputs and try again. A design that has
+    ANY DesignVersion (generating, generated, or a failed run that still linked
+    an incomplete version) is no longer draft-editable — its version is
+    immutable historical work and must never be modified or removed."""
+    return (
+        locked.status == Design.Status.GENERATION_FAILED
+        and not DesignVersion.objects.filter(design=locked).exists()
+    )
+
+
 def update_design_draft(
     design: Design,
     *,
@@ -403,11 +417,26 @@ def update_design_draft(
     no partial update (answers saved but inspirations failed, or vice versa)
     can ever occur.
 
+    Editability (Phase 10 lifecycle): ordinary edits are allowed only while the
+    design is ``draft``; a recovery edit is additionally allowed while it is
+    ``generation_failed`` with no DesignVersion, and the FIRST successful such
+    edit returns the design to ``draft``. Every other state (generating,
+    generated, or failed-with-a-version) is rejected with the safe
+    ``design_not_editable`` code and never touches an existing DesignVersion.
+
     Raises :class:`DraftUpdateError` (controlled, safe) or
     :class:`~sitara.questionnaire.answer_validation.QuestionnaireAnswerError`
-    (per-question), both mapped to a 400 by the view."""
+    (per-question), both mapped by the view."""
     with transaction.atomic():
         locked = Design.objects.select_for_update().get(pk=design.pk)
+
+        is_draft = locked.status == Design.Status.DRAFT
+        is_recovery = not is_draft and _recovery_editable(locked)
+        if not is_draft and not is_recovery:
+            raise DraftUpdateError(
+                "design_not_editable",
+                "This design can no longer be edited.",
+            )
 
         if title is not UNSET:
             locked.title = title
@@ -437,6 +466,12 @@ def update_design_draft(
 
         if inspiration_asset_ids is not UNSET:
             _replace_inspirations(locked, inspiration_asset_ids)
+
+        if is_recovery:
+            # A successful recovery edit clears the failed state so the design
+            # can be completed and re-generated.
+            locked.status = Design.Status.DRAFT
+            locked.save(update_fields=["status", "updated_at"])
 
         return locked
 

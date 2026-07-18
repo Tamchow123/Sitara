@@ -220,7 +220,9 @@ def _generate_valid_spec(provider, context: GenerationContext, design_id):
     raise GenerationFailed(attempts)
 
 
-def _finalise_atomic(design, spec: DesignSpec, usage: _AggregatedUsage, input_snapshot: tuple):
+def _finalise_atomic(
+    design, spec: DesignSpec, usage: _AggregatedUsage, input_snapshot: tuple, attempt=None
+):
     """Re-check freshness and persist the DesignVersion in ONE transaction under
     the Design row lock.
 
@@ -231,7 +233,12 @@ def _finalise_atomic(design, spec: DesignSpec, usage: _AggregatedUsage, input_sn
     and populated. Because the lock spans the whole block, a concurrent draft
     mutation (which also locks the row) can only commit BEFORE this block —
     causing :class:`DesignChangedDuringGeneration` — or AFTER it commits; it can
-    never slip between the freshness check and version creation."""
+    never slip between the freshness check and version creation.
+
+    When ``attempt`` is supplied (Phase 10 async pipeline) the attempt's
+    ``design_version`` link is written in this SAME transaction, so there is no
+    crash window in which a DesignVersion exists but is not yet linked to the
+    attempt that created it. The attempt must belong to the locked Design."""
     with transaction.atomic():
         locked = Design.objects.select_for_update().get(pk=design.pk)
         if design_completion_errors(locked) or _input_snapshot(locked) != input_snapshot:
@@ -249,17 +256,27 @@ def _finalise_atomic(design, spec: DesignSpec, usage: _AggregatedUsage, input_sn
         version.design_spec_output_tokens = usage.output_tokens
         version.design_spec_generated_at = timezone.now()
         version.save()
+        if attempt is not None:
+            if attempt.design_id != locked.pk:
+                # Defensive: an attempt from a different design must never be
+                # linked to this version. Nothing is persisted.
+                raise DesignChangedDuringGeneration(
+                    "the attempt does not belong to this design; no version was linked"
+                )
+            attempt.design_version = version
+            attempt.save(update_fields=["design_version", "updated_at"])
     return version
 
 
-def generate_design_spec_for_design(design, *, provider=None):
+def generate_design_spec_for_design(design, *, provider=None, attempt=None):
     """Generate, validate and persist one DesignVersion for ``design``.
 
     ``provider`` may be injected (fixtures/fakes in tests and the offline
     command); when omitted the gated live Anthropic provider is selected —
-    only after every gate passes. Raises DesignNotReady / GenerationLocked /
-    GenerationRefused / GenerationFailed / StructuredDesignProviderError on
-    failure, persisting nothing."""
+    only after every gate passes. ``attempt`` (Phase 10) links the created
+    DesignVersion to a GenerationAttempt atomically. Raises DesignNotReady /
+    GenerationLocked / GenerationRefused / GenerationFailed /
+    StructuredDesignProviderError on failure, persisting nothing."""
     # Every pre-spend validation FIRST (before any provider selection/call).
     context = build_generation_context(design)
     # Snapshot the exact inputs the context was built from, to detect a
@@ -277,7 +294,7 @@ def generate_design_spec_for_design(design, *, provider=None):
                 "already_generated", "This design already has a generated version."
             )
         selected = provider if provider is not None else get_structured_design_generation_provider()
-        spec, usage, attempts = _generate_valid_spec(selected, context, design.id)
+        spec, usage, spec_attempts = _generate_valid_spec(selected, context, design.id)
 
         # Freshness re-check AND persistence in ONE short transaction under the
         # Design row lock: re-run completion + inspiration-eligibility
@@ -286,15 +303,15 @@ def generate_design_spec_for_design(design, *, provider=None):
         # commit between the check and the write. Any change means the draft
         # moved on during the (un-transacted) call — persist nothing, never
         # touch the newer draft, and never retry the provider.
-        version = _finalise_atomic(design, spec, usage, input_snapshot)
+        version = _finalise_atomic(design, spec, usage, input_snapshot, attempt=attempt)
     logger.info(
         "design spec generated design=%s version=%s attempts=%s provider=%s",
         design.id,
         version.version_number,
-        attempts,
+        spec_attempts,
         usage.provider,
     )
     # Transient (not persisted) — the management command reports it. Deliberately
     # NOT "generation_attempts" (that is the GenerationAttempt reverse relation).
-    version.spec_generation_attempts = attempts
+    version.spec_generation_attempts = spec_attempts
     return version

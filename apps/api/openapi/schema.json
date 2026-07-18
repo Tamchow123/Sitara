@@ -481,7 +481,7 @@
             },
             "patch": {
                 "operationId": "designs_update",
-                "description": "Partial draft update: title, questionnaire version (assignable once), answers (draft-validated) and inspiration selections (replaced as one ordered set). Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Partial draft update: title, questionnaire version (assignable once), answers (draft-validated) and inspiration selections (replaced as one ordered set). Only a draft — or a generation_failed design with no version, which returns to draft — may be edited. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "Update a design",
                 "parameters": [
                     {
@@ -561,6 +561,123 @@
                             }
                         },
                         "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "design_not_editable: the design is no longer a draft (generating, generated, or a failed run with a version)."
+                    }
+                }
+            }
+        },
+        "/api/v1/designs/{design_id}/generate/": {
+            "post": {
+                "operationId": "designs_generate",
+                "description": "Enqueues one asynchronous generation job for a complete design and returns 202 with the public job payload and a same-origin Location header. Requires an Idempotency-Key UUID header; a repeated key returns the same job and queues no extra work. Accepts no body or exactly {}. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Start a design generation job",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "Idempotency-Key",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "A client-generated UUID that makes the request idempotent PER DESIGN: repeating it returns the same job and queues no additional work.",
+                        "required": true
+                    },
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Generation"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/GenerationJobResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "generation_in_progress / design_already_generated / design_not_generatable."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "generation_unavailable / queue_unavailable."
                     }
                 }
             }
@@ -844,6 +961,55 @@
                             }
                         },
                         "description": "Eligible asset whose private storage object is unavailable."
+                    }
+                }
+            }
+        },
+        "/api/v1/jobs/{job_id}/": {
+            "get": {
+                "operationId": "jobs_retrieve",
+                "description": "Returns the public job payload (status, ids, timestamps, stable error code) for a job the caller owns. No prompt, DesignSpec, image URL or provider/storage provenance is ever exposed. Available even when live generation is currently disabled. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Retrieve a generation job",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "job_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Generation"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/GenerationJobResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
                     }
                 }
             }
@@ -1191,6 +1357,72 @@
                 "required": [
                     "code",
                     "message"
+                ]
+            },
+            "GenerationJob": {
+                "type": "object",
+                "description": "The stable public shape of one generation job (Phase 10).\n\nDeliberately excludes every provider/storage provenance field (provider,\nmodel, prediction id, seed, parameters, storage key, image hash/size and\nthe Celery task id) — only the lifecycle is public.",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "design_id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "design_version_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "nullable": true
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/StatusEnum"
+                    },
+                    "error_code": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "started_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "completed_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "completed_at",
+                    "created_at",
+                    "design_id",
+                    "design_version_id",
+                    "error_code",
+                    "id",
+                    "started_at",
+                    "status",
+                    "updated_at"
+                ]
+            },
+            "GenerationJobResponse": {
+                "type": "object",
+                "properties": {
+                    "job": {
+                        "$ref": "#/components/schemas/GenerationJob"
+                    }
+                },
+                "required": [
+                    "job"
                 ]
             },
             "InspirationCatalogueResponse": {
@@ -1690,6 +1922,17 @@
                     "thumbnail_url",
                     "title"
                 ]
+            },
+            "StatusEnum": {
+                "enum": [
+                    "queued",
+                    "running_text",
+                    "running_image",
+                    "succeeded",
+                    "failed"
+                ],
+                "type": "string",
+                "description": "* `queued` - queued\n* `running_text` - running_text\n* `running_image` - running_image\n* `succeeded` - succeeded\n* `failed` - failed"
             },
             "StepSchema": {
                 "type": "object",

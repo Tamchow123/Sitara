@@ -318,3 +318,72 @@ export function validateDesignDraft(
     {},
   );
 }
+
+// ---------------------------------------------------------------------------
+// Generation jobs (Phase 10) — CSRF-aware start + GET-only poll
+// ---------------------------------------------------------------------------
+//
+// Two narrow explicit wrappers (NOT a generic arbitrary-header client): the
+// generated api/client.ts stays GET-only, and starting generation goes through
+// the same in-memory-CSRF, retry-once, no-store, 5s-timeout transport as every
+// other unsafe design mutation. The Idempotency-Key header is sent WITHOUT
+// exposing a general header API. Wire types are generated OpenAPI components,
+// so they cannot drift. No polling UI, TanStack Query or results route here.
+
+export type GenerationJob = components["schemas"]["GenerationJob"];
+export type GenerationJobResponse = components["schemas"]["GenerationJobResponse"];
+
+export type GenerationResult = DraftResult<GenerationJobResponse>;
+
+// The unsafe start-generation request reuses the shared CSRF flow but must also
+// carry an Idempotency-Key header. This is the ONLY place that header is added;
+// there is deliberately no generic header parameter on the transport.
+async function sendGenerate(
+  path: string,
+  idempotencyKey: string,
+  hasRetried = false,
+): Promise<ApiEnvelope<GenerationJobResponse & ErrorBody>> {
+  const token = await ensureCsrfToken();
+  const response = await fetchWithTimeout(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRFToken": token,
+      "Idempotency-Key": idempotencyKey,
+    },
+    body: JSON.stringify({}),
+  });
+  const data = (await response.json()) as GenerationJobResponse & ErrorBody;
+  if (response.status === 403 && data?.error?.code === "csrf_failed" && !hasRetried) {
+    csrfToken = null;
+    return sendGenerate(path, idempotencyKey, true);
+  }
+  return { ok: response.ok, status: response.status, data };
+}
+
+export async function startDesignGeneration(
+  designId: string,
+  idempotencyKey: string,
+): Promise<GenerationResult> {
+  let envelope: ApiEnvelope<GenerationJobResponse & ErrorBody>;
+  try {
+    envelope = await sendGenerate(
+      `/api/v1/designs/${encodeURIComponent(designId)}/generate/`,
+      idempotencyKey,
+    );
+  } catch {
+    return UNREACHABLE;
+  }
+  const { ok, status, data } = envelope;
+  if (ok) return { ok: true, data: data as GenerationJobResponse };
+  return toDraftFailure(status, data);
+}
+
+export async function fetchGenerationJob(jobId: string): Promise<GenerationJob> {
+  const response = await fetchWithTimeout(`/api/v1/jobs/${encodeURIComponent(jobId)}/`);
+  if (response.status !== 200) {
+    throw new Error("generation job unavailable");
+  }
+  const body = (await response.json()) as GenerationJobResponse;
+  return body.job;
+}

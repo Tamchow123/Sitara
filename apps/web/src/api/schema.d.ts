@@ -167,9 +167,29 @@ export interface paths {
         head?: never;
         /**
          * Update a design
-         * @description Partial draft update: title, questionnaire version (assignable once), answers (draft-validated) and inspiration selections (replaced as one ordered set). Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Partial draft update: title, questionnaire version (assignable once), answers (draft-validated) and inspiration selections (replaced as one ordered set). Only a draft — or a generation_failed design with no version, which returns to draft — may be edited. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         patch: operations["designs_update"];
+        trace?: never;
+    };
+    "/api/v1/designs/{design_id}/generate/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a design generation job
+         * @description Enqueues one asynchronous generation job for a complete design and returns 202 with the public job payload and a same-origin Location header. Requires an Idempotency-Key UUID header; a repeated key returns the same job and queues no extra work. Accepts no body or exactly {}. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        post: operations["designs_generate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/designs/{design_id}/validate/": {
@@ -284,6 +304,26 @@ export interface paths {
          * @description Streams the thumbnail sanitised WebP for an eligible asset. No storage keys or storage URLs are exposed.
          */
         get: operations["inspiration_asset_thumbnail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieve a generation job
+         * @description Returns the public job payload (status, ids, timestamps, stable error code) for a job the caller owns. No prompt, DesignSpec, image URL or provider/storage provenance is ever exposed. Available even when live generation is currently disabled. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        get: operations["jobs_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -422,6 +462,34 @@ export interface components {
             fields?: {
                 [key: string]: string[];
             };
+        };
+        /**
+         * @description The stable public shape of one generation job (Phase 10).
+         *
+         *     Deliberately excludes every provider/storage provenance field (provider,
+         *     model, prediction id, seed, parameters, storage key, image hash/size and
+         *     the Celery task id) — only the lifecycle is public.
+         */
+        GenerationJob: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            design_id: string;
+            /** Format: uuid */
+            design_version_id: string | null;
+            status: components["schemas"]["StatusEnum"];
+            error_code: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            completed_at: string | null;
+        };
+        GenerationJobResponse: {
+            job: components["schemas"]["GenerationJob"];
         };
         InspirationCatalogueResponse: {
             assets: components["schemas"]["PublicInspirationAsset"][];
@@ -587,6 +655,15 @@ export interface components {
             image_url: string;
             thumbnail_url: string;
         };
+        /**
+         * @description * `queued` - queued
+         *     * `running_text` - running_text
+         *     * `running_image` - running_image
+         *     * `succeeded` - succeeded
+         *     * `failed` - failed
+         * @enum {string}
+         */
+        StatusEnum: "queued" | "running_text" | "running_image" | "succeeded" | "failed";
         StepSchema: {
             id: string;
             title: string;
@@ -985,6 +1062,85 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
+            /** @description design_not_editable: the design is no longer a draft (generating, generated, or a failed run with a version). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_generate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A client-generated UUID that makes the request idempotent PER DESIGN: repeating it returns the same job and queues no additional work. */
+                "Idempotency-Key": string;
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationJobResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorEnvelope"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description generation_in_progress / design_already_generated / design_not_generatable. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description generation_unavailable / queue_unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
     designs_validate: {
@@ -1174,6 +1330,36 @@ export interface operations {
             };
             /** @description Eligible asset whose private storage object is unavailable. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    jobs_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationJobResponse"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

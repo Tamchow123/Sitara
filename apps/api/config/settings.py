@@ -278,6 +278,21 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 
+# Explicit task routing (Phase 10): the durable generation task runs on its own
+# ``generation`` queue so it never blocks (or is blocked by) the default
+# ``celery`` queue, which stays available for the health ping. The worker
+# process listens to BOTH queues (see compose.yaml). Enqueue also passes the
+# queue explicitly, so routing is correct even if this table is missed.
+CELERY_TASK_ROUTES = {
+    "sitara.generation.tasks.generate_design_attempt": {"queue": "generation"},
+}
+# Deterministic, bounded task behaviour: acknowledge late (redeliver on worker
+# loss) and never let a result linger unboundedly. Per-task time limits and the
+# no-whole-pipeline-retry policy live on the task itself.
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+
 # Django cache (rate limiting) — Redis DB 1, separate from Celery's DB 0.
 # Uses Django's built-in Redis cache backend; no extra client package.
 REDIS_CACHE_URL = os.getenv("REDIS_CACHE_URL", "redis://localhost:6379/1")

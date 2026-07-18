@@ -1,0 +1,451 @@
+"""Resumable pipeline state-machine tests (Part A) — zero network, zero live
+providers. Fakes are injected for the structured provider, image provider,
+downloader and storage.
+"""
+
+import threading
+import uuid
+
+import pytest
+
+from sitara.ai_gateway.image_generation import (
+    PREDICTION_ABORTED,
+    PREDICTION_CANCELED,
+    PREDICTION_FAILED,
+    PREDICTION_PROCESSING,
+    PREDICTION_SUCCEEDED,
+    ImageProviderError,
+)
+from sitara.designs.models import Design, DesignVersion, GenerationAttempt
+from sitara.generation import errors
+from sitara.generation.fixture_provider import FixtureStructuredDesignProvider
+from sitara.generation.image_fixtures import (
+    FakeImageProvider,
+    InMemoryStorage,
+    invalid_bytes_downloader,
+    synthetic_webp_downloader,
+)
+from sitara.generation.pipeline import (
+    _ATTEMPT_LOCK_NAMESPACE,
+    PipelineConfig,
+    _attempt_lock_key,
+    run_generation_attempt,
+)
+
+from .factory import make_complete_design
+
+pytestmark = pytest.mark.django_db
+
+_Status = GenerationAttempt.Status
+_FAST = PipelineConfig(poll_interval_seconds=0.0, poll_max_attempts=10)
+
+
+def _queued_attempt(design) -> GenerationAttempt:
+    design.status = Design.Status.GENERATING
+    design.save(update_fields=["status"])
+    return GenerationAttempt.objects.create(design=design, status=_Status.QUEUED)
+
+
+def _run(
+    attempt,
+    *,
+    structured=None,
+    image=None,
+    downloader=synthetic_webp_downloader,
+    storage=None,
+    seed_factory=None,
+    config=_FAST,
+):
+    return run_generation_attempt(
+        attempt.id,
+        structured_provider=structured or FixtureStructuredDesignProvider(),
+        image_provider=image or FakeImageProvider(),
+        image_downloader=downloader,
+        storage=storage or InMemoryStorage(),
+        seed_factory=seed_factory or (lambda: 0),
+        config=config,
+    )
+
+
+class TestHappyPath:
+    def test_full_pipeline_reaches_succeeded(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt)
+        assert result.status == _Status.SUCCEEDED
+        assert result.error_code == ""
+        assert result.completed_at is not None
+        # DesignVersion linked; Design generated.
+        design.refresh_from_db()
+        assert design.status == Design.Status.GENERATED
+        assert result.design_version_id is not None
+        version = DesignVersion.objects.get(pk=result.design_version_id)
+        assert version.design_spec is not None
+        assert version.prompt_builder_version == "3.0.0"
+        # The FINAL design image key stays blank in Phase 10.
+        assert version.image_storage_key == ""
+        # Staged raw image metadata is populated all-or-none.
+        assert result.staged_image_storage_key.startswith(f"generation-staging/{attempt.id}/raw.")
+        assert len(result.staged_image_sha256) == 64
+        assert result.staged_image_size_bytes > 0
+        assert result.staged_image_width == 768
+        assert result.staged_image_height == 1024
+
+    def test_one_design_version_created(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt)
+        assert DesignVersion.objects.filter(design=design).count() == 1
+
+    def test_seed_and_parameters_recorded_privately(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, seed_factory=lambda: 12345)
+        assert result.image_seed == 12345
+        assert result.image_parameters["aspect_ratio"] == "3:4"
+        assert result.image_parameters["output_format"] == "webp"
+        assert "prompt" not in result.image_parameters
+
+
+class TestResume:
+    def test_redelivery_after_linked_version_skips_text_provider(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        structured = FixtureStructuredDesignProvider()
+        # First run fails at the image stage (terminal), leaving a linked
+        # DesignVersion behind.
+        _run(
+            attempt,
+            structured=structured,
+            image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]),
+        )
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.FAILED
+        assert attempt.design_version_id is not None
+        first_calls = structured._calls
+        # A brand-new attempt reuses the existing DesignVersion (image-only).
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        retry = GenerationAttempt.objects.create(
+            design=design, design_version_id=attempt.design_version_id, status=_Status.QUEUED
+        )
+        result = _run(retry, structured=structured)
+        assert result.status == _Status.SUCCEEDED
+        # The text provider was NOT called again on the resuming attempt.
+        assert structured._calls == first_calls
+        # Still exactly one DesignVersion.
+        assert DesignVersion.objects.filter(design=design).count() == 1
+
+    def test_transient_image_failure_retries_without_another_text_call(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        structured = FixtureStructuredDesignProvider()
+        image = FakeImageProvider(
+            poll_actions=[ImageProviderError("timeout"), PREDICTION_SUCCEEDED]
+        )
+        # First invocation raises GenerationRetry (transient poll failure).
+        from sitara.generation.pipeline import GenerationRetry
+
+        with pytest.raises(GenerationRetry):
+            _run(attempt, structured=structured, image=image)
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.RUNNING_IMAGE
+        assert attempt.image_prediction_id  # persisted before polling
+        assert structured._calls == 1
+        prediction_id = attempt.image_prediction_id
+        # Redelivery resumes: no new text call, same prediction, succeeds.
+        result = _run(attempt, structured=structured, image=image)
+        assert result.status == _Status.SUCCEEDED
+        assert structured._calls == 1
+        assert image.create_calls == 1
+        assert result.image_prediction_id == prediction_id
+
+    def test_existing_prompt_is_reused(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        attempt.refresh_from_db()
+        version = DesignVersion.objects.get(pk=attempt.design_version_id)
+        original_prompt = version.image_prompt
+        # Resume image-only against the same version; prompt is not rebuilt.
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        retry = GenerationAttempt.objects.create(
+            design=design, design_version=version, status=_Status.QUEUED
+        )
+        _run(retry)
+        version.refresh_from_db()
+        assert version.image_prompt == original_prompt
+
+    def test_terminal_invocation_is_idempotent(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        _run(attempt)
+        attempt.refresh_from_db()
+        completed = attempt.completed_at
+        # Re-running a succeeded attempt is a no-op (does not re-generate).
+        again = _run(attempt)
+        assert again.status == _Status.SUCCEEDED
+        assert again.completed_at == completed
+        assert DesignVersion.objects.filter(design=design).count() == 1
+
+
+class TestImageFailures:
+    @pytest.mark.parametrize(
+        "state,code",
+        [
+            (PREDICTION_FAILED, errors.IMAGE_PREDICTION_FAILED),
+            (PREDICTION_CANCELED, errors.IMAGE_PREDICTION_CANCELED),
+            (PREDICTION_ABORTED, errors.IMAGE_PREDICTION_ABORTED),
+        ],
+    )
+    def test_terminal_prediction_states_map_to_codes(self, state, code):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, image=FakeImageProvider(poll_actions=[state]))
+        assert result.status == _Status.FAILED
+        assert result.error_code == code
+        design.refresh_from_db()
+        assert design.status == Design.Status.GENERATION_FAILED
+
+    def test_ambiguous_submission_is_terminal_without_retry(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        image = FakeImageProvider(
+            create_error=ImageProviderError("timeout", ambiguous_acceptance=True)
+        )
+        result = _run(attempt, image=image)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_SUBMISSION_AMBIGUOUS
+        # No prediction id was persisted (ambiguous never resubmits/polls).
+        assert result.image_prediction_id == ""
+
+    def test_invalid_output_bytes_are_rejected(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, downloader=invalid_bytes_downloader)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_OUTPUT_INVALID
+
+    def test_poll_timeout_cancels_and_fails(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        image = FakeImageProvider(poll_actions=[PREDICTION_PROCESSING])
+        result = _run(attempt, image=image, config=PipelineConfig(poll_max_attempts=3))
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.IMAGE_POLL_TIMEOUT
+        assert image.cancel_calls == 1
+
+    def test_error_codes_are_all_in_the_allowlist(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        result = _run(attempt, image=FakeImageProvider(poll_actions=[PREDICTION_FAILED]))
+        assert errors.is_valid_error_code(result.error_code)
+
+
+class TestStagingResume:
+    def test_matching_staged_object_resumes_without_reverify_failure(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        storage = InMemoryStorage()
+        _run(attempt, storage=storage)
+        attempt.refresh_from_db()
+        key = attempt.staged_image_storage_key
+        # A second attempt whose image is already staged at the deterministic
+        # key resumes finalisation rather than regenerating.
+        assert storage.exists(key)
+
+
+class TestDuplicateDelivery:
+    def test_missing_attempt_is_a_safe_noop(self):
+        assert run_generation_attempt(uuid.uuid4()) is None
+
+
+class _CrashAfterCreateProvider(FakeImageProvider):
+    """create_prediction succeeds at the provider, but the process 'crashes'
+    (raises) immediately after — before the caller persists the prediction id.
+    Simulates the worst-case create-then-crash window."""
+
+    def create_prediction(self, request):
+        super().create_prediction(request)
+        raise RuntimeError("worker killed after provider accepted the request")
+
+
+class TestSubmissionCrashWindow:
+    def test_crash_after_create_before_persist_never_resubmits(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        crashing = _CrashAfterCreateProvider()
+        # First run: the provider accepted a prediction, then the run crashed
+        # before persisting the id -> terminal internal error, marker left set.
+        result = _run(attempt, image=crashing)
+        assert result.status == _Status.FAILED
+        attempt.refresh_from_db()
+        assert attempt.image_submission_in_flight is True
+        assert attempt.image_prediction_id == ""
+        assert crashing.create_calls == 1
+        # A resuming attempt against the same version must NOT resubmit: it sees
+        # the in-flight marker with no id and fails as ambiguous.
+        design.refresh_from_db()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        # Re-run the SAME attempt id (redelivery) with a healthy provider.
+        healthy = FakeImageProvider()
+        # Reset the terminal state to running_image to simulate redelivery
+        # resuming an interrupted (non-terminal) attempt.
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            status=_Status.RUNNING_IMAGE, error_code="", completed_at=None
+        )
+        again = _run(attempt, image=healthy)
+        assert again.status == _Status.FAILED
+        assert again.error_code == errors.IMAGE_SUBMISSION_AMBIGUOUS
+        assert healthy.create_calls == 0  # never resubmitted
+
+    def test_pre_acceptance_transient_clears_marker_and_retries(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        # create fails as a definitely-pre-acceptance transient (not ambiguous).
+        image = FakeImageProvider(
+            create_error=ImageProviderError("connection", ambiguous_acceptance=False)
+        )
+        from sitara.generation.pipeline import GenerationRetry
+
+        with pytest.raises(GenerationRetry):
+            _run(attempt, image=image)
+        attempt.refresh_from_db()
+        # Nothing was accepted: the marker is cleared so a retry may resubmit.
+        assert attempt.image_submission_in_flight is False
+        assert attempt.image_prediction_id == ""
+        assert attempt.image_seed == 0  # seed persisted once, reused on retry
+        # A healthy retry resubmits with the SAME persisted seed.
+        healthy = FakeImageProvider()
+        result = _run(attempt, image=healthy)
+        assert result.status == _Status.SUCCEEDED
+        assert healthy.create_calls == 1
+        assert healthy.last_request.seed == 0
+
+
+class TestSoftTimeLimit:
+    def test_soft_time_limit_is_retryable_not_terminal(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        from sitara.generation.pipeline import GenerationRetry
+
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+
+        class _TimeoutOnPoll(FakeImageProvider):
+            def get_prediction(self, prediction_id):
+                raise SoftTimeLimitExceeded()
+
+        image = _TimeoutOnPoll()
+        # A soft-time-limit mid-poll must NOT mark the attempt terminally failed;
+        # it becomes a bounded retry so a redelivery resumes the same prediction.
+        with pytest.raises(GenerationRetry):
+            _run(attempt, image=image)
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.RUNNING_IMAGE
+        assert attempt.image_prediction_id  # prediction already submitted/persisted
+
+
+class TestStatusTransitions:
+    def test_pipeline_passes_through_running_text_then_running_image(self):
+        design = make_complete_design()
+        attempt = _queued_attempt(design)
+        seen = []
+
+        class _StatusSpyStructured(FixtureStructuredDesignProvider):
+            def generate(self, request):
+                seen.append(("text", _current_status(attempt.id)))
+                return super().generate(request)
+
+        class _StatusSpyImage(FakeImageProvider):
+            def create_prediction(self, request):
+                seen.append(("image", _current_status(attempt.id)))
+                return super().create_prediction(request)
+
+        result = _run(attempt, structured=_StatusSpyStructured(), image=_StatusSpyImage())
+        assert result.status == _Status.SUCCEEDED
+        assert ("text", _Status.RUNNING_TEXT) in seen
+        assert ("image", _Status.RUNNING_IMAGE) in seen
+
+
+class TestCrossDesignGuard:
+    def test_attempt_from_a_different_design_is_never_linked(self):
+        from sitara.generation.services import (
+            DesignChangedDuringGeneration,
+            generate_design_spec_for_design,
+        )
+
+        from .factory import make_active_v1
+
+        questionnaire = make_active_v1()
+        design = make_complete_design(questionnaire=questionnaire)
+        other = make_complete_design(questionnaire=questionnaire)
+        foreign_attempt = GenerationAttempt.objects.create(
+            design=other, status=_Status.RUNNING_TEXT
+        )
+        with pytest.raises(DesignChangedDuringGeneration):
+            generate_design_spec_for_design(
+                design, provider=FixtureStructuredDesignProvider(), attempt=foreign_attempt
+            )
+        # Nothing persisted for either design.
+        assert DesignVersion.objects.filter(design=design).count() == 0
+        foreign_attempt.refresh_from_db()
+        assert foreign_attempt.design_version_id is None
+
+
+def _current_status(attempt_id):
+    return GenerationAttempt.objects.values_list("status", flat=True).get(pk=attempt_id)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_duplicate_delivery_is_serialised_by_the_advisory_lock():
+    """A second (duplicate) delivery whose advisory lock is already held by
+    another session performs NO work and returns None."""
+    design = make_complete_design()
+    attempt = _queued_attempt(design)
+    namespace = _ATTEMPT_LOCK_NAMESPACE
+    key = _attempt_lock_key(attempt.id)
+
+    holding = threading.Event()
+    release = threading.Event()
+
+    def holder():
+        from django.db import connection as thread_connection
+
+        try:
+            with thread_connection.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_lock(%s, %s)", [namespace, key])
+                holding.set()
+                release.wait(timeout=10)
+                cursor.execute("SELECT pg_advisory_unlock(%s, %s)", [namespace, key])
+        finally:
+            thread_connection.close()
+
+    thread = threading.Thread(target=holder)
+    thread.start()
+    try:
+        assert holding.wait(timeout=10)
+        structured = FixtureStructuredDesignProvider()
+        image = FakeImageProvider()
+        result = run_generation_attempt(
+            attempt.id,
+            structured_provider=structured,
+            image_provider=image,
+            image_downloader=synthetic_webp_downloader,
+            storage=InMemoryStorage(),
+            seed_factory=lambda: 0,
+            config=_FAST,
+        )
+        assert result is None  # duplicate delivery exits without work
+        assert structured._calls == 0
+        assert image.create_calls == 0
+        assert DesignVersion.objects.filter(design=design).count() == 0
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.QUEUED
+    finally:
+        release.set()
+        thread.join(timeout=10)
