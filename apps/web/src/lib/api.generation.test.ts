@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   _resetCsrfTokenForTests,
   fetchGenerationJob,
+  GenerationJobMalformedError,
+  GenerationJobNotFoundError,
+  GenerationJobUnavailableError,
   startDesignGeneration,
 } from "./api";
 
@@ -114,8 +117,48 @@ describe("fetchGenerationJob", () => {
     expect(calls[0].init?.method ?? "GET").toBe("GET");
   });
 
-  it("throws on a non-200 response", async () => {
+  it("throws GenerationJobNotFoundError on a 404", async () => {
     installFetchSpy(() => json({ error: { code: "not_found", message: "x" } }, 404));
-    await expect(fetchGenerationJob("missing")).rejects.toThrow();
+    await expect(fetchGenerationJob("missing")).rejects.toBeInstanceOf(
+      GenerationJobNotFoundError,
+    );
+  });
+
+  it("throws GenerationJobUnavailableError on a 503", async () => {
+    installFetchSpy(() => json({ error: { code: "unavailable", message: "x" } }, 503));
+    await expect(fetchGenerationJob("j1")).rejects.toBeInstanceOf(GenerationJobUnavailableError);
+  });
+
+  it("throws GenerationJobUnavailableError on a network/timeout failure", async () => {
+    installFetchSpy(() => {
+      throw new TypeError("network down");
+    });
+    await expect(fetchGenerationJob("j1")).rejects.toBeInstanceOf(GenerationJobUnavailableError);
+  });
+
+  it("throws GenerationJobMalformedError on non-JSON output", async () => {
+    installFetchSpy(
+      () =>
+        new Response("<html>proxy error</html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }),
+    );
+    await expect(fetchGenerationJob("j1")).rejects.toBeInstanceOf(GenerationJobMalformedError);
+  });
+
+  it("throws GenerationJobMalformedError when the job shape is invalid", async () => {
+    installFetchSpy(() => json({ job: { id: "j1" } }, 200));
+    await expect(fetchGenerationJob("j1")).rejects.toBeInstanceOf(GenerationJobMalformedError);
+  });
+
+  it("throws GenerationJobMalformedError when the envelope has no job key", async () => {
+    installFetchSpy(() => json({ nope: true }, 200));
+    await expect(fetchGenerationJob("j1")).rejects.toBeInstanceOf(GenerationJobMalformedError);
+  });
+
+  it("throws GenerationJobMalformedError when status is an unrecognised value", async () => {
+    installFetchSpy(() => json({ job: { ...JOB.job, status: "cancelled" } }, 200));
+    await expect(fetchGenerationJob("j1")).rejects.toBeInstanceOf(GenerationJobMalformedError);
   });
 });

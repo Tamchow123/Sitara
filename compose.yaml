@@ -200,8 +200,13 @@ services:
     # only. To persist a regenerated schema.d.ts back to the host, add a
     # temporary src mount, e.g.
     #   docker compose run --rm -v ./apps/web/src:/app/src web npm run generate:api
+    #
+    # The shared Django/Vitest cross-language validation contract (see the
+    # api service's mount above) is consumed the same way here by
+    # src/features/questionnaire/validation.test.ts.
     volumes:
       - ./apps/api/openapi:/api/openapi:ro
+      - ./contracts:/contracts:ro
     depends_on:
       api:
         condition: service_healthy

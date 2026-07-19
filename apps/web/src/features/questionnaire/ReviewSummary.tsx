@@ -1,39 +1,59 @@
 "use client";
 
 // The review screen. Before showing the draft as ready it calls the
-// authoritative server-side validation endpoint; a validation failure routes
-// the user back to the errors. Option labels are resolved from the linked
-// schema (never hard-coded). The "Generate my concept" button is disabled —
-// generation arrives in a later phase; nothing here calls a provider.
+// authoritative server-side validation endpoint and fetches the public
+// configuration; a validation failure routes the user back to the errors.
+// Option labels are resolved from the linked schema (never hard-coded).
+//
+// "Generate my concept" starts an idempotent generation job (Phase 12): one
+// UUID is minted on the first deliberate click and retained in memory (never
+// browser storage) for the life of the in-flight attempt, reused verbatim on
+// a retry after a transport failure, and reset only once a definitive server
+// outcome proves no replay is required.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-import { fetchDesign, validateDesignDraft } from "./api";
+import { fetchDesign, fetchPublicConfig, startDesignGeneration, validateDesignDraft } from "./api";
 import { answerLabels } from "./answer-utils";
 import { visibleQuestions } from "./rules";
+import { resolveDesignLifecycleTarget } from "@/lib/design-lifecycle";
 import type { Answers, DesignDraft, QuestionnaireSchema } from "./types";
 
 type Props = { designId: string };
 
 type State =
   | { phase: "loading" }
+  | { phase: "redirecting" }
   | { phase: "notfound" }
   | { phase: "unavailable" }
   // The design loaded but validation could not be PERFORMED (timeout, status 0,
   // malformed response, 5xx) — distinct from a completed 400 (incomplete).
   | { phase: "validation_unavailable" }
+  | { phase: "conflict" }
   | {
       phase: "ready";
       design: DesignDraft;
       schema: QuestionnaireSchema;
       valid: boolean;
       errors: Record<string, string[]>;
+      generationEnabled: boolean;
     };
 
+type SubmitState = { status: "idle" } | { status: "submitting" } | { status: "error"; message: string };
+
 export function ReviewSummary({ designId }: Props) {
+  const router = useRouter();
   const [state, setState] = useState<State>({ phase: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const [submit, setSubmit] = useState<SubmitState>({ status: "idle" });
+
+  // A ref (not state) so a synchronous double click is rejected even before
+  // React re-renders with the "submitting" state — state alone cannot
+  // guarantee that under a rapid double click within one event loop turn.
+  const submittingRef = useRef(false);
+  const idempotencyKeyRef = useRef<string | null>(null);
 
   const retry = useCallback(() => {
     setState({ phase: "loading" });
@@ -45,14 +65,36 @@ export function ReviewSummary({ designId }: Props) {
     async function run() {
       try {
         const design = await fetchDesign(designId);
-        if (!design.questionnaire) {
-          if (!cancelled) setState({ phase: "unavailable" });
+        if (cancelled) return;
+        const target = resolveDesignLifecycleTarget(design);
+        if (target.kind === "progress" || target.kind === "result") {
+          setState({ phase: "redirecting" });
+          router.replace(target.href);
           return;
         }
-        const validation = await validateDesignDraft(designId);
+        if (target.kind === "unavailable") {
+          setState({ phase: "unavailable" });
+          return;
+        }
+        if (!design.questionnaire) {
+          setState({ phase: "unavailable" });
+          return;
+        }
+        const [validation, config] = await Promise.all([
+          validateDesignDraft(designId),
+          fetchPublicConfig().catch(() => null),
+        ]);
         if (cancelled) return;
+        const generationEnabled = config?.generation_enabled === true;
         if (validation.ok) {
-          setState({ phase: "ready", design, schema: design.questionnaire.schema, valid: true, errors: {} });
+          setState({
+            phase: "ready",
+            design,
+            schema: design.questionnaire.schema,
+            valid: true,
+            errors: {},
+            generationEnabled,
+          });
           return;
         }
         // A completed HTTP 400 means the draft is genuinely incomplete; any
@@ -64,6 +106,7 @@ export function ReviewSummary({ designId }: Props) {
             schema: design.questionnaire.schema,
             valid: false,
             errors: validation.fields ?? {},
+            generationEnabled,
           });
         } else {
           setState({ phase: "validation_unavailable" });
@@ -78,9 +121,63 @@ export function ReviewSummary({ designId }: Props) {
     return () => {
       cancelled = true;
     };
+    // router is intentionally omitted: Next.js guarantees a stable
+    // reference, and including it would re-run this effect (and refetch)
+    // whenever a caller's router mock is not memoised.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [designId, attempt]);
 
-  if (state.phase === "loading") {
+  const handleGenerate = useCallback(async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmit({ status: "submitting" });
+
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = crypto.randomUUID();
+    }
+    const key = idempotencyKeyRef.current;
+
+    const result = await startDesignGeneration(designId, key);
+
+    if (result.ok) {
+      idempotencyKeyRef.current = null; // confirmed success: no replay possible or needed
+      router.replace(`/design/${designId}/generation/${result.data.job.id}`);
+      return; // stay "submitting": we are navigating away
+    }
+
+    if (result.status === 0) {
+      // Transport failure or malformed response: genuinely ambiguous whether
+      // the server received the request — keep the SAME key for the retry.
+      submittingRef.current = false;
+      setSubmit({ status: "error", message: result.message });
+      return;
+    }
+
+    // Any confirmed HTTP response is a definitive outcome: the next
+    // deliberate click (if any) mints a fresh key.
+    idempotencyKeyRef.current = null;
+
+    if (result.code === "generation_in_progress" || result.code === "design_already_generated") {
+      try {
+        const refreshed = await fetchDesign(designId);
+        const target = resolveDesignLifecycleTarget(refreshed);
+        if (target.kind === "progress" || target.kind === "result") {
+          router.replace(target.href);
+          return; // stay "submitting": we are navigating away
+        }
+      } catch {
+        // fall through to the controlled conflict state below
+      }
+      submittingRef.current = false;
+      setState({ phase: "conflict" });
+      return;
+    }
+
+    submittingRef.current = false;
+    setSubmit({ status: "error", message: result.message });
+  }, [designId, router]);
+
+  if (state.phase === "loading" || state.phase === "redirecting") {
     return (
       <p role="status" aria-live="polite">
         Checking your design…
@@ -114,11 +211,22 @@ export function ReviewSummary({ designId }: Props) {
       </div>
     );
   }
+  if (state.phase === "conflict") {
+    return (
+      <div role="alert">
+        <h1>We couldn&apos;t confirm your generation status</h1>
+        <p>Please try again in a moment.</p>
+        <Link href={`/design/${designId}`}>Back to your design</Link>
+      </div>
+    );
+  }
 
-  const { design, schema, valid, errors } = state;
+  const { design, schema, valid, errors, generationEnabled } = state;
   const answers = (design.answers ?? {}) as Answers;
   const visibility = visibleQuestions(schema, answers);
   const editHref = `/design/${design.id}`;
+  const submitting = submit.status === "submitting";
+  const canGenerate = valid && generationEnabled && !submitting;
 
   return (
     <main className="review">
@@ -215,13 +323,32 @@ export function ReviewSummary({ designId }: Props) {
 
       <div className="wizard-nav">
         <Link href={editHref}>Back to questionnaire</Link>
-        <button type="button" disabled aria-describedby="generate-note">
-          Generate my concept
+        <button
+          type="button"
+          onClick={() => void handleGenerate()}
+          disabled={!canGenerate}
+          aria-describedby="generate-note"
+        >
+          {submitting ? "Starting…" : "Generate my concept"}
         </button>
       </div>
       <p id="generate-note" className="field-help">
-        Concept generation is introduced in a later phase and is not available yet.
+        {!valid
+          ? "Complete the highlighted items above before generating."
+          : !generationEnabled
+            ? "Concept generation is not currently available."
+            : submitting
+              ? "Starting your generation…"
+              : "Ready to generate your concept."}
       </p>
+      {submit.status === "error" && (
+        <div className="generate-error" role="alert">
+          <p>{submit.message}</p>
+          <button type="button" onClick={() => void handleGenerate()}>
+            Try again
+          </button>
+        </div>
+      )}
     </main>
   );
 }

@@ -237,4 +237,133 @@ describe("QuestionnaireWizard", () => {
     expect(await screen.findByRole("heading", { name: "Detail step" })).toBeInTheDocument();
     expect(mocks.fetchDesign).toHaveBeenCalledWith("d1");
   });
+
+  describe("lifecycle navigation", () => {
+    it("renders the wizard for a draft design", async () => {
+      mocks.fetchDesign.mockResolvedValue(detail({ status: "draft" }));
+      render(<QuestionnaireWizard initialDesignId="d1" />);
+      expect(await screen.findByRole("heading", { name: "Garment step" })).toBeInTheDocument();
+      expect(mocks.replace).not.toHaveBeenCalledWith(expect.stringContaining("/generation/"));
+    });
+
+    it("redirects to the progress route for a generating design with a coherent job", async () => {
+      mocks.fetchDesign.mockResolvedValue(
+        detail({
+          status: "generating",
+          latest_job: {
+            id: "job-1",
+            design_id: "d1",
+            design_version_id: null,
+            status: "running_image",
+            error_code: null,
+            created_at: "t",
+            updated_at: "t",
+            started_at: null,
+            completed_at: null,
+          },
+        }),
+      );
+      render(<QuestionnaireWizard initialDesignId="d1" />);
+      await waitFor(() =>
+        expect(mocks.replace).toHaveBeenCalledWith("/design/d1/generation/job-1"),
+      );
+      expect(screen.queryByRole("heading", { name: "Garment step" })).not.toBeInTheDocument();
+    });
+
+    it("redirects to the result route for a generated design", async () => {
+      mocks.fetchDesign.mockResolvedValue(
+        detail({
+          status: "generated",
+          latest_job: {
+            id: "job-2",
+            design_id: "d1",
+            design_version_id: "v-2",
+            status: "succeeded",
+            error_code: null,
+            created_at: "t",
+            updated_at: "t",
+            started_at: null,
+            completed_at: "t",
+          },
+        }),
+      );
+      render(<QuestionnaireWizard initialDesignId="d1" />);
+      await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/design/d1/result/v-2"));
+    });
+
+    it("keeps an editable wizard for a failed design with no linked version", async () => {
+      mocks.fetchDesign.mockResolvedValue(
+        detail({
+          status: "generation_failed",
+          latest_job: {
+            id: "job-3",
+            design_id: "d1",
+            design_version_id: null,
+            status: "failed",
+            error_code: "structured_generation_failed",
+            created_at: "t",
+            updated_at: "t",
+            started_at: null,
+            completed_at: "t",
+          },
+        }),
+      );
+      render(<QuestionnaireWizard initialDesignId="d1" />);
+      expect(await screen.findByRole("heading", { name: "Garment step" })).toBeInTheDocument();
+      expect(mocks.replace).not.toHaveBeenCalledWith(expect.stringContaining("/generation/"));
+    });
+
+    it("redirects to the failed-progress route for a failed design with a linked version", async () => {
+      mocks.fetchDesign.mockResolvedValue(
+        detail({
+          status: "generation_failed",
+          latest_job: {
+            id: "job-4",
+            design_id: "d1",
+            design_version_id: "v-4",
+            status: "failed",
+            error_code: "image_ingest_failed",
+            created_at: "t",
+            updated_at: "t",
+            started_at: null,
+            completed_at: "t",
+          },
+        }),
+      );
+      render(<QuestionnaireWizard initialDesignId="d1" />);
+      await waitFor(() =>
+        expect(mocks.replace).toHaveBeenCalledWith("/design/d1/generation/job-4"),
+      );
+    });
+
+    it("shows a controlled unavailable state for inconsistent lifecycle data, without redirecting", async () => {
+      mocks.fetchDesign.mockResolvedValue(detail({ status: "generating", latest_job: null }));
+      render(<QuestionnaireWizard initialDesignId="d1" />);
+      expect(await screen.findByText(/temporarily unavailable/i)).toBeInTheDocument();
+      expect(mocks.replace).not.toHaveBeenCalled();
+      expect(mocks.push).not.toHaveBeenCalled();
+    });
+
+    it("does not loop: a single redirect call is made for a generating design", async () => {
+      mocks.fetchDesign.mockResolvedValue(
+        detail({
+          status: "generating",
+          latest_job: {
+            id: "job-5",
+            design_id: "d1",
+            design_version_id: null,
+            status: "queued",
+            error_code: null,
+            created_at: "t",
+            updated_at: "t",
+            started_at: null,
+            completed_at: null,
+          },
+        }),
+      );
+      render(<QuestionnaireWizard initialDesignId="d1" />);
+      await waitFor(() => expect(mocks.replace).toHaveBeenCalled());
+      expect(mocks.replace).toHaveBeenCalledTimes(1);
+    });
+  });
 });
