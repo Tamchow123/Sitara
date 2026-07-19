@@ -41,6 +41,11 @@ from sitara.generation.pipeline import (
     QueueUnavailable,
     enqueue_design_generation,
 )
+from sitara.media.delivery import issue_design_image_urls
+from sitara.media.exceptions import (
+    DesignImageDeliveryUnavailable,
+    DesignImageNotReady,
+)
 from sitara.questionnaire.answer_validation import QuestionnaireAnswerError
 from sitara.schema import (
     CSRF_HEADER_PARAMETER,
@@ -48,12 +53,13 @@ from sitara.schema import (
     ValidationErrorEnvelopeSerializer,
 )
 
-from .jobs import public_job_payload
-from .models import Design
+from .jobs import _iso, public_job_payload
+from .models import Design, DesignVersion
 from .openapi import (
     DesignDetailResponseSerializer,
     DesignListResponseSerializer,
     DesignValidationSuccessSerializer,
+    DesignVersionImagesResponseSerializer,
     GenerationJobResponseSerializer,
 )
 from .ownership import accessible_designs, accessible_generation_attempts
@@ -82,11 +88,17 @@ logger = logging.getLogger(__name__)
 NO_STORE = {"Cache-Control": "no-store"}
 
 
-def _error(code: str, message: str, http_status: int, fields: dict | None = None) -> Response:
+def _error(
+    code: str,
+    message: str,
+    http_status: int,
+    fields: dict | None = None,
+    headers: dict | None = None,
+) -> Response:
     body: dict = {"error": {"code": code, "message": message}}
     if fields:
         body["error"]["fields"] = fields
-    return Response(body, status=http_status, headers=NO_STORE)
+    return Response(body, status=http_status, headers=headers if headers is not None else NO_STORE)
 
 
 def _not_found() -> Response:
@@ -509,6 +521,111 @@ class DesignGenerateView(APIView):
         # Same-origin relative Location — never the internal Django host.
         response["Location"] = f"/api/v1/jobs/{attempt.id}/"
         return response
+
+
+# Signed image URLs are sensitive and NOT revocable before expiry — only the
+# TTL ends them. Never let a cache retain them, and never leak them to a
+# third party via the Referer header (see sitara.media.delivery for the full
+# bearer-URL privacy model).
+_IMAGE_HEADERS = {**NO_STORE, "Referrer-Policy": "no-referrer"}
+
+
+class DesignVersionImagesView(APIView):
+    """Short-lived signed image URLs for one owned DesignVersion (Phase 11).
+
+    Ownership filtering runs BEFORE the design UUID lookup, and the version
+    must belong to that owned design — an inaccessible or nonexistent design
+    OR version is one indistinguishable 404, so a caller knowing only a
+    DesignVersion UUID gains nothing. A failed GET never creates a workspace
+    (accessible_designs resolves with create=False). The response exposes no
+    prompt, DesignSpec, storage key, hash, provider/model/prediction id,
+    seed, staging metadata or user/session identifier."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    @staticmethod
+    def _image_error(code: str, message: str, http_status: int) -> Response:
+        # The shared _error helper with this endpoint's extended header set.
+        return _error(code, message, http_status, headers=_IMAGE_HEADERS)
+
+    @extend_schema(
+        operation_id="designs_version_images_retrieve",
+        tags=_DESIGN_TAGS,
+        responses={
+            200: DesignVersionImagesResponseSerializer,
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="design_image_not_ready: no permanent image has been ingested yet.",
+            ),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="design_image_delivery_unavailable: not possible right now.",
+            ),
+        },
+        summary="Get short-lived signed image URLs for a design version",
+        description=(
+            "Returns presigned GET URLs for the version's private original and "
+            "thumbnail WebP images, plus their dimensions and one shared "
+            "expiry. The URLs are temporary bearer URLs: anyone possessing one "
+            "may use it until it expires, and logout or session rotation does "
+            "not revoke it — they are short-lived and must never be stored. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def get(self, request, design_id: str, version_id: str):
+        # Ownership filter FIRST, UUID lookup second — indistinguishable 404,
+        # and no workspace/session is ever created for a failed GET.
+        design = accessible_designs(request).filter(pk=design_id).first()
+        if design is None:
+            return self._image_error("not_found", "Not found.", status.HTTP_404_NOT_FOUND)
+        version = DesignVersion.objects.filter(design=design, pk=version_id).first()
+        if version is None:
+            return self._image_error("not_found", "Not found.", status.HTTP_404_NOT_FOUND)
+        try:
+            issued = issue_design_image_urls(version)
+        except DesignImageNotReady:
+            return self._image_error(
+                "design_image_not_ready",
+                "This design version has no viewable image yet.",
+                status.HTTP_409_CONFLICT,
+            )
+        except DesignImageDeliveryUnavailable as exc:
+            # A storage/signing failure on the sole image-delivery path is an
+            # operational incident: log the safe boundary signal (operation
+            # name, row UUID, exception TYPE only — never a key, URL or raw
+            # message), matching _workspace_unavailable's convention.
+            cause = type(exc.__cause__).__name__ if exc.__cause__ else "unknown"
+            logger.warning(
+                "design image delivery unavailable design_version=%s exception_type=%s",
+                version.pk,
+                cause,
+            )
+            return self._image_error(
+                "design_image_delivery_unavailable",
+                "Design images are temporarily unavailable. Try again shortly.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(
+            {
+                "images": {
+                    "original": {
+                        "url": issued.original_url,
+                        "width": version.image_width,
+                        "height": version.image_height,
+                    },
+                    "thumbnail": {
+                        "url": issued.thumbnail_url,
+                        "width": version.thumbnail_width,
+                        "height": version.thumbnail_height,
+                    },
+                    "expires_at": _iso(issued.expires_at),
+                }
+            },
+            headers=_IMAGE_HEADERS,
+        )
 
 
 class GenerationJobView(APIView):

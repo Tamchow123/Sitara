@@ -99,3 +99,27 @@ class GenerationJobSerializer(serializers.Serializer):
 
 class GenerationJobResponseSerializer(serializers.Serializer):
     job = GenerationJobSerializer()
+
+
+class DesignImageSerializer(serializers.Serializer):
+    """One deliverable image: a short-lived signed URL plus its dimensions.
+
+    The URL is a TEMPORARY BEARER URL (usable by anyone holding it until
+    expiry) — never persisted, cached or logged. No storage key, hash,
+    provider/prediction id, seed or staging metadata is ever exposed."""
+
+    url = serializers.CharField(help_text="Short-lived signed GET URL for the private WebP object.")
+    width = serializers.IntegerField()
+    height = serializers.IntegerField()
+
+
+class DesignImagesSerializer(serializers.Serializer):
+    original = DesignImageSerializer()
+    thumbnail = DesignImageSerializer()
+    expires_at = serializers.DateTimeField(
+        help_text="The single instant BOTH URLs stop working (ISO-8601)."
+    )
+
+
+class DesignVersionImagesResponseSerializer(serializers.Serializer):
+    images = DesignImagesSerializer()

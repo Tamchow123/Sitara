@@ -18,6 +18,16 @@ def inmemory_storage(settings):
 
 
 @pytest.fixture(autouse=True)
+def inmemory_design_image_storage(settings):
+    """Every generation test resolves the ``design_images`` alias (Phase 11
+    permanent ingest) to isolated in-memory storage — CI has no MinIO, and the
+    network guard below makes any accidental S3 construction fail loudly."""
+    storages = copy.deepcopy(settings.STORAGES)
+    storages["design_images"] = {"BACKEND": "django.core.files.storage.InMemoryStorage"}
+    settings.STORAGES = storages
+
+
+@pytest.fixture(autouse=True)
 def no_network(monkeypatch):
     def guard(*args, **kwargs):
         raise AssertionError("network access attempted during a generation test")

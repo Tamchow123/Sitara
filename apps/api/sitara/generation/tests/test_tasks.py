@@ -119,7 +119,9 @@ class TestTaskTimeLimits:
         assert tasks.SOFT_TIME_LIMIT_SECONDS > pipeline_budget_seconds()
         assert tasks.HARD_TIME_LIMIT_SECONDS > tasks.SOFT_TIME_LIMIT_SECONDS
 
-    def test_budget_covers_text_image_and_download(self):
+    def test_budget_covers_text_image_download_and_ingest(self):
+        from sitara.generation.pipeline import INGEST_STAGE_BUDGET_SECONDS
+
         expected_download = settings.REPLICATE_TIMEOUT_SECONDS * (MAX_REDIRECTS + 1)
         expected = (
             2 * settings.ANTHROPIC_TIMEOUT_SECONDS
@@ -127,6 +129,8 @@ class TestTaskTimeLimits:
             + 2 * settings.REPLICATE_TIMEOUT_SECONDS
             + settings.REPLICATE_POLL_TIMEOUT_SECONDS
             + expected_download
+            # Phase 11 stage E: canonical ingest processing + storage I/O.
+            + INGEST_STAGE_BUDGET_SECONDS
         )
         assert pipeline_budget_seconds() == expected
 

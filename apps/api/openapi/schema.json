@@ -760,6 +760,84 @@
                 }
             }
         },
+        "/api/v1/designs/{design_id}/versions/{version_id}/images/": {
+            "get": {
+                "operationId": "designs_version_images_retrieve",
+                "description": "Returns presigned GET URLs for the version's private original and thumbnail WebP images, plus their dimensions and one shared expiry. The URLs are temporary bearer URLs: anyone possessing one may use it until it expires, and logout or session rotation does not revoke it — they are short-lived and must never be stored. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Get short-lived signed image URLs for a design version",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DesignVersionImagesResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "design_image_not_ready: no permanent image has been ingested yet."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "design_image_delivery_unavailable: not possible right now."
+                    }
+                }
+            }
+        },
         "/api/v1/health/live": {
             "get": {
                 "operationId": "health_live",
@@ -1205,6 +1283,48 @@
                     "updated_at"
                 ]
             },
+            "DesignImage": {
+                "type": "object",
+                "description": "One deliverable image: a short-lived signed URL plus its dimensions.\n\nThe URL is a TEMPORARY BEARER URL (usable by anyone holding it until\nexpiry) — never persisted, cached or logged. No storage key, hash,\nprovider/prediction id, seed or staging metadata is ever exposed.",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Short-lived signed GET URL for the private WebP object."
+                    },
+                    "width": {
+                        "type": "integer"
+                    },
+                    "height": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "height",
+                    "url",
+                    "width"
+                ]
+            },
+            "DesignImages": {
+                "type": "object",
+                "properties": {
+                    "original": {
+                        "$ref": "#/components/schemas/DesignImage"
+                    },
+                    "thumbnail": {
+                        "$ref": "#/components/schemas/DesignImage"
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "The single instant BOTH URLs stop working (ISO-8601)."
+                    }
+                },
+                "required": [
+                    "expires_at",
+                    "original",
+                    "thumbnail"
+                ]
+            },
             "DesignListItem": {
                 "type": "object",
                 "description": "A compact list row — no questionnaire schema, no inspiration records.",
@@ -1280,6 +1400,17 @@
                 },
                 "required": [
                     "valid"
+                ]
+            },
+            "DesignVersionImagesResponse": {
+                "type": "object",
+                "properties": {
+                    "images": {
+                        "$ref": "#/components/schemas/DesignImages"
+                    }
+                },
+                "required": [
+                    "images"
                 ]
             },
             "DesignWriteRequest": {

@@ -1,4 +1,5 @@
-"""Durable asynchronous generation pipeline (Phase 10, Parts A & B).
+"""Durable asynchronous generation pipeline (Phase 10 Parts A & B; Phase 11
+adds stage E — canonical permanent image ingest).
 
 Two public entry points:
 
@@ -54,6 +55,12 @@ from sitara.ai_gateway.policy import generation_is_available
 from sitara.ai_gateway.structured_design import StructuredDesignProviderError
 from sitara.designs.models import Design, DesignVersion, GenerationAttempt
 from sitara.designs.services import design_completion_errors
+from sitara.media.exceptions import (
+    DesignImageImmutable,
+    DesignImageIngestFailed,
+    DesignImageIngestRetry,
+)
+from sitara.media.ingest import ingest_staged_design_image
 
 from . import errors
 from .context import DesignNotReady
@@ -157,6 +164,17 @@ def build_pipeline_config() -> "PipelineConfig":
     )
 
 
+# Worst-case wall-clock allowance (seconds) for stage E — canonical permanent
+# ingest (Phase 11): one bounded staging read, full Pillow decode/orient/
+# composite/resize/encode of an image up to GENERATION_RAW_MAX_PIXELS, two
+# final-object writes and their read-back verifications. Deliberately
+# conservative: ingest is idempotent but NOT incremental, so a soft-limit
+# interruption re-runs the whole stage on retry — the budget must comfortably
+# exceed a legitimately slow (large image / loaded storage) run, or bounded
+# retries would exhaust at the same point every time.
+INGEST_STAGE_BUDGET_SECONDS = 120
+
+
 def pipeline_budget_seconds() -> int:
     """The worst-case wall-clock budget of one attempt's stages, from the SAME
     settings the stages use — colocated with :func:`build_pipeline_config` so all
@@ -167,14 +185,16 @@ def pipeline_budget_seconds() -> int:
     Stages: the text stage may make up to two Anthropic requests; the image
     stage submits (one REPLICATE_TIMEOUT), polls under a REPLICATE_POLL_TIMEOUT
     wall-clock deadline plus one in-flight status call that may run up to
-    REPLICATE_TIMEOUT past it, then downloads over a bounded multi-hop budget."""
+    REPLICATE_TIMEOUT past it, then downloads over a bounded multi-hop budget;
+    the ingest stage (E) gets the fixed INGEST_STAGE_BUDGET_SECONDS allowance
+    for processing plus final-storage round-trips."""
     text = 2 * settings.ANTHROPIC_TIMEOUT_SECONDS
     download = settings.REPLICATE_TIMEOUT_SECONDS * (MAX_REDIRECTS + 1)
     image = (
         # submit + one trailing in-flight poll call + the poll wall-clock bound
         2 * settings.REPLICATE_TIMEOUT_SECONDS + settings.REPLICATE_POLL_TIMEOUT_SECONDS + download
     )
-    return text + image
+    return text + image + INGEST_STAGE_BUDGET_SECONDS
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +503,7 @@ def run_generation_attempt(
     image_provider=None,
     image_downloader=None,
     storage=None,
+    final_storage=None,
     seed_factory=None,
     config=None,
 ):
@@ -527,6 +548,7 @@ def run_generation_attempt(
                 image_provider,
                 image_downloader,
                 storage,
+                final_storage,
                 seed_factory,
                 config,
             )
@@ -553,7 +575,14 @@ def run_generation_attempt(
 
 
 def _execute(
-    attempt, structured_provider, image_provider, image_downloader, storage, seed_factory, config
+    attempt,
+    structured_provider,
+    image_provider,
+    image_downloader,
+    storage,
+    final_storage,
+    seed_factory,
+    config,
 ):
     # Stage A — claim and pre-check.
     _set_started(attempt)
@@ -575,12 +604,25 @@ def _execute(
     # Stage C — deterministic image prompt (idempotent).
     version = _run_prompt_stage(version)
 
-    # Stage D — image submission, polling, download and staging.
-    _run_image_stage(
-        attempt, version, image_provider, image_downloader, storage, seed_factory, config
-    )
+    # Stage D — image submission, polling, download and raw staging. Skipped
+    # entirely on a redelivery whose version already carries COMPLETE
+    # permanent-image provenance: no Anthropic, no prompt rebuild, no
+    # prediction create/poll, no download, no reprocessing — stage E verifies
+    # the final objects and the attempt finalises.
+    if version.has_permanent_image:
+        _set_status(attempt, _Status.RUNNING_IMAGE)
+        attempt.refresh_from_db()
+    else:
+        _run_image_stage(
+            attempt, version, image_provider, image_downloader, storage, seed_factory, config
+        )
 
-    # Stage E — success.
+    # Stage E — canonical permanent ingest (original + thumbnail verified in
+    # private storage). The attempt is never marked succeeded, and the Design
+    # never marked generated, before this completes.
+    _run_ingest_stage(attempt, storage, final_storage)
+
+    # Stage F — success.
     _finalise_success(attempt)
     return GenerationAttempt.objects.get(pk=attempt.pk)
 
@@ -1086,18 +1128,75 @@ def _persist_staged(attempt, key, sha256, size_bytes, width, height) -> None:
     )
 
 
+def _run_ingest_stage(attempt, storage, final_storage) -> None:
+    """Stage E — canonical permanent ingest (Phase 11).
+
+    Delegates to the crash-safe :func:`ingest_staged_design_image` service
+    (idempotent, provider-free under every path) and maps its safe exceptions
+    onto the pipeline taxonomy: a transient/unknown storage outcome becomes a
+    bounded ``image_ingest_unverified`` retry that reruns ONLY verification/
+    ingest; confirmed corrupt/conflicting permanent content (including an
+    immutability conflict) terminalises as ``image_ingest_failed``. Neither
+    ever causes an image resubmission — the staged metadata these attempts
+    keep carrying blocks the enqueue guard."""
+    attempt.refresh_from_db()
+    # Resolve the staging storage exactly like stage D does (the module-level
+    # default_storage reference), so an injected/patched staging double is
+    # honoured by BOTH stages and the two can never read different sources.
+    staging_store = storage if storage is not None else default_storage
+    try:
+        ingest_staged_design_image(
+            attempt,
+            staging_storage=staging_store,
+            final_storage=final_storage,
+        )
+    except DesignImageIngestRetry as exc:
+        raise GenerationRetry(errors.IMAGE_INGEST_UNVERIFIED) from exc
+    except (DesignImageIngestFailed, DesignImageImmutable) as exc:
+        raise _TerminalGenerationError(errors.IMAGE_INGEST_FAILED) from exc
+
+
+def finalise_ingest_recovery(attempt_id) -> GenerationAttempt | None:
+    """Complete a FAILED ingest-stage attempt after an operator-driven ingest.
+
+    Used ONLY by the ``ingest_design_image`` management command once the
+    ingest service has verified complete permanent provenance: an attempt that
+    terminally failed at stage E (``image_ingest_failed`` /
+    ``image_ingest_unverified``) is completed as succeeded and its Design
+    marked generated — zero provider calls, nothing else touched. Any other
+    status/code combination is left unchanged (in-progress attempts belong to
+    the worker; other terminal codes are not ingest-stage outcomes). Returns
+    the refreshed attempt, or None when it does not exist."""
+    with transaction.atomic():
+        locked = GenerationAttempt.objects.select_for_update().filter(pk=attempt_id).first()
+        if locked is None:
+            return None
+        if locked.status == _Status.FAILED and locked.error_code in errors.INGEST_STAGE_ERROR_CODES:
+            _mark_attempt_succeeded(locked)
+    return GenerationAttempt.objects.get(pk=attempt_id)
+
+
+def _mark_attempt_succeeded(locked: GenerationAttempt) -> None:
+    """The SINGLE success transition: the locked attempt becomes succeeded
+    (error cleared, completion stamped) and its Design becomes generated.
+    Every success path — normal finalisation and operator ingest recovery —
+    goes through here so the transition can never drift between callers.
+    Callers hold the attempt row lock and have applied their own guard."""
+    locked.status = _Status.SUCCEEDED
+    locked.error_code = ""
+    locked.completed_at = timezone.now()
+    locked.save(update_fields=["status", "error_code", "completed_at", "updated_at"])
+    Design.objects.filter(pk=locked.design_id).update(
+        status=Design.Status.GENERATED, updated_at=timezone.now()
+    )
+
+
 def _finalise_success(attempt) -> None:
     with transaction.atomic():
         locked = GenerationAttempt.objects.select_for_update().get(pk=attempt.pk)
         if locked.status == _Status.SUCCEEDED:
             return
-        locked.status = _Status.SUCCEEDED
-        locked.error_code = ""
-        locked.completed_at = timezone.now()
-        locked.save(update_fields=["status", "error_code", "completed_at", "updated_at"])
-        Design.objects.filter(pk=locked.design_id).update(
-            status=Design.Status.GENERATED, updated_at=timezone.now()
-        )
+        _mark_attempt_succeeded(locked)
 
 
 def _finalise_failure(attempt, code: str, *, clear_text_marker: bool = False) -> None:

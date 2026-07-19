@@ -207,8 +207,8 @@ Base: `/api/v1/`, always reached same-origin (dev rewrite / prod reverse-proxy p
 
 ## 10. Image-Storage Workflow
 
-- Single `django-storages` switch: dev = `FileSystemStorage` under `backend/media/` (gitignored); prod = S3-compatible bucket. Identical application code.
-- Layout: `catalogue/{uuid}.webp` (+ thumbs), `designs/{design_id}/v{n}.webp` (+ thumbs), `demo/{fixture_id}.webp` for demo-mode fixtures. Replicate PNGs transcoded to WebP + thumbnail on ingest (Pillow).
+- `django-storages` with a dedicated `design_images` alias resolved at call time (Phase 11). The strict `DESIGN_IMAGE_STORAGE_BACKEND` selects `s3` (production and the local MinIO in compose — the normal path) or `filesystem` (offline ingest testing only; private root, no public base URL, refused in production). Identical application code either way.
+- Layout (as delivered in Phase 11): permanent design images at `design-images/{design_uuid}/{design_version_uuid}/original.webp` and `.../thumbnail.webp` (server UUIDs only); Phase 10 raw provider output stays at `generation-staging/{attempt_uuid}/raw.{ext}` until Phase 16 purges it; catalogue derivatives keep their own `catalogue/inspiration/...` prefix. Provider output is transcoded to canonical WebP + thumbnail on ingest (Pillow, versioned processor, full metadata strip).
 - Catalogue uploads only via Django admin: content-type validation, EXIF strip, thumbnail generation; approval blocked without a verified UsageRights record.
 - Prod access per §8: private bucket + short-lived signed URLs for design images (bearer-URL risk documented); public CDN for catalogue/showcase; optional backend-proxy upgrade path if strict enforcement is later required.
 - Deletion: purging a Design deletes its storage objects in the same task; UsageRights rows outlive asset retirement (audit trail).

@@ -7,6 +7,10 @@
 // This transport stores NOTHING — no cookies (the session is an HttpOnly
 // cookie the JS cannot read), no CSRF token (held in memory by lib/api.ts).
 
+// The backend's design-image delivery endpoint bounds its synchronous
+// storage phase under this budget (apps/api/sitara/media/delivery.py
+// EXISTENCE_DEADLINE_SECONDS) so its controlled 503 can actually reach the
+// browser — check that bound before changing this value.
 export const REQUEST_TIMEOUT_MS = 5000;
 
 export async function fetchWithTimeout(

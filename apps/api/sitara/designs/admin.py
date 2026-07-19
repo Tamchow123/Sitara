@@ -86,7 +86,20 @@ class DesignVersionAdmin(admin.ModelAdmin):
         "design_spec_generated_at",
         "image_prompt",
         "prompt_builder_version",
+        # Permanent-image provenance (Phase 11) is immutable audit data —
+        # read-only everywhere; no preview or URL is ever rendered.
         "image_storage_key",
+        "image_sha256",
+        "image_size_bytes",
+        "image_width",
+        "image_height",
+        "thumbnail_storage_key",
+        "thumbnail_sha256",
+        "thumbnail_size_bytes",
+        "thumbnail_width",
+        "thumbnail_height",
+        "image_processor_version",
+        "image_ingested_at",
         "created_at",
         "updated_at",
     )

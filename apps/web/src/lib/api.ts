@@ -387,3 +387,93 @@ export async function fetchGenerationJob(jobId: string): Promise<GenerationJob> 
   const body = (await response.json()) as GenerationJobResponse;
   return body.job;
 }
+
+// ---------------------------------------------------------------------------
+// Design images (Phase 11) — short-lived signed URL retrieval
+// ---------------------------------------------------------------------------
+//
+// One narrow GET wrapper. The returned URLs are TEMPORARY BEARER URLS: anyone
+// holding one can use it until it expires, so they are requested fresh on
+// every call and NEVER cached in module state, localStorage, sessionStorage
+// or IndexedDB. Phase 12 owns refresh while a results page stays open; there
+// is deliberately no polling or automatic refresh here.
+
+export type DesignImage = components["schemas"]["DesignImage"];
+export type DesignImages = components["schemas"]["DesignImages"];
+
+// Failures reuse the file's canonical DraftFailure shape (and its shared
+// status/body -> code/message mapping) so this endpoint can never drift from
+// the rest of the API client's error-handling contract.
+export type DesignImageUrlFailure = DraftFailure;
+export type DesignImageUrlSuccess = { ok: true; images: DesignImages };
+export type DesignImageUrlResult = DesignImageUrlSuccess | DesignImageUrlFailure;
+
+function isDesignImage(value: unknown): value is DesignImage {
+  if (typeof value !== "object" || value === null) return false;
+  const image = value as Record<string, unknown>;
+  return (
+    typeof image.url === "string" &&
+    image.url.length > 0 &&
+    typeof image.width === "number" &&
+    typeof image.height === "number"
+  );
+}
+
+function isDesignImages(value: unknown): value is DesignImages {
+  if (typeof value !== "object" || value === null) return false;
+  const images = value as Record<string, unknown>;
+  return (
+    isDesignImage(images.original) &&
+    isDesignImage(images.thumbnail) &&
+    typeof images.expires_at === "string" &&
+    images.expires_at.length > 0
+  );
+}
+
+// Strict result mapping: a timeout/network error, invalid JSON, or a 200 with
+// a malformed body all become typed failures — never a false success and
+// never an exception the caller must remember to catch.
+export async function fetchDesignImageUrls(
+  designId: string,
+  designVersionId: string,
+): Promise<DesignImageUrlResult> {
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      `/api/v1/designs/${encodeURIComponent(designId)}/versions/${encodeURIComponent(
+        designVersionId,
+      )}/images/`,
+    );
+  } catch {
+    return {
+      ok: false,
+      status: 0,
+      code: "unavailable",
+      message: "The service could not be reached.",
+    };
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return {
+      ok: false,
+      status: response.status,
+      code: "invalid_response",
+      message: "The service returned an unexpected response.",
+    };
+  }
+  if (response.status === 200) {
+    const images = (body as { images?: unknown }).images;
+    if (isDesignImages(images)) {
+      return { ok: true, images };
+    }
+    return {
+      ok: false,
+      status: 200,
+      code: "invalid_response",
+      message: "The service returned an unexpected response.",
+    };
+  }
+  return toDraftFailure(response.status, body as ErrorBody);
+}

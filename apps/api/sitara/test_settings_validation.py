@@ -444,3 +444,142 @@ class TestPaidGateCredentialValidation:
         # availability simply stays False (see policy tests).
         result = load_settings({"REPLICATE_API_TOKEN": "__REPLACE_ME__"})
         assert result.returncode == 0, result.stderr
+
+
+class TestDesignImageStorageSettings:
+    """Phase 11: strict design-image storage/processing configuration."""
+
+    def test_default_backend_is_s3_and_alias_exists(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import config.settings as s; "
+                "print(s.DESIGN_IMAGE_STORAGE_BACKEND); "
+                "print(s.STORAGES['design_images']['BACKEND'])",
+            ],
+            cwd=API_ROOT,
+            env={"PATH": os.environ.get("PATH", "")},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "s3" in result.stdout
+        assert "storages.backends.s3.S3Storage" in result.stdout
+
+    def test_filesystem_backend_is_accepted_in_development(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import config.settings as s; "
+                "print(s.STORAGES['design_images']['BACKEND']); "
+                "print(s.STORAGES['design_images']['OPTIONS']['base_url'])",
+            ],
+            cwd=API_ROOT,
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "DESIGN_IMAGE_STORAGE_BACKEND": "filesystem",
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "FileSystemStorage" in result.stdout
+        assert "None" in result.stdout  # no public base URL, ever
+
+    def test_unknown_blank_and_cased_backends_fail_without_echo(self):
+        for bad in ("minio", "", "S3", "Filesystem", " s3"):
+            result = load_settings({"DESIGN_IMAGE_STORAGE_BACKEND": bad})
+            assert result.returncode != 0, f"backend {bad!r} must be rejected"
+            assert "DESIGN_IMAGE_STORAGE_BACKEND" in result.stderr
+            if bad.strip() and bad not in ("s3", "filesystem"):
+                assert bad not in result.stderr.replace("DESIGN_IMAGE_STORAGE_BACKEND", "")
+
+    def test_filesystem_backend_is_rejected_in_production(self):
+        result = load_settings(
+            {**VALID_PRODUCTION_ENV, "DESIGN_IMAGE_STORAGE_BACKEND": "filesystem"}
+        )
+        assert result.returncode != 0
+        assert "DESIGN_IMAGE_STORAGE_BACKEND" in result.stderr
+
+    def test_blank_filesystem_root_is_rejected_when_selected(self):
+        result = load_settings(
+            {
+                "DESIGN_IMAGE_STORAGE_BACKEND": "filesystem",
+                "DESIGN_IMAGE_FILESYSTEM_ROOT": "   ",
+            }
+        )
+        assert result.returncode != 0
+        assert "DESIGN_IMAGE_FILESYSTEM_ROOT" in result.stderr
+
+    def test_webp_quality_bounds_are_enforced(self):
+        for name in ("DESIGN_IMAGE_WEBP_QUALITY", "DESIGN_IMAGE_THUMBNAIL_QUALITY"):
+            for bad in ("0", "101"):
+                result = load_settings({name: bad})
+                assert result.returncode != 0, f"{name}={bad} must be rejected"
+                assert name in result.stderr
+
+    def test_thumbnail_edge_must_not_exceed_max_edge(self):
+        result = load_settings(
+            {"DESIGN_IMAGE_MAX_EDGE": "512", "DESIGN_IMAGE_THUMBNAIL_EDGE": "1024"}
+        )
+        assert result.returncode != 0
+        assert "DESIGN_IMAGE_THUMBNAIL_EDGE" in result.stderr
+
+    def test_signed_url_ttl_bounds_are_enforced(self):
+        for bad in ("29", "3601"):
+            result = load_settings({"DESIGN_IMAGE_SIGNED_URL_TTL_SECONDS": bad})
+            assert result.returncode != 0
+            assert "DESIGN_IMAGE_SIGNED_URL_TTL_SECONDS" in result.stderr
+        for good in ("30", "3600"):
+            result = load_settings({"DESIGN_IMAGE_SIGNED_URL_TTL_SECONDS": good})
+            assert result.returncode == 0, result.stderr
+
+
+class TestSignedUrlEndpointSettings:
+    """Phase 11 Part B: strict S3_SIGNED_URL_ENDPOINT_URL validation."""
+
+    def test_blank_means_regional_endpoint_and_loads(self):
+        result = load_settings({"S3_SIGNED_URL_ENDPOINT_URL": ""})
+        assert result.returncode == 0, result.stderr
+
+    def test_development_minio_origin_is_accepted(self):
+        result = load_settings({"S3_SIGNED_URL_ENDPOINT_URL": "http://localhost:9000"})
+        assert result.returncode == 0, result.stderr
+
+    def test_https_origin_with_root_path_is_accepted(self):
+        result = load_settings({"S3_SIGNED_URL_ENDPOINT_URL": "https://media.example.com/"})
+        assert result.returncode == 0, result.stderr
+
+    def test_production_requires_https(self):
+        result = load_settings(
+            {**VALID_PRODUCTION_ENV, "S3_SIGNED_URL_ENDPOINT_URL": "http://media.example.com"}
+        )
+        assert result.returncode != 0
+        assert "S3_SIGNED_URL_ENDPOINT_URL" in result.stderr
+
+    def test_production_accepts_a_clean_https_origin(self):
+        result = load_settings(
+            {**VALID_PRODUCTION_ENV, "S3_SIGNED_URL_ENDPOINT_URL": "https://media.example.com"}
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_invalid_shapes_are_rejected_without_echoing(self):
+        for bad in (
+            "ftp://media.example.com",
+            "media.example.com",
+            "https://user:pass@media.example.com",
+            "https://media.example.com?query=1",
+            "https://media.example.com#fragment",
+            "https://media.example.com/bucket-path",
+        ):
+            result = load_settings({"S3_SIGNED_URL_ENDPOINT_URL": bad})
+            assert result.returncode != 0, f"{bad!r} must be rejected"
+            assert "S3_SIGNED_URL_ENDPOINT_URL" in result.stderr
+            # The rejected value itself is never echoed.
+            assert "media.example.com" not in result.stderr.replace(
+                "S3_SIGNED_URL_ENDPOINT_URL", ""
+            )

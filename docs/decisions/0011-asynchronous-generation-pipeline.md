@@ -150,3 +150,21 @@ The offline fixture checkpoint (zero network, `run_generation_fixture`) is
 validated by automated tests. The **paid live checkpoint remains pending** and
 must not run without explicit, budgeted spend authorisation. Only safe aggregate
 observations may ever be recorded here.
+
+## Amendment: Phase 11 gates `generated` on permanent ingest
+
+Phase 11 (ADR 0012) appended a canonical permanent-ingest stage (E) to this
+pipeline. Two statements above are superseded:
+
+- a Design now moves `generating` -> `generated` only once the permanent
+  original AND thumbnail have been stored and verified by the Phase 11 ingest
+  (raw staging alone no longer completes a generation);
+- `DesignVersion.image_storage_key` is no longer blank after success — the
+  Phase 11 ingest populates the full permanent-image provenance
+  (all-or-none), and a redelivery with complete provenance skips every
+  provider stage and finalises after verifying the final objects.
+
+The staged raw object and its metadata are retained after ingest (crash
+recovery across the non-atomic object-storage/PostgreSQL boundary); purging
+them remains Phase 16 work. See
+`docs/decisions/0012-private-design-image-storage.md`.

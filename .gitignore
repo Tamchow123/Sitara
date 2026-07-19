@@ -10,6 +10,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 apps/api/staticfiles/
+# Local filesystem design-image storage (private; never committed)
+apps/api/private-design-images/
 
 # Node / Next.js
 node_modules/
