@@ -313,7 +313,15 @@ file_overwrite = False
 
 Do not expose MinIO/S3 endpoints or credentials through API responses, generated schemas, logs, or browser code.
 
-Catalogue images currently stream through eligibility-checked Django endpoints. Design-image signed URLs arrive in a later phase and must remain ownership checked.
+Catalogue images currently stream through eligibility-checked Django endpoints.
+
+Permanent design images (Phase 11) follow these permanent rules:
+
+- All permanent generated-image operations use the `design_images` storage alias resolved at call time via `django.core.files.storage.storages` — never a module-level storage instance.
+- Permanent-image provenance on `DesignVersion` is immutable audit data (all-or-none). A changed image processor requires a `DESIGN_IMAGE_PROCESSOR_VERSION` bump plus a reviewed golden-manifest update, and produces new DesignVersions — never rewrites.
+- Signed design-image URLs are issued only by the ownership-checked images endpoint. They are temporary bearer URLs: keep the TTL short, never persist, cache or log an issued URL anywhere (backend or frontend), and never present them as revocable or non-shareable. A backend proxy is the documented upgrade path.
+- The filesystem design-image backend is development-only: it has no public base URL, its browser delivery fails closed, and production refuses it.
+- Phase 10 staging objects and staged metadata are retained after ingest (crash recovery); purging them is Phase 16 work.
 
 ## 15. API conventions
 

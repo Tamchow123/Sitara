@@ -63,6 +63,19 @@ x-api-environment: &api-environment
   INSPIRATION_MAX_IMAGE_PIXELS: ${INSPIRATION_MAX_IMAGE_PIXELS:-40000000}
   INSPIRATION_OUTPUT_MAX_EDGE: ${INSPIRATION_OUTPUT_MAX_EDGE:-2048}
   INSPIRATION_THUMBNAIL_EDGE: ${INSPIRATION_THUMBNAIL_EDGE:-512}
+  # Permanent private design-image storage (Phase 11). The backend selection
+  # is strict (exactly s3 or filesystem); processing bounds are strict
+  # positive integers with documented ranges; the signing endpoint is the
+  # BROWSER-reachable MinIO origin (the API talks to minio:9000 internally,
+  # but a presigned URL must resolve from the host machine).
+  DESIGN_IMAGE_STORAGE_BACKEND: ${DESIGN_IMAGE_STORAGE_BACKEND:-s3}
+  DESIGN_IMAGE_FILESYSTEM_ROOT: ${DESIGN_IMAGE_FILESYSTEM_ROOT:-/app/private-design-images}
+  DESIGN_IMAGE_MAX_EDGE: ${DESIGN_IMAGE_MAX_EDGE:-2048}
+  DESIGN_IMAGE_THUMBNAIL_EDGE: ${DESIGN_IMAGE_THUMBNAIL_EDGE:-512}
+  DESIGN_IMAGE_WEBP_QUALITY: ${DESIGN_IMAGE_WEBP_QUALITY:-90}
+  DESIGN_IMAGE_THUMBNAIL_QUALITY: ${DESIGN_IMAGE_THUMBNAIL_QUALITY:-82}
+  DESIGN_IMAGE_SIGNED_URL_TTL_SECONDS: ${DESIGN_IMAGE_SIGNED_URL_TTL_SECONDS:-300}
+  S3_SIGNED_URL_ENDPOINT_URL: ${S3_SIGNED_URL_ENDPOINT_URL:-http://localhost:9000}
 
 services:
   postgres:

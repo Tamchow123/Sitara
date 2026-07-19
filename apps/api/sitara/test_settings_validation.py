@@ -537,3 +537,49 @@ class TestDesignImageStorageSettings:
         for good in ("30", "3600"):
             result = load_settings({"DESIGN_IMAGE_SIGNED_URL_TTL_SECONDS": good})
             assert result.returncode == 0, result.stderr
+
+
+class TestSignedUrlEndpointSettings:
+    """Phase 11 Part B: strict S3_SIGNED_URL_ENDPOINT_URL validation."""
+
+    def test_blank_means_regional_endpoint_and_loads(self):
+        result = load_settings({"S3_SIGNED_URL_ENDPOINT_URL": ""})
+        assert result.returncode == 0, result.stderr
+
+    def test_development_minio_origin_is_accepted(self):
+        result = load_settings({"S3_SIGNED_URL_ENDPOINT_URL": "http://localhost:9000"})
+        assert result.returncode == 0, result.stderr
+
+    def test_https_origin_with_root_path_is_accepted(self):
+        result = load_settings({"S3_SIGNED_URL_ENDPOINT_URL": "https://media.example.com/"})
+        assert result.returncode == 0, result.stderr
+
+    def test_production_requires_https(self):
+        result = load_settings(
+            {**VALID_PRODUCTION_ENV, "S3_SIGNED_URL_ENDPOINT_URL": "http://media.example.com"}
+        )
+        assert result.returncode != 0
+        assert "S3_SIGNED_URL_ENDPOINT_URL" in result.stderr
+
+    def test_production_accepts_a_clean_https_origin(self):
+        result = load_settings(
+            {**VALID_PRODUCTION_ENV, "S3_SIGNED_URL_ENDPOINT_URL": "https://media.example.com"}
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_invalid_shapes_are_rejected_without_echoing(self):
+        for bad in (
+            "ftp://media.example.com",
+            "media.example.com",
+            "https://user:pass@media.example.com",
+            "https://media.example.com?query=1",
+            "https://media.example.com#fragment",
+            "https://media.example.com/bucket-path",
+        ):
+            result = load_settings({"S3_SIGNED_URL_ENDPOINT_URL": bad})
+            assert result.returncode != 0, f"{bad!r} must be rejected"
+            assert "S3_SIGNED_URL_ENDPOINT_URL" in result.stderr
+            # The rejected value itself is never echoed.
+            assert "media.example.com" not in result.stderr.replace(
+                "S3_SIGNED_URL_ENDPOINT_URL", ""
+            )

@@ -457,9 +457,26 @@ if DESIGN_IMAGE_STORAGE_BACKEND == "filesystem" and not DESIGN_IMAGE_FILESYSTEM_
     )
 
 if DESIGN_IMAGE_STORAGE_BACKEND == "s3":
+    # Bounded client timeouts: the signed-delivery endpoint checks object
+    # existence synchronously inside the HTTP request cycle, so a HANGING
+    # (rather than refusing) storage backend must fail fast into the
+    # controlled 503 instead of pinning a worker for botocore's ~60s
+    # defaults. Single-attempt, short timeouts: this is a synchronous
+    # user-facing READ path — failing one request fast beats pinning a
+    # worker through retries during an outage. Import deferred to here
+    # so the filesystem branch never touches botocore.
+    from botocore.config import Config as _BotoClientConfig
+
     STORAGES["design_images"] = {
         "BACKEND": "storages.backends.s3.S3Storage",
-        "OPTIONS": dict(_PRIVATE_S3_OPTIONS),
+        "OPTIONS": {
+            **_PRIVATE_S3_OPTIONS,
+            "client_config": _BotoClientConfig(
+                connect_timeout=5,
+                read_timeout=10,
+                retries={"max_attempts": 1},
+            ),
+        },
     }
 else:
     STORAGES["design_images"] = {
@@ -474,6 +491,46 @@ else:
             "file_permissions_mode": 0o600,
         },
     }
+
+# ---------------------------------------------------------------------------
+# Signed design-image delivery endpoint (Phase 11 Part B).
+#
+# The API container reaches S3/MinIO through S3_ENDPOINT_URL (an internal
+# Docker host); a BROWSER following a presigned URL needs an externally
+# reachable origin. This setting configures ONLY the presigning host for
+# design-image GET URLs — it is never used for ordinary object upload/read
+# calls, never exposed through /api/v1/config/public, and blank means "use
+# the normal regional S3 endpoint" (the production default on real AWS).
+# A configured value must be an absolute http(s) ORIGIN: no userinfo, no
+# query, no fragment, no path other than "/", and HTTPS in production.
+# Rejected values are never echoed.
+# ---------------------------------------------------------------------------
+
+S3_SIGNED_URL_ENDPOINT_URL = os.getenv("S3_SIGNED_URL_ENDPOINT_URL", "").strip()
+if S3_SIGNED_URL_ENDPOINT_URL:
+    from urllib.parse import urlsplit as _urlsplit
+
+    _signed_parts = _urlsplit(S3_SIGNED_URL_ENDPOINT_URL)
+    _signed_problems = []
+    if _signed_parts.scheme not in ("http", "https"):
+        _signed_problems.append("must be an absolute http(s) URL")
+    if IS_PRODUCTION and _signed_parts.scheme != "https":
+        _signed_problems.append("must use https in production")
+    if not _signed_parts.netloc:
+        _signed_problems.append("must include a host")
+    if _signed_parts.username is not None or _signed_parts.password is not None:
+        _signed_problems.append("must not include credentials")
+    if _signed_parts.query:
+        _signed_problems.append("must not include a query string")
+    if _signed_parts.fragment:
+        _signed_problems.append("must not include a fragment")
+    if _signed_parts.path not in ("", "/"):
+        _signed_problems.append("must not include a path")
+    if _signed_problems:
+        raise ImproperlyConfigured(
+            "S3_SIGNED_URL_ENDPOINT_URL is not a valid signing origin: "
+            + "; ".join(_signed_problems)
+        )
 
 # Canonical design-image processing bounds (strict positive integers; errors
 # identify only the setting, never its value).

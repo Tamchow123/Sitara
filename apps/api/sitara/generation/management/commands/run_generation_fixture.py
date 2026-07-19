@@ -17,7 +17,7 @@ import uuid as uuid_module
 from django.core.files.storage import default_storage
 from django.core.management.base import BaseCommand, CommandError
 
-from sitara.designs.models import Design, GenerationAttempt
+from sitara.designs.models import Design, DesignVersion, GenerationAttempt
 from sitara.generation.fixture_provider import FixtureStructuredDesignProvider
 from sitara.generation.image_fixtures import FakeImageProvider, synthetic_webp_downloader
 from sitara.generation.pipeline import (
@@ -93,9 +93,15 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"attempt {result.id} ({result.status})"))
         self.stdout.write(f"created_new_attempt={created}")
         self.stdout.write(f"design_version={result.design_version_id}")
-        self.stdout.write(f"final_status={result.status}")
+        self.stdout.write(f"status={result.status}")
         self.stdout.write(f"error_code={result.error_code or '-'}")
-        self.stdout.write(f"staged_size_bytes={result.staged_image_size_bytes}")
-        self.stdout.write(f"staged_sha256={result.staged_image_sha256 or '-'}")
-        # Deliberately NOT printed: prompt, answers, storage key, provider,
-        # model, prediction id, seed or parameters.
+        # Phase 11: the pipeline now finishes with the canonical permanent
+        # ingest, so report the safe provenance of the ingested derivatives.
+        if result.design_version_id is not None:
+            version = DesignVersion.objects.get(pk=result.design_version_id)
+            self.stdout.write(f"processor_version={version.image_processor_version or '-'}")
+            if version.has_permanent_image:
+                self.stdout.write(f"original={version.image_width}x{version.image_height}")
+                self.stdout.write(f"thumbnail={version.thumbnail_width}x{version.thumbnail_height}")
+        # Deliberately NOT printed: prompt, answers, storage keys, hashes,
+        # signed URLs, provider, model, prediction id, seed or parameters.

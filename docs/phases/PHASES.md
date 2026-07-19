@@ -164,6 +164,37 @@ Standing rules across all phases:
 - **Manual checkpoint:** generated image retrievable via signed URL; the same URL fails after expiry; catalogue images publicly readable.
 - **Commit:** `feat(storage): unified local/S3 image storage with signed design-image URLs`
 
+> **Delivered (ADR 0012)** as two commits — `feat(storage): add canonical
+> private design image ingest` (Part A) and `feat(storage): add signed design
+> image delivery` (Part B). Part A adds the call-time-resolved
+> `design_images` storage alias (strict `DESIGN_IMAGE_STORAGE_BACKEND`:
+> `s3` for production/MinIO, `filesystem` for offline ingest testing only —
+> refused in production, no public base URL), the `sitara/media` package
+> (pure deterministic key builder `design-images/<design>/<version>/
+> {original,thumbnail}.webp`, versioned canonical WebP processing —
+> `DESIGN_IMAGE_PROCESSOR_VERSION 1.0.0` with a golden-manifest regeneration
+> guard — and the crash-safe idempotent `ingest_staged_design_image` service:
+> reuse-or-fail-never-overwrite objects, metadata recovery, no lock held
+> during I/O), the all-or-none permanent-image provenance on `DesignVersion`
+> (keys/hashes/sizes/dimensions/processor version/timestamp, admin
+> read-only), pipeline stage E gating `succeeded`/`generated` on VERIFIED
+> permanent ingest with the `image_ingest_unverified`/`image_ingest_failed`
+> taxonomy (never spend-resolved; staged output keeps blocking regeneration),
+> and the provider-free `ingest_design_image` operator recovery command.
+> Part B adds the strict browser-reachable `S3_SIGNED_URL_ENDPOINT_URL`
+> signing origin, the GET-only SigV4 `issue_design_image_urls` service
+> (ownership before signing; both URLs share one declared expiry;
+> filesystem delivery deliberately fails closed — no proxy in Phase 11),
+> `GET /designs/<uuid>/versions/<uuid>/images/` (AllowAny + ownership-first
+> indistinguishable 404, controlled 409/503, no-store + no-referrer, zero
+> provenance leak), the regenerated OpenAPI contract + `fetchDesignImageUrls`
+> frontend wrapper (memory-only, strict result mapping, no caching), and the
+> fixture pipeline exercising the whole zero-network path through permanent
+> ingest. Signed URLs are documented TEMPORARY BEARER URLs (no revocation
+> before expiry; a backend proxy is the upgrade path). Staging objects are
+> retained (Phase 16 owns purge); the Phase 10 **paid live checkpoint remains
+> pending**.
+
 ## Phase 12 — Results page
 - **Scope:** staged progress screen driven by `/jobs/{id}/` polling (TanStack Query, backoff); concept view rendering the DesignSpec-derived description (title, garment breakdown, colour story, embellishments, styling notes, construction caveats, cultural context), image with spec-derived alt text, download/copy actions, constructability + AI-concept disclaimers; friendly error states mapped from domain error codes.
 - **Non-goals:** no refinement UI, no showcase gallery.

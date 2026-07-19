@@ -212,6 +212,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/designs/{design_id}/versions/{version_id}/images/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get short-lived signed image URLs for a design version
+         * @description Returns presigned GET URLs for the version's private original and thumbnail WebP images, plus their dimensions and one shared expiry. The URLs are temporary bearer URLs: anyone possessing one may use it until it expires, and logout or session rotation does not revoke it — they are short-lived and must never be stored. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        get: operations["designs_version_images_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health/live": {
         parameters: {
             query?: never;
@@ -412,6 +432,28 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /**
+         * @description One deliverable image: a short-lived signed URL plus its dimensions.
+         *
+         *     The URL is a TEMPORARY BEARER URL (usable by anyone holding it until
+         *     expiry) — never persisted, cached or logged. No storage key, hash,
+         *     provider/prediction id, seed or staging metadata is ever exposed.
+         */
+        DesignImage: {
+            /** @description Short-lived signed GET URL for the private WebP object. */
+            url: string;
+            width: number;
+            height: number;
+        };
+        DesignImages: {
+            original: components["schemas"]["DesignImage"];
+            thumbnail: components["schemas"]["DesignImage"];
+            /**
+             * Format: date-time
+             * @description The single instant BOTH URLs stop working (ISO-8601).
+             */
+            expires_at: string;
+        };
         /** @description A compact list row — no questionnaire schema, no inspiration records. */
         DesignListItem: {
             /** Format: uuid */
@@ -435,6 +477,9 @@ export interface components {
         };
         DesignValidationSuccess: {
             valid: boolean;
+        };
+        DesignVersionImagesResponse: {
+            images: components["schemas"]["DesignImages"];
         };
         DesignWriteRequest: {
             title?: string;
@@ -1184,6 +1229,55 @@ export interface operations {
             };
             /** @description Not found or not owned (indistinguishable). */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_version_images_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                design_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DesignVersionImagesResponse"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description design_image_not_ready: no permanent image has been ingested yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description design_image_delivery_unavailable: not possible right now. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
