@@ -22,11 +22,12 @@ import { clearStaleAnswers, resumeStepIndex } from "./answer-utils";
 import { createStepResolver } from "./validation";
 import { useDraftSaver } from "./use-draft-saver";
 import { useLatest } from "./use-latest";
+import { resolveDesignLifecycleTarget } from "@/lib/design-lifecycle";
 import type { Answers, AnswerValue, PublicAsset, QuestionnaireSchema, Step } from "./types";
 
 const MAX_INSPIRATIONS = 3;
 
-type LoadState = "loading" | "ready" | "unavailable" | "notfound";
+type LoadState = "loading" | "ready" | "unavailable" | "notfound" | "redirecting";
 type CatalogueState = {
   status: "idle" | "loading" | "ready" | "unavailable";
   assets: PublicAsset[];
@@ -101,6 +102,17 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
       try {
         if (initialDesignId) {
           const design = await fetchDesign(initialDesignId);
+          if (cancelled) return;
+          const target = resolveDesignLifecycleTarget(design);
+          if (target.kind === "progress" || target.kind === "result") {
+            setLoad("redirecting");
+            router.replace(target.href);
+            return;
+          }
+          if (target.kind === "unavailable") {
+            setLoad("unavailable");
+            return;
+          }
           let loadedSchema: QuestionnaireSchema;
           let loadedVersionId: string;
           if (design.questionnaire) {
@@ -139,6 +151,10 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
     return () => {
       cancelled = true;
     };
+    // router is intentionally omitted: Next.js guarantees a stable
+    // reference, and including it would re-run this effect (and refetch)
+    // whenever a caller's router mock is not memoised.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialDesignId, reloadCounter, setAnswersSynced, adopt]);
 
   // -- Catalogue (loaded lazily; empty is valid, failure is distinct) --------
@@ -224,7 +240,7 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
   );
 
   // -- Render ---------------------------------------------------------------
-  if (load === "loading") {
+  if (load === "loading" || load === "redirecting") {
     return (
       <p role="status" aria-live="polite">
         Loading the questionnaire…

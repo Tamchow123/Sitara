@@ -144,6 +144,12 @@ services:
     ports:
       - "${BIND_HOST:-127.0.0.1}:8000:8000"
     environment: *api-environment
+    # The Django/Vitest cross-language validation contract lives at the repo
+    # root (outside the apps/api build context) and is consumed read-only by
+    # apps/api/sitara/questionnaire/tests/contract.py, which looks for it at
+    # /contracts — see that module's docstring.
+    volumes:
+      - ./contracts:/contracts:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -184,6 +190,23 @@ services:
       # Server-only: the Next.js rewrite proxies /api/* here. The browser
       # never sees this host — it talks to the web origin only.
       API_INTERNAL_BASE_URL: http://api:8000
+    # `npm run generate:api` reads the committed OpenAPI schema via the
+    # relative path ../api/openapi/schema.json (see apps/web/package.json),
+    # which resolves to /api/openapi/schema.json from this container's
+    # WORKDIR — outside the apps/web build context, so it is bind-mounted
+    # read-only here. This mount satisfies only the INPUT side: this
+    # service has no bind mount of apps/web/src, so `docker compose exec
+    # web npm run generate:api` writes schema.d.ts inside the container
+    # only. To persist a regenerated schema.d.ts back to the host, add a
+    # temporary src mount, e.g.
+    #   docker compose run --rm -v ./apps/web/src:/app/src web npm run generate:api
+    #
+    # The shared Django/Vitest cross-language validation contract (see the
+    # api service's mount above) is consumed the same way here by
+    # src/features/questionnaire/validation.test.ts.
+    volumes:
+      - ./apps/api/openapi:/api/openapi:ro
+      - ./contracts:/contracts:ro
     depends_on:
       api:
         condition: service_healthy

@@ -31,8 +31,15 @@ class RecordingSigner:
     def __init__(self):
         self.calls = []
 
-    def sign_get(self, key, *, ttl_seconds, filename):
-        self.calls.append({"key": key, "ttl_seconds": ttl_seconds, "filename": filename})
+    def sign_get(self, key, *, ttl_seconds, filename, disposition="inline"):
+        self.calls.append(
+            {
+                "key": key,
+                "ttl_seconds": ttl_seconds,
+                "filename": filename,
+                "disposition": disposition,
+            }
+        )
         return f"https://signed.example/{filename}?X-Amz-Expires={ttl_seconds}"
 
 
@@ -168,7 +175,7 @@ class TestPreconditions:
         version = _ingested_version()
 
         class ExplodingSigner:
-            def sign_get(self, key, *, ttl_seconds, filename):
+            def sign_get(self, key, *, ttl_seconds, filename, disposition="inline"):
                 raise RuntimeError("botocore internal validation error")
 
         with pytest.raises(DesignImageDeliveryUnavailable) as exc:
@@ -184,14 +191,23 @@ class TestIssuance:
         issued = issue_design_image_urls(version, signer=signer)
         assert [call["key"] for call in signer.calls] == [
             version.image_storage_key,
+            version.image_storage_key,
             version.thumbnail_storage_key,
         ]
         assert all(call["ttl_seconds"] == 120 for call in signer.calls)
         assert [call["filename"] for call in signer.calls] == [
             "design-original.webp",
+            "sitara-concept.webp",
             "design-thumbnail.webp",
         ]
+        assert [call["disposition"] for call in signer.calls] == [
+            "inline",
+            "attachment",
+            "inline",
+        ]
         assert issued.original_url != issued.thumbnail_url
+        assert issued.original_download_url != issued.original_url
+        assert issued.original_download_url != issued.thumbnail_url
 
     def test_explicit_ttl_override_reaches_the_signer(self):
         version = _ingested_version()
@@ -220,6 +236,7 @@ class TestIssuance:
             value = getattr(version, field)
             if isinstance(value, str):
                 assert issued.original_url not in value
+                assert issued.original_download_url not in value
                 assert issued.thumbnail_url not in value
 
     def test_urls_and_keys_never_reach_the_logs(self, caplog):
@@ -227,6 +244,7 @@ class TestIssuance:
         with caplog.at_level(logging.DEBUG):
             issued = issue_design_image_urls(version, signer=RecordingSigner())
         assert issued.original_url not in caplog.text
+        assert issued.original_download_url not in caplog.text
         assert issued.thumbnail_url not in caplog.text
         assert version.image_storage_key not in caplog.text
 
@@ -411,3 +429,26 @@ class TestRealSigner:
             'inline; filename="design-thumbnail.webp"'
         ]
         assert "test-secret-material" not in issued.thumbnail_url
+        # The DOWNLOAD URL targets the SAME object as the original, under an
+        # attachment disposition and a fixed, generic filename.
+        download_parts = urlsplit(issued.original_download_url)
+        assert download_parts.netloc == "localhost:9000"
+        assert download_parts.path == f"/{settings.S3_BUCKET_NAME}/{version.image_storage_key}"
+        download_query = parse_qs(download_parts.query)
+        assert download_query["X-Amz-Expires"] == ["90"]
+        assert download_query["response-content-type"] == ["image/webp"]
+        assert download_query["response-content-disposition"] == [
+            'attachment; filename="sitara-concept.webp"'
+        ]
+        assert "test-secret-material" not in issued.original_download_url
+
+    def test_sign_get_rejects_an_unrecognised_disposition(self, settings):
+        settings.S3_SIGNED_URL_ENDPOINT_URL = "http://localhost:9000"
+        signer = S3DesignImageSigner()
+        with pytest.raises(ValueError):
+            signer.sign_get(
+                "some/key.webp",
+                ttl_seconds=60,
+                filename="x.webp",
+                disposition="x-attachment; evil=1",
+            )

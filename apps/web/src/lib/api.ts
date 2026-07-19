@@ -379,13 +379,87 @@ export async function startDesignGeneration(
   return toDraftFailure(status, data);
 }
 
-export async function fetchGenerationJob(jobId: string): Promise<GenerationJob> {
-  const response = await fetchWithTimeout(`/api/v1/jobs/${encodeURIComponent(jobId)}/`);
-  if (response.status !== 200) {
-    throw new Error("generation job unavailable");
+// Three distinct, narrow error types so a caller (the progress polling hook)
+// can tell an owned-but-missing job apart from a transient outage and from a
+// malformed response, instead of one generic thrown Error.
+export class GenerationJobNotFoundError extends Error {
+  constructor() {
+    super("generation job not found");
+    this.name = "GenerationJobNotFoundError";
   }
-  const body = (await response.json()) as GenerationJobResponse;
-  return body.job;
+}
+export class GenerationJobUnavailableError extends Error {
+  constructor() {
+    super("generation job temporarily unavailable");
+    this.name = "GenerationJobUnavailableError";
+  }
+}
+export class GenerationJobMalformedError extends Error {
+  constructor() {
+    super("generation job response was malformed");
+    this.name = "GenerationJobMalformedError";
+  }
+}
+
+// The complete, known GenerationJob.status enum (mirrors the generated
+// StatusEnum). A status outside this set is treated as malformed rather than
+// silently accepted — an unrecognised status must never be guessed at by the
+// progress UI (which relies on exactly these five values to decide what to
+// render and when to stop polling).
+const KNOWN_JOB_STATUSES: ReadonlySet<string> = new Set([
+  "queued",
+  "running_text",
+  "running_image",
+  "succeeded",
+  "failed",
+]);
+
+function isGenerationJob(value: unknown): value is GenerationJob {
+  if (typeof value !== "object" || value === null) return false;
+  const job = value as Record<string, unknown>;
+  return (
+    typeof job.id === "string" &&
+    job.id.length > 0 &&
+    typeof job.design_id === "string" &&
+    job.design_id.length > 0 &&
+    (job.design_version_id === null || typeof job.design_version_id === "string") &&
+    typeof job.status === "string" &&
+    KNOWN_JOB_STATUSES.has(job.status) &&
+    (job.error_code === null || typeof job.error_code === "string") &&
+    typeof job.created_at === "string" &&
+    typeof job.updated_at === "string" &&
+    (job.started_at === null || typeof job.started_at === "string") &&
+    (job.completed_at === null || typeof job.completed_at === "string")
+  );
+}
+
+// Validates the runtime response shape rather than casting arbitrary JSON.
+// Throws one of the three typed errors above; never exposes a raw response
+// body or backend exception message to the caller.
+export async function fetchGenerationJob(jobId: string): Promise<GenerationJob> {
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(`/api/v1/jobs/${encodeURIComponent(jobId)}/`);
+  } catch {
+    throw new GenerationJobUnavailableError();
+  }
+  if (response.status === 404) {
+    throw new GenerationJobNotFoundError();
+  }
+  if (response.status !== 200) {
+    throw new GenerationJobUnavailableError();
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new GenerationJobMalformedError();
+  }
+  const job = (body as { job?: unknown } | null)?.job;
+  if (!isGenerationJob(job)) {
+    throw new GenerationJobMalformedError();
+  }
+  return job;
 }
 
 // ---------------------------------------------------------------------------
@@ -399,6 +473,7 @@ export async function fetchGenerationJob(jobId: string): Promise<GenerationJob> 
 // is deliberately no polling or automatic refresh here.
 
 export type DesignImage = components["schemas"]["DesignImage"];
+export type DesignOriginalImage = components["schemas"]["DesignOriginalImage"];
 export type DesignImages = components["schemas"]["DesignImages"];
 
 // Failures reuse the file's canonical DraftFailure shape (and its shared
@@ -419,11 +494,17 @@ function isDesignImage(value: unknown): value is DesignImage {
   );
 }
 
+function isDesignOriginalImage(value: unknown): value is DesignOriginalImage {
+  if (!isDesignImage(value)) return false;
+  const image = value as Record<string, unknown>;
+  return typeof image.download_url === "string" && image.download_url.length > 0;
+}
+
 function isDesignImages(value: unknown): value is DesignImages {
   if (typeof value !== "object" || value === null) return false;
   const images = value as Record<string, unknown>;
   return (
-    isDesignImage(images.original) &&
+    isDesignOriginalImage(images.original) &&
     isDesignImage(images.thumbnail) &&
     typeof images.expires_at === "string" &&
     images.expires_at.length > 0
@@ -467,6 +548,162 @@ export async function fetchDesignImageUrls(
     const images = (body as { images?: unknown }).images;
     if (isDesignImages(images)) {
       return { ok: true, images };
+    }
+    return {
+      ok: false,
+      status: 200,
+      code: "invalid_response",
+      message: "The service returned an unexpected response.",
+    };
+  }
+  return toDraftFailure(response.status, body as ErrorBody);
+}
+
+// ---------------------------------------------------------------------------
+// Design result (Phase 12) — the curated, private concept result
+// ---------------------------------------------------------------------------
+//
+// One narrow GET wrapper, strictly shape-validated. Never issues or expects a
+// signed image URL — Phase 11's image endpoint above is the only issuer.
+
+export type DesignResult = components["schemas"]["DesignResult"];
+
+export type DesignResultFailure = DraftFailure;
+export type DesignResultSuccess = { ok: true; result: DesignResult };
+export type DesignResultOutcome = DesignResultSuccess | DesignResultFailure;
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isGarmentBreakdown(value: unknown): value is DesignResult["garment_breakdown"] {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.overall_form === "string" &&
+    isStringArray(v.garment_components) &&
+    typeof v.silhouette === "string" &&
+    typeof v.drape_or_layering === "string" &&
+    typeof v.key_proportions === "string"
+  );
+}
+
+function isColourStory(value: unknown): value is DesignResult["colour_story"] {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.palette_summary === "string" &&
+    typeof v.placement === "string" &&
+    typeof v.rationale === "string"
+  );
+}
+
+function isFabricEntry(value: unknown): value is DesignResult["fabrics_and_texture"][number] {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.fabric === "string" &&
+    typeof v.placement === "string" &&
+    typeof v.finish_and_movement === "string"
+  );
+}
+
+function isEmbellishmentPlan(value: unknown): value is DesignResult["embellishment_plan"] {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    isStringArray(v.techniques) &&
+    typeof v.density === "string" &&
+    isStringArray(v.placement) &&
+    isStringArray(v.motifs) &&
+    typeof v.restraint_notes === "string"
+  );
+}
+
+function isCoverageAndDrape(value: unknown): value is DesignResult["coverage_and_drape"] {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.sleeves === "string" &&
+    typeof v.neckline === "string" &&
+    typeof v.back_and_midriff === "string" &&
+    typeof v.head_covering === "string" &&
+    typeof v.dupatta_or_saree_drape === "string"
+  );
+}
+
+function isCulturalContext(value: unknown): value is DesignResult["cultural_context"] {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    (v.regional_direction === null || typeof v.regional_direction === "string") &&
+    isStringArray(v.interpretation_notes) &&
+    isStringArray(v.safeguards)
+  );
+}
+
+function isDesignResult(value: unknown): value is DesignResult {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.design_id === "string" &&
+    v.design_id.length > 0 &&
+    typeof v.design_version_id === "string" &&
+    v.design_version_id.length > 0 &&
+    typeof v.version_number === "number" &&
+    typeof v.title === "string" &&
+    typeof v.concept_summary === "string" &&
+    isGarmentBreakdown(v.garment_breakdown) &&
+    isColourStory(v.colour_story) &&
+    Array.isArray(v.fabrics_and_texture) &&
+    v.fabrics_and_texture.every(isFabricEntry) &&
+    isEmbellishmentPlan(v.embellishment_plan) &&
+    isCoverageAndDrape(v.coverage_and_drape) &&
+    isCulturalContext(v.cultural_context) &&
+    isStringArray(v.styling_notes) &&
+    isStringArray(v.construction_caveats) &&
+    typeof v.image_alt_text === "string" &&
+    typeof v.created_at === "string"
+  );
+}
+
+// Strict result mapping using the generated OpenAPI types and runtime shape
+// validation — a timeout/network error, invalid JSON, or a 200 with a
+// malformed body all become typed failures, never a false success.
+export async function fetchDesignResult(
+  designId: string,
+  designVersionId: string,
+): Promise<DesignResultOutcome> {
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      `/api/v1/designs/${encodeURIComponent(designId)}/versions/${encodeURIComponent(
+        designVersionId,
+      )}/result/`,
+    );
+  } catch {
+    return {
+      ok: false,
+      status: 0,
+      code: "unavailable",
+      message: "The service could not be reached.",
+    };
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return {
+      ok: false,
+      status: response.status,
+      code: "invalid_response",
+      message: "The service returned an unexpected response.",
+    };
+  }
+  if (response.status === 200) {
+    const result = (body as { result?: unknown }).result;
+    if (isDesignResult(result)) {
+      return { ok: true, result };
     }
     return {
       ok: false,

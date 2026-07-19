@@ -11,7 +11,7 @@ from rest_framework import serializers
 
 from sitara.generation import errors as generation_errors
 
-from .models import GenerationAttempt
+from .models import Design, GenerationAttempt
 
 # One shared DRF field for ISO-8601 timestamps, matching the rest of the API.
 _DATETIME = serializers.DateTimeField()
@@ -19,6 +19,18 @@ _DATETIME = serializers.DateTimeField()
 
 def _iso(value):
     return _DATETIME.to_representation(value) if value is not None else None
+
+
+def latest_generation_attempt(design: Design) -> GenerationAttempt | None:
+    """The design's most recent generation attempt, or None.
+
+    Selected deterministically (newest ``created_at``, UUID as the
+    tie-breaker) so durable navigation — resuming a generating design,
+    revisiting a generated one, or returning to a failed one with a linked
+    version — always lands on the same attempt. Used only to expose one
+    sanitised public job snapshot on design detail; never on design-list
+    responses."""
+    return design.generation_attempts.order_by("-created_at", "-id").first()
 
 
 def _public_error_code(code: str) -> str | None:

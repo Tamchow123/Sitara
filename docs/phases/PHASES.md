@@ -203,6 +203,37 @@ Standing rules across all phases:
 - **Manual checkpoint:** full browser journey questionnaire → progress → concept view against a locally generated (or fixture) result; disclaimers visible without scrolling hunt.
 - **Commit:** `feat(frontend): generation progress and concept results page`
 
+> **Delivered (ADR 0013)** as three commits — `feat(results): add private
+> design result API` (Part A), `feat(frontend): add generation progress
+> flow` (Part B), `feat(frontend): add private concept results page`
+> (Part C). Part A adds the dedicated `GET /designs/<uuid>/versions/<uuid>/
+> result/` endpoint (ownership-first indistinguishable 404, controlled
+> 409/503, no-store, DesignSpec revalidated + safety-rescanned before
+> delivery, a curated payload never exposing prompt/provider/token/storage
+> provenance), the additive `latest_job` field on design detail (existing
+> public `GenerationJob` shape only, deterministic newest-`created_at`+UUID
+> selection), and the original image's separately signed, fixed-filename
+> `download_url` via a narrow `inline|attachment` signer parameter (same
+> shared expiry as the existing inline URLs; no new signing service). Part B
+> adds the pinned `@tanstack/react-query` dependency and shared
+> `QueryClient`, the idempotent Generate action (in-memory
+> `crypto.randomUUID()` key, synchronous double-click guard, 409-resumes-via-
+> latest_job), lifecycle-aware navigation, and the progress route polling on
+> a `created_at`-derived backoff (1s/2s/5s bands, stopped at any terminal
+> state) with an exhaustive `satisfies Record<...>`-checked mapping of all 21
+> backend error codes. Part C adds the results route with two deliberately
+> independent queries (stable result vs. short-lived signed image, so image
+> trouble never hides the readable brief), the complete DesignSpec-derived
+> rendering with prominent disclaimers, `formatDesignBrief` plus copy/
+> download-brief/download-image actions, and signed-URL refresh at ~80% of
+> the observed remaining lifetime plus a near-expiry focus refresh, capped to
+> exactly one automatic retry per load-failure episode. Signed URLs are never
+> persisted, cached beyond an in-memory `gcTime: 0`, or logged anywhere.
+> Refinement (Phase 14), the demo flow (Phase 15), live cost controls and
+> retention (Phase 16), and the full accessibility/visual polish pass
+> (Phase 17) remain later phases; the Phase 10 **paid live checkpoint
+> remains pending**.
+
 ## Phase 13 — Optional inspiration metadata/reference support
 - **Scope:** wire selected InspirationAsset tags/metadata into the Claude context (text-only, labelled as the MVP mechanism); design-note in `docs/decisions/0002-inspiration-influence.md` recording text-only as an MVP limitation and the upgrade path (Replicate wrapper already accepts reference images — enabling image conditioning is a wrapper + eval change, not a redesign); optionally a spike behind a dev-only flag if Phase 2 findings justify it.
 - **Non-goals:** no production image conditioning; no new FLUX model commitments without repeating a scoped Phase-2-style eval.

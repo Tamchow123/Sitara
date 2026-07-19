@@ -9,10 +9,12 @@ teaches clients they worked. Answer content and inspiration eligibility are
 validated authoritatively in the service layer, not here.
 
 The read payloads never expose the DesignSession identifier, the user,
-version rows, generation attempts, storage keys, image hashes, rights
-evidence, verifier identity or internal notes. The list payload is compact
-(no questionnaire schema, no inspiration records); only the detail payload
-embeds the linked questionnaire and the selected inspirations.
+version rows, storage keys, image hashes, rights evidence, verifier identity
+or internal notes. The list payload is compact (no questionnaire schema, no
+inspiration records, no job data); only the detail payload embeds the linked
+questionnaire, the selected inspirations and, since Phase 12, one sanitised
+public snapshot of the latest generation job (``latest_job``) — still no
+private provenance (provider, model, prediction id, seed, storage key).
 """
 
 from rest_framework import serializers
@@ -20,6 +22,7 @@ from rest_framework import serializers
 from sitara.catalogue.models import InspirationAsset
 from sitara.catalogue.serializers import public_asset_payload
 
+from .jobs import latest_generation_attempt, public_job_payload
 from .models import DESIGN_TITLE_MAX_LENGTH, Design
 
 # One shared DRF field to render timestamps in the same ISO-8601 form the
@@ -97,6 +100,17 @@ def _selected_inspirations_payload(design: Design) -> list[dict]:
     return payload
 
 
+def _latest_job_payload(design: Design) -> dict | None:
+    """The design's latest generation attempt as the one public job shape, or
+    None when it has never attempted generation. Supports durable resume
+    navigation (returning to a generating/generated/failed design) without
+    exposing any private attempt provenance."""
+    attempt = latest_generation_attempt(design)
+    if attempt is None:
+        return None
+    return public_job_payload(attempt)["job"]
+
+
 def design_detail_payload(design: Design) -> dict:
     """The full private detail response for one owned design."""
     return {
@@ -106,6 +120,7 @@ def design_detail_payload(design: Design) -> dict:
         "questionnaire": _questionnaire_payload(design),
         "answers": design.answers,
         "selected_inspirations": _selected_inspirations_payload(design),
+        "latest_job": _latest_job_payload(design),
         "created_at": _DATETIME.to_representation(design.created_at),
         "updated_at": _DATETIME.to_representation(design.updated_at),
     }

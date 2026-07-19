@@ -38,7 +38,12 @@ afterEach(() => {
 
 const IMAGES = {
   images: {
-    original: { url: "https://minio.local/signed-original", width: 1536, height: 2048 },
+    original: {
+      url: "https://minio.local/signed-original",
+      download_url: "https://minio.local/signed-original-download",
+      width: 1536,
+      height: 2048,
+    },
     thumbnail: { url: "https://minio.local/signed-thumbnail", width: 384, height: 512 },
     expires_at: "2026-07-19T12:05:00Z",
   },
@@ -51,6 +56,9 @@ describe("fetchDesignImageUrls", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.images.original.url).toBe("https://minio.local/signed-original");
+      expect(result.images.original.download_url).toBe(
+        "https://minio.local/signed-original-download",
+      );
       expect(result.images.thumbnail.width).toBe(384);
       expect(result.images.expires_at).toBe("2026-07-19T12:05:00Z");
     }
@@ -58,6 +66,20 @@ describe("fetchDesignImageUrls", () => {
     expect(calls[0].url).toBe("/api/v1/designs/design-1/versions/version-1/images/");
     expect(calls[0].init?.credentials).toBe("same-origin");
     expect(calls[0].init?.cache).toBe("no-store");
+  });
+
+  it("rejects a 200 body missing the original download_url as invalid_response", async () => {
+    installFetchSpy(() =>
+      json({
+        images: {
+          original: { url: "https://minio.local/signed-original", width: 1536, height: 2048 },
+          thumbnail: { url: "https://minio.local/signed-thumbnail", width: 384, height: 512 },
+          expires_at: "2026-07-19T12:05:00Z",
+        },
+      }),
+    );
+    const result = await fetchDesignImageUrls("d", "v");
+    expect(result).toMatchObject({ ok: false, status: 200, code: "invalid_response" });
   });
 
   it("encodes the design and version ids into the path", async () => {

@@ -45,5 +45,10 @@ urlpatterns = [
         views.DesignVersionImagesView.as_view(),
         name="design-version-images",
     ),
+    re_path(
+        rf"^designs/{_UUID}/versions/{_VERSION_UUID}/result/?$",
+        views.DesignVersionResultView.as_view(),
+        name="design-version-result",
+    ),
     re_path(rf"^jobs/{_JOB_UUID}/?$", views.GenerationJobView.as_view(), name="generation-job"),
 ]

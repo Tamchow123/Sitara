@@ -40,6 +40,15 @@ from .ingest import design_image_storage
 # Fixed, server-owned inline filenames — never derived from user input.
 _ORIGINAL_FILENAME = "design-original.webp"
 _THUMBNAIL_FILENAME = "design-thumbnail.webp"
+# Fixed, server-owned attachment filename for the downloadable original
+# (Phase 12) — deliberately generic, never the design title or any
+# user-controlled value.
+_DOWNLOAD_FILENAME = "sitara-concept.webp"
+
+# The only Content-Disposition values a caller may request — never derived
+# from user input, so the signed URL can never be steered into an arbitrary
+# disposition string.
+_ALLOWED_DISPOSITIONS = frozenset({"inline", "attachment"})
 
 # Hard in-process bound on the WHOLE existence-check phase (both keys,
 # checked concurrently). The browser's shared transport aborts every API
@@ -76,9 +85,10 @@ _existence_pool = ThreadPoolExecutor(
 
 @dataclass(frozen=True)
 class DesignImageUrls:
-    """One issuance: both URLs share a single declared expiry."""
+    """One issuance: all three URLs share a single declared expiry."""
 
     original_url: str
+    original_download_url: str
     thumbnail_url: str
     expires_at: datetime
 
@@ -107,16 +117,21 @@ class S3DesignImageSigner:
             config=BotoConfig(**config_kwargs),
         )
 
-    def sign_get(self, key: str, *, ttl_seconds: int, filename: str) -> str:
+    def sign_get(
+        self, key: str, *, ttl_seconds: int, filename: str, disposition: str = "inline"
+    ) -> str:
         """Presign one GET (no network call). Response headers pin the content
-        type to image/webp and an inline, server-owned filename."""
+        type to image/webp and a server-owned filename under the requested,
+        allowlisted disposition (``inline`` or ``attachment``)."""
+        if disposition not in _ALLOWED_DISPOSITIONS:
+            raise ValueError(f"unsupported disposition: {disposition!r}")
         return self._client.generate_presigned_url(
             "get_object",
             Params={
                 "Bucket": settings.S3_BUCKET_NAME,
                 "Key": key,
                 "ResponseContentType": "image/webp",
-                "ResponseContentDisposition": f'inline; filename="{filename}"',
+                "ResponseContentDisposition": f'{disposition}; filename="{filename}"',
             },
             ExpiresIn=ttl_seconds,
             HttpMethod="GET",
@@ -189,6 +204,12 @@ def issue_design_image_urls(
         original_url = active_signer.sign_get(
             design_version.image_storage_key, ttl_seconds=ttl, filename=_ORIGINAL_FILENAME
         )
+        original_download_url = active_signer.sign_get(
+            design_version.image_storage_key,
+            ttl_seconds=ttl,
+            filename=_DOWNLOAD_FILENAME,
+            disposition="attachment",
+        )
         thumbnail_url = active_signer.sign_get(
             design_version.thumbnail_storage_key, ttl_seconds=ttl, filename=_THUMBNAIL_FILENAME
         )
@@ -196,6 +217,7 @@ def issue_design_image_urls(
         raise DesignImageDeliveryUnavailable("image delivery is temporarily unavailable") from exc
     return DesignImageUrls(
         original_url=original_url,
+        original_download_url=original_download_url,
         thumbnail_url=thumbnail_url,
         expires_at=issued_at + timedelta(seconds=ttl),
     )

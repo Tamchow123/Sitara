@@ -17,6 +17,8 @@ export {
   createDesignDraft,
   updateDesignDraft,
   validateDesignDraft,
+  startDesignGeneration,
+  fetchPublicConfig,
 } from "@/lib/api";
 export type {
   DesignWriteRequest,
@@ -24,6 +26,8 @@ export type {
   DraftFailure,
   DraftResult,
   DraftSuccess,
+  GenerationResult,
+  PublicConfig,
 } from "@/lib/api";
 
 export async function fetchActiveQuestionnaire(): Promise<ActiveQuestionnaire> {

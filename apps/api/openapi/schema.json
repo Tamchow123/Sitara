@@ -838,6 +838,84 @@
                 }
             }
         },
+        "/api/v1/designs/{design_id}/versions/{version_id}/result/": {
+            "get": {
+                "operationId": "designs_version_result_retrieve",
+                "description": "Returns a purpose-built, curated result — title, concept summary and every DesignSpec section — revalidated and safety-scanned before delivery. Never exposes source_selections, questionnaire answers, the image prompt, provider/model/token provenance, storage keys, hashes or any signed URL. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Get the private concept result for a design version",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DesignResultResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "design_result_not_ready: this design version has no complete result yet."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "design_result_unavailable: the stored content is corrupt, unsupported or unsafe."
+                    }
+                }
+            }
+        },
         "/api/v1/health/live": {
             "get": {
                 "operationId": "health_live",
@@ -1202,6 +1280,25 @@
                     "id"
                 ]
             },
+            "ColourStoryResult": {
+                "type": "object",
+                "properties": {
+                    "palette_summary": {
+                        "type": "string"
+                    },
+                    "placement": {
+                        "type": "string"
+                    },
+                    "rationale": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "palette_summary",
+                    "placement",
+                    "rationale"
+                ]
+            },
             "CompatibilityRuleSchema": {
                 "type": "object",
                 "properties": {
@@ -1221,6 +1318,33 @@
                     "when"
                 ]
             },
+            "CoverageAndDrapeResult": {
+                "type": "object",
+                "properties": {
+                    "sleeves": {
+                        "type": "string"
+                    },
+                    "neckline": {
+                        "type": "string"
+                    },
+                    "back_and_midriff": {
+                        "type": "string"
+                    },
+                    "head_covering": {
+                        "type": "string"
+                    },
+                    "dupatta_or_saree_drape": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "back_and_midriff",
+                    "dupatta_or_saree_drape",
+                    "head_covering",
+                    "neckline",
+                    "sleeves"
+                ]
+            },
             "CsrfResponse": {
                 "type": "object",
                 "properties": {
@@ -1231,6 +1355,32 @@
                 },
                 "required": [
                     "csrf_token"
+                ]
+            },
+            "CulturalContextResult": {
+                "type": "object",
+                "properties": {
+                    "regional_direction": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "interpretation_notes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "safeguards": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": [
+                    "interpretation_notes",
+                    "regional_direction",
+                    "safeguards"
                 ]
             },
             "DesignDetailResponse": {
@@ -1263,6 +1413,14 @@
                             "$ref": "#/components/schemas/SelectedInspiration"
                         }
                     },
+                    "latest_job": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/GenerationJob"
+                            }
+                        ],
+                        "nullable": true
+                    },
                     "created_at": {
                         "type": "string",
                         "format": "date-time"
@@ -1276,6 +1434,7 @@
                     "answers",
                     "created_at",
                     "id",
+                    "latest_job",
                     "questionnaire",
                     "selected_inspirations",
                     "status",
@@ -1308,7 +1467,7 @@
                 "type": "object",
                 "properties": {
                     "original": {
-                        "$ref": "#/components/schemas/DesignImage"
+                        "$ref": "#/components/schemas/DesignOriginalImage"
                     },
                     "thumbnail": {
                         "$ref": "#/components/schemas/DesignImage"
@@ -1316,7 +1475,7 @@
                     "expires_at": {
                         "type": "string",
                         "format": "date-time",
-                        "description": "The single instant BOTH URLs stop working (ISO-8601)."
+                        "description": "The single instant ALL THREE URLs stop working (ISO-8601)."
                     }
                 },
                 "required": [
@@ -1370,6 +1529,32 @@
                     "designs"
                 ]
             },
+            "DesignOriginalImage": {
+                "type": "object",
+                "description": "The original image additionally carries a separately signed\nattachment URL (Phase 12) for a reliable download, sharing the same\ndeclared expiry as every other URL in the response.",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Short-lived signed GET URL for the private WebP object."
+                    },
+                    "width": {
+                        "type": "integer"
+                    },
+                    "height": {
+                        "type": "integer"
+                    },
+                    "download_url": {
+                        "type": "string",
+                        "description": "Short-lived signed GET URL that downloads the private WebP object as an attachment."
+                    }
+                },
+                "required": [
+                    "download_url",
+                    "height",
+                    "url",
+                    "width"
+                ]
+            },
             "DesignQuestionnaire": {
                 "type": "object",
                 "description": "The questionnaire a design is pinned to (null for legacy designs).",
@@ -1389,6 +1574,97 @@
                     "id",
                     "schema",
                     "version"
+                ]
+            },
+            "DesignResult": {
+                "type": "object",
+                "description": "The purpose-built, curated concept result (Phase 12).\n\nDeliberately excludes ``source_selections``, questionnaire answers,\ninspiration selections, the image prompt, prompt-builder version,\nDesignSpec provider/model, token counts, provider prediction id,\nprovider/model name, seed, image parameters, staged metadata, storage\nkeys, hashes, internal byte sizes, the user id, DesignSession id, the\nquestionnaire version id and every signed URL.",
+                "properties": {
+                    "design_id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "design_version_id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "version_number": {
+                        "type": "integer"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "concept_summary": {
+                        "type": "string"
+                    },
+                    "garment_breakdown": {
+                        "$ref": "#/components/schemas/GarmentBreakdownResult"
+                    },
+                    "colour_story": {
+                        "$ref": "#/components/schemas/ColourStoryResult"
+                    },
+                    "fabrics_and_texture": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/FabricEntryResult"
+                        }
+                    },
+                    "embellishment_plan": {
+                        "$ref": "#/components/schemas/EmbellishmentPlanResult"
+                    },
+                    "coverage_and_drape": {
+                        "$ref": "#/components/schemas/CoverageAndDrapeResult"
+                    },
+                    "cultural_context": {
+                        "$ref": "#/components/schemas/CulturalContextResult"
+                    },
+                    "styling_notes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "construction_caveats": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "image_alt_text": {
+                        "type": "string"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": [
+                    "colour_story",
+                    "concept_summary",
+                    "construction_caveats",
+                    "coverage_and_drape",
+                    "created_at",
+                    "cultural_context",
+                    "design_id",
+                    "design_version_id",
+                    "embellishment_plan",
+                    "fabrics_and_texture",
+                    "garment_breakdown",
+                    "image_alt_text",
+                    "styling_notes",
+                    "title",
+                    "version_number"
+                ]
+            },
+            "DesignResultResponse": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "$ref": "#/components/schemas/DesignResult"
+                    }
+                },
+                "required": [
+                    "result"
                 ]
             },
             "DesignValidationSuccess": {
@@ -1434,6 +1710,69 @@
                     }
                 }
             },
+            "EmbellishmentPlanResult": {
+                "type": "object",
+                "properties": {
+                    "techniques": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "density": {
+                        "type": "string"
+                    },
+                    "placement": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "motifs": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "restraint_notes": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "density",
+                    "motifs",
+                    "placement",
+                    "restraint_notes",
+                    "techniques"
+                ]
+            },
+            "ErrorCodeEnum": {
+                "enum": [
+                    "design_changed",
+                    "design_incomplete",
+                    "generation_unavailable",
+                    "image_download_failed",
+                    "image_ingest_failed",
+                    "image_ingest_unverified",
+                    "image_output_invalid",
+                    "image_poll_timeout",
+                    "image_prediction_aborted",
+                    "image_prediction_canceled",
+                    "image_prediction_failed",
+                    "image_provider_unavailable",
+                    "image_staging_failed",
+                    "image_staging_unverified",
+                    "image_submission_ambiguous",
+                    "internal_generation_error",
+                    "prompt_build_failed",
+                    "queue_unavailable",
+                    "structured_generation_failed",
+                    "structured_provider_refused",
+                    "structured_submission_ambiguous"
+                ],
+                "type": "string",
+                "description": "* `design_changed` - design_changed\n* `design_incomplete` - design_incomplete\n* `generation_unavailable` - generation_unavailable\n* `image_download_failed` - image_download_failed\n* `image_ingest_failed` - image_ingest_failed\n* `image_ingest_unverified` - image_ingest_unverified\n* `image_output_invalid` - image_output_invalid\n* `image_poll_timeout` - image_poll_timeout\n* `image_prediction_aborted` - image_prediction_aborted\n* `image_prediction_canceled` - image_prediction_canceled\n* `image_prediction_failed` - image_prediction_failed\n* `image_provider_unavailable` - image_provider_unavailable\n* `image_staging_failed` - image_staging_failed\n* `image_staging_unverified` - image_staging_unverified\n* `image_submission_ambiguous` - image_submission_ambiguous\n* `internal_generation_error` - internal_generation_error\n* `prompt_build_failed` - prompt_build_failed\n* `queue_unavailable` - queue_unavailable\n* `structured_generation_failed` - structured_generation_failed\n* `structured_provider_refused` - structured_provider_refused\n* `structured_submission_ambiguous` - structured_submission_ambiguous"
+            },
             "ErrorDetail": {
                 "type": "object",
                 "properties": {
@@ -1463,6 +1802,25 @@
                     "error"
                 ]
             },
+            "FabricEntryResult": {
+                "type": "object",
+                "properties": {
+                    "fabric": {
+                        "type": "string"
+                    },
+                    "placement": {
+                        "type": "string"
+                    },
+                    "finish_and_movement": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "fabric",
+                    "finish_and_movement",
+                    "placement"
+                ]
+            },
             "FieldValidationErrorDetail": {
                 "type": "object",
                 "properties": {
@@ -1490,6 +1848,36 @@
                     "message"
                 ]
             },
+            "GarmentBreakdownResult": {
+                "type": "object",
+                "properties": {
+                    "overall_form": {
+                        "type": "string"
+                    },
+                    "garment_components": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "silhouette": {
+                        "type": "string"
+                    },
+                    "drape_or_layering": {
+                        "type": "string"
+                    },
+                    "key_proportions": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "drape_or_layering",
+                    "garment_components",
+                    "key_proportions",
+                    "overall_form",
+                    "silhouette"
+                ]
+            },
             "GenerationJob": {
                 "type": "object",
                 "description": "The stable public shape of one generation job (Phase 10).\n\nDeliberately excludes every provider/storage provenance field (provider,\nmodel, prediction id, seed, parameters, storage key, image hash/size and\nthe Celery task id) — only the lifecycle is public.",
@@ -1511,8 +1899,15 @@
                         "$ref": "#/components/schemas/StatusEnum"
                     },
                     "error_code": {
-                        "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/ErrorCodeEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
                     },
                     "created_at": {
                         "type": "string",
@@ -1652,6 +2047,11 @@
                 "required": [
                     "authenticated",
                     "user"
+                ]
+            },
+            "NullEnum": {
+                "enum": [
+                    null
                 ]
             },
             "OperatorEnum": {
