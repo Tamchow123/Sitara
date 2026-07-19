@@ -377,6 +377,13 @@ class TestBoundedConcurrentChecks:
 class TestRealSigner:
     def test_presigned_url_targets_the_signing_endpoint_with_bounded_expiry(self, settings):
         settings.S3_SIGNED_URL_ENDPOINT_URL = "http://localhost:9000"
+        # DISTINCT sentinel credentials: SigV4 query auth legitimately embeds
+        # the ACCESS key id in X-Amz-Credential, so the secret-not-in-URL
+        # assertions below are only meaningful when the two values differ
+        # (an environment using one placeholder for both would otherwise
+        # false-positive this test).
+        settings.S3_ACCESS_KEY_ID = "test-access-key-id"
+        settings.S3_SECRET_ACCESS_KEY = "test-secret-material"
         version = _ingested_version()
         issued = issue_design_image_urls(version, ttl_seconds=90, signer=S3DesignImageSigner())
         parts = urlsplit(issued.original_url)
@@ -387,10 +394,12 @@ class TestRealSigner:
         query = parse_qs(parts.query)
         assert query["X-Amz-Expires"] == ["90"]  # bounded expiry embedded
         assert "X-Amz-Signature" in query  # SigV4
+        # The PUBLIC access key id is embedded in the credential scope...
+        assert query["X-Amz-Credential"][0].startswith("test-access-key-id/")
         assert query["response-content-type"] == ["image/webp"]
         assert query["response-content-disposition"] == ['inline; filename="design-original.webp"']
-        # No credential material beyond the standard SigV4 query auth fields.
-        assert settings.S3_SECRET_ACCESS_KEY not in issued.original_url
+        # ...while the SECRET never appears anywhere in the URL.
+        assert "test-secret-material" not in issued.original_url
         # The THUMBNAIL URL carries the same contract independently.
         thumb_parts = urlsplit(issued.thumbnail_url)
         assert thumb_parts.netloc == "localhost:9000"
@@ -401,4 +410,4 @@ class TestRealSigner:
         assert thumb_query["response-content-disposition"] == [
             'inline; filename="design-thumbnail.webp"'
         ]
-        assert settings.S3_SECRET_ACCESS_KEY not in issued.thumbnail_url
+        assert "test-secret-material" not in issued.thumbnail_url
