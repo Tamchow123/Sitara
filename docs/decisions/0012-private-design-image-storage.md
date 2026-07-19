@@ -176,9 +176,21 @@ signing, while each URL's storage-enforced expiry is stamped by the signer a
 few milliseconds later — so under synchronised clocks the real expiry is at
 or slightly after the declared one (the safe direction). Clients must treat
 `expires_at` as "refresh no later than this"; Phase 12's refresh logic should
-renew comfortably before it. Storage clients carry bounded connect/read
-timeouts so a hanging backend fails fast into the controlled 503 instead of
-pinning a request worker.
+renew comfortably before it.
+
+Delivery does NOT rely on the storage client's own botocore timeouts for
+fail-fast behaviour — those are deliberately generous, sized for the slower
+asynchronous ingest consumer of the same `design_images` alias. Instead the
+existence-check phase bounds itself with an in-process deadline
+(`EXISTENCE_DEADLINE_SECONDS`, 3.5s against the frontend's fixed 5s
+transport abort): both object checks run concurrently on ONE module-level
+bounded thread pool (`_EXISTENCE_POOL_WORKERS`), each request cancels its
+still-queued checks on every exit, and an expired deadline returns the
+controlled 503 immediately. Under a sustained storage hang the pool
+saturates at its fixed cap instead of growing with request volume — new
+requests' checks stay queued, their deadlines expire, and they degrade to
+the same controlled 503: a circuit breaker that never pins request workers
+and never grows threads without bound.
 
 **The privacy limitation is explicit:** ownership is checked before issuance;
 AFTER issuance a signed URL is a temporary bearer URL. Anyone possessing it
@@ -201,3 +213,32 @@ public ACLs, no public URLs, no sharing surface.
 - Phase 16 owns staging retention/purge, stuck-attempt reconciliation and
   rate/cost safeguards; until then staged objects accumulate privately.
 - The Phase 10 paid live checkpoint remains pending and unaffected.
+
+## Amendment: delivery latency is bounded in-process, not by client timeouts
+
+The full-phase council found the original "Signed delivery" text attributed
+delivery's fail-fast behaviour to bounded storage-client connect/read
+timeouts. The delivered design is deliberately different, and the section
+above now records it: the `design_images` storage client keeps generous,
+ingest-sized timeouts (the settings comment names both consumers), and the
+synchronous delivery path bounds ONLY its own storage phase with the
+in-process `EXISTENCE_DEADLINE_SECONDS` deadline over one shared bounded
+existence-check pool. Tuning the client timeouts therefore changes ingest
+behaviour, not the delivery worst case; tuning delivery means changing the
+deadline or the pool cap in `sitara/media/delivery.py`, whose comments
+document the sizing basis, the cancel-on-exit guarantee and the saturation
+circuit breaker.
+
+Operator note (recorded residual edge, accepted as safer than deleting):
+the ingest service never deletes objects at a version's deterministic
+permanent keys. If an anomalous state (for example staged metadata
+rewritten mid-ingest, which the locked re-checks refuse) ever strands a
+just-written object there whose content differs from what a later correct
+ingest produces, that later ingest fails closed with "a conflicting
+permanent object already exists" rather than overwriting. Recovery is a
+manual, deliberate deletion of the two private objects under
+`design-images/<design-uuid>/<version-uuid>/` followed by the
+`ingest_design_image` command. Automated cleanup was considered and
+rejected: deletion at a deterministic key risks discarding an object that a
+concurrently committed provenance row already references, which is the
+worse failure.
