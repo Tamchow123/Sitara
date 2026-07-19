@@ -89,7 +89,7 @@ stream, and polling needs no new infrastructure (no channel layer, no
 persistent connection management, no reconnection/backpressure design) for a
 problem this shaped. The progress route
 (`/design/<designId>/generation/<jobId>`) polls
-`GET /api/v1/designs/<id>/generation-attempts/<jobId>/` with a query key
+`GET /api/v1/jobs/<jobId>/` with a query key
 including the job UUID, and treats a `design_id` mismatch between the fetched
 job and the route as not-found rather than ever redirecting from a
 mismatched payload.
