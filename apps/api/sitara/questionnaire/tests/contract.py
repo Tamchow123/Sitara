@@ -5,7 +5,8 @@ validation-cases.json``) so both the Django tests and the frontend Vitest
 tests consume the SAME file. It is found by walking up from this test module
 (and the working directory) until a ``contracts`` directory containing the
 file is reached — which resolves correctly both in CI (repo root checked out)
-and in the local API container (the file is copied to ``/contracts``)."""
+and in the local API container (bind-mounted read-only to ``/contracts``,
+see ``compose.yaml``)."""
 
 import json
 import pathlib
