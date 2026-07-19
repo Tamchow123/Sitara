@@ -199,7 +199,7 @@ class TestObjectRecovery:
         assert result.has_permanent_image
 
     def test_fresh_attempt_without_staged_fields_finalises_on_ingested_version(self):
-        # FUNC-001 regression: the metadata-already-committed fast path must
+        # Fast-path regression guard: the metadata-already-committed path must
         # work purely off the DesignVersion's committed provenance — a fresh
         # attempt linked to an already-ingested version but carrying NO staged
         # fields of its own must verify and return, never terminally fail.
@@ -331,7 +331,7 @@ class TestStagedSourceValidation:
             ingest_staged_design_image(attempt, staging_storage=staging, final_storage=final)
 
     def test_decompression_bomb_during_revalidation_is_classified(self, monkeypatch):
-        # TEST-005: the staged-bytes revalidation opens the image with Pillow
+        # Bomb-classification guard: the staged-bytes revalidation opens the image with Pillow
         # directly; a decompression bomb tripping Pillow's own threshold must
         # surface as the safe, generic DesignImageIngestFailed — never an
         # unclassified PIL exception escaping the crash-safe service.
@@ -458,7 +458,7 @@ class TestSafeLogs:
 
 @pytest.mark.django_db(transaction=True)
 class TestRowLockSerialisation:
-    """TEST-002: the final metadata write must serialise on the REAL
+    """Row-lock serialisation guard: the final metadata write must serialise on the REAL
     PostgreSQL DesignVersion row lock — proven with a second connection
     genuinely holding SELECT ... FOR UPDATE, not a monkeypatched simulation."""
 

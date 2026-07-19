@@ -24,6 +24,8 @@ delivery fails closed with :class:`DesignImageDeliveryUnavailable` — never a
 filesystem path or permanent public URL.
 """
 
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -38,6 +40,38 @@ from .ingest import design_image_storage
 # Fixed, server-owned inline filenames — never derived from user input.
 _ORIGINAL_FILENAME = "design-original.webp"
 _THUMBNAIL_FILENAME = "design-thumbnail.webp"
+
+# Hard in-process bound on the WHOLE existence-check phase (both keys,
+# checked concurrently). The browser's shared transport aborts every API
+# call at 5s (apps/web/src/lib/transport.ts REQUEST_TIMEOUT_MS), and this
+# deadline bounds only the storage phase — the rest of the request cycle
+# spends the remaining slack, so this is a tight budget, not spare headroom.
+# Independent of the storage client's own botocore timeouts (which are sized
+# for the slower async ingest path).
+EXISTENCE_DEADLINE_SECONDS = 3.5
+
+# ONE shared, bounded pool for every request's existence checks, so the
+# total threads this path can ever hold is a fixed process-wide cap — never
+# a function of request rate. The cap is a deliberately conservative
+# placeholder pending real traffic data: four fully concurrent deliveries
+# (two checks each) per worker process, comfortably above a small
+# deployment's concurrency — revisit alongside the WSGI worker/thread
+# configuration. An expired deadline ABANDONS its checks: the running ones
+# occupy their slots until the storage client itself gives up (worst case
+# is roughly (connect 5s + read 10s) x 2 attempts, about 30s — see the
+# design_images client_config), and queued not-yet-started ones are
+# cancelled outright. Under a sustained storage hang the pool therefore
+# SATURATES instead of growing: new requests' submissions stay queued, their
+# deadlines expire, and they return the controlled 503 immediately — a
+# natural circuit breaker. Worker threads are non-daemon, so worst-case
+# process shutdown is delayed by at most one occupied-slot lifetime,
+# assuming no queued backlog beyond the pool at shutdown — a safe
+# assumption here because every request cancels its still-queued checks on
+# exit.
+_EXISTENCE_POOL_WORKERS = 8
+_existence_pool = ThreadPoolExecutor(
+    max_workers=_EXISTENCE_POOL_WORKERS, thread_name_prefix="design-image-exists"
+)
 
 
 @dataclass(frozen=True)
@@ -112,18 +146,34 @@ def issue_design_image_urls(
         raise DesignImageDeliveryUnavailable("image delivery is not available for this backend")
 
     store = storage if storage is not None else design_image_storage()
-    for key in (design_version.image_storage_key, design_version.thumbnail_storage_key):
-        try:
-            present = bool(store.exists(key))
-        except Exception as exc:  # noqa: BLE001 - backend-specific transport errors
-            raise DesignImageDeliveryUnavailable(
-                "image storage is temporarily unavailable"
-            ) from exc
-        if not present:
-            # Metadata says ingested but the private object is gone — an
-            # integrity problem surfaced as unavailability, never a 404 that
-            # would contradict the ownership-checked design lookup.
-            raise DesignImageDeliveryUnavailable("a stored image object is unavailable")
+    # Both existence checks run CONCURRENTLY on the shared bounded pool
+    # (boto3 clients are thread-safe) and the WHOLE phase is bounded by the
+    # in-process EXISTENCE_DEADLINE_SECONDS: the worst case is one storage
+    # round-trip or the deadline, whichever is smaller — never the sum of
+    # two calls, and never botocore's own (ingest-sized) timeouts. On any
+    # exit the request's futures are cancelled: queued work is dropped;
+    # already-running work is abandoned to wind down on the client timeout
+    # inside its bounded pool slot.
+    keys = (design_version.image_storage_key, design_version.thumbnail_storage_key)
+    futures = [_existence_pool.submit(store.exists, key) for key in keys]
+    try:
+        deadline = time.monotonic() + EXISTENCE_DEADLINE_SECONDS
+        for future in futures:
+            try:
+                remaining = max(0.0, deadline - time.monotonic())
+                present = bool(future.result(timeout=remaining))
+            except Exception as exc:  # noqa: BLE001 - transport errors AND the deadline
+                raise DesignImageDeliveryUnavailable(
+                    "image storage is temporarily unavailable"
+                ) from exc
+            if not present:
+                # Metadata says ingested but the private object is gone — an
+                # integrity problem surfaced as unavailability, never a 404
+                # that would contradict the ownership-checked design lookup.
+                raise DesignImageDeliveryUnavailable("a stored image object is unavailable")
+    finally:
+        for future in futures:
+            future.cancel()
 
     ttl = int(ttl_seconds) if ttl_seconds else settings.DESIGN_IMAGE_SIGNED_URL_TTL_SECONDS
     issued_at = now if now is not None else timezone.now()

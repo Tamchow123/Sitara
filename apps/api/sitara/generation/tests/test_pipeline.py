@@ -1696,7 +1696,7 @@ class TestTextSubmissionCrashWindow:
         assert counting._calls == 0  # provider never invoked
 
     def test_unsafe_user_text_failure_is_recoverable(self):
-        # Round-4 FUNC-001: a pre-request input-safety rejection spends
+        # Pre-spend rejection guard: a pre-request input-safety rejection spends
         # nothing and must never strand the design — the marker is untouched
         # and a fresh idempotency key readmits after the user fixes the text.
         import uuid as uuid_module
@@ -2237,7 +2237,7 @@ class TestPermanentIngestStage:
         assert staging.exists(result.staged_image_storage_key)
 
     def test_task_time_budget_includes_the_ingest_stage(self):
-        # REL-001: the Celery soft/hard limits derive from this budget; the
+        # Time-budget guard: the Celery soft/hard limits derive from this budget; the
         # new ingest stage's processing + storage round-trips must be part of
         # it, or a legitimately slow ingest would soft-timeout at the same
         # point on every bounded retry and exhaust.

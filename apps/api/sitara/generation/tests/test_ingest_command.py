@@ -123,7 +123,7 @@ class TestRecovery:
         assert "succeeded" in output
 
     def test_non_ingest_failure_codes_are_refused(self, inmemory_storage):
-        # REL-002: an attempt that failed for a NON-ingest reason must be
+        # Narrow-recovery guard: an attempt that failed for a NON-ingest reason must be
         # refused outright — silently committing permanent image data for it
         # would leave an attempt/Design state no code path can ever resolve.
         attempt, version, _data = _make_failed_staged_attempt(error_code=errors.IMAGE_POLL_TIMEOUT)
@@ -136,7 +136,7 @@ class TestRecovery:
         assert attempt.error_code == errors.IMAGE_POLL_TIMEOUT
 
     def test_in_progress_attempts_are_refused(self, inmemory_storage):
-        # REL-002: an in-progress attempt belongs to a (possibly actively
+        # Worker-race guard: an in-progress attempt belongs to a (possibly actively
         # retrying) worker — the command must never race it.
         attempt, version, _data = _make_failed_staged_attempt()
         GenerationAttempt.objects.filter(pk=attempt.pk).update(

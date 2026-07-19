@@ -1,4 +1,5 @@
-"""Run the full generation pipeline OFFLINE for one design (Phase 10).
+"""Run the full generation pipeline OFFLINE for one design (Phase 10; the
+Phase 11 permanent ingest now completes the run and is reported too).
 
     python manage.py run_generation_fixture --design <uuid> [--idempotency-key <uuid>]
 

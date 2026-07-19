@@ -7,15 +7,18 @@ succeeded journey, a worker-restart resume that never re-submits, and the
 offline fixture command — all without a single provider network call.
 """
 
+import io
 import socket
 import uuid
 
 import pytest
 from django.core.management import call_command
+from django.test import Client
 
 from sitara.ai_gateway.image_generation import PREDICTION_SUCCEEDED, ImageProviderError
 from sitara.designs.jobs import public_job_payload
-from sitara.designs.models import Design, DesignVersion, GenerationAttempt
+from sitara.designs.models import Design, DesignSession, DesignVersion, GenerationAttempt
+from sitara.designs.services import DESIGN_SESSION_KEY
 from sitara.generation.fixture_provider import FixtureStructuredDesignProvider
 from sitara.generation.image_fixtures import (
     FakeImageProvider,
@@ -185,7 +188,10 @@ def test_offline_fixture_command_runs_and_is_idempotent(monkeypatch):
     )
     design = make_complete_design()
     key = str(uuid.uuid4())
-    call_command("run_generation_fixture", "--design", str(design.id), "--idempotency-key", key)
+    out = io.StringIO()
+    call_command(
+        "run_generation_fixture", "--design", str(design.id), "--idempotency-key", key, stdout=out
+    )
 
     attempt = GenerationAttempt.objects.get(design=design)
     assert attempt.status == _Status.SUCCEEDED
@@ -193,7 +199,77 @@ def test_offline_fixture_command_runs_and_is_idempotent(monkeypatch):
     assert attempt.staged_image_size_bytes > 0
     assert len(attempt.staged_image_sha256) == 64
 
+    # The printed output is a SAFE-FIELDS-ONLY contract (spec section 21):
+    # UUIDs, status, processor version and dimensions — never a prompt,
+    # answer, storage key, hash, signed URL or provider metadata.
+    version = DesignVersion.objects.get(design=design)
+    output = out.getvalue()
+    assert str(attempt.id) in output
+    assert str(version.id) in output
+    assert "processor_version=1.0.0" in output
+    assert f"original={version.image_width}x{version.image_height}" in output
+    assert f"thumbnail={version.thumbnail_width}x{version.thumbnail_height}" in output
+    assert "design-images/" not in output
+    assert "generation-staging/" not in output
+    assert attempt.staged_image_sha256 not in output
+    assert version.image_sha256 not in output
+    assert version.thumbnail_sha256 not in output
+    assert version.image_prompt not in output
+    assert "http" not in output  # no signed or provider URL of any kind
+
     # Repeating the same key creates no duplicate work.
     call_command("run_generation_fixture", "--design", str(design.id), "--idempotency-key", key)
     assert GenerationAttempt.objects.filter(design=design).count() == 1
     assert DesignVersion.objects.filter(design=design).count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_pipeline_ingested_version_delivers_through_the_images_endpoint(settings, monkeypatch):
+    # The FULL journey in one continuous test: a real pipeline run (staging ->
+    # canonical permanent ingest) followed by the real ownership-checked
+    # delivery endpoint signing THAT version — no hand-built provenance
+    # fixtures on either side, so the ingest/delivery seam is genuinely
+    # proven to compose.
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    _open_all_gates(settings)
+    settings.S3_SIGNED_URL_ENDPOINT_URL = "http://localhost:9000"
+    storage = InMemoryStorage()
+    _inject_fakes(monkeypatch, storage)
+
+    design = make_complete_design()
+    attempt, _created = enqueue_design_generation(design, idempotency_key=uuid.uuid4())
+    attempt.refresh_from_db()
+    assert attempt.status == _Status.SUCCEEDED
+    version = DesignVersion.objects.get(design=design)
+    assert version.has_permanent_image
+
+    # Bind the design's workspace to a browser session and fetch signed URLs
+    # through the real HTTP endpoint (presigning is a local computation — the
+    # module-level socket guard proves no network is touched).
+    client = Client()
+    client.get("/api/v1/auth/csrf/")
+    session = client.session
+    session[DESIGN_SESSION_KEY] = str(design.design_session_id)
+    session.save()
+    response = client.get(f"/api/v1/designs/{design.id}/versions/{version.id}/images/")
+    assert response.status_code == 200, response.content
+    images = response.json()["images"]
+    assert images["original"]["width"] == version.image_width
+    assert images["original"]["height"] == version.image_height
+    assert images["thumbnail"]["width"] == version.thumbnail_width
+    assert images["thumbnail"]["height"] == version.thumbnail_height
+    # The REAL signer signed the REAL ingested keys.
+    assert version.image_storage_key in images["original"]["url"]
+    assert version.thumbnail_storage_key in images["thumbnail"]["url"]
+    assert response["Cache-Control"] == "no-store"
+    assert response["Referrer-Policy"] == "no-referrer"
+
+    # A different browser session gains nothing from the same journey.
+    stranger = Client()
+    stranger.get("/api/v1/auth/csrf/")
+    assert (
+        stranger.get(f"/api/v1/designs/{design.id}/versions/{version.id}/images/").status_code
+        == 404
+    )
+    assert Design.objects.filter(pk=design.pk).exists()
+    assert DesignSession.objects.filter(pk=design.design_session_id).exists()

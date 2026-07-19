@@ -285,7 +285,7 @@ class TestControlledFailureStates:
         assert response.json()["error"]["code"] == "design_image_delivery_unavailable"
         assert response["Cache-Control"] == "no-store"
         assert response["Referrer-Policy"] == "no-referrer"
-        # REL-005: the boundary logs a safe operational signal — row UUID and
+        # Safe-log guard: the boundary logs a safe operational signal — row UUID and
         # exception TYPE only, never the raw message or a storage key.
         assert any(
             "design image delivery unavailable" in record.message

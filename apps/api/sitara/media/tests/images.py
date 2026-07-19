@@ -65,15 +65,21 @@ def jpeg_plain_bytes(width: int = 800, height: int = 600) -> bytes:
     return _encode(_checker_rgb(width, height), "JPEG", quality=90)
 
 
-def jpeg_with_metadata_bytes(width: int = 800, height: int = 600) -> bytes:
+def jpeg_with_metadata_bytes(width: int = 800, height: int = 600, *, gps: bool = False) -> bytes:
     """A JPEG carrying EXIF (orientation 6 + camera fields), a comment and a
     fake ICC profile — everything the processor must strip. Orientation 6
-    means the rendered output is rotated 90° (dimensions swap)."""
+    means the rendered output is rotated 90° (dimensions swap). With
+    ``gps=True`` a GPS sub-IFD (latitude) is embedded too, so the strip test
+    can positively prove location data is removed."""
     image = _checker_rgb(width, height)
     exif = Image.Exif()
     exif[0x0112] = 6  # Orientation: rotate 90 CW
     exif[0x010F] = "SitaraTestCamera"  # Make
     exif[0x0110] = "MetadataModel"  # Model
+    if gps:
+        gps_ifd = exif.get_ifd(0x8825)
+        gps_ifd[1] = "N"  # GPSLatitudeRef
+        gps_ifd[2] = (51.0, 30.0, 0.0)  # GPSLatitude
     return _encode(
         image,
         "JPEG",

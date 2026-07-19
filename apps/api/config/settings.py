@@ -457,14 +457,17 @@ if DESIGN_IMAGE_STORAGE_BACKEND == "filesystem" and not DESIGN_IMAGE_FILESYSTEM_
     )
 
 if DESIGN_IMAGE_STORAGE_BACKEND == "s3":
-    # Bounded client timeouts: the signed-delivery endpoint checks object
-    # existence synchronously inside the HTTP request cycle, so a HANGING
-    # (rather than refusing) storage backend must fail fast into the
-    # controlled 503 instead of pinning a worker for botocore's ~60s
-    # defaults. Single-attempt, short timeouts: this is a synchronous
-    # user-facing READ path — failing one request fast beats pinning a
-    # worker through retries during an outage. Import deferred to here
-    # so the filesystem branch never touches botocore.
+    # Client timeouts for the design_images alias. BOTH consumers share it:
+    # sitara/media/ingest.py (asynchronous permanent-image reads/writes) and
+    # sitara/media/delivery.py (synchronous existence checks). The values
+    # here are sized for the SLOWER consumer — a legitimately slow but
+    # succeeding ingest PUT must never be spuriously timed out into the
+    # Celery bounded-retry budget (tasks.MAX_TRANSIENT_RETRIES is the
+    # resilience mechanism there). The synchronous delivery path does NOT
+    # depend on these values: it bounds its own wait with an in-process
+    # deadline (sitara/media/delivery.py EXISTENCE_DEADLINE_SECONDS) sized
+    # under the browser transport's fixed 5s abort. Import deferred so the
+    # filesystem branch never touches botocore.
     from botocore.config import Config as _BotoClientConfig
 
     STORAGES["design_images"] = {
@@ -474,7 +477,7 @@ if DESIGN_IMAGE_STORAGE_BACKEND == "s3":
             "client_config": _BotoClientConfig(
                 connect_timeout=5,
                 read_timeout=10,
-                retries={"max_attempts": 1},
+                retries={"max_attempts": 2},
             ),
         },
     }

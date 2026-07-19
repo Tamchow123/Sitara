@@ -69,6 +69,38 @@ def _ingested_version(*, with_objects=True) -> DesignVersion:
     return version
 
 
+@pytest.fixture(autouse=True)
+def shared_pool_left_fully_idle():
+    """Fail the LEAKING test, not a later victim.
+
+    The existence pool is module-level and shared across the whole test
+    session, so a test that submits a blocking storage double MUST release
+    it (the try/finally convention used below) or it would silently consume
+    shared worker capacity for the rest of the session. After every test in
+    this module a barrier sized to the whole pool proves all workers are
+    free again — it can only trip if every worker picks up a probe
+    simultaneously — so a leaked still-blocked double fails here, at its
+    source, instead of surfacing as mystery timeouts in unrelated tests.
+    """
+    import threading
+
+    from sitara.media.delivery import _EXISTENCE_POOL_WORKERS, _existence_pool
+
+    yield
+    barrier = threading.Barrier(_EXISTENCE_POOL_WORKERS + 1)
+    probes = [_existence_pool.submit(barrier.wait, 10) for _ in range(_EXISTENCE_POOL_WORKERS)]
+    try:
+        barrier.wait(10)
+    except threading.BrokenBarrierError:
+        pytest.fail(
+            "a design-image-exists pool worker is still blocked — this test "
+            "leaked a hung storage double without releasing it"
+        )
+    finally:
+        for probe in probes:
+            probe.cancel()
+
+
 class TestPreconditions:
     def test_incomplete_provenance_raises_not_ready(self):
         design = make_complete_design()
@@ -114,7 +146,7 @@ class TestPreconditions:
             issue_design_image_urls(version, signer=RecordingSigner())
 
     def test_signer_construction_failure_is_controlled_unavailability(self, monkeypatch):
-        # REL-001/TEST-005: the DEFAULT (non-injected) signer's construction
+        # Construction-failure guard: the DEFAULT (non-injected) signer's construction
         # has the broadest botocore exception surface (credential/region/data
         # resolution) — a failure there must also classify into the
         # controlled unavailability, proving construction sits INSIDE the
@@ -130,7 +162,7 @@ class TestPreconditions:
         assert "botocore" not in str(exc.value)
 
     def test_signing_failure_is_controlled_unavailability(self):
-        # REL-001: ANY failure inside signer construction/presigning must
+        # Signing-failure guard: ANY failure inside signer construction/presigning must
         # classify into the controlled unavailability — never escape as an
         # unhandled botocore exception (the endpoint's taxonomy is 404/409/503).
         version = _ingested_version()
@@ -197,6 +229,149 @@ class TestIssuance:
         assert issued.original_url not in caplog.text
         assert issued.thumbnail_url not in caplog.text
         assert version.image_storage_key not in caplog.text
+
+
+class TestBoundedConcurrentChecks:
+    """The delivery-side latency contract: both existence checks run
+    CONCURRENTLY and the whole phase is bounded by the in-process deadline —
+    the two properties that keep the controlled 503 inside the browser's
+    fixed 5s transport abort (apps/web/src/lib/transport.ts)."""
+
+    def test_deadline_fits_the_frontend_transport_budget(self):
+        from sitara.media.delivery import EXISTENCE_DEADLINE_SECONDS
+
+        # 5s transport budget minus network/app overhead: the storage phase
+        # must leave real slack for the rest of the request cycle.
+        assert EXISTENCE_DEADLINE_SECONDS <= 4
+
+    def test_existence_checks_run_concurrently(self):
+        # Deterministic overlap proof: each exists() blocks on a two-party
+        # barrier, so the call can only complete if BOTH checks are in
+        # flight simultaneously. A sequential implementation deadlocks the
+        # first call until its barrier timeout and fails this test.
+        import threading
+
+        barrier = threading.Barrier(2)
+
+        class BarrierStorage:
+            def exists(self, key):
+                barrier.wait(timeout=5)
+                return True
+
+        version = _ingested_version(with_objects=False)
+        issued = issue_design_image_urls(
+            version, signer=RecordingSigner(), storage=BarrierStorage()
+        )
+        assert issued.original_url and issued.thumbnail_url
+
+    def test_hung_storage_hits_the_deadline_not_the_client_timeout(self):
+        # A check that never returns must surface as the controlled 503
+        # within the in-process deadline — independent of the storage
+        # client's own (ingest-sized) timeouts. The worker is released via
+        # the event afterwards so no thread outlives the test.
+        import threading
+        import time as time_module
+
+        release = threading.Event()
+
+        class HungStorage:
+            def exists(self, key):
+                release.wait(timeout=30)
+                return True
+
+        from sitara.media.delivery import EXISTENCE_DEADLINE_SECONDS
+
+        version = _ingested_version(with_objects=False)
+        started = time_module.monotonic()
+        try:
+            with pytest.raises(DesignImageDeliveryUnavailable):
+                issue_design_image_urls(version, signer=RecordingSigner(), storage=HungStorage())
+            elapsed = time_module.monotonic() - started
+            assert elapsed < 5  # well inside the browser budget
+            # And AT the declared deadline — a near-zero-deadline regression
+            # (broken arithmetic, stray early return) must fail here too.
+            assert elapsed >= EXISTENCE_DEADLINE_SECONDS - 0.5
+        finally:
+            release.set()
+
+    def test_abandoned_checks_never_grow_threads_beyond_the_shared_pool(self):
+        # The pool is module-level and bounded: repeated deadline-hitting
+        # requests saturate the fixed worker cap instead of growing thread
+        # count with request volume. The final request runs against an
+        # ALREADY-FULL pool, proving the circuit-breaker path: its checks
+        # stay queued, the deadline still expires on time, and the
+        # per-request cancel() drops them without them EVER executing.
+        import threading
+        import time as time_module
+
+        from sitara.media.delivery import (
+            _EXISTENCE_POOL_WORKERS,
+            EXISTENCE_DEADLINE_SECONDS,
+        )
+
+        releases = []
+        exists_counters = []
+
+        def make_hung_storage():
+            # Per-request factory (not a class like the other doubles): each
+            # request needs its own release event and exists() call counter.
+            release = threading.Event()
+            releases.append(release)
+            counter = {"exists_calls": 0}
+            exists_counters.append(counter)
+
+            class OneShotHung:
+                def exists(self, key):
+                    counter["exists_calls"] += 1
+                    release.wait(timeout=30)
+                    return True
+
+            return OneShotHung()
+
+        def pool_thread_count():
+            return len(
+                [
+                    thread
+                    for thread in threading.enumerate()
+                    if thread.name.startswith("design-image-exists")
+                ]
+            )
+
+        version = _ingested_version(with_objects=False)
+        # Exactly enough requests to occupy every worker slot (two checks
+        # each), parametrised so the test stays conclusive if the cap
+        # changes. The past-saturation request below would push a
+        # per-request-executor regression OVER the cap and fail the ceiling
+        # assertion — and its checks would run, failing the never-executed
+        # assertion too.
+        saturating_requests = _EXISTENCE_POOL_WORKERS // 2
+        try:
+            for _ in range(saturating_requests):
+                with pytest.raises(DesignImageDeliveryUnavailable):
+                    issue_design_image_urls(
+                        version, signer=RecordingSigner(), storage=make_hung_storage()
+                    )
+                assert pool_thread_count() <= _EXISTENCE_POOL_WORKERS
+            # Past saturation: every worker is still hung, so this request's
+            # checks never leave the queue.
+            started = time_module.monotonic()
+            with pytest.raises(DesignImageDeliveryUnavailable):
+                issue_design_image_urls(
+                    version, signer=RecordingSigner(), storage=make_hung_storage()
+                )
+            elapsed = time_module.monotonic() - started
+            # The controlled 503 lands ON the deadline — queueing behind a
+            # full pool must not stretch the wait beyond it.
+            assert elapsed < EXISTENCE_DEADLINE_SECONDS + 1.0
+            assert pool_thread_count() <= _EXISTENCE_POOL_WORKERS
+            # The queued checks were cancelled while still pending: they
+            # never executed at all...
+            assert exists_counters[-1]["exists_calls"] == 0
+            # ...while every saturating request's two checks genuinely ran.
+            assert all(counter["exists_calls"] == 2 for counter in exists_counters[:-1])
+        finally:
+            for release in releases:
+                release.set()
 
 
 class TestRealSigner:

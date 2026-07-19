@@ -1,4 +1,5 @@
-"""Durable asynchronous generation pipeline (Phase 10, Parts A & B).
+"""Durable asynchronous generation pipeline (Phase 10 Parts A & B; Phase 11
+adds stage E — canonical permanent image ingest).
 
 Two public entry points:
 

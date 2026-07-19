@@ -84,6 +84,18 @@ class TestOrientationAndMetadata:
             for marker in ("exif", "icc_profile", "xmp", "comment"):
                 assert marker not in image.info
 
+    def test_gps_location_data_is_stripped(self):
+        # Positive proof for the most privacy-sensitive metadata class: the
+        # INPUT genuinely carries a GPS sub-IFD, and BOTH outputs carry none.
+        data = images.jpeg_with_metadata_bytes(gps=True)
+        source = _open(data)
+        assert dict(source.getexif().get_ifd(0x8825))  # precondition
+        processed = _process(data)
+        for output in (processed.original_bytes, processed.thumbnail_bytes):
+            produced = _open(output)
+            produced.load()
+            assert not dict(produced.getexif().get_ifd(0x8825))
+
 
 class TestRejection:
     def test_animated_webp_is_rejected(self):
