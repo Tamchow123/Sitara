@@ -229,8 +229,29 @@ deadline or the pool cap in `sitara/media/delivery.py`, whose comments
 document the sizing basis, the cancel-on-exit guarantee and the saturation
 circuit breaker.
 
-Operator note (recorded residual edge, accepted as safer than deleting):
-the ingest service never deletes objects at a version's deterministic
+## Amendment: Phase 12 adds a separately signed attachment download URL
+
+Phase 12 (ADR 0013) extends the image endpoint's response additively rather
+than superseding the "Signed delivery" contract above: the original image's
+response object gains a `download_url` alongside the existing inline `url`,
+sharing the same declared `expires_at` as the inline original and thumbnail
+URLs. The new URL is signed with `Content-Disposition: attachment` and the
+fixed server-owned filename `sitara-concept.webp` — no user-controlled title
+or filename ever enters signing. This is implemented as one allowlisted
+`disposition: "inline" | "attachment"` parameter on the existing
+`S3DesignImageSigner.sign_get`, not a second signing service, and the
+filesystem backend's controlled `503 design_image_delivery_unavailable`
+still applies to both dispositions identically. Every privacy limitation
+above — temporary bearer URL, no revocation before expiry, never persisted,
+cached or logged, ownership checked only before issuance — applies equally
+to the attachment URL.
+
+## Operator note: stray permanent objects are never auto-deleted
+
+This note concerns ingest/crash-recovery generally (both amendments above),
+not the attachment download URL specifically. Recorded residual edge,
+accepted as safer than deleting: the ingest service never deletes objects at
+a version's deterministic
 permanent keys. If an anomalous state (for example staged metadata
 rewritten mid-ingest, which the locked re-checks refuse) ever strands a
 just-written object there whose content differs from what a later correct
