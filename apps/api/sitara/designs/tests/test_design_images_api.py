@@ -10,8 +10,6 @@ computation — no network is touched.
 import copy
 
 import pytest
-from django.core.files.base import ContentFile
-from django.core.files.storage import storages
 from django.utils import timezone
 
 from sitara.designs.models import Design, DesignSession, DesignVersion
@@ -19,6 +17,8 @@ from sitara.designs.models import Design, DesignSession, DesignVersion
 from .utils import (
     bootstrap_csrf,
     create_design,
+    create_owned_design_id,
+    create_ready_design_version,
     csrf_client,
     login,
     logout,
@@ -41,41 +41,13 @@ def _images_url(design_id, version_id) -> str:
 
 
 def _make_owned_design(client) -> str:
-    response = create_design(client, title="Signed image test")
-    assert response.status_code == 201, response.content
-    return response.json()["id"]
+    return create_owned_design_id(client, title="Signed image test")
 
 
 def _attach_ingested_version(design_id, *, with_objects=True) -> DesignVersion:
-    version = DesignVersion.objects.create(
-        design_id=design_id,
-        version_number=1,
-        design_spec={"schema_version": 1},
-        design_spec_schema_version=1,
-        design_spec_template_version="v1",
-        design_spec_provider="fixture",
-        design_spec_model="fixture-model",
-        design_spec_generated_at=timezone.now(),
-        image_prompt="An API-test prompt.",
-        prompt_builder_version="3.0.0",
-        image_storage_key=f"design-images/{design_id}/v1/original.webp",
-        image_sha256="a" * 64,
-        image_size_bytes=1000,
-        image_width=1536,
-        image_height=2048,
-        thumbnail_storage_key=f"design-images/{design_id}/v1/thumbnail.webp",
-        thumbnail_sha256="b" * 64,
-        thumbnail_size_bytes=100,
-        thumbnail_width=384,
-        thumbnail_height=512,
-        image_processor_version="1.0.0",
-        image_ingested_at=timezone.now(),
+    return create_ready_design_version(
+        design_id, image_prompt="An API-test prompt.", with_storage_objects=with_objects
     )
-    if with_objects:
-        store = storages["design_images"]
-        store.save(version.image_storage_key, ContentFile(b"original"))
-        store.save(version.thumbnail_storage_key, ContentFile(b"thumbnail"))
-    return version
 
 
 class TestAuthorisedAccess:
@@ -87,6 +59,8 @@ class TestAuthorisedAccess:
         assert response.status_code == 200, response.content
         images = response.json()["images"]
         assert images["original"]["url"]
+        assert images["original"]["download_url"]
+        assert images["original"]["download_url"] != images["original"]["url"]
         assert images["original"]["width"] == 1536
         assert images["original"]["height"] == 2048
         assert images["thumbnail"]["url"]
@@ -135,7 +109,7 @@ class TestAuthorisedAccess:
         body = response.json()
         assert set(body) == {"images"}
         assert set(body["images"]) == {"original", "thumbnail", "expires_at"}
-        assert set(body["images"]["original"]) == {"url", "width", "height"}
+        assert set(body["images"]["original"]) == {"url", "download_url", "width", "height"}
         assert set(body["images"]["thumbnail"]) == {"url", "width", "height"}
         raw = response.content.decode()
         assert version.image_sha256 not in raw
@@ -157,6 +131,7 @@ class TestAuthorisedAccess:
             response = client.get(_images_url(design_id, version.pk))
         for url in (
             response.json()["images"]["original"]["url"],
+            response.json()["images"]["original"]["download_url"],
             response.json()["images"]["thumbnail"]["url"],
         ):
             assert url not in caplog.text

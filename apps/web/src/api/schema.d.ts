@@ -232,6 +232,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/designs/{design_id}/versions/{version_id}/result/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the private concept result for a design version
+         * @description Returns a purpose-built, curated result — title, concept summary and every DesignSpec section — revalidated and safety-scanned before delivery. Never exposes source_selections, questionnaire answers, the image prompt, provider/model/token provenance, storage keys, hashes or any signed URL. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        get: operations["designs_version_result_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health/live": {
         parameters: {
             query?: never;
@@ -409,14 +429,31 @@ export interface components {
              */
             readonly email: string;
         };
+        ColourStoryResult: {
+            palette_summary: string;
+            placement: string;
+            rationale: string;
+        };
         CompatibilityRuleSchema: {
             id: string;
             when: components["schemas"]["RuleConditionSchema"];
             then: components["schemas"]["RuleActionSchema"];
         };
+        CoverageAndDrapeResult: {
+            sleeves: string;
+            neckline: string;
+            back_and_midriff: string;
+            head_covering: string;
+            dupatta_or_saree_drape: string;
+        };
         CsrfResponse: {
             /** @description Send this back as the X-CSRFToken header on unsafe requests. */
             csrf_token: string;
+        };
+        CulturalContextResult: {
+            regional_direction: string | null;
+            interpretation_notes: string[];
+            safeguards: string[];
         };
         DesignDetailResponse: {
             /** Format: uuid */
@@ -427,6 +464,7 @@ export interface components {
             /** @description Answers keyed by stable question id. */
             answers: unknown;
             selected_inspirations: components["schemas"]["SelectedInspiration"][];
+            latest_job: components["schemas"]["GenerationJob"] | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -446,11 +484,11 @@ export interface components {
             height: number;
         };
         DesignImages: {
-            original: components["schemas"]["DesignImage"];
+            original: components["schemas"]["DesignOriginalImage"];
             thumbnail: components["schemas"]["DesignImage"];
             /**
              * Format: date-time
-             * @description The single instant BOTH URLs stop working (ISO-8601).
+             * @description The single instant ALL THREE URLs stop working (ISO-8601).
              */
             expires_at: string;
         };
@@ -468,12 +506,58 @@ export interface components {
         DesignListResponse: {
             designs: components["schemas"]["DesignListItem"][];
         };
+        /**
+         * @description The original image additionally carries a separately signed
+         *     attachment URL (Phase 12) for a reliable download, sharing the same
+         *     declared expiry as every other URL in the response.
+         */
+        DesignOriginalImage: {
+            /** @description Short-lived signed GET URL for the private WebP object. */
+            url: string;
+            width: number;
+            height: number;
+            /** @description Short-lived signed GET URL that downloads the private WebP object as an attachment. */
+            download_url: string;
+        };
         /** @description The questionnaire a design is pinned to (null for legacy designs). */
         DesignQuestionnaire: {
             /** Format: uuid */
             id: string;
             version: number;
             schema: components["schemas"]["QuestionnaireSchema"];
+        };
+        /**
+         * @description The purpose-built, curated concept result (Phase 12).
+         *
+         *     Deliberately excludes ``source_selections``, questionnaire answers,
+         *     inspiration selections, the image prompt, prompt-builder version,
+         *     DesignSpec provider/model, token counts, provider prediction id,
+         *     provider/model name, seed, image parameters, staged metadata, storage
+         *     keys, hashes, internal byte sizes, the user id, DesignSession id, the
+         *     questionnaire version id and every signed URL.
+         */
+        DesignResult: {
+            /** Format: uuid */
+            design_id: string;
+            /** Format: uuid */
+            design_version_id: string;
+            version_number: number;
+            title: string;
+            concept_summary: string;
+            garment_breakdown: components["schemas"]["GarmentBreakdownResult"];
+            colour_story: components["schemas"]["ColourStoryResult"];
+            fabrics_and_texture: components["schemas"]["FabricEntryResult"][];
+            embellishment_plan: components["schemas"]["EmbellishmentPlanResult"];
+            coverage_and_drape: components["schemas"]["CoverageAndDrapeResult"];
+            cultural_context: components["schemas"]["CulturalContextResult"];
+            styling_notes: string[];
+            construction_caveats: string[];
+            image_alt_text: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        DesignResultResponse: {
+            result: components["schemas"]["DesignResult"];
         };
         DesignValidationSuccess: {
             valid: boolean;
@@ -488,6 +572,38 @@ export interface components {
             answers?: unknown;
             inspiration_asset_ids?: string[];
         };
+        EmbellishmentPlanResult: {
+            techniques: string[];
+            density: string;
+            placement: string[];
+            motifs: string[];
+            restraint_notes: string;
+        };
+        /**
+         * @description * `design_changed` - design_changed
+         *     * `design_incomplete` - design_incomplete
+         *     * `generation_unavailable` - generation_unavailable
+         *     * `image_download_failed` - image_download_failed
+         *     * `image_ingest_failed` - image_ingest_failed
+         *     * `image_ingest_unverified` - image_ingest_unverified
+         *     * `image_output_invalid` - image_output_invalid
+         *     * `image_poll_timeout` - image_poll_timeout
+         *     * `image_prediction_aborted` - image_prediction_aborted
+         *     * `image_prediction_canceled` - image_prediction_canceled
+         *     * `image_prediction_failed` - image_prediction_failed
+         *     * `image_provider_unavailable` - image_provider_unavailable
+         *     * `image_staging_failed` - image_staging_failed
+         *     * `image_staging_unverified` - image_staging_unverified
+         *     * `image_submission_ambiguous` - image_submission_ambiguous
+         *     * `internal_generation_error` - internal_generation_error
+         *     * `prompt_build_failed` - prompt_build_failed
+         *     * `queue_unavailable` - queue_unavailable
+         *     * `structured_generation_failed` - structured_generation_failed
+         *     * `structured_provider_refused` - structured_provider_refused
+         *     * `structured_submission_ambiguous` - structured_submission_ambiguous
+         * @enum {string}
+         */
+        ErrorCodeEnum: "design_changed" | "design_incomplete" | "generation_unavailable" | "image_download_failed" | "image_ingest_failed" | "image_ingest_unverified" | "image_output_invalid" | "image_poll_timeout" | "image_prediction_aborted" | "image_prediction_canceled" | "image_prediction_failed" | "image_provider_unavailable" | "image_staging_failed" | "image_staging_unverified" | "image_submission_ambiguous" | "internal_generation_error" | "prompt_build_failed" | "queue_unavailable" | "structured_generation_failed" | "structured_provider_refused" | "structured_submission_ambiguous";
         ErrorDetail: {
             /** @description Stable machine-readable error code. */
             code: string;
@@ -498,6 +614,11 @@ export interface components {
         ErrorEnvelope: {
             error: components["schemas"]["ErrorDetail"];
         };
+        FabricEntryResult: {
+            fabric: string;
+            placement: string;
+            finish_and_movement: string;
+        };
         FieldValidationErrorDetail: {
             /** @description Stable machine-readable error code. */
             code: string;
@@ -507,6 +628,13 @@ export interface components {
             fields?: {
                 [key: string]: string[];
             };
+        };
+        GarmentBreakdownResult: {
+            overall_form: string;
+            garment_components: string[];
+            silhouette: string;
+            drape_or_layering: string;
+            key_proportions: string;
         };
         /**
          * @description The stable public shape of one generation job (Phase 10).
@@ -523,7 +651,7 @@ export interface components {
             /** Format: uuid */
             design_version_id: string | null;
             status: components["schemas"]["StatusEnum"];
-            error_code: string | null;
+            error_code: (components["schemas"]["ErrorCodeEnum"] | components["schemas"]["NullEnum"]) | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -562,6 +690,8 @@ export interface components {
             /** @description The user when authenticated, else null. */
             user: components["schemas"]["AuthUser"] | null;
         };
+        /** @enum {unknown} */
+        NullEnum: null;
         /**
          * @description * `equals` - equals
          *     * `in` - in
@@ -1277,6 +1407,55 @@ export interface operations {
                 };
             };
             /** @description design_image_delivery_unavailable: not possible right now. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_version_result_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                design_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DesignResultResponse"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description design_result_not_ready: this design version has no complete result yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description design_result_unavailable: the stored content is corrupt, unsupported or unsafe. */
             503: {
                 headers: {
                     [name: string]: unknown;

@@ -58,11 +58,18 @@ from .models import Design, DesignVersion
 from .openapi import (
     DesignDetailResponseSerializer,
     DesignListResponseSerializer,
+    DesignResultResponseSerializer,
     DesignValidationSuccessSerializer,
     DesignVersionImagesResponseSerializer,
     GenerationJobResponseSerializer,
 )
 from .ownership import accessible_designs, accessible_generation_attempts
+from .result import (
+    DesignResultNotReady,
+    DesignResultUnavailable,
+    design_result_payload,
+    load_validated_design_spec,
+)
 from .serializers import (
     DesignWriteSerializer,
     design_detail_payload,
@@ -613,6 +620,7 @@ class DesignVersionImagesView(APIView):
                 "images": {
                     "original": {
                         "url": issued.original_url,
+                        "download_url": issued.original_download_url,
                         "width": version.image_width,
                         "height": version.image_height,
                     },
@@ -626,6 +634,87 @@ class DesignVersionImagesView(APIView):
             },
             headers=_IMAGE_HEADERS,
         )
+
+
+class DesignVersionResultView(APIView):
+    """The private, curated concept result for one owned DesignVersion (Phase 12).
+
+    Ownership filtering runs BEFORE the design UUID lookup, and the version
+    must belong to that owned design — an inaccessible or nonexistent design
+    OR version is one indistinguishable 404. A failed GET never creates a
+    workspace. Before delivery the persisted DesignSpec is revalidated,
+    safety-scanned and its schema version confirmed supported; corrupt,
+    unsupported or unsafe content is a controlled 503, never a raw
+    exception. This endpoint never issues an image URL — Phase 11's image
+    endpoint remains the only signed-image URL issuer."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        operation_id="designs_version_result_retrieve",
+        tags=_DESIGN_TAGS,
+        responses={
+            200: DesignResultResponseSerializer,
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "design_result_not_ready: this design version has no complete result yet."
+                ),
+            ),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "design_result_unavailable: the stored content is corrupt, "
+                    "unsupported or unsafe."
+                ),
+            ),
+        },
+        summary="Get the private concept result for a design version",
+        description=(
+            "Returns a purpose-built, curated result — title, concept summary "
+            "and every DesignSpec section — revalidated and safety-scanned "
+            "before delivery. Never exposes source_selections, questionnaire "
+            "answers, the image prompt, provider/model/token provenance, "
+            "storage keys, hashes or any signed URL. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def get(self, request, design_id: str, version_id: str):
+        # Ownership filter FIRST, UUID lookup second — indistinguishable 404,
+        # and no workspace/session is ever created for a failed GET.
+        design = accessible_designs(request).filter(pk=design_id).first()
+        if design is None:
+            return _not_found()
+        version = DesignVersion.objects.filter(design=design, pk=version_id).first()
+        if version is None:
+            return _not_found()
+        try:
+            spec = load_validated_design_spec(version)
+        except DesignResultNotReady:
+            return _error(
+                "design_result_not_ready",
+                "This design version has no complete result yet.",
+                status.HTTP_409_CONFLICT,
+            )
+        except DesignResultUnavailable as exc:
+            # Safe boundary log: operation name, row UUID, exception TYPE
+            # only — never the DesignSpec, title, narrative, prompt, answers,
+            # storage keys, hashes or URLs.
+            cause = type(exc.__cause__).__name__ if exc.__cause__ else "unknown"
+            logger.warning(
+                "design result unavailable design_version=%s exception_type=%s",
+                version.pk,
+                cause,
+            )
+            return _error(
+                "design_result_unavailable",
+                "This design's result is temporarily unavailable. Try again shortly.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(design_result_payload(version, spec), headers=NO_STORE)
 
 
 class GenerationJobView(APIView):

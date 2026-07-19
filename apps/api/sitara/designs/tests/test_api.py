@@ -28,6 +28,7 @@ PUBLIC_DESIGN_KEYS = {
     "questionnaire",
     "answers",
     "selected_inspirations",
+    "latest_job",
     "created_at",
     "updated_at",
 }
@@ -89,6 +90,7 @@ class TestCreate:
         assert body["title"] == "My walima concept"
         assert body["status"] == "draft"
         assert body["answers"] == {}
+        assert body["latest_job"] is None
         assert uuid.UUID(body["id"])
         assert body["created_at"] and body["updated_at"]
 
