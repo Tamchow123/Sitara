@@ -30,6 +30,7 @@ ASSET_CULTURAL_CONTEXT_MAX_LENGTH = 500
 GARMENT_TYPE_MAX_LENGTH = 64
 STORAGE_KEY_MAX_LENGTH = 255
 INTERNAL_NOTES_MAX_LENGTH = 2_000
+ATTRIBUTION_TEXT_MAX_LENGTH = 500
 
 _MACHINE_ID_VALIDATOR = RegexValidator(
     regex=r"^[a-z][a-z0-9_]{1,63}$",
@@ -91,7 +92,7 @@ class UsageRights(models.Model):
     allows_derivative_generation = models.BooleanField(default=False)
     allows_commercial_use = models.BooleanField(default=False)
     attribution_required = models.BooleanField(default=False)
-    attribution_text = models.CharField(max_length=500, blank=True)
+    attribution_text = models.CharField(max_length=ATTRIBUTION_TEXT_MAX_LENGTH, blank=True)
     internal_notes = models.TextField(max_length=INTERNAL_NOTES_MAX_LENGTH, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

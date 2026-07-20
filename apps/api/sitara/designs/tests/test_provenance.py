@@ -124,3 +124,141 @@ class TestAdminReadOnly:
         ):
             assert field in readonly
         assert model_admin.has_add_permission(request=None) is False
+
+
+_EMPTY_HASH = "e" * 64
+_VALID_SNAPSHOT = {"schema_version": 1, "items": []}
+
+
+class TestInspirationContextProvenance:
+    """DesignVersion.inspiration_context/_schema_version/_sha256 database
+    constraints (Phase 13) — the final backstop below the generation
+    service's snapshot persistence."""
+
+    def test_legacy_version_without_inspiration_context_is_valid(self):
+        version = make_version()
+        assert version.inspiration_context is None
+        assert version.inspiration_context_schema_version is None
+        assert version.inspiration_context_sha256 == ""
+
+    def test_null_provenance_alongside_a_spec_is_valid(self):
+        version = make_version(**full_provenance())
+        version.refresh_from_db()
+        assert version.inspiration_context is None
+
+    def test_complete_empty_snapshot_provenance_is_valid(self):
+        version = make_version(
+            **full_provenance(
+                inspiration_context=_VALID_SNAPSHOT,
+                inspiration_context_schema_version=1,
+                inspiration_context_sha256=_EMPTY_HASH,
+            )
+        )
+        version.refresh_from_db()
+        assert version.inspiration_context == _VALID_SNAPSHOT
+
+    def test_complete_selected_snapshot_provenance_is_valid(self):
+        snapshot = {
+            "schema_version": 1,
+            "items": [
+                {
+                    "asset_id": "11111111-1111-1111-1111-111111111111",
+                    "position": 1,
+                    "provider_cues": {
+                        "garment_type": "lehenga",
+                        "visual_description": "A description.",
+                        "cultural_context": None,
+                    },
+                    "acknowledgement": {"title": "A look", "attribution": ""},
+                }
+            ],
+        }
+        version = make_version(
+            **full_provenance(
+                inspiration_context=snapshot,
+                inspiration_context_schema_version=1,
+                inspiration_context_sha256=_EMPTY_HASH,
+            )
+        )
+        version.refresh_from_db()
+        assert version.inspiration_context == snapshot
+
+    def test_context_without_schema_version_is_blocked(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            make_version(
+                **full_provenance(
+                    inspiration_context=_VALID_SNAPSHOT,
+                    inspiration_context_sha256=_EMPTY_HASH,
+                )
+            )
+
+    def test_context_without_hash_is_blocked(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            make_version(
+                **full_provenance(
+                    inspiration_context=_VALID_SNAPSHOT,
+                    inspiration_context_schema_version=1,
+                )
+            )
+
+    def test_schema_version_without_context_is_blocked(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            make_version(
+                **full_provenance(
+                    inspiration_context_schema_version=1,
+                    inspiration_context_sha256=_EMPTY_HASH,
+                )
+            )
+
+    def test_hash_without_context_is_blocked(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            make_version(**full_provenance(inspiration_context_sha256=_EMPTY_HASH))
+
+    def test_invalid_schema_version_is_blocked(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            make_version(
+                **full_provenance(
+                    inspiration_context=_VALID_SNAPSHOT,
+                    inspiration_context_schema_version=2,
+                    inspiration_context_sha256=_EMPTY_HASH,
+                )
+            )
+
+    def test_malformed_hash_is_blocked(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            make_version(
+                **full_provenance(
+                    inspiration_context=_VALID_SNAPSHOT,
+                    inspiration_context_schema_version=1,
+                    inspiration_context_sha256="not-a-valid-hash",
+                )
+            )
+
+    def test_uppercase_hash_is_blocked(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            make_version(
+                **full_provenance(
+                    inspiration_context=_VALID_SNAPSHOT,
+                    inspiration_context_schema_version=1,
+                    inspiration_context_sha256="E" * 64,
+                )
+            )
+
+    def test_context_without_design_spec_is_blocked(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            make_version(
+                design_spec=None,
+                inspiration_context=_VALID_SNAPSHOT,
+                inspiration_context_schema_version=1,
+                inspiration_context_sha256=_EMPTY_HASH,
+            )
+
+    def test_inspiration_context_admin_fields_are_read_only(self):
+        model_admin = admin.site._registry[DesignVersion]
+        readonly = set(model_admin.readonly_fields)
+        for field in (
+            "inspiration_context",
+            "inspiration_context_schema_version",
+            "inspiration_context_sha256",
+        ):
+            assert field in readonly

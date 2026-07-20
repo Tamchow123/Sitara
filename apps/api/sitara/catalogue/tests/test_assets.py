@@ -178,6 +178,33 @@ class TestApproveInspirationAsset:
         with pytest.raises(AssetApprovalError, match="title"):
             approve_inspiration_asset(asset, approved_by=_staff())
 
+    def test_unsafe_alt_text_is_rejected(self):
+        asset = make_asset_with_image(
+            alt_text="Styled after Sabyasachi's signature look.",
+            usage_rights=make_rights(verified=True),
+        )
+        with pytest.raises(AssetApprovalError, match="safety check"):
+            approve_inspiration_asset(asset, approved_by=_staff())
+        asset.refresh_from_db()
+        assert asset.status == InspirationAsset.Status.DRAFT
+
+    def test_unsafe_cultural_context_is_rejected(self):
+        asset = make_asset_with_image(
+            cultural_context="Visit https://example.com for more.",
+            usage_rights=make_rights(verified=True),
+        )
+        with pytest.raises(AssetApprovalError, match="safety check"):
+            approve_inspiration_asset(asset, approved_by=_staff())
+
+    def test_safe_metadata_is_approved(self):
+        asset = make_asset_with_image(
+            alt_text="Front view of an emerald bridal outfit with gold embroidery.",
+            cultural_context="Broad Pakistani bridal styling reference.",
+            usage_rights=make_rights(verified=True),
+        )
+        approved = approve_inspiration_asset(asset, approved_by=_staff())
+        assert approved.status == InspirationAsset.Status.APPROVED
+
     def test_incomplete_attribution_is_rejected(self):
         rights = make_rights(verified=True, attribution_required=True, attribution_text="x")
         asset = make_asset_with_image(usage_rights=rights)
