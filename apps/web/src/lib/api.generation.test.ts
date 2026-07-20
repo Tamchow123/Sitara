@@ -54,6 +54,7 @@ const JOB = {
     design_version_id: null,
     status: "queued",
     error_code: null,
+    generation_kind: "initial",
     created_at: "t",
     updated_at: "t",
     started_at: null,

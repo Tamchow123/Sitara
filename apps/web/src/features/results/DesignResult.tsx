@@ -7,8 +7,8 @@
 // deliberate — image delivery may be temporarily unavailable while the
 // validated design brief remains fully readable.
 
-import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { DesignBrief } from "./DesignBrief";
 import { ResultImage } from "./ResultImage";
@@ -18,27 +18,21 @@ import {
   DesignResultQueryError,
   resultErrorCopy,
 } from "./result-errors";
-import { fetchDesignImageUrls, fetchDesignResult } from "@/lib/api";
-import type { DesignImages } from "@/lib/api";
+import { imageRefetchIntervalMs, useImageFocusRefresh } from "./image-refresh";
+import { RefinementPanel } from "@/features/refinement/RefinementPanel";
+import { VersionComparison } from "@/features/refinement/VersionComparison";
+import {
+  isRefinementEligible,
+  isRefinementFailed,
+  isRefinementRunning,
+} from "@/features/refinement/refinement-eligibility";
+import { friendlyGenerationError } from "@/features/generation/generation-errors";
+import { fetchDesign, fetchDesignImageUrls, fetchDesignResult, fetchPublicConfig } from "@/lib/api";
 
 type Props = { designId: string; versionId: string };
 
-// Refresh at ~80% of the observed remaining lifetime, never below a minimum
-// positive delay, and never at all once there is no data or the expiry
-// timestamp is unusable.
-const MIN_REFRESH_DELAY_MS = 1_000;
-const NEAR_EXPIRY_MS = 15_000;
-
-function imageRefetchIntervalMs(images: DesignImages | undefined, now: number): number | false {
-  if (!images) return false;
-  const expiresAt = Date.parse(images.expires_at);
-  if (Number.isNaN(expiresAt)) return false;
-  const remaining = expiresAt - now;
-  if (remaining <= 0) return false;
-  return Math.max(MIN_REFRESH_DELAY_MS, remaining * 0.8);
-}
-
 export function DesignResult({ designId, versionId }: Props) {
+  const queryClient = useQueryClient();
   const resultQuery = useQuery({
     queryKey: ["design-result", designId, versionId],
     queryFn: async () => {
@@ -80,25 +74,38 @@ export function DesignResult({ designId, versionId }: Props) {
     refetchInterval: (activeQuery) => imageRefetchIntervalMs(activeQuery.state.data, Date.now()),
   });
 
-  // Immediate refresh on focus, but only when the current URL is genuinely
-  // near expiry — not on every focus, which would defeat the 80%-lifetime
-  // schedule above and risk a tight refresh loop.
-  useEffect(() => {
-    function onFocus() {
-      const images = imageQuery.data;
-      if (!images) return;
-      const expiresAt = Date.parse(images.expires_at);
-      if (Number.isNaN(expiresAt)) return;
-      if (expiresAt - Date.now() <= NEAR_EXPIRY_MS) {
-        void imageQuery.refetch();
-      }
-    }
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-    // imageQuery.refetch is stable for a given query key; only the observed
-    // data needs to retrigger this effect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageQuery.data]);
+  useImageFocusRefresh(imageQuery.data, () => void imageQuery.refetch());
+
+  // Since Phase 14: the owning Design's latest_job (refinement eligibility,
+  // in-progress/failed banners) and the public config's generation_enabled
+  // flag (the same fail-closed signal ReviewSummary gates "Generate" on).
+  // Independent of the result/image queries above — a slow or failed design/
+  // config fetch never blocks the validated brief/image from rendering; it
+  // only withholds the additive refinement section until it resolves.
+  const designQuery = useQuery({
+    queryKey: ["design-detail", designId],
+    queryFn: () => fetchDesign(designId),
+    retry: false,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  });
+
+  const configQuery = useQuery({
+    queryKey: ["public-config"],
+    queryFn: () => fetchPublicConfig(),
+    retry: false,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  });
+
+  // A submit-time 409 (design_not_refinable / refinement_in_progress /
+  // refinement_limit_reached) means our locally cached latest_job is stale —
+  // refetch the Design so eligibility/running/failed recompute from the
+  // server's current state instead of re-offering a submission we know will
+  // fail again.
+  const handleRequiresRecheck = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["design-detail", designId] });
+  }, [queryClient, designId]);
 
   if (resultQuery.isPending) {
     return (
@@ -126,6 +133,34 @@ export function DesignResult({ designId, versionId }: Props) {
 
   const result = resultQuery.data;
 
+  // Viewing the refined output (version 2): render the side-by-side
+  // comparison instead of a single-version view. A DB constraint enforces
+  // parent_version_id non-null for any "refinement" lineage kind, so the
+  // `&&` below is defensive only, against a malformed or stale-cached payload
+  // — not a condition expected to actually be false in practice.
+  if (result.lineage.kind === "refinement" && result.lineage.parent_version_id) {
+    return (
+      <VersionComparison
+        designId={designId}
+        parentVersionId={result.lineage.parent_version_id}
+        refined={{
+          result,
+          images: imageQuery.data,
+          imagesPending: imageQuery.isPending,
+          imagesFetching: imageQuery.isFetching,
+          imagesError: imageQuery.error,
+          onRetryImages: () => void imageQuery.refetch(),
+        }}
+      />
+    );
+  }
+
+  const design = designQuery.data;
+  const generationEnabled = configQuery.data?.generation_enabled === true;
+  const eligible = designQuery.isSuccess && isRefinementEligible(result, design, generationEnabled);
+  const running = designQuery.isSuccess && isRefinementRunning(design);
+  const failed = designQuery.isSuccess && isRefinementFailed(design);
+
   return (
     <main className="design-result">
       <h1>{result.title}</h1>
@@ -138,6 +173,32 @@ export function DesignResult({ designId, versionId }: Props) {
         onRetry={() => void imageQuery.refetch()}
       />
       <DesignBrief result={result} />
+
+      {running && design?.latest_job && (
+        <div role="status" aria-live="polite" className="refinement-running-notice">
+          <p>
+            A refinement is currently running.{" "}
+            <a href={`/design/${designId}/generation/${design.latest_job.id}`}>
+              View refinement progress
+            </a>
+          </p>
+        </div>
+      )}
+
+      {failed && design?.latest_job && (
+        <div role="alert" className="refinement-failed-notice">
+          <h2>{friendlyGenerationError(design.latest_job.error_code).heading}</h2>
+          <p>{friendlyGenerationError(design.latest_job.error_code).message}</p>
+        </div>
+      )}
+
+      {eligible && (
+        <RefinementPanel
+          designId={designId}
+          sourceVersionId={versionId}
+          onRequiresRecheck={handleRequiresRecheck}
+        />
+      )}
     </main>
   );
 }

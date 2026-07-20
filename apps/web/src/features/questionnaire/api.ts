@@ -7,17 +7,14 @@
 
 import { apiClient } from "@/api/client";
 
-import type {
-  ActiveQuestionnaire,
-  DesignDraft,
-  InspirationCatalogue,
-} from "./types";
+import type { ActiveQuestionnaire, InspirationCatalogue } from "./types";
 
 export {
   createDesignDraft,
   updateDesignDraft,
   validateDesignDraft,
   startDesignGeneration,
+  fetchDesign,
   fetchPublicConfig,
 } from "@/lib/api";
 export type {
@@ -39,15 +36,5 @@ export async function fetchActiveQuestionnaire(): Promise<ActiveQuestionnaire> {
 export async function fetchCatalogue(): Promise<InspirationCatalogue> {
   const { data } = await apiClient.GET("/api/v1/inspiration-assets/");
   if (!data) throw new Error("catalogue_unavailable");
-  return data;
-}
-
-// GET a single design (ownership enforced by the session cookie server-side;
-// a foreign/nonexistent design is an indistinguishable 404 → thrown here).
-export async function fetchDesign(designId: string): Promise<DesignDraft> {
-  const { data } = await apiClient.GET("/api/v1/designs/{design_id}/", {
-    params: { path: { design_id: designId } },
-  });
-  if (!data) throw new Error("not_found");
   return data;
 }

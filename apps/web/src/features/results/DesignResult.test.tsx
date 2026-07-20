@@ -4,11 +4,13 @@ import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DesignResult } from "./DesignResult";
-import type { DesignImages, DesignResult as DesignResultType } from "@/lib/api";
+import type { DesignDraft, DesignImages, DesignResult as DesignResultType } from "@/lib/api";
 
 const mocks = vi.hoisted(() => ({
   fetchDesignResult: vi.fn(),
   fetchDesignImageUrls: vi.fn(),
+  fetchDesign: vi.fn(),
+  fetchPublicConfig: vi.fn(),
   // Captures every useQuery(...) options object this test file's render
   // passes through, keyed by call order, so assertions can find the image
   // query specifically by its queryKey.
@@ -21,8 +23,14 @@ vi.mock("@/lib/api", async () => {
     ...actual,
     fetchDesignResult: mocks.fetchDesignResult,
     fetchDesignImageUrls: mocks.fetchDesignImageUrls,
+    fetchDesign: mocks.fetchDesign,
+    fetchPublicConfig: mocks.fetchPublicConfig,
   };
 });
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+}));
 
 vi.mock("@tanstack/react-query", async () => {
   const actual =
@@ -93,6 +101,7 @@ function result(overrides: Partial<DesignResultType> = {}): DesignResultType {
     image_alt_text: "A model in an ivory flared lehenga with gold embroidery.",
     created_at: "2026-07-19T12:00:00Z",
     inspiration_acknowledgements: [],
+    lineage: { kind: "initial", parent_version_id: null, refinement: null },
     ...overrides,
   };
 }
@@ -111,6 +120,30 @@ function images(overrides: Partial<DesignImages> = {}): DesignImages {
   };
 }
 
+function design(overrides: Partial<DesignDraft> = {}): DesignDraft {
+  return {
+    id: "d1",
+    title: "My concept",
+    status: "generated",
+    questionnaire: null,
+    answers: {},
+    selected_inspirations: [],
+    latest_job: null,
+    created_at: "t",
+    updated_at: "t",
+    ...overrides,
+  };
+}
+
+function publicConfig(generationEnabled: boolean) {
+  return {
+    demo_mode: true,
+    generation_enabled: generationEnabled,
+    max_inspiration_images: 3,
+    max_refinements: 1,
+  };
+}
+
 function renderResult(designId = "d1", versionId = "v1") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const utils = render(
@@ -126,6 +159,8 @@ beforeEach(() => {
   mocks.capturedQueries = [];
   localStorage.clear();
   sessionStorage.clear();
+  mocks.fetchDesign.mockResolvedValue(design());
+  mocks.fetchPublicConfig.mockResolvedValue(publicConfig(true));
 });
 
 afterEach(() => {
@@ -556,5 +591,127 @@ describe("DesignResult — copy and download actions", () => {
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:fake-url");
     window.removeEventListener("error", onWindowError);
     HTMLAnchorElement.prototype.click = originalClick;
+  });
+});
+
+describe("DesignResult — refinement (Phase 14)", () => {
+  it("shows the refinement panel on an eligible version 1", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchDesign.mockResolvedValue(design({ status: "generated", latest_job: null }));
+    mocks.fetchPublicConfig.mockResolvedValue(publicConfig(true));
+    renderResult();
+    expect(await screen.findByRole("heading", { name: /refine this concept/i })).toBeInTheDocument();
+  });
+
+  it("hides the refinement panel and shows the comparison when viewing version 2", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({
+      ok: true,
+      result: result({
+        design_version_id: "v2",
+        version_number: 2,
+        title: "Refined version",
+        lineage: {
+          kind: "refinement",
+          parent_version_id: "v1",
+          refinement: { change_type: "colour_story" },
+        },
+      }),
+    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    renderResult("d1", "v2");
+    expect(await screen.findByRole("heading", { name: /compare your concepts/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /refine this concept/i })).not.toBeInTheDocument();
+  });
+
+  it("hides the refinement panel once the limit has been reached (a completed refinement exists)", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchDesign.mockResolvedValue(
+      design({
+        status: "generated",
+        latest_job: {
+          id: "j1",
+          design_id: "d1",
+          design_version_id: "v2",
+          status: "succeeded",
+          error_code: null,
+          generation_kind: "refinement",
+          created_at: "t",
+          updated_at: "t",
+          started_at: "t",
+          completed_at: "t",
+        },
+      }),
+    );
+    renderResult();
+    await screen.findByRole("heading", { name: /Ivory and gold/i });
+    expect(screen.queryByRole("heading", { name: /refine this concept/i })).not.toBeInTheDocument();
+  });
+
+  it("hides the refinement panel when generation is disabled", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchPublicConfig.mockResolvedValue(publicConfig(false));
+    renderResult();
+    await screen.findByRole("heading", { name: /Ivory and gold/i });
+    expect(screen.queryByRole("heading", { name: /refine this concept/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a running-refinement notice with a link to the progress route, and hides the panel", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchDesign.mockResolvedValue(
+      design({
+        status: "generating",
+        latest_job: {
+          id: "j7",
+          design_id: "d1",
+          design_version_id: null,
+          status: "running_image",
+          error_code: null,
+          generation_kind: "refinement",
+          created_at: "t",
+          updated_at: "t",
+          started_at: "t",
+          completed_at: null,
+        },
+      }),
+    );
+    renderResult();
+    const link = await screen.findByRole("link", { name: /view refinement progress/i });
+    expect(link).toHaveAttribute("href", "/design/d1/generation/j7");
+    expect(screen.queryByRole("heading", { name: /refine this concept/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a controlled failed-refinement notice while keeping version 1 fully readable", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchDesign.mockResolvedValue(
+      design({
+        status: "generation_failed",
+        latest_job: {
+          id: "j8",
+          design_id: "d1",
+          design_version_id: null,
+          status: "failed",
+          error_code: "refinement_generation_failed",
+          generation_kind: "refinement",
+          created_at: "t",
+          updated_at: "t",
+          started_at: "t",
+          completed_at: "t",
+        },
+      }),
+    );
+    renderResult();
+    await screen.findByRole("heading", { name: /Ivory and gold/i });
+    expect(screen.getByText(/concept summary describing/i)).toBeInTheDocument();
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.some((el) => /couldn't refine your concept/i.test(el.textContent ?? ""))).toBe(
+      true,
+    );
+    // A resolved failure still permits a retry — the panel comes back.
+    expect(await screen.findByRole("heading", { name: /refine this concept/i })).toBeInTheDocument();
   });
 });

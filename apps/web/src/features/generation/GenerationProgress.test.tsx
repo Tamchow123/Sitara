@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   // passes through, so tests can assert on options the rendered DOM cannot
   // otherwise reveal (e.g. refetchIntervalInBackground).
   capturedQueryOptions: null as Record<string, unknown> | null,
+  searchParams: new URLSearchParams(),
 }));
 
 vi.mock("@/lib/api", async () => {
@@ -41,6 +42,7 @@ vi.mock("@tanstack/react-query", async () => {
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
   useParams: () => ({}),
+  useSearchParams: () => mocks.searchParams,
 }));
 
 function job(overrides: Partial<GenerationJob> = {}): GenerationJob {
@@ -50,6 +52,7 @@ function job(overrides: Partial<GenerationJob> = {}): GenerationJob {
     design_version_id: null,
     status: "queued",
     error_code: null,
+    generation_kind: "initial",
     created_at: new Date().toISOString(),
     updated_at: "t",
     started_at: null,
@@ -72,6 +75,7 @@ function renderProgress(designId = "d1", jobId = "j1") {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.capturedQueryOptions = null;
+  mocks.searchParams = new URLSearchParams();
 });
 
 afterEach(() => {
@@ -264,5 +268,68 @@ describe("GenerationProgress", () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(mocks.fetchGenerationJob.mock.calls.length).toBeGreaterThan(initialCalls);
+  });
+
+  describe("refinement jobs (Phase 14)", () => {
+    it("renders the refinement-specific queued copy", async () => {
+      mocks.fetchGenerationJob.mockResolvedValue(
+        job({ status: "queued", generation_kind: "refinement" }),
+      );
+      renderProgress();
+      expect(await screen.findByText("Preparing your refinement")).toBeInTheDocument();
+    });
+
+    it("renders the refinement-specific running_text copy", async () => {
+      mocks.fetchGenerationJob.mockResolvedValue(
+        job({ status: "running_text", generation_kind: "refinement" }),
+      );
+      renderProgress();
+      expect(await screen.findByText("Updating your design brief")).toBeInTheDocument();
+    });
+
+    it("renders the refinement-specific running_image copy with no fake percentage", async () => {
+      mocks.fetchGenerationJob.mockResolvedValue(
+        job({ status: "running_image", generation_kind: "refinement" }),
+      );
+      renderProgress();
+      expect(await screen.findByText("Creating your refined visual concept")).toBeInTheDocument();
+      expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+      expect(screen.getByText(/original concept remains private and available/i)).toBeInTheDocument();
+    });
+
+    it("still redirects to the output version result on success", async () => {
+      mocks.fetchGenerationJob.mockResolvedValue(
+        job({ status: "succeeded", design_version_id: "v2", generation_kind: "refinement" }),
+      );
+      renderProgress("d1", "j1");
+      await vi.waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/design/d1/result/v2"));
+    });
+
+    it("links back to the original concept on failure when the source version id is known", async () => {
+      mocks.fetchGenerationJob.mockResolvedValue(
+        job({
+          status: "failed",
+          error_code: "refinement_generation_failed",
+          generation_kind: "refinement",
+        }),
+      );
+      mocks.searchParams = new URLSearchParams("from=v1");
+      renderProgress();
+      const link = await screen.findByRole("link", { name: /original concept/i });
+      expect(link).toHaveAttribute("href", "/design/d1/result/v1");
+    });
+
+    it("does not show an original-concept link when no source version id is known", async () => {
+      mocks.fetchGenerationJob.mockResolvedValue(
+        job({
+          status: "failed",
+          error_code: "refinement_generation_failed",
+          generation_kind: "refinement",
+        }),
+      );
+      renderProgress();
+      await screen.findByRole("alert");
+      expect(screen.queryByRole("link", { name: /original concept/i })).not.toBeInTheDocument();
+    });
   });
 });
