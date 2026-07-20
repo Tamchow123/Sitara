@@ -51,6 +51,7 @@ const RESULT: DesignResult = {
   ],
   image_alt_text: "A model in an ivory flared lehenga.",
   created_at: "2026-07-19T12:00:00Z",
+  inspiration_acknowledgements: [],
 };
 
 describe("formatDesignBrief", () => {
@@ -113,5 +114,42 @@ describe("formatDesignBrief", () => {
 
   it("is deterministic: the same input produces the same output", () => {
     expect(formatDesignBrief(RESULT)).toBe(formatDesignBrief(RESULT));
+  });
+
+  it("omits the inspiration acknowledgements section when there are none", () => {
+    const text = formatDesignBrief(RESULT);
+    expect(text).not.toContain("Inspiration acknowledgements");
+  });
+
+  it("includes acknowledgements, attribution and the metadata-only limitation when present", () => {
+    const withInspiration: DesignResult = {
+      ...RESULT,
+      inspiration_acknowledgements: [
+        { position: 1, title: "Emerald look", attribution: "Studio A" },
+        { position: 2, title: "Rose gold look", attribution: "" },
+      ],
+    };
+    const text = formatDesignBrief(withInspiration);
+    expect(text).toContain("Inspiration acknowledgements");
+    expect(text).toContain("- Emerald look — Studio A");
+    expect(text).toContain("- Rose gold look");
+    expect(text).not.toContain("Rose gold look — ");
+    expect(text).toMatch(/staff-curated descriptions/i);
+    expect(text).toMatch(/not sent to the generation models/i);
+  });
+
+  it("excludes asset ids, provider cues, alt text, cultural context and URLs from acknowledgements", () => {
+    const withInspiration: DesignResult = {
+      ...RESULT,
+      inspiration_acknowledgements: [
+        { position: 1, title: "Emerald look", attribution: "Studio A" },
+      ],
+    };
+    const text = formatDesignBrief(withInspiration);
+    expect(text).not.toMatch(/garment_type/i);
+    expect(text).not.toMatch(/visual_description/i);
+    expect(text).not.toMatch(/cultural_context/i);
+    expect(text).not.toMatch(/alt_text/i);
+    expect(text).not.toMatch(/https?:\/\//);
   });
 });

@@ -280,39 +280,46 @@ export function ReviewSummary({ designId }: Props) {
         {design.selected_inspirations.length === 0 ? (
           <p>No inspiration images selected.</p>
         ) : (
-          <ul className="review-inspirations">
-            {design.selected_inspirations.map((selection) => (
-              <li key={selection.id}>
-                {selection.available && selection.asset ? (
-                  <figure>
-                    {/* Plain <img>, never next/image, so the backend's
-                        no-store eligibility checks apply to every request. */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      className="inspiration-thumb"
-                      src={selection.asset.thumbnail_url}
-                      alt={selection.asset.alt_text}
-                      loading="lazy"
-                      width={512}
-                      height={512}
-                    />
-                    <figcaption>
-                      {selection.asset.title}
-                      {selection.asset.attribution ? (
-                        <span className="inspiration-attribution">
-                          {selection.asset.attribution}
-                        </span>
-                      ) : null}
-                    </figcaption>
-                  </figure>
-                ) : (
-                  <p className="inspiration-card-unavailable">
-                    This inspiration is no longer available.
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
+          <>
+            <p className="field-help">
+              Selected inspirations guide compatible details only — your garment, ceremony,
+              colour, embellishment and coverage answers always take priority. Images are used
+              through staff-written descriptions, not direct image matching.
+            </p>
+            <ul className="review-inspirations">
+              {design.selected_inspirations.map((selection) => (
+                <li key={selection.id}>
+                  {selection.available && selection.asset ? (
+                    <figure>
+                      {/* Plain <img>, never next/image, so the backend's
+                          no-store eligibility checks apply to every request. */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        className="inspiration-thumb"
+                        src={selection.asset.thumbnail_url}
+                        alt={selection.asset.alt_text}
+                        loading="lazy"
+                        width={512}
+                        height={512}
+                      />
+                      <figcaption>
+                        {selection.asset.title}
+                        {selection.asset.attribution ? (
+                          <span className="inspiration-attribution">
+                            {selection.asset.attribution}
+                          </span>
+                        ) : null}
+                      </figcaption>
+                    </figure>
+                  ) : (
+                    <p className="inspiration-card-unavailable">
+                      This inspiration is no longer available.
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </section>
 

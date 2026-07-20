@@ -174,6 +174,25 @@ export function DesignBrief({ result }: Props) {
         <NarrativeList items={result.construction_caveats} />
       </section>
 
+      {result.inspiration_acknowledgements.length > 0 && (
+        <section aria-labelledby="brief-inspiration">
+          <h2 id="brief-inspiration">Inspiration acknowledgements</h2>
+          <p>
+            Selected inspirations influenced this concept through staff-curated descriptions. The
+            source images themselves were not sent to the generation models, and the result is not
+            an exact reproduction.
+          </p>
+          <ul className="inspiration-acknowledgements">
+            {result.inspiration_acknowledgements.map((acknowledgement) => (
+              <li key={acknowledgement.position}>
+                <strong>{acknowledgement.title}</strong>
+                {acknowledgement.attribution ? ` — ${acknowledgement.attribution}` : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <div className="result-actions">
         <button type="button" onClick={() => void handleCopy()}>
           Copy brief

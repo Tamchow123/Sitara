@@ -642,6 +642,18 @@ function isCulturalContext(value: unknown): value is DesignResult["cultural_cont
   );
 }
 
+function isInspirationAcknowledgement(
+  value: unknown,
+): value is DesignResult["inspiration_acknowledgements"][number] {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.position === "number" &&
+    typeof v.title === "string" &&
+    typeof v.attribution === "string"
+  );
+}
+
 function isDesignResult(value: unknown): value is DesignResult {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
@@ -663,7 +675,9 @@ function isDesignResult(value: unknown): value is DesignResult {
     isStringArray(v.styling_notes) &&
     isStringArray(v.construction_caveats) &&
     typeof v.image_alt_text === "string" &&
-    typeof v.created_at === "string"
+    typeof v.created_at === "string" &&
+    Array.isArray(v.inspiration_acknowledgements) &&
+    v.inspiration_acknowledgements.every(isInspirationAcknowledgement)
   );
 }
 
