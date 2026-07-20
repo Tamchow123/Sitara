@@ -208,29 +208,59 @@ def make_attempt(design=None, **kwargs) -> GenerationAttempt:
     return GenerationAttempt.objects.create(**fields)
 
 
+_ATTEMPT_REQUEST = {"schema_version": 1, "change_type": "colour_story", "note": ""}
+
+
+def _refinement_attempt_fields(source_version) -> dict:
+    # Phase 14 Part C: a refinement attempt carries its OWN durable copy of
+    # the canonical refinement request (see GenerationAttempt.refinement_request's
+    # docstring) — required from the moment the row is created.
+    return {
+        "generation_kind": GenerationAttempt.GenerationKind.REFINEMENT,
+        "source_design_version": source_version,
+        "refinement_request": _ATTEMPT_REQUEST,
+        "refinement_request_schema_version": 1,
+        "refinement_request_sha256": "e" * 64,
+    }
+
+
 class TestGenerationKind:
     def test_initial_attempt_defaults_and_has_no_source_version(self):
         attempt = make_attempt()
         assert attempt.generation_kind == GenerationAttempt.GenerationKind.INITIAL
         assert attempt.source_design_version_id is None
         assert attempt.seed_reused is False
+        assert attempt.refinement_request is None
 
     def test_refinement_attempt_requires_source_version(self):
         with pytest.raises(IntegrityError), transaction.atomic():
-            make_attempt(generation_kind=GenerationAttempt.GenerationKind.REFINEMENT)
+            make_attempt(
+                generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
+                refinement_request=_ATTEMPT_REQUEST,
+                refinement_request_schema_version=1,
+                refinement_request_sha256="e" * 64,
+            )
+
+    def test_refinement_attempt_requires_refinement_request(self):
+        design = make_design()
+        v1 = make_version(design=design, **full_spec_provenance())
+        with pytest.raises(IntegrityError), transaction.atomic():
+            make_attempt(
+                design=design,
+                generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
+                source_design_version=v1,
+            )
 
     def test_refinement_attempt_with_source_version_is_valid(self):
         design = make_design()
         v1 = make_version(design=design, **full_spec_provenance())
-        attempt = make_attempt(
-            design=design,
-            generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
-            source_design_version=v1,
-            seed_reused=True,
-        )
+        attempt = make_attempt(design=design, seed_reused=True, **_refinement_attempt_fields(v1))
         attempt.refresh_from_db()
         assert attempt.source_design_version_id == v1.pk
         assert attempt.seed_reused is True
+        assert attempt.refinement_request == _ATTEMPT_REQUEST
+        assert attempt.refinement_request_schema_version == 1
+        assert attempt.refinement_request_sha256 == "e" * 64
 
     def test_initial_attempt_with_source_version_is_blocked(self):
         design = make_design()
@@ -242,10 +272,26 @@ class TestGenerationKind:
                 source_design_version=v1,
             )
 
+    def test_initial_attempt_with_refinement_request_is_blocked(self):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            make_attempt(
+                generation_kind=GenerationAttempt.GenerationKind.INITIAL,
+                refinement_request=_ATTEMPT_REQUEST,
+                refinement_request_schema_version=1,
+                refinement_request_sha256="e" * 64,
+            )
+
 
 class TestGenerationAttemptAdminReadOnly:
     def test_refinement_kind_fields_are_read_only(self):
         model_admin = admin.site._registry[GenerationAttempt]
         readonly = set(model_admin.readonly_fields)
-        for field in ("generation_kind", "source_design_version", "seed_reused"):
+        for field in (
+            "generation_kind",
+            "source_design_version",
+            "seed_reused",
+            "refinement_request",
+            "refinement_request_schema_version",
+            "refinement_request_sha256",
+        ):
             assert field in readonly

@@ -41,6 +41,11 @@ urlpatterns = [
         name="design-generate",
     ),
     re_path(
+        rf"^designs/{_UUID}/refine/?$",
+        views.DesignRefineView.as_view(),
+        name="design-refine",
+    ),
+    re_path(
         rf"^designs/{_UUID}/versions/{_VERSION_UUID}/images/?$",
         views.DesignVersionImagesView.as_view(),
         name="design-version-images",

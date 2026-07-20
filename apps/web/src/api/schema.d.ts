@@ -192,6 +192,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/designs/{design_id}/refine/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a single constrained refinement job
+         * @description Enqueues one asynchronous refinement job editing the design's existing version-1 concept and returns 202 with the public job payload and a same-origin Location header. Requires an Idempotency-Key UUID header; a repeated key returns the same job and queues no extra work. The body names the source version, one allowlisted change_type and an optional bounded note — the note is untrusted preference data, safety-scanned before any provider call, and never echoed back. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        post: operations["designs_refine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/designs/{design_id}/validate/": {
         parameters: {
             query?: never;
@@ -429,6 +449,18 @@ export interface components {
              */
             readonly email: string;
         };
+        /**
+         * @description * `colour_story` - colour_story
+         *     * `dupatta_or_saree_drape` - dupatta_or_saree_drape
+         *     * `embellishment` - embellishment
+         *     * `fabric_and_texture` - fabric_and_texture
+         *     * `neckline` - neckline
+         *     * `silhouette_detail` - silhouette_detail
+         *     * `sleeves_and_coverage` - sleeves_and_coverage
+         *     * `styling_details` - styling_details
+         * @enum {string}
+         */
+        ChangeTypeEnum: "colour_story" | "dupatta_or_saree_drape" | "embellishment" | "fabric_and_texture" | "neckline" | "silhouette_detail" | "sleeves_and_coverage" | "styling_details";
         ColourStoryResult: {
             palette_summary: string;
             placement: string;
@@ -534,7 +566,9 @@ export interface components {
          *     DesignSpec provider/model, token counts, provider prediction id,
          *     provider/model name, seed, image parameters, staged metadata, storage
          *     keys, hashes, internal byte sizes, the user id, DesignSession id, the
-         *     questionnaire version id and every signed URL.
+         *     questionnaire version id, every signed URL and (Phase 14) the raw
+         *     refinement note, refinement-request hash/schema version, seed reuse or
+         *     source attempt.
          */
         DesignResult: {
             /** Format: uuid */
@@ -556,6 +590,7 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             inspiration_acknowledgements: components["schemas"]["InspirationAcknowledgementResult"][];
+            lineage: components["schemas"]["DesignVersionLineage"];
         };
         DesignResultResponse: {
             result: components["schemas"]["DesignResult"];
@@ -565,6 +600,17 @@ export interface components {
         };
         DesignVersionImagesResponse: {
             images: components["schemas"]["DesignImages"];
+        };
+        /**
+         * @description Since Phase 14: additive parent-child lineage for one result. A
+         *     version with no parent (initial, or legacy) reports
+         *     ``kind="initial"``/``parent_version_id=None``/``refinement=None``.
+         */
+        DesignVersionLineage: {
+            kind: components["schemas"]["GenerationKindEnum"];
+            /** Format: uuid */
+            parent_version_id: string | null;
+            refinement: components["schemas"]["RefinementLineage"] | null;
         };
         DesignWriteRequest: {
             title?: string;
@@ -599,12 +645,17 @@ export interface components {
          *     * `internal_generation_error` - internal_generation_error
          *     * `prompt_build_failed` - prompt_build_failed
          *     * `queue_unavailable` - queue_unavailable
+         *     * `refinement_generation_failed` - refinement_generation_failed
+         *     * `refinement_invalid` - refinement_invalid
+         *     * `refinement_limit_reached` - refinement_limit_reached
+         *     * `refinement_no_change` - refinement_no_change
+         *     * `refinement_source_unavailable` - refinement_source_unavailable
          *     * `structured_generation_failed` - structured_generation_failed
          *     * `structured_provider_refused` - structured_provider_refused
          *     * `structured_submission_ambiguous` - structured_submission_ambiguous
          * @enum {string}
          */
-        ErrorCodeEnum: "design_changed" | "design_incomplete" | "generation_unavailable" | "image_download_failed" | "image_ingest_failed" | "image_ingest_unverified" | "image_output_invalid" | "image_poll_timeout" | "image_prediction_aborted" | "image_prediction_canceled" | "image_prediction_failed" | "image_provider_unavailable" | "image_staging_failed" | "image_staging_unverified" | "image_submission_ambiguous" | "internal_generation_error" | "prompt_build_failed" | "queue_unavailable" | "structured_generation_failed" | "structured_provider_refused" | "structured_submission_ambiguous";
+        ErrorCodeEnum: "design_changed" | "design_incomplete" | "generation_unavailable" | "image_download_failed" | "image_ingest_failed" | "image_ingest_unverified" | "image_output_invalid" | "image_poll_timeout" | "image_prediction_aborted" | "image_prediction_canceled" | "image_prediction_failed" | "image_provider_unavailable" | "image_staging_failed" | "image_staging_unverified" | "image_submission_ambiguous" | "internal_generation_error" | "prompt_build_failed" | "queue_unavailable" | "refinement_generation_failed" | "refinement_invalid" | "refinement_limit_reached" | "refinement_no_change" | "refinement_source_unavailable" | "structured_generation_failed" | "structured_provider_refused" | "structured_submission_ambiguous";
         ErrorDetail: {
             /** @description Stable machine-readable error code. */
             code: string;
@@ -653,6 +704,7 @@ export interface components {
             design_version_id: string | null;
             status: components["schemas"]["StatusEnum"];
             error_code: (components["schemas"]["ErrorCodeEnum"] | components["schemas"]["NullEnum"]) | null;
+            generation_kind: components["schemas"]["GenerationKindEnum"];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -665,6 +717,12 @@ export interface components {
         GenerationJobResponse: {
             job: components["schemas"]["GenerationJob"];
         };
+        /**
+         * @description * `initial` - initial
+         *     * `refinement` - refinement
+         * @enum {string}
+         */
+        GenerationKindEnum: "initial" | "refinement";
         /**
          * @description One private audit acknowledgement from the persisted, historical
          *     inspiration-context snapshot (Phase 13). Deliberately excludes the asset
@@ -792,6 +850,32 @@ export interface components {
             /** @description "ok" (200) or "unavailable" (503). */
             status: string;
             checks: components["schemas"]["ReadyChecks"];
+        };
+        /**
+         * @description The refinement-specific lineage detail (Phase 14) for a version whose
+         *     ``lineage.kind`` is ``"refinement"``. Deliberately excludes the raw
+         *     optional note, the refinement-request hash, its schema version, the
+         *     refinement template version, a seed and the source attempt.
+         */
+        RefinementLineage: {
+            change_type: components["schemas"]["ChangeTypeEnum"];
+        };
+        /**
+         * @description Coarse wire-shape validation for a refinement request (Phase 14):
+         *     exactly ``source_version_id``, ``change_type`` and an optional ``note``.
+         *
+         *     Deliberately loose on ``change_type``/``note`` content — the strict
+         *     allowlist/schema/safety-scan validation belongs to
+         *     ``sitara.generation.refinement.normalise_refinement_request``, which the
+         *     view calls next; this layer only rejects unknown fields and wrong JSON
+         *     types, matching ``DesignWriteSerializer``'s pattern.
+         */
+        RefinementWriteRequest: {
+            /** Format: uuid */
+            source_version_id: string;
+            change_type: string;
+            /** @default  */
+            note: string;
         };
         RegisterRequest: {
             /** Format: email */
@@ -1312,6 +1396,80 @@ export interface operations {
                 };
             };
             /** @description generation_in_progress / design_already_generated / design_not_generatable. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description generation_unavailable / queue_unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_refine: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A client-generated UUID that makes the request idempotent PER DESIGN: repeating it returns the same job and queues no additional work. */
+                "Idempotency-Key": string;
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefinementWriteRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationJobResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorEnvelope"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description refinement_limit_reached / refinement_in_progress / refinement_source_unavailable / design_not_refinable. */
             409: {
                 headers: {
                     [name: string]: unknown;

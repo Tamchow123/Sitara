@@ -50,7 +50,10 @@ def public_job_payload(attempt: GenerationAttempt) -> dict:
 
     Deliberately omits every provider/storage/provenance field. ``error_code``
     is one of the stable machine codes (or null); it is never a provider
-    message."""
+    message. ``generation_kind`` (Phase 14) is the one safe addition beyond
+    lifecycle fields — it lets the frontend render honest refinement-specific
+    progress wording without exposing the source version, refinement request
+    text/hash, seed, seed-reuse, prompt or any provider/storage provenance."""
     return {
         "job": {
             "id": str(attempt.id),
@@ -60,6 +63,7 @@ def public_job_payload(attempt: GenerationAttempt) -> dict:
             ),
             "status": attempt.status,
             "error_code": _public_error_code(attempt.error_code),
+            "generation_kind": attempt.generation_kind,
             "created_at": _iso(attempt.created_at),
             "updated_at": _iso(attempt.updated_at),
             "started_at": _iso(attempt.started_at),

@@ -580,6 +580,17 @@ class GenerationAttempt(models.Model):
     # version's succeeded initial attempt rather than freshly generated.
     # Private; never exposed through the public job API.
     seed_reused = models.BooleanField(default=False)
+    # The canonical refinement request THIS ATTEMPT is fulfilling (Phase 14),
+    # persisted synchronously at enqueue time — before the async pipeline task
+    # ever runs and before any child DesignVersion exists to carry the
+    # DesignVersion-side copy (see DesignVersion.refinement_request). Durable
+    # redelivery must reconstruct "what did the user ask to change" from
+    # database state alone, never from Celery task arguments (which only ever
+    # carry the attempt id) and never by re-deriving it from a client request
+    # that may not be replayed. Present exactly for a refinement attempt.
+    refinement_request = models.JSONField(null=True, blank=True)
+    refinement_request_schema_version = models.PositiveSmallIntegerField(null=True, blank=True)
+    refinement_request_sha256 = models.CharField(max_length=64, blank=True)
 
     # --- Private provider-submission provenance (image + text; never exposed) ---
     image_provider = models.CharField(max_length=32, blank=True)
@@ -724,6 +735,36 @@ class GenerationAttempt(models.Model):
                 condition=Q(generation_kind="initial", source_design_version__isnull=True)
                 | Q(generation_kind="refinement", source_design_version__isnull=False),
                 name="designs_attempt_generation_kind_source_version_consistent",
+            ),
+            # The pending refinement request (Phase 14) is all-or-none and
+            # present exactly for a refinement attempt.
+            models.CheckConstraint(
+                condition=(
+                    Q(refinement_request__isnull=True)
+                    & Q(refinement_request_schema_version__isnull=True)
+                    & Q(refinement_request_sha256="")
+                )
+                | (
+                    Q(refinement_request__isnull=False)
+                    & Q(refinement_request_schema_version__isnull=False)
+                    & ~Q(refinement_request_sha256="")
+                ),
+                name="designs_attempt_refinement_request_all_or_none",
+            ),
+            models.CheckConstraint(
+                condition=Q(refinement_request_schema_version__isnull=True)
+                | Q(refinement_request_schema_version=1),
+                name="designs_attempt_refinement_request_schema_version_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(refinement_request_sha256="")
+                | Q(refinement_request_sha256__regex=r"^[0-9a-f]{64}$"),
+                name="designs_attempt_refinement_request_sha256_shape",
+            ),
+            models.CheckConstraint(
+                condition=Q(generation_kind="initial", refinement_request__isnull=True)
+                | Q(generation_kind="refinement", refinement_request__isnull=False),
+                name="designs_attempt_generation_kind_refinement_request_consistent",
             ),
         ]
 

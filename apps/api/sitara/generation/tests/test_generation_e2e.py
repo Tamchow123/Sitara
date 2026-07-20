@@ -108,11 +108,13 @@ def test_end_to_end_generation_succeeds_via_eager_task(settings, monkeypatch):
         "design_version_id",
         "status",
         "error_code",
+        "generation_kind",
         "created_at",
         "updated_at",
         "started_at",
         "completed_at",
     }
+    assert job["generation_kind"] == "initial"
 
 
 @pytest.mark.django_db(transaction=True)

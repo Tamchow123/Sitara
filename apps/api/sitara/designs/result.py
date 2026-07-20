@@ -42,6 +42,11 @@ from sitara.generation.inspiration_context import (
     inspiration_acknowledgements,
     inspiration_context_sha256,
 )
+from sitara.generation.refinement import (
+    REFINEMENT_REQUEST_SCHEMA_VERSION,
+    RefinementRequest,
+    refinement_request_sha256,
+)
 from sitara.generation.services import scan_design_spec_or_raise
 
 from .jobs import _iso
@@ -125,12 +130,47 @@ def load_inspiration_acknowledgements(version: DesignVersion) -> list[dict]:
     return inspiration_acknowledgements(snapshot)
 
 
+def load_lineage(version: DesignVersion) -> dict:
+    """The additive ``lineage`` block (Phase 14): ``kind``, the parent
+    version id, and — for a refinement — its ``change_type`` only. Never the
+    raw note, the refinement-request hash, its schema version, the
+    refinement template version, a seed or the source attempt.
+
+    A legacy or initial version (no ``parent_version``) returns
+    ``{"kind": "initial", "parent_version_id": None, "refinement": None}``.
+    Raises :class:`DesignResultUnavailable` when the persisted refinement
+    provenance is incomplete, corrupt, unsupported, or fails hash
+    verification — never exposing the raw stored content."""
+    if version.parent_version_id is None:
+        return {"kind": "initial", "parent_version_id": None, "refinement": None}
+
+    if version.refinement_request is None or version.refinement_request_schema_version is None:
+        raise DesignResultUnavailable("persisted refinement provenance is incomplete")
+    if version.refinement_request_schema_version != REFINEMENT_REQUEST_SCHEMA_VERSION:
+        raise DesignResultUnavailable(
+            "persisted refinement request schema version is not supported"
+        )
+    try:
+        request = RefinementRequest.model_validate(version.refinement_request)
+    except ValidationError as exc:
+        raise DesignResultUnavailable("stored refinement request failed validation") from exc
+    if refinement_request_sha256(request) != version.refinement_request_sha256:
+        raise DesignResultUnavailable("stored refinement request failed hash verification")
+
+    return {
+        "kind": "refinement",
+        "parent_version_id": str(version.parent_version_id),
+        "refinement": {"change_type": request.change_type},
+    }
+
+
 def design_result_payload(
-    version: DesignVersion, spec: DesignSpec, acknowledgements: list[dict]
+    version: DesignVersion, spec: DesignSpec, acknowledgements: list[dict], lineage: dict
 ) -> dict:
     """The curated ``{"result": {...}}`` body for one owned, ready
-    DesignVersion, its revalidated DesignSpec and its inspiration
-    acknowledgements (see :func:`load_inspiration_acknowledgements`)."""
+    DesignVersion, its revalidated DesignSpec, its inspiration
+    acknowledgements (see :func:`load_inspiration_acknowledgements`) and its
+    lineage (see :func:`load_lineage`)."""
     return {
         "result": {
             "design_id": str(version.design_id),
@@ -182,5 +222,6 @@ def design_result_payload(
             "image_alt_text": spec.image_alt_text,
             "created_at": _iso(version.design_spec_generated_at),
             "inspiration_acknowledgements": list(acknowledgements),
+            "lineage": lineage,
         }
     }

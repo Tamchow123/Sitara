@@ -36,11 +36,20 @@ from sitara.generation.pipeline import (
     DesignAlreadyGenerated,
     DesignIncomplete,
     DesignNotGeneratable,
+    DesignNotRefinable,
     GenerationInProgress,
     GenerationUnavailable,
     QueueUnavailable,
     enqueue_design_generation,
+    enqueue_design_refinement,
 )
+from sitara.generation.refinement import (
+    REFINEMENT_REQUEST_SCHEMA_VERSION,
+    RefinementNoteUnsafe,
+    RefinementRequestInvalid,
+    normalise_refinement_request,
+)
+from sitara.generation.refinement_service import RefinementLimitReached, RefinementSourceUnavailable
 from sitara.media.delivery import issue_design_image_urls
 from sitara.media.exceptions import (
     DesignImageDeliveryUnavailable,
@@ -69,10 +78,12 @@ from .result import (
     DesignResultUnavailable,
     design_result_payload,
     load_inspiration_acknowledgements,
+    load_lineage,
     load_validated_design_spec,
 )
 from .serializers import (
     DesignWriteSerializer,
+    RefinementWriteSerializer,
     design_detail_payload,
     design_list_item_payload,
 )
@@ -695,6 +706,7 @@ class DesignVersionResultView(APIView):
         try:
             spec = load_validated_design_spec(version)
             acknowledgements = load_inspiration_acknowledgements(version)
+            lineage = load_lineage(version)
         except DesignResultNotReady:
             return _error(
                 "design_result_not_ready",
@@ -716,7 +728,143 @@ class DesignVersionResultView(APIView):
                 "This design's result is temporarily unavailable. Try again shortly.",
                 status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        return Response(design_result_payload(version, spec, acknowledgements), headers=NO_STORE)
+        return Response(
+            design_result_payload(version, spec, acknowledgements, lineage), headers=NO_STORE
+        )
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class DesignRefineView(APIView):
+    """Start a single constrained refinement job for an owned Design
+    (Phase 14). Mirrors ``DesignGenerateView``'s shape (ownership-first
+    404, required Idempotency-Key header, 202 + Location) but requires a
+    validated JSON body naming the source version and the one allowlisted
+    change category."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+    parser_classes = [JSONParser]
+
+    @extend_schema(
+        operation_id="designs_refine",
+        tags=_GENERATION_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER, _IDEMPOTENCY_KEY_PARAMETER],
+        request={"application/json": RefinementWriteSerializer},
+        responses={
+            202: GenerationJobResponseSerializer,
+            400: ValidationErrorEnvelopeSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "refinement_limit_reached / refinement_in_progress / "
+                    "refinement_source_unavailable / design_not_refinable."
+                ),
+            ),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="generation_unavailable / queue_unavailable.",
+            ),
+        },
+        summary="Start a single constrained refinement job",
+        description=(
+            "Enqueues one asynchronous refinement job editing the design's "
+            "existing version-1 concept and returns 202 with the public job "
+            "payload and a same-origin Location header. Requires an "
+            "Idempotency-Key UUID header; a repeated key returns the same job "
+            "and queues no extra work. The body names the source version, one "
+            "allowlisted change_type and an optional bounded note — the note "
+            "is untrusted preference data, safety-scanned before any provider "
+            "call, and never echoed back. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def post(self, request, design_id: str):
+        # Ownership filter FIRST, UUID lookup second — indistinguishable 404.
+        design = accessible_designs(request).filter(pk=design_id).first()
+        if design is None:
+            return _not_found()
+
+        key, key_failure = _read_idempotency_key(request)
+        if key_failure is not None:
+            return key_failure
+
+        body, parse_failure = _parse_body(request)
+        if parse_failure is not None:
+            return parse_failure
+        serializer = RefinementWriteSerializer(data=body)
+        if not serializer.is_valid():
+            return _validation_failed(serializer.errors)
+        validated = serializer.validated_data
+
+        try:
+            refinement_request = normalise_refinement_request(
+                {
+                    "schema_version": REFINEMENT_REQUEST_SCHEMA_VERSION,
+                    "change_type": validated["change_type"],
+                    "note": validated.get("note", ""),
+                }
+            )
+        except (RefinementRequestInvalid, RefinementNoteUnsafe):
+            return _error(
+                "refinement_invalid",
+                "Please correct the highlighted fields.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            attempt, _created = enqueue_design_refinement(
+                design,
+                source_version_id=str(validated["source_version_id"]),
+                refinement_request=refinement_request,
+                idempotency_key=key,
+            )
+        except DesignNotRefinable:
+            return _error(
+                "design_not_refinable",
+                "This design cannot be refined.",
+                status.HTTP_409_CONFLICT,
+            )
+        except RefinementSourceUnavailable:
+            return _error(
+                "refinement_source_unavailable",
+                "The source version is not available for refinement.",
+                status.HTTP_409_CONFLICT,
+            )
+        except GenerationInProgress:
+            return _error(
+                "refinement_in_progress",
+                "A refinement job is already in progress for this design.",
+                status.HTTP_409_CONFLICT,
+            )
+        except RefinementLimitReached:
+            return _error(
+                "refinement_limit_reached",
+                "This design has already been refined.",
+                status.HTTP_409_CONFLICT,
+            )
+        except GenerationUnavailable:
+            return _error(
+                "generation_unavailable",
+                "Generation is not currently available.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except QueueUnavailable:
+            return _error(
+                "queue_unavailable",
+                "The generation queue is temporarily unavailable. Try again shortly.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        response = Response(
+            public_job_payload(attempt), status=status.HTTP_202_ACCEPTED, headers=NO_STORE
+        )
+        response["Location"] = f"/api/v1/jobs/{attempt.id}/"
+        return response
 
 
 class GenerationJobView(APIView):

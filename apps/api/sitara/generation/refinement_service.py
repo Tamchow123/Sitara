@@ -138,7 +138,7 @@ class _SourceContext:
     inspiration_context_sha256: str
 
 
-def _validate_source_version(source_version: DesignVersion) -> _SourceContext:
+def validate_source_version(source_version: DesignVersion) -> _SourceContext:
     """Every pre-spend validation for the refinement SOURCE, strictly before
     any provider is selected.
 
@@ -421,7 +421,7 @@ def generate_refined_design_spec_for_design(
     :class:`~sitara.ai_gateway.structured_design.StructuredDesignProviderError`
     on failure, persisting nothing."""
     # Every pre-spend validation FIRST (before any provider selection/call).
-    source_context = _validate_source_version(source_version)
+    source_context = validate_source_version(source_version)
     if source_version.refined_versions.exists():
         raise RefinementLimitReached("this design has already been refined")
 
@@ -476,4 +476,5 @@ __all__ = [
     "RefinementOutputRejected",
     "RefinementSourceUnavailable",
     "generate_refined_design_spec_for_design",
+    "validate_source_version",
 ]

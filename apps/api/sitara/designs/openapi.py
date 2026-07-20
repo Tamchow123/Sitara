@@ -10,6 +10,7 @@ image hashes, rights evidence, verifier identity or internal notes.
 from rest_framework import serializers
 
 from sitara.generation.errors import GENERATION_ERROR_CODES
+from sitara.generation.refinement import REFINEMENT_CHANGE_TYPES
 from sitara.questionnaire.openapi import QuestionnaireSchemaSerializer
 
 from .models import GenerationAttempt
@@ -83,6 +84,11 @@ class GenerationJobSerializer(serializers.Serializer):
     # Derived from the backend allowlist so the documented enum can never
     # drift from the actual set of codes a job may carry.
     error_code = serializers.ChoiceField(choices=sorted(GENERATION_ERROR_CODES), allow_null=True)
+    # Since Phase 14: which pipeline branch this job runs, so the frontend can
+    # render honest refinement-specific progress wording. Never the source
+    # version, refinement request text/hash, seed, seed-reuse or any
+    # provider/storage provenance.
+    generation_kind = serializers.ChoiceField(choices=GenerationAttempt.GenerationKind.values)
     created_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()
     started_at = serializers.DateTimeField(allow_null=True)
@@ -199,6 +205,28 @@ class InspirationAcknowledgementResultSerializer(serializers.Serializer):
     attribution = serializers.CharField()
 
 
+class RefinementLineageSerializer(serializers.Serializer):
+    """The refinement-specific lineage detail (Phase 14) for a version whose
+    ``lineage.kind`` is ``"refinement"``. Deliberately excludes the raw
+    optional note, the refinement-request hash, its schema version, the
+    refinement template version, a seed and the source attempt."""
+
+    change_type = serializers.ChoiceField(choices=sorted(REFINEMENT_CHANGE_TYPES))
+
+
+class DesignVersionLineageSerializer(serializers.Serializer):
+    """Since Phase 14: additive parent-child lineage for one result. A
+    version with no parent (initial, or legacy) reports
+    ``kind="initial"``/``parent_version_id=None``/``refinement=None``."""
+
+    # Reuses GenerationAttempt.GenerationKind's exact value set — a version's
+    # lineage kind and the attempt that produced it share the same "initial"
+    # or "refinement" vocabulary (see ENUM_NAME_OVERRIDES in settings.py).
+    kind = serializers.ChoiceField(choices=GenerationAttempt.GenerationKind.values)
+    parent_version_id = serializers.UUIDField(allow_null=True)
+    refinement = RefinementLineageSerializer(allow_null=True)
+
+
 class DesignResultSerializer(serializers.Serializer):
     """The purpose-built, curated concept result (Phase 12).
 
@@ -207,7 +235,9 @@ class DesignResultSerializer(serializers.Serializer):
     DesignSpec provider/model, token counts, provider prediction id,
     provider/model name, seed, image parameters, staged metadata, storage
     keys, hashes, internal byte sizes, the user id, DesignSession id, the
-    questionnaire version id and every signed URL."""
+    questionnaire version id, every signed URL and (Phase 14) the raw
+    refinement note, refinement-request hash/schema version, seed reuse or
+    source attempt."""
 
     design_id = serializers.UUIDField()
     design_version_id = serializers.UUIDField()
@@ -226,6 +256,8 @@ class DesignResultSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField()
     # Since Phase 13: audit-only; empty for a legacy pre-Phase-13 version.
     inspiration_acknowledgements = InspirationAcknowledgementResultSerializer(many=True)
+    # Since Phase 14: additive parent-child lineage.
+    lineage = DesignVersionLineageSerializer()
 
 
 class DesignResultResponseSerializer(serializers.Serializer):
