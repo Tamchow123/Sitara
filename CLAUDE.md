@@ -21,7 +21,7 @@ Sitara is for **concept visualisation only** — no sewing patterns, manufacturi
 
 ## 3. Current repository state
 
-Phases 1–12 are delivered on `main`; Phase 13 (optional inspiration metadata/reference support) is next. Delivered: Phase 2 image-model evaluation; app foundation; session auth/CSRF; anonymous + authenticated design ownership; versioned questionnaire; rights-controlled catalogue; OpenAPI-generated client; structured DesignSpec generation; deterministic image-prompt builder; async Celery/Replicate generation; permanent design-image storage; generation-progress and private results.
+Phases 1–12 are delivered on `main`. Phase 13 (rights-safe inspiration metadata influence, ADR 0014) is delivered on `phase/phase-13-inspiration-metadata`, pending merge to `main`; Phase 14 (constrained refinement) is next. Delivered: Phase 2 image-model evaluation; app foundation; session auth/CSRF; anonymous + authenticated design ownership; versioned questionnaire; rights-controlled catalogue; OpenAPI-generated client; structured DesignSpec generation; deterministic image-prompt builder; async Celery/Replicate generation; permanent design-image storage; generation-progress and private results; curated inspiration-metadata influence on generation.
 
 `docs/phases/PHASES.md` is authoritative for future work — always inspect the current branch and that file rather than relying on this paragraph.
 
@@ -35,7 +35,7 @@ black-forest-labs/flux-1.1-pro
 
 For any substantial task, read the relevant code plus `README.md`, `docs/PROPOSAL.md`, `docs/phases/PHASES.md`, `docs/decisions/`, `compose.yaml`, `.github/workflows/ci.yml`. For a phase task with its own spec file, read that file in full before editing.
 
-ADRs currently on record: 0001 image model, 0002 application foundation, 0003 session authentication, 0004 private design ownership, 0005 versioned questionnaire schema, 0006 rights-controlled inspiration catalogue, 0007 OpenAPI generated client, 0008 questionnaire draft and wizard, 0009 structured design-spec generation, 0010 deterministic image-prompt builder, 0011 asynchronous generation pipeline, 0012 private design-image storage, 0013 generation progress and results.
+ADRs currently on record: 0001 image model, 0002 application foundation, 0003 session authentication, 0004 private design ownership, 0005 versioned questionnaire schema, 0006 rights-controlled inspiration catalogue, 0007 OpenAPI generated client, 0008 questionnaire draft and wizard, 0009 structured design-spec generation, 0010 deterministic image-prompt builder, 0011 asynchronous generation pipeline, 0012 private design-image storage, 0013 generation progress and results, 0014 rights-safe inspiration metadata influence.
 
 ## 5. Repository layout
 
