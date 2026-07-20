@@ -68,6 +68,7 @@ from .result import (
     DesignResultNotReady,
     DesignResultUnavailable,
     design_result_payload,
+    load_inspiration_acknowledgements,
     load_validated_design_spec,
 )
 from .serializers import (
@@ -693,6 +694,7 @@ class DesignVersionResultView(APIView):
             return _not_found()
         try:
             spec = load_validated_design_spec(version)
+            acknowledgements = load_inspiration_acknowledgements(version)
         except DesignResultNotReady:
             return _error(
                 "design_result_not_ready",
@@ -714,7 +716,7 @@ class DesignVersionResultView(APIView):
                 "This design's result is temporarily unavailable. Try again shortly.",
                 status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        return Response(design_result_payload(version, spec), headers=NO_STORE)
+        return Response(design_result_payload(version, spec, acknowledgements), headers=NO_STORE)
 
 
 class GenerationJobView(APIView):

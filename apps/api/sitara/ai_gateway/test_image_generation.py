@@ -345,9 +345,44 @@ class TestReplicateContract:
 
 
 class TestReferenceImagesRejected:
+    """Reference-image conditioning stays disabled (Phase 13 §17): no
+    implementation exists to enable, so this remains fail-closed regardless
+    of any gate state."""
+
     def test_non_empty_reference_collection_is_rejected_at_construction(self):
         with pytest.raises(ReferenceImagesNotEnabled):
             _request(reference_image_urls=("https://replicate.delivery/x",))
+
+    def test_default_request_always_carries_an_empty_tuple(self):
+        assert _request().reference_image_urls == ()
+
+    def test_rejected_even_when_every_live_gate_is_open(self, settings):
+        _open_gates(settings)
+        with pytest.raises(ReferenceImagesNotEnabled):
+            _request(reference_image_urls=("https://replicate.delivery/catalogue-image.webp",))
+
+    def test_zero_provider_clients_instantiated_on_rejection(self, monkeypatch):
+        def _fail_if_constructed(*args, **kwargs):
+            raise AssertionError("no provider client may be constructed before the reject")
+
+        monkeypatch.setattr(ReplicateImageProvider, "__init__", _fail_if_constructed)
+        with pytest.raises(ReferenceImagesNotEnabled):
+            _request(reference_image_urls=("https://replicate.delivery/x",))
+
+    def test_create_prediction_payload_has_no_reference_field(self, settings):
+        # A request that reached create_prediction already carries an empty
+        # tuple (construction rejects any other value) — confirm the
+        # Replicate payload builder never reads a reference-image key even
+        # structurally, so a future field addition to the request dataclass
+        # could not silently start forwarding one.
+        _open_gates(settings)
+        preds = _FakePredictions(create_result=_FakePrediction(id="p", status="starting"))
+        client = _FakeClient(preds)
+        provider = ReplicateImageProvider(client=client)
+        provider.create_prediction(_request())
+        model_input = preds.create_calls[0]["input"]
+        assert "reference_image_urls" not in model_input
+        assert not any("reference" in str(key).lower() for key in model_input)
 
 
 class TestWorkerInterruption:

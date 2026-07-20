@@ -1,8 +1,13 @@
 """DesignSpec generation orchestration: gates, retry, persistence, locking."""
 
+import json
+
 import pytest
 
-from sitara.ai_gateway.structured_design import StructuredDesignProviderError
+from sitara.ai_gateway.structured_design import (
+    StructuredDesignProviderError,
+    StructuredDesignResult,
+)
 from sitara.designs.models import Design, DesignVersion
 from sitara.generation.context import DesignNotReady, build_generation_context
 from sitara.generation.design_spec import (
@@ -10,7 +15,9 @@ from sitara.generation.design_spec import (
     SPEC_TEMPLATE_VERSION,
     DesignSpec,
 )
+from sitara.generation.fixture_provider import build_fixture_spec
 from sitara.generation.input_safety import UnsafeUserTextError
+from sitara.generation.inspiration_context import inspiration_context_sha256
 from sitara.generation.services import (
     DesignChangedDuringGeneration,
     GenerationFailed,
@@ -26,6 +33,16 @@ pytestmark = pytest.mark.django_db
 
 def _source_selections(design) -> dict:
     return build_generation_context(design).source_selections
+
+
+def _trusted_json(user_message: str) -> dict:
+    """Parse just the trusted JSON block from a built user message, ignoring
+    any untrusted section or retry note that may follow it."""
+    from sitara.generation.prompting import _TRUSTED_HEADER
+
+    start = user_message.index(_TRUSTED_HEADER) + len(_TRUSTED_HEADER) + 1
+    obj, _ = json.JSONDecoder().raw_decode(user_message, start)
+    return obj
 
 
 class TestHappyPath:
@@ -188,11 +205,11 @@ class TestPreSpendGates:
 
 class TestNoInspirationLeakage:
     def test_request_carries_no_selected_inspiration_metadata(self, inmemory_storage):
-        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.catalogue.tests.utils import make_eligible_asset, make_rights
         from sitara.designs.models import DesignInspiration
 
         design = make_complete_design()
-        asset = make_eligible_asset()
+        asset = make_eligible_asset(rights=make_rights(verified=True, attribution_text="Studio A"))
         DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
         ss = _source_selections(design)
         provider = fakes.SequenceProvider([fakes.valid_result(ss)])
@@ -202,6 +219,137 @@ class TestNoInspirationLeakage:
         assert str(asset.id) not in blob
         assert asset.image_storage_key not in blob
         assert asset.title not in blob
+        assert "Studio A" not in blob
+
+
+class TestInspirationCuesInRequest:
+    """Fixture-provider tests proving the exact provider-facing cue shape
+    (Phase 13 §19/§23): zero, one and up to three assets preserve order and
+    reach Anthropic's user message as trusted structured JSON, while image
+    bytes, storage keys, public URLs, rights evidence, asset ids, titles and
+    attribution never do. No network socket is opened (enforced by the
+    module-level ``no_network`` autouse fixture)."""
+
+    def test_zero_selected_assets_produces_no_cues(self):
+        design = make_complete_design()
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider([fakes.valid_result(ss)])
+        generate_design_spec_for_design(design, provider=provider)
+        assert '"curated_inspiration_cues": []' in provider.requests[0].user_message
+
+    def test_one_to_three_assets_preserve_order(self, inmemory_storage):
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        assets = [
+            make_eligible_asset(
+                title=f"Look {i}",
+                alt_text=f"A safe visual description number {i}.",
+                garment_type="lehenga",
+                cultural_context="",
+            )
+            for i in range(3)
+        ]
+        for index, asset in enumerate(assets, start=1):
+            DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=index)
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider([fakes.valid_result(ss)])
+        generate_design_spec_for_design(design, provider=provider)
+        message = provider.requests[0].user_message
+        positions = [message.index(f'"A safe visual description number {i}.') for i in range(3)]
+        assert positions == sorted(positions)
+
+    def test_cues_contain_only_the_four_documented_fields(self, inmemory_storage):
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset()
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider([fakes.valid_result(ss)])
+        generate_design_spec_for_design(design, provider=provider)
+        message = provider.requests[0].user_message
+        cues_line_start = message.index('"curated_inspiration_cues"')
+        cues_block = message[cues_line_start : cues_line_start + 400]
+        forbidden_values = (
+            "asset_id",
+            "title",
+            "attribution",
+            asset.image_storage_key,
+            str(asset.id),
+        )
+        for forbidden in forbidden_values:
+            assert forbidden not in cues_block
+
+    def test_no_image_bytes_storage_keys_or_urls_reach_the_request(self, inmemory_storage):
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset()
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider([fakes.valid_result(ss)])
+        generate_design_spec_for_design(design, provider=provider)
+        blob = provider.requests[0].system_prompt + provider.requests[0].user_message
+        assert asset.image_storage_key not in blob
+        assert asset.thumbnail_storage_key not in blob
+        assert "http://" not in blob and "https://" not in blob
+
+    def test_unsafe_inspiration_metadata_blocks_before_provider(self, inmemory_storage):
+        from sitara.catalogue.models import InspirationAsset
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset()
+        InspirationAsset.objects.filter(pk=asset.pk).update(
+            alt_text="Styled after Sabyasachi's signature look."
+        )
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        provider = fakes.SequenceProvider([])
+        with pytest.raises(DesignNotReady) as excinfo:
+            generate_design_spec_for_design(design, provider=provider)
+        assert excinfo.value.code == "inspiration_metadata_unavailable"
+        assert provider.calls == 0
+
+    def test_retry_reuses_the_exact_same_inspiration_context(self, inmemory_storage):
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset()
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider([fakes.malformed_result(), fakes.valid_result(ss)])
+        generate_design_spec_for_design(design, provider=provider)
+        assert provider.calls == 2
+        first_cues = _trusted_json(provider.requests[0].user_message)["curated_inspiration_cues"]
+        second_cues = _trusted_json(provider.requests[1].user_message)["curated_inspiration_cues"]
+        assert first_cues == second_cues
+        assert first_cues  # non-empty: the retry genuinely carried the cue
+
+    def test_adversarial_conflicting_cue_does_not_change_canonical_selections(
+        self, inmemory_storage
+    ):
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()  # garment_type == "lehenga"
+        conflicting = make_eligible_asset(garment_type="saree", alt_text="A saree drape look.")
+        DesignInspiration.objects.create(design=design, inspiration_asset=conflicting, position=1)
+        ss = _source_selections(design)
+        assert ss["garment_type"] == "lehenga"
+        provider = fakes.SequenceProvider([fakes.valid_result(ss)])
+        version = generate_design_spec_for_design(design, provider=provider)
+        # The conflicting cue genuinely reached the request...
+        assert '"garment_type": "saree"' in provider.requests[0].user_message
+        # ...but the canonical selections in the persisted output are
+        # unaffected — the system prompt plus exact echo validation remain
+        # the authoritative control.
+        assert version.design_spec["source_selections"]["garment_type"] == "lehenga"
 
 
 class TestStaleInputProtection:
@@ -271,6 +419,218 @@ class TestStaleInputProtection:
 
         provider = fakes.MutatingProvider(ss, retire)
         with pytest.raises(DesignChangedDuringGeneration):
+            generate_design_spec_for_design(design, provider=provider)
+        assert DesignVersion.objects.filter(design=design).count() == 0
+
+    def test_inspiration_metadata_mutation_during_generation_is_not_persisted(
+        self, inmemory_storage
+    ):
+        # The asset stays publicly eligible throughout — only its alt_text
+        # (a provider cue) changes. Only the CONTENT-level snapshot
+        # comparison, not the eligibility recheck, can catch this.
+        from sitara.catalogue.models import InspirationAsset
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset()
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        ss = _source_selections(design)
+
+        def mutate_alt_text():
+            InspirationAsset.objects.filter(pk=asset.pk).update(
+                alt_text="A different, still-safe visual description."
+            )
+
+        provider = fakes.MutatingProvider(ss, mutate_alt_text)
+        with pytest.raises(DesignChangedDuringGeneration):
+            generate_design_spec_for_design(design, provider=provider)
+        assert provider.calls == 1  # no provider retry after a stale-context failure
+        assert DesignVersion.objects.filter(design=design).count() == 0
+
+    def test_attribution_mutation_during_generation_is_not_persisted(self, inmemory_storage):
+        # Attribution never reaches the provider, but it is still part of the
+        # audit snapshot's exact content and must still block persistence.
+        from sitara.catalogue.models import UsageRights
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset()
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        ss = _source_selections(design)
+
+        def mutate_attribution():
+            UsageRights.objects.filter(pk=asset.usage_rights_id).update(
+                attribution_text="A different studio"
+            )
+
+        provider = fakes.MutatingProvider(ss, mutate_attribution)
+        with pytest.raises(DesignChangedDuringGeneration):
+            generate_design_spec_for_design(design, provider=provider)
+        assert DesignVersion.objects.filter(design=design).count() == 0
+
+
+class TestInspirationOutputLeakage:
+    """The exact source_selections echo validation remains unchanged;
+    post-output semantic checks additionally reject any inspiration
+    title/attribution appearing in the generated narrative (Phase 13 §14)."""
+
+    def test_leaked_title_is_rejected_and_retried(self, inmemory_storage):
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset(title="Emerald velvet showcase look")
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        ss = _source_selections(design)
+
+        def _leaking_result():
+            payload = build_fixture_spec(ss)
+            payload["styling_notes"] = [f"Inspired by the {asset.title}."]
+            return StructuredDesignResult(
+                payload=payload,
+                provider="fake",
+                model="fake-model",
+                input_tokens=1234,
+                output_tokens=567,
+                stop_reason="end_turn",
+            )
+
+        provider = fakes.SequenceProvider([_leaking_result(), fakes.valid_result(ss)])
+        version = generate_design_spec_for_design(design, provider=provider)
+        assert provider.calls == 2
+        assert asset.title not in json.dumps(version.design_spec)
+
+    def test_persistently_leaking_title_persists_nothing(self, inmemory_storage):
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset(title="Emerald velvet showcase look")
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        ss = _source_selections(design)
+
+        def _leaking_result():
+            payload = build_fixture_spec(ss)
+            payload["styling_notes"] = [f"Inspired by the {asset.title}."]
+            return StructuredDesignResult(
+                payload=payload,
+                provider="fake",
+                model="fake-model",
+                input_tokens=1234,
+                output_tokens=567,
+                stop_reason="end_turn",
+            )
+
+        provider = fakes.SequenceProvider([_leaking_result(), _leaking_result()])
+        with pytest.raises(GenerationFailed):
+            generate_design_spec_for_design(design, provider=provider)
+        assert DesignVersion.objects.filter(design=design).count() == 0
+
+    def test_leaked_attribution_is_rejected(self, inmemory_storage):
+        from sitara.catalogue.tests.utils import make_eligible_asset, make_rights
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset(rights=make_rights(verified=True, attribution_text="Studio A"))
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        attribution = asset.usage_rights.attribution_text
+        ss = _source_selections(design)
+
+        def _leaking_result():
+            payload = build_fixture_spec(ss)
+            payload["styling_notes"] = [f"Credit: {attribution}."]
+            return StructuredDesignResult(
+                payload=payload,
+                provider="fake",
+                model="fake-model",
+                input_tokens=1234,
+                output_tokens=567,
+                stop_reason="end_turn",
+            )
+
+        provider = fakes.SequenceProvider([_leaking_result(), fakes.valid_result(ss)])
+        generate_design_spec_for_design(design, provider=provider)
+        assert provider.calls == 2
+
+    def test_ordinary_output_without_inspiration_text_is_unaffected(self, inmemory_storage):
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset(title="Emerald velvet showcase look")
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider([fakes.valid_result(ss)])
+        generate_design_spec_for_design(design, provider=provider)
+        assert provider.calls == 1
+
+    def test_short_common_word_title_does_not_spuriously_leak(self, inmemory_storage):
+        # A single ordinary word used as a catalogue title (nothing requires
+        # titles to be distinctive) must never collide with unrelated
+        # generated prose that happens to use the same word.
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset(title="Rose")
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        ss = _source_selections(design)
+
+        def _result_mentioning_rose():
+            payload = build_fixture_spec(ss)
+            payload["styling_notes"] = ["Finished with delicate rose gold embroidery accents."]
+            return StructuredDesignResult(
+                payload=payload,
+                provider="fake",
+                model="fake-model",
+                input_tokens=1234,
+                output_tokens=567,
+                stop_reason="end_turn",
+            )
+
+        provider = fakes.SequenceProvider([_result_mentioning_rose()])
+        generate_design_spec_for_design(design, provider=provider)
+        assert provider.calls == 1
+
+
+class TestInspirationSnapshotPersistence:
+    def test_no_inspiration_generation_persists_a_versioned_empty_snapshot(self):
+        design = make_complete_design()
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider([fakes.valid_result(ss)])
+        version = generate_design_spec_for_design(design, provider=provider)
+        version.refresh_from_db()
+        assert version.inspiration_context == {"schema_version": 1, "items": []}
+        assert version.inspiration_context_schema_version == 1
+        assert len(version.inspiration_context_sha256) == 64
+
+    def test_selected_inspiration_generation_persists_the_exact_snapshot(self, inmemory_storage):
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+        from sitara.generation.inspiration_context import build_inspiration_context_snapshot
+
+        design = make_complete_design()
+        asset = make_eligible_asset()
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        expected = build_inspiration_context_snapshot(design)
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider([fakes.valid_result(ss)])
+        version = generate_design_spec_for_design(design, provider=provider)
+        version.refresh_from_db()
+        assert version.inspiration_context == expected.model_dump(mode="json")
+        assert version.inspiration_context_sha256 == inspiration_context_sha256(expected)
+
+    def test_failure_persists_neither_spec_nor_inspiration_context(self, inmemory_storage):
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        asset = make_eligible_asset()
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        provider = fakes.SequenceProvider([fakes.malformed_result(), fakes.malformed_result()])
+        with pytest.raises(GenerationFailed):
             generate_design_spec_for_design(design, provider=provider)
         assert DesignVersion.objects.filter(design=design).count() == 0
 

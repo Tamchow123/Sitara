@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from sitara.ai_gateway.policy import get_structured_design_generation_provider
 from sitara.ai_gateway.structured_design import StructuredDesignRequest
+from sitara.catalogue.models import InspirationAsset, UsageRights
 from sitara.designs.models import Design, GenerationAttempt
 from sitara.designs.services import (
     create_next_design_version_locked,
@@ -32,7 +33,14 @@ from sitara.designs.services import (
 
 from .context import DesignNotReady, GenerationContext, build_generation_context
 from .design_spec import DESIGN_SPEC_SCHEMA_VERSION, SPEC_TEMPLATE_VERSION, DesignSpec
-from .input_safety import GeneratedContentRejected
+from .input_safety import GeneratedContentRejected, RejectionCategory, contains_phrase, iter_strings
+from .inspiration_context import (
+    InspirationAssetIneligible,
+    InspirationContextSnapshot,
+    InspirationMetadataUnavailable,
+    build_inspiration_context_snapshot,
+    inspiration_context_sha256,
+)
 from .prompting import SYSTEM_PROMPT, build_user_message
 
 logger = logging.getLogger(__name__)
@@ -134,6 +142,30 @@ def _input_snapshot(design: Design) -> tuple:
     )
 
 
+@dataclass(frozen=True)
+class _InputSnapshot:
+    """The full pre-persistence freshness fingerprint: the base
+    questionnaire/answers/inspiration-id tuple, the exact canonical
+    inspiration-context snapshot and its hash. Equality compares both the
+    hash AND the exact content — a provider response built from stale
+    metadata (a selection change, asset retirement, rights revocation/
+    expiry, metadata mutation or attribution mutation) is never persisted."""
+
+    base: tuple
+    inspiration_context: InspirationContextSnapshot
+    inspiration_context_sha256: str
+
+
+def _build_input_snapshot(
+    design: Design, inspiration_context: InspirationContextSnapshot
+) -> _InputSnapshot:
+    return _InputSnapshot(
+        base=_input_snapshot(design),
+        inspiration_context=inspiration_context,
+        inspiration_context_sha256=inspiration_context_sha256(inspiration_context),
+    )
+
+
 def _lock_key(design_id) -> int:
     # A stable signed 64-bit advisory-lock key from the Design UUID.
     return int.from_bytes(design_id.bytes[:8], "big", signed=True)
@@ -160,12 +192,41 @@ def _assert_source_selections_match(spec: DesignSpec, canonical: dict) -> None:
         raise SourceSelectionMismatch("generated source_selections did not match the input")
 
 
+def _assert_no_inspiration_leakage(
+    spec: DesignSpec, inspiration_context: InspirationContextSnapshot
+) -> None:
+    """The audit-only title/attribution of a selected inspiration (never sent
+    to the provider) must never appear in generated output — its presence
+    would mean the model guessed or fabricated it. Provider cues themselves
+    are allowed to influence the narrative; this checks only the fields the
+    model was never given.
+
+    Matched the same way as every other safety denylist in this codebase
+    (token-boundary ``contains_phrase``, never a raw substring test), and
+    only for titles/attributions of at least two words — a short, ordinary
+    bridalwear/colour/fabric word used as a catalogue title (nothing
+    requires titles to be distinctive) must never spuriously match
+    unrelated generated prose."""
+    needles = [
+        text.strip()
+        for item in inspiration_context.items
+        for text in (item.acknowledgement.title, item.acknowledgement.attribution)
+        if len(text.split()) >= 2
+    ]
+    if not needles:
+        return
+    haystack = " ".join(iter_strings(spec.model_dump(mode="python")))
+    if any(contains_phrase(haystack, needle) for needle in needles):
+        raise GeneratedContentRejected(RejectionCategory.INSPIRATION_LEAKAGE)
+
+
 def _validate_output(payload: dict, context: GenerationContext) -> DesignSpec:
     """Fresh Django-side revalidation + business checks. Raises on any failure
     (all treated as retryable by the caller)."""
     spec = DesignSpec.model_validate(payload)
     scan_design_spec_or_raise(spec)
     _assert_source_selections_match(spec, context.source_selections)
+    _assert_no_inspiration_leakage(spec, context.inspiration_context)
     return spec
 
 
@@ -232,19 +293,61 @@ def _generate_valid_spec(provider, context: GenerationContext, design_id, genera
     raise GenerationFailed(attempts)
 
 
+def _lock_inspiration_rows_in_order(locked_design: Design) -> None:
+    """Lock every row a selected inspiration's provider-safe snapshot could
+    depend on, in one documented order (Design already locked by the caller;
+    DesignInspiration by position; InspirationAsset by uuid; UsageRights by
+    uuid) — never across the provider request, only for the remainder of
+    this short finalisation transaction. Blocks a concurrent selection
+    change, asset retirement, rights verification/revocation or (should a
+    future write path allow it) an attribution edit until this transaction
+    commits, closing the window between the snapshot rebuild below and the
+    version write."""
+    inspirations = list(
+        locked_design.inspiration_selections.select_for_update().order_by("position")
+    )
+    asset_ids = sorted({selection.inspiration_asset_id for selection in inspirations})
+    if not asset_ids:
+        return
+    list(InspirationAsset.objects.select_for_update().filter(pk__in=asset_ids).order_by("pk"))
+    rights_ids = sorted(
+        InspirationAsset.objects.filter(pk__in=asset_ids, usage_rights__isnull=False).values_list(
+            "usage_rights_id", flat=True
+        )
+    )
+    if rights_ids:
+        list(UsageRights.objects.select_for_update().filter(pk__in=rights_ids).order_by("pk"))
+
+
+def _rebuild_input_snapshot_locked(locked_design: Design) -> _InputSnapshot | None:
+    """Rebuild the full freshness fingerprint under the locks acquired by
+    :func:`_lock_inspiration_rows_in_order`. Returns ``None`` (never a raw
+    exception) when a selected inspiration is no longer eligible or its
+    metadata no longer passes the safety scan — both are a "changed"
+    condition, not a crash."""
+    try:
+        fresh_inspiration_context = build_inspiration_context_snapshot(locked_design)
+    except (InspirationAssetIneligible, InspirationMetadataUnavailable):
+        return None
+    return _build_input_snapshot(locked_design, fresh_inspiration_context)
+
+
 def _finalise_atomic(
-    design, spec: DesignSpec, usage: _AggregatedUsage, input_snapshot: tuple, attempt=None
+    design, spec: DesignSpec, usage: _AggregatedUsage, input_snapshot: _InputSnapshot, attempt=None
 ):
     """Re-check freshness and persist the DesignVersion in ONE transaction under
     the Design row lock.
 
     The provider call has already completed (no transaction/lock is held across
-    it). Here the Design row is locked with ``select_for_update()`` and, under
-    that SAME lock, completion + inspiration-eligibility validation is re-run,
-    the input snapshot is recomputed and compared, and the version is created
-    and populated. Because the lock spans the whole block, a concurrent draft
-    mutation (which also locks the row) can only commit BEFORE this block —
-    causing :class:`DesignChangedDuringGeneration` — or AFTER it commits; it can
+    it). Here the Design row is locked with ``select_for_update()``, every row
+    a selected inspiration's snapshot could depend on is locked in one
+    documented order, and — under those SAME locks — completion +
+    inspiration-eligibility validation is re-run, the full input snapshot
+    (base fingerprint, exact inspiration-context content and its hash) is
+    rebuilt and compared, and the version is created and populated. Because
+    the locks span the whole block, a concurrent draft mutation, asset
+    retirement or rights change can only commit BEFORE this block — causing
+    :class:`DesignChangedDuringGeneration` — or AFTER it commits; it can
     never slip between the freshness check and version creation.
 
     When ``attempt`` is supplied (Phase 10 async pipeline) the attempt's
@@ -253,7 +356,9 @@ def _finalise_atomic(
     attempt that created it. The attempt must belong to the locked Design."""
     with transaction.atomic():
         locked = Design.objects.select_for_update().get(pk=design.pk)
-        if design_completion_errors(locked) or _input_snapshot(locked) != input_snapshot:
+        _lock_inspiration_rows_in_order(locked)
+        fresh = _rebuild_input_snapshot_locked(locked)
+        if design_completion_errors(locked) or fresh is None or fresh != input_snapshot:
             logger.warning("design spec discarded (inputs changed) design=%s", design.id)
             raise DesignChangedDuringGeneration(
                 "the design changed during generation; no version was created"
@@ -267,6 +372,9 @@ def _finalise_atomic(
         version.design_spec_input_tokens = usage.input_tokens
         version.design_spec_output_tokens = usage.output_tokens
         version.design_spec_generated_at = timezone.now()
+        version.inspiration_context = fresh.inspiration_context.model_dump(mode="json")
+        version.inspiration_context_schema_version = fresh.inspiration_context.schema_version
+        version.inspiration_context_sha256 = fresh.inspiration_context_sha256
         version.save()
         if attempt is not None:
             if attempt.design_id != locked.pk:
@@ -297,9 +405,11 @@ def generate_design_spec_for_design(design, *, provider=None, attempt=None):
     StructuredDesignProviderError on failure, persisting nothing."""
     # Every pre-spend validation FIRST (before any provider selection/call).
     context = build_generation_context(design)
-    # Snapshot the exact inputs the context was built from, to detect a
-    # concurrent draft edit while the (un-transacted) provider call is running.
-    input_snapshot = _input_snapshot(design)
+    # Snapshot the exact inputs the context was built from — base fingerprint
+    # plus the exact inspiration-context content and hash already built by
+    # build_generation_context above — to detect a concurrent draft edit or
+    # inspiration/rights change while the (un-transacted) provider call runs.
+    input_snapshot = _build_input_snapshot(design, context.inspiration_context)
 
     # The advisory lock is a SESSION-level lock, deliberately NOT a row lock or
     # an open transaction — no database transaction is held across the network

@@ -555,6 +555,7 @@ export interface components {
             image_alt_text: string;
             /** Format: date-time */
             created_at: string;
+            inspiration_acknowledgements: components["schemas"]["InspirationAcknowledgementResult"][];
         };
         DesignResultResponse: {
             result: components["schemas"]["DesignResult"];
@@ -663,6 +664,18 @@ export interface components {
         };
         GenerationJobResponse: {
             job: components["schemas"]["GenerationJob"];
+        };
+        /**
+         * @description One private audit acknowledgement from the persisted, historical
+         *     inspiration-context snapshot (Phase 13). Deliberately excludes the asset
+         *     UUID, provider cues (garment type, visual description, cultural
+         *     context), storage data and every URL — never reconstructed from the
+         *     live catalogue, so a later asset retirement never rewrites it.
+         */
+        InspirationAcknowledgementResult: {
+            position: number;
+            title: string;
+            attribution: string;
         };
         InspirationCatalogueResponse: {
             assets: components["schemas"]["PublicInspirationAsset"][];

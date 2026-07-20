@@ -187,6 +187,18 @@ class CulturalContextResultSerializer(serializers.Serializer):
     safeguards = serializers.ListField(child=serializers.CharField())
 
 
+class InspirationAcknowledgementResultSerializer(serializers.Serializer):
+    """One private audit acknowledgement from the persisted, historical
+    inspiration-context snapshot (Phase 13). Deliberately excludes the asset
+    UUID, provider cues (garment type, visual description, cultural
+    context), storage data and every URL — never reconstructed from the
+    live catalogue, so a later asset retirement never rewrites it."""
+
+    position = serializers.IntegerField()
+    title = serializers.CharField()
+    attribution = serializers.CharField()
+
+
 class DesignResultSerializer(serializers.Serializer):
     """The purpose-built, curated concept result (Phase 12).
 
@@ -212,6 +224,8 @@ class DesignResultSerializer(serializers.Serializer):
     construction_caveats = serializers.ListField(child=serializers.CharField())
     image_alt_text = serializers.CharField()
     created_at = serializers.DateTimeField()
+    # Since Phase 13: audit-only; empty for a legacy pre-Phase-13 version.
+    inspiration_acknowledgements = InspirationAcknowledgementResultSerializer(many=True)
 
 
 class DesignResultResponseSerializer(serializers.Serializer):

@@ -187,6 +187,10 @@ class RejectionCategory(str, Enum):
     SEWING_PATTERN_CLAIM = "sewing_pattern_claim"
     CONSTRUCTIBILITY_CLAIM = "constructibility_claim"
     MARKUP = "markup_or_formatting"
+    # An inspiration's audit-only title/attribution (Phase 13) leaked into
+    # generated output — those fields are never sent to the provider, so
+    # their appearance means the model guessed or fabricated them.
+    INSPIRATION_LEAKAGE = "inspiration_leakage"
 
 
 class GeneratedContentRejected(Exception):
@@ -337,15 +341,20 @@ def scan_generated_text(text: str) -> None:
         raise GeneratedContentRejected(RejectionCategory.CONSTRUCTIBILITY_CLAIM)
 
 
-def _iter_strings(value: object):
+def iter_strings(value: object):
+    """Every string nested inside a dict/list/tuple structure, depth-first.
+
+    Public (unlike this module's other internals) so callers needing the
+    same flattening — e.g. the Phase 13 inspiration-leakage check — reuse it
+    rather than re-implementing it."""
     if isinstance(value, str):
         yield value
     elif isinstance(value, dict):
         for item in value.values():
-            yield from _iter_strings(item)
+            yield from iter_strings(item)
     elif isinstance(value, list | tuple):
         for item in value:
-            yield from _iter_strings(item)
+            yield from iter_strings(item)
 
 
 def scan_design_spec(spec) -> None:
@@ -354,7 +363,7 @@ def scan_design_spec(spec) -> None:
     ``spec`` is a :class:`~sitara.generation.design_spec.DesignSpec`; its
     ``model_dump()`` is walked so machine values and all narrative strings are
     checked."""
-    for text in _iter_strings(spec.model_dump(mode="python")):
+    for text in iter_strings(spec.model_dump(mode="python")):
         scan_generated_text(text)
 
 

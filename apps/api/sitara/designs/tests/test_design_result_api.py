@@ -50,7 +50,13 @@ def _make_owned_design(client) -> str:
 
 
 def _attach_ready_version(
-    design_id, *, design_spec: dict | None = None, schema_version: int = 1
+    design_id,
+    *,
+    design_spec: dict | None = None,
+    schema_version: int = 1,
+    inspiration_context: dict | None = None,
+    inspiration_context_schema_version: int | None = None,
+    inspiration_context_sha256: str = "",
 ) -> DesignVersion:
     """A DesignVersion with every result prerequisite satisfied. The result
     endpoint never checks object-store existence, so no storage objects are
@@ -62,6 +68,9 @@ def _attach_ready_version(
         schema_version=schema_version,
         image_prompt="A result-API-test prompt.",
         with_storage_objects=False,
+        inspiration_context=inspiration_context,
+        inspiration_context_schema_version=inspiration_context_schema_version,
+        inspiration_context_sha256=inspiration_context_sha256,
     )
 
 
@@ -81,6 +90,7 @@ _RESULT_SECTION_KEYS = {
     "construction_caveats",
     "image_alt_text",
     "created_at",
+    "inspiration_acknowledgements",
 }
 
 
@@ -361,3 +371,158 @@ class TestControlledUnavailability:
             "design result unavailable" in record.message and str(version.pk) in record.getMessage()
             for record in caplog.records
         )
+
+
+def _snapshot(items: list[dict]):
+    from sitara.generation.inspiration_context import InspirationContextSnapshot
+
+    return InspirationContextSnapshot(schema_version=1, items=items)
+
+
+def _item(position: int, *, title: str, attribution: str, asset_id: str | None = None) -> dict:
+    return {
+        "asset_id": asset_id or f"{'1' * 7}{position}-1111-1111-1111-111111111111",
+        "position": position,
+        "provider_cues": {
+            "garment_type": "lehenga",
+            "visual_description": "A visual description.",
+            "cultural_context": None,
+        },
+        "acknowledgement": {"title": title, "attribution": attribution},
+    }
+
+
+class TestInspirationAcknowledgements:
+    def test_legacy_version_returns_an_empty_list(self):
+        client = csrf_client()
+        design_id = _make_owned_design(client)
+        version = _attach_ready_version(design_id)
+        response = client.get(_result_url(design_id, version.pk))
+        assert response.status_code == 200
+        assert response.json()["result"]["inspiration_acknowledgements"] == []
+
+    def test_acknowledgement_order_and_attribution_are_preserved(self):
+        from sitara.generation.inspiration_context import inspiration_context_sha256
+
+        client = csrf_client()
+        design_id = _make_owned_design(client)
+        snapshot = _snapshot(
+            [
+                _item(1, title="First look", attribution="Studio A"),
+                _item(2, title="Second look", attribution=""),
+                _item(3, title="Third look", attribution="Studio C"),
+            ]
+        )
+        version = _attach_ready_version(
+            design_id,
+            inspiration_context=snapshot.model_dump(mode="json"),
+            inspiration_context_schema_version=1,
+            inspiration_context_sha256=inspiration_context_sha256(snapshot),
+        )
+        response = client.get(_result_url(design_id, version.pk))
+        assert response.status_code == 200
+        acknowledgements = response.json()["result"]["inspiration_acknowledgements"]
+        assert acknowledgements == [
+            {"position": 1, "title": "First look", "attribution": "Studio A"},
+            {"position": 2, "title": "Second look", "attribution": ""},
+            {"position": 3, "title": "Third look", "attribution": "Studio C"},
+        ]
+
+    def test_retired_source_still_renders_the_stored_acknowledgement(self, inmemory_storage):
+        # The acknowledgement is read ONLY from the persisted snapshot, never
+        # by re-querying the (now-retired) live catalogue asset.
+        from sitara.catalogue.services import retire_inspiration_asset
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.generation.inspiration_context import inspiration_context_sha256
+
+        asset = make_eligible_asset(title="A retired look")
+        retire_inspiration_asset(asset)
+        client = csrf_client()
+        design_id = _make_owned_design(client)
+        snapshot = _snapshot(
+            [_item(1, title="A retired look", attribution="", asset_id=str(asset.id))]
+        )
+        version = _attach_ready_version(
+            design_id,
+            inspiration_context=snapshot.model_dump(mode="json"),
+            inspiration_context_schema_version=1,
+            inspiration_context_sha256=inspiration_context_sha256(snapshot),
+        )
+        response = client.get(_result_url(design_id, version.pk))
+        assert response.status_code == 200
+        assert response.json()["result"]["inspiration_acknowledgements"] == [
+            {"position": 1, "title": "A retired look", "attribution": ""}
+        ]
+
+    def test_no_internal_cue_or_asset_uuid_leaks(self):
+        from sitara.generation.inspiration_context import inspiration_context_sha256
+
+        client = csrf_client()
+        design_id = _make_owned_design(client)
+        snapshot = _snapshot([_item(1, title="A look", attribution="Studio A")])
+        version = _attach_ready_version(
+            design_id,
+            inspiration_context=snapshot.model_dump(mode="json"),
+            inspiration_context_schema_version=1,
+            inspiration_context_sha256=inspiration_context_sha256(snapshot),
+        )
+        response = client.get(_result_url(design_id, version.pk))
+        raw = response.content.decode()
+        assert "asset_id" not in raw
+        assert "provider_cues" not in raw
+        assert "garment_type" not in raw
+        assert snapshot.items[0].asset_id not in raw
+
+    def test_foreign_owner_remains_404(self):
+        from sitara.generation.inspiration_context import inspiration_context_sha256
+
+        owner = csrf_client()
+        design_id = _make_owned_design(owner)
+        snapshot = _snapshot([_item(1, title="A look", attribution="Studio A")])
+        version = _attach_ready_version(
+            design_id,
+            inspiration_context=snapshot.model_dump(mode="json"),
+            inspiration_context_schema_version=1,
+            inspiration_context_sha256=inspiration_context_sha256(snapshot),
+        )
+        stranger = csrf_client()
+        response = stranger.get(_result_url(design_id, version.pk))
+        assert response.status_code == 404
+
+    # An "unsupported inspiration_context_schema_version" 503 path exists in
+    # load_inspiration_acknowledgements as defence in depth, but is
+    # unreachable through any legitimate write today: the
+    # designs_designversion_inspiration_context_schema_version_valid DB
+    # constraint already pins the value to 1 (proved directly in
+    # designs/tests/test_provenance.py::test_invalid_schema_version_is_blocked).
+
+    def test_corrupt_context_returns_controlled_503_without_exposing_content(self, caplog):
+        client = csrf_client()
+        design_id = _make_owned_design(client)
+        version = _attach_ready_version(
+            design_id,
+            inspiration_context={"schema_version": 1, "items": "not-a-list"},
+            inspiration_context_schema_version=1,
+            inspiration_context_sha256="a" * 64,
+        )
+        with caplog.at_level(logging.DEBUG):
+            response = client.get(_result_url(design_id, version.pk))
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "design_result_unavailable"
+        assert "not-a-list" not in response.content.decode()
+        assert "not-a-list" not in caplog.text
+
+    def test_hash_mismatch_returns_controlled_503(self):
+        client = csrf_client()
+        design_id = _make_owned_design(client)
+        snapshot = _snapshot([_item(1, title="A look", attribution="Studio A")])
+        version = _attach_ready_version(
+            design_id,
+            inspiration_context=snapshot.model_dump(mode="json"),
+            inspiration_context_schema_version=1,
+            # Well-formed shape but a hash that cannot match the content.
+            inspiration_context_sha256="0" * 64,
+        )
+        response = client.get(_result_url(design_id, version.pk))
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "design_result_unavailable"
