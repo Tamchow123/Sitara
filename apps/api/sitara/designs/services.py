@@ -40,6 +40,20 @@ class DesignVersionLimitReached(Exception):
     """The design already has MAX_DESIGN_VERSIONS versions."""
 
 
+class CrossDesignLineageError(Exception):
+    """A supplied ``parent_version`` belongs to a different Design, or is not
+    a :class:`~sitara.designs.models.DesignVersion` instance at all.
+
+    Database CHECK constraints cannot express the cross-row invariant, so
+    this is the defence-in-depth backstop below every future refinement
+    caller (Part B/C) — safe message; never exposes a UUID or design id."""
+
+
+class UnsupportedVersionFieldError(Exception):
+    """``create_next_design_version_locked`` was called with a
+    ``version_fields`` key outside its documented, narrow accepted set."""
+
+
 class DraftUpdateError(Exception):
     """A draft update was rejected for a controlled, safe reason.
 
@@ -233,7 +247,17 @@ def _resolve_for_create(request) -> DesignSession:
         return design_session
 
 
-def create_next_design_version_locked(locked_design: Design) -> DesignVersion:
+_REFINEMENT_VERSION_FIELDS = frozenset(
+    {
+        "parent_version",
+        "refinement_request",
+        "refinement_request_schema_version",
+        "refinement_request_sha256",
+    }
+)
+
+
+def create_next_design_version_locked(locked_design: Design, **version_fields) -> DesignVersion:
     """Create the next DesignVersion for an ALREADY-locked Design.
 
     The caller MUST already be inside a ``transaction.atomic()`` block holding
@@ -241,7 +265,33 @@ def create_next_design_version_locked(locked_design: Design) -> DesignVersion:
     that must first perform its own checks under that same lock (e.g. the
     generation service's final freshness re-check) create the version without
     opening a second, disconnected check/write sequence. Applies the same
-    application-level maximum and relies on the same uniqueness backstop."""
+    application-level maximum and relies on the same uniqueness backstop.
+
+    ``version_fields`` are passed straight into the single ``.create()`` call
+    and MUST be a subset of :data:`_REFINEMENT_VERSION_FIELDS`
+    (``parent_version``/``refinement_request``/
+    ``refinement_request_schema_version``/``refinement_request_sha256`` for a
+    refinement's version 2) — a version 2 row must carry complete refinement
+    provenance from the moment it is created, never a bare row populated by a
+    later ``save()``, because the database CHECK constraints tying
+    ``parent_version`` to ``version_number`` are evaluated immediately, not
+    deferred to transaction commit.
+
+    Raises :class:`UnsupportedVersionFieldError` for a ``version_fields`` key
+    outside :data:`_REFINEMENT_VERSION_FIELDS`, and :class:`CrossDesignLineageError`
+    for a ``parent_version`` that is not a :class:`DesignVersion` instance or
+    does not belong to ``locked_design`` — no CHECK constraint can express
+    that last, cross-row invariant, so every caller is protected here rather
+    than trusting each call site individually."""
+    unsupported = set(version_fields) - _REFINEMENT_VERSION_FIELDS
+    if unsupported:
+        raise UnsupportedVersionFieldError(f"unsupported version field(s): {sorted(unsupported)}")
+    parent_version = version_fields.get("parent_version")
+    if parent_version is not None:
+        if not isinstance(parent_version, DesignVersion):
+            raise CrossDesignLineageError("parent_version must be a DesignVersion instance")
+        if parent_version.design_id != locked_design.pk:
+            raise CrossDesignLineageError("parent_version must belong to the same design")
     highest = (
         DesignVersion.objects.filter(design=locked_design).aggregate(highest=Max("version_number"))[
             "highest"
@@ -252,18 +302,21 @@ def create_next_design_version_locked(locked_design: Design) -> DesignVersion:
         raise DesignVersionLimitReached(
             f"design already has the maximum of {settings.MAX_DESIGN_VERSIONS} versions"
         )
-    return DesignVersion.objects.create(design=locked_design, version_number=highest + 1)
+    return DesignVersion.objects.create(
+        design=locked_design, version_number=highest + 1, **version_fields
+    )
 
 
-def create_next_design_version(design: Design) -> DesignVersion:
+def create_next_design_version(design: Design, **version_fields) -> DesignVersion:
     """Create the next DesignVersion under the application-level maximum.
 
     The Design row is locked for the duration, so concurrent calls serialise
     and cannot compute the same next number; the database uniqueness
-    constraint on (design, version_number) remains the final backstop."""
+    constraint on (design, version_number) remains the final backstop. See
+    :func:`create_next_design_version_locked` for ``version_fields``."""
     with transaction.atomic():
         locked = Design.objects.select_for_update().get(pk=design.pk)
-        return create_next_design_version_locked(locked)
+        return create_next_design_version_locked(locked, **version_fields)
 
 
 def _assign_questionnaire_version(design: Design, questionnaire_version_id) -> None:
@@ -522,9 +575,11 @@ def design_completion_errors(design: Design) -> dict:
 # Re-exported so callers can catch answer-validation failures alongside
 # DraftUpdateError without importing from the questionnaire app directly.
 __all__ = [
+    "CrossDesignLineageError",
     "DesignVersionLimitReached",
     "DraftUpdateError",
     "QuestionnaireAnswerError",
+    "UnsupportedVersionFieldError",
     "WorkspaceCoordinationError",
     "create_next_design_version",
     "create_next_design_version_locked",

@@ -214,18 +214,51 @@ class UnsafeUserTextError(Exception):
         super().__init__(f"user text rejected: {category.value}")
 
 
+def strip_format_characters(text: str) -> str:
+    """NFKC-normalise, then remove Unicode "format" characters (category
+    ``Cf`` — zero-width space/joiner/non-joiner and similar invisible marks)
+    outright.
+
+    Every check in this module that matches a denylisted phrase or pattern
+    against raw (non-tokenised) text routes through this first — a
+    denylisted word or pattern broken up with an invisible character (e.g.
+    ``"sew\\u200bing pattern"`` or ``"exam\\u200bple.com"``) must still match
+    as if it were contiguous, never silently split into pieces that no
+    longer match."""
+    normalised = unicodedata.normalize("NFKC", text)
+    return "".join(char for char in normalised if unicodedata.category(char) != "Cf")
+
+
 def _tokens(text: str) -> list[str]:
-    """NFKC + case-fold + punctuation→space + collapse, then split to tokens.
+    """Case-fold + punctuation→space + collapse (after
+    :func:`strip_format_characters`), then split to tokens.
 
     Underscores are treated as separators too (``[\\W_]+``): ``\\w`` keeps
     underscore, so without this ``Manish_Malhotra`` would collapse to one
     token and slip past a multi-token denylist entry."""
-    normalised = unicodedata.normalize("NFKC", text).casefold()
+    normalised = strip_format_characters(text).casefold()
     # Replace any run of non-word (Unicode-aware) characters OR underscores
     # with a single space, so punctuation/underscore/spacing variants all
     # collapse to the same tokens.
     normalised = re.sub(r"[\W_]+", " ", normalised, flags=re.UNICODE)
     return normalised.split()
+
+
+def contains_markup(text: str) -> bool:
+    """True if ``text`` contains a raw HTML tag or Markdown formatting
+    syntax, after stripping invisible format characters that could
+    otherwise break a pattern's required character adjacency. Public so
+    other modules matching raw refinement/free-text input (rather than the
+    tokenised phrase checks) reuse this single denylist instead of
+    duplicating it."""
+    stripped = strip_format_characters(text)
+    return any(pattern.search(stripped) for pattern in _MARKUP_PATTERNS)
+
+
+def contains_url(text: str) -> bool:
+    """True if ``text`` contains a URL, after stripping invisible format
+    characters. Public for the same reason as :func:`contains_markup`."""
+    return bool(_URL_PATTERN.search(strip_format_characters(text)))
 
 
 def _phrase_tokens(phrase: str) -> list[str]:
@@ -320,7 +353,7 @@ def scan_generated_text(text: str) -> None:
         if char != "\n" and unicodedata.category(char) == "Cc":
             raise GeneratedContentRejected(RejectionCategory.CONTROL_CHARACTER)
 
-    if _URL_PATTERN.search(text):
+    if contains_url(text):
         raise GeneratedContentRejected(RejectionCategory.URL)
 
     tokens = _tokens(text)
@@ -333,7 +366,7 @@ def scan_generated_text(text: str) -> None:
         raise GeneratedContentRejected(RejectionCategory.IMITATION_PHRASE)
     if any(_contains_phrase(tokens, _phrase_tokens(p)) for p in _PROMPT_LEAKAGE_PHRASES):
         raise GeneratedContentRejected(RejectionCategory.PROMPT_LEAKAGE)
-    if any(pattern.search(text) for pattern in _MARKUP_PATTERNS):
+    if contains_markup(text):
         raise GeneratedContentRejected(RejectionCategory.MARKUP)
     if _asserts_claim(text, _SEWING_PATTERN_CLAIMS):
         raise GeneratedContentRejected(RejectionCategory.SEWING_PATTERN_CLAIM)
@@ -373,7 +406,7 @@ def scan_user_text(text: str) -> None:
     Rejects the designer/brand denylist, imitation phrasing, obvious
     prompt-override phrasing and URLs. Raises :class:`UnsafeUserTextError`
     (generic category only, never the text)."""
-    if _URL_PATTERN.search(text):
+    if contains_url(text):
         raise UnsafeUserTextError(RejectionCategory.URL)
     tokens = _tokens(text)
     if any(_contains_phrase(tokens, _phrase_tokens(name)) for name in _DESIGNER_BRAND_NAMES):

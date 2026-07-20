@@ -212,6 +212,26 @@ class DesignVersion(models.Model):
     inspiration_context = models.JSONField(null=True, blank=True)
     inspiration_context_schema_version = models.PositiveSmallIntegerField(null=True, blank=True)
     inspiration_context_sha256 = models.CharField(max_length=64, blank=True)
+    # --- Refinement lineage provenance (Phase 14) --------------------------
+    # Present exactly on a refined (version 2) row, pointing at the version it
+    # refined. PROTECT per the phase spec; there is currently no design/version
+    # deletion endpoint anywhere in the API, so the well-known PROTECT-vs-
+    # RESTRICT self-referential cascade caveat (PROTECT blocks even a delete
+    # that would remove both rows together) has no live trigger today.
+    parent_version = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="refined_versions",
+    )
+    # The canonical refinement request that produced this version (present
+    # exactly when parent_version is present). NEVER a client field path, a
+    # provider parameter, a seed or a storage/image reference — only the
+    # validated {schema_version, change_type, note} contract.
+    refinement_request = models.JSONField(null=True, blank=True)
+    refinement_request_schema_version = models.PositiveSmallIntegerField(null=True, blank=True)
+    refinement_request_sha256 = models.CharField(max_length=64, blank=True)
     # --- Permanent private image provenance (Phase 11) --------------------
     # Written EXACTLY ONCE by the canonical ingest service and immutable
     # afterwards (all-or-none constraint below; a future processor version
@@ -417,6 +437,60 @@ class DesignVersion(models.Model):
                 ),
                 name="designs_designversion_permanent_image_requires_spec_prompt",
             ),
+            # Refinement provenance (Phase 14) is all-or-none: either no
+            # refinement request was recorded (version 1 and legacy rows) or
+            # every field is present.
+            models.CheckConstraint(
+                condition=(
+                    Q(refinement_request__isnull=True)
+                    & Q(refinement_request_schema_version__isnull=True)
+                    & Q(refinement_request_sha256="")
+                )
+                | (
+                    Q(refinement_request__isnull=False)
+                    & Q(refinement_request_schema_version__isnull=False)
+                    & ~Q(refinement_request_sha256="")
+                ),
+                name="designs_designversion_refinement_request_all_or_none",
+            ),
+            models.CheckConstraint(
+                condition=Q(refinement_request_schema_version__isnull=True)
+                | Q(refinement_request_schema_version=1),
+                name="designs_designversion_refinement_request_schema_version_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(refinement_request_sha256="")
+                | Q(refinement_request_sha256__regex=r"^[0-9a-f]{64}$"),
+                name="designs_designversion_refinement_request_sha256_shape",
+            ),
+            # A refinement request requires a parent version and vice versa —
+            # neither may exist without the other.
+            models.CheckConstraint(
+                condition=Q(refinement_request__isnull=True) | Q(parent_version__isnull=False),
+                name="designs_designversion_refinement_request_requires_parent",
+            ),
+            models.CheckConstraint(
+                condition=Q(parent_version__isnull=True) | Q(refinement_request__isnull=False),
+                name="designs_designversion_parent_requires_refinement_request",
+            ),
+            # A version can never parent itself.
+            models.CheckConstraint(
+                condition=Q(parent_version__isnull=True) | ~Q(parent_version=models.F("id")),
+                name="designs_designversion_parent_not_self",
+            ),
+            # Version 1 never has a parent; version 2 always does. Higher
+            # version numbers are deliberately NOT constrained here — the
+            # application-level MAX_DESIGN_VERSIONS rule is the only cap, so a
+            # future multi-round refinement phase needs no migration (mirrors
+            # the class docstring's existing promise for version_number itself).
+            models.CheckConstraint(
+                condition=~Q(version_number=1) | Q(parent_version__isnull=True),
+                name="designs_designversion_v1_no_parent",
+            ),
+            models.CheckConstraint(
+                condition=~Q(version_number=2) | Q(parent_version__isnull=False),
+                name="designs_designversion_v2_requires_parent",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -456,6 +530,10 @@ class GenerationAttempt(models.Model):
         SUCCEEDED = "succeeded", "Succeeded"
         FAILED = "failed", "Failed"
 
+    class GenerationKind(models.TextChoices):
+        INITIAL = "initial", "Initial"
+        REFINEMENT = "refinement", "Refinement"
+
     # The statuses that count as an in-progress job (at most one per Design).
     IN_PROGRESS_STATUSES = (Status.QUEUED, Status.RUNNING_TEXT, Status.RUNNING_IMAGE)
 
@@ -481,6 +559,27 @@ class GenerationAttempt(models.Model):
     error_code = models.CharField(max_length=64, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    # Which pipeline branch this attempt runs (Phase 14). Public (unlike every
+    # other field on this model) via the job API, so the frontend can render
+    # honest refinement-specific progress wording.
+    generation_kind = models.CharField(
+        max_length=20, choices=GenerationKind.choices, default=GenerationKind.INITIAL
+    )
+    # The DesignVersion being refined. Present exactly for a refinement
+    # attempt; PROTECT so the source version can never be deleted out from
+    # under an in-progress or historical refinement attempt. NEVER exposed
+    # through the public job API.
+    source_design_version = models.ForeignKey(
+        DesignVersion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="refinement_attempts",
+    )
+    # True only when this attempt's image_seed was copied from the source
+    # version's succeeded initial attempt rather than freshly generated.
+    # Private; never exposed through the public job API.
+    seed_reused = models.BooleanField(default=False)
 
     # --- Private provider-submission provenance (image + text; never exposed) ---
     image_provider = models.CharField(max_length=32, blank=True)
@@ -611,6 +710,20 @@ class GenerationAttempt(models.Model):
             models.CheckConstraint(
                 condition=~Q(status="failed") | (~Q(error_code="") & Q(completed_at__isnull=False)),
                 name="designs_attempt_failed_requirements",
+            ),
+            models.CheckConstraint(
+                condition=Q(generation_kind__in=["initial", "refinement"]),
+                name="designs_attempt_generation_kind_valid",
+            ),
+            # An initial attempt never carries a source version; a refinement
+            # attempt always does. Cross-row rules (same Design, source version
+            # is version 1, source has a complete successful result) belong to
+            # the locking enqueue service — a CHECK constraint cannot reference
+            # another row.
+            models.CheckConstraint(
+                condition=Q(generation_kind="initial", source_design_version__isnull=True)
+                | Q(generation_kind="refinement", source_design_version__isnull=False),
+                name="designs_attempt_generation_kind_source_version_consistent",
             ),
         ]
 
