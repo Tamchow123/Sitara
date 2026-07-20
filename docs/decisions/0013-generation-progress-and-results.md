@@ -257,9 +257,21 @@ this phase introducing no new durable client-side state for design content.
 
 ## Consequences
 
-- Phase 14 (constrained refinement) builds on this exact result shape and the
-  same result/image query separation; it does not need to change the result
-  endpoint's payload contract.
+- Phase 14 (constrained refinement, ADR 0015) delivered on this exact result
+  shape and the same result/image query separation predicted here — the
+  result endpoint's payload contract was not changed, only additively
+  extended with `lineage` (kind, parent_version_id, refinement.change_type).
+  Version comparison reuses this ADR's result/image query independence
+  twice over: viewing a refined (version 2) result renders a side-by-side
+  comparison that fetches version 1's result and signed images through their
+  own independent query pair (own query keys, own `gcTime: 0`, own focus/
+  near-expiry refresh schedule) alongside version 2's already-fetched data —
+  one version's image-delivery failure never hides the other version's
+  brief, exactly as this ADR's single-version independence already
+  guaranteed for a version's own result vs. image split. Progress copy
+  (queued/running_text/running_image headings and explanations) is now
+  branched on the job's `generation_kind`, reusing this ADR's exact
+  polling/backoff/redirect machinery unchanged for both kinds.
 - Phase 15 (demo flow) reuses this progress and result UI verbatim against
   demo-mode fixtures; this phase makes no demo-mode claim and ships no demo
   fixture pipeline itself.

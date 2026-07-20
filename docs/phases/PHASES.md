@@ -284,6 +284,40 @@ Standing rules across all phases:
 - **Manual checkpoint:** live refinement round; verify the drift disclaimer sets accurate expectations against the actual output; compare drift with Phase 2 findings.
 - **Commit:** `feat: single-round design refinement with honest drift expectations`
 
+> **Delivered (ADR 0015)** as four commits — `feat(refinement): add
+> versioned refinement request provenance` (Part A), `feat(refinement): add
+> constrained DesignSpec edit service` (Part B), `feat(refinement): add
+> durable asynchronous refinement pipeline` (Part C), `feat(frontend): add
+> single refinement and version comparison` (Part D). Part A adds a strict,
+> versioned `RefinementRequest` (one of eight allowlisted `change_type`
+> categories, a bounded 300-character safety-scanned note), the per-category
+> `REFINEMENT_ALLOWED_PATHS` DesignSpec-diff allowlist, and
+> `DesignVersion.parent_version`/`refinement_request`/`_schema_version`/
+> `_sha256` lineage fields plus matching `GenerationAttempt` fields, all
+> under all-or-none/parent-consistency database constraints. Part B adds a
+> separate, independently versioned refinement structured-output prompt
+> (`REFINEMENT_TEMPLATE_VERSION 1.0.0`), a retry-bounded
+> (`MAX_REFINEMENT_PROVIDER_REQUESTS = 2`) generation loop that structurally
+> diff-checks every candidate DesignSpec against the requested category's
+> allowlist before accepting it, and an atomic persistence service that
+> copies the source version's historical inspiration-context snapshot
+> forward unchanged. Part C wires this into the existing durable pipeline —
+> `enqueue_design_refinement` mirrors the initial-generation precondition
+> ordering with refinement-specific substitutions, `_execute()` branches
+> only its text stage on `generation_kind`, seed reuse is opportunistic via
+> `_find_source_attempt_seed` — and adds `POST /designs/{id}/refine/`, the
+> additive `generation_kind`/`lineage` API fields, and the regenerated
+> OpenAPI contract. Part D adds the frontend refinement panel (single-choice
+> chip group, capped note, mandatory drift acknowledgement, idempotent
+> submission), kind-aware generation-progress copy, and the side-by-side
+> version-comparison view (two fully independent result/image query pairs)
+> with honest drift disclosure. `MAX_DESIGN_VERSIONS` stays its existing
+> default of `2`; the fixed `MAX_REFINEMENTS = 1` is the operative limit
+> constant. The Phase 2 fresh-regeneration-vs-image-editing comparison
+> remains unrun; the paid live refinement checkpoint remains pending and is
+> not required before merge, only before Sitara claims measured visual
+> continuity or before Phase 16 public live generation.
+
 ## Phase 15 — Strict zero-cost demo mode
 - **Scope:** `DEMO_MODE=true` path: curated pre-generated DesignSpecs + images stored as fixtures (`demo/` storage + JSON fixtures, generated once manually with real keys and committed/uploaded); demo pipeline maps questionnaire answers to the nearest fixture deterministically; identical API response shapes; simulated status transitions (queued → running_text → running_image → succeeded) with optional configurable artificial delay; demo designs flagged `is_demo`; showcase gallery endpoint + landing carousel from the same fixtures.
 - **Non-goals:** demo mode never imports or reaches provider wrappers (separate code path, not a mocked wrapper); no rate-limited-paid anything labelled "demo".

@@ -21,7 +21,7 @@ Sitara is for **concept visualisation only** — no sewing patterns, manufacturi
 
 ## 3. Current repository state
 
-Phases 1–12 are delivered on `main`. Phase 13 (rights-safe inspiration metadata influence, ADR 0014) is delivered on `phase/phase-13-inspiration-metadata`, pending merge to `main`; Phase 14 (constrained refinement) is next. Delivered: Phase 2 image-model evaluation; app foundation; session auth/CSRF; anonymous + authenticated design ownership; versioned questionnaire; rights-controlled catalogue; OpenAPI-generated client; structured DesignSpec generation; deterministic image-prompt builder; async Celery/Replicate generation; permanent design-image storage; generation-progress and private results; curated inspiration-metadata influence on generation.
+Phases 1–13 are delivered on `main`. Phase 14 (single-round constrained refinement, ADR 0015) is delivered on `phase/phase-14-refinement`, pending merge to `main`; Phase 15 (strict zero-cost demo mode) is next. Delivered: Phase 2 image-model evaluation; app foundation; session auth/CSRF; anonymous + authenticated design ownership; versioned questionnaire; rights-controlled catalogue; OpenAPI-generated client; structured DesignSpec generation; deterministic image-prompt builder; async Celery/Replicate generation; permanent design-image storage; generation-progress and private results; curated inspiration-metadata influence on generation; single-round constrained refinement with version comparison.
 
 `docs/phases/PHASES.md` is authoritative for future work — always inspect the current branch and that file rather than relying on this paragraph.
 
@@ -35,7 +35,7 @@ black-forest-labs/flux-1.1-pro
 
 For any substantial task, read the relevant code plus `README.md`, `docs/PROPOSAL.md`, `docs/phases/PHASES.md`, `docs/decisions/`, `compose.yaml`, `.github/workflows/ci.yml`. For a phase task with its own spec file, read that file in full before editing.
 
-ADRs currently on record: 0001 image model, 0002 application foundation, 0003 session authentication, 0004 private design ownership, 0005 versioned questionnaire schema, 0006 rights-controlled inspiration catalogue, 0007 OpenAPI generated client, 0008 questionnaire draft and wizard, 0009 structured design-spec generation, 0010 deterministic image-prompt builder, 0011 asynchronous generation pipeline, 0012 private design-image storage, 0013 generation progress and results, 0014 rights-safe inspiration metadata influence.
+ADRs currently on record: 0001 image model, 0002 application foundation, 0003 session authentication, 0004 private design ownership, 0005 versioned questionnaire schema, 0006 rights-controlled inspiration catalogue, 0007 OpenAPI generated client, 0008 questionnaire draft and wizard, 0009 structured design-spec generation, 0010 deterministic image-prompt builder, 0011 asynchronous generation pipeline, 0012 private design-image storage, 0013 generation progress and results, 0014 rights-safe inspiration metadata influence, 0015 single-round constrained refinement.
 
 ## 5. Repository layout
 
@@ -70,6 +70,7 @@ Rules:
 - Do not change the selected model without a scoped, documented evaluation and decision update.
 - Demo mode uses deterministic local fixtures and stays structurally separate from paid-provider execution.
 - The image prompt is built only by the deterministic, versioned `build_image_prompt` (`generation/prompt_builder.py`) from a validated DesignSpec: one positive natural-language prompt, no negative prompt, no JSON prompt, no hard-coded model id, no provider call, no construction caveats/alt text/inspiration metadata/raw questionnaire text/provider metadata. Persisted `image_prompt`/`prompt_builder_version` are immutable audit data; a builder change requires a `PROMPT_BUILDER_VERSION` bump plus a reviewed snapshot/manifest update.
+- A `Design` may be refined at most once (`MAX_REFINEMENTS = 1`; a completed refinement is enforced via `DesignVersion.parent_version`/`refined_versions`). A refinement request must name exactly one allowlisted `change_type`; the resulting DesignSpec diff is checked field-by-field against that category's exact allowlist and rejected if any changed path falls outside it or touches an immutable root — never trust a model's own claim of what it changed. Refinement is always a fresh text-to-image generation through the same deterministic `build_image_prompt` and selected image model as initial generation — never image-to-image editing, never sent the original image's bytes/URL/storage key. Seed reuse (when available) is documented everywhere as a continuity aid only, never a guarantee. The raw refinement note is untrusted, safety-scanned, bounded input; it must never be persisted into any public/result-facing payload — only the allowlisted `change_type` category may be exposed there.
 
 ## 8. Secrets and production configuration
 
