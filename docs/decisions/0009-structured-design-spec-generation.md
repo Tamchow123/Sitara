@@ -67,6 +67,17 @@ instructions and context layout; a deterministic `PROMPT_TEMPLATE_HASH` test
 fails if the prompt, delimiters, retry note or scaffolding change without a
 deliberate update.
 
+**Phase 13 amendment (ADR 0014):** the trusted JSON gains one more key,
+`curated_inspiration_cues` — a staff-curated, validated array (position,
+garment type, visual description, cultural context only; never an asset id,
+title or attribution), placed alongside `source_selections` and
+`questionnaire_answers`, never inside the untrusted delimiters. The system
+prompt gains rules keeping questionnaire selections authoritative over any
+compatible-only cue influence. Because this changes both the trusted JSON
+shape and the system prompt, `SPEC_TEMPLATE_VERSION` bumped `1.0.0` →
+`2.0.0` with a recomputed `PROMPT_TEMPLATE_HASH`; `DESIGN_SPEC_SCHEMA_VERSION`
+stays `1` (no DesignSpec field changed).
+
 ### Anthropic structured output, one controlled retry, SDK retries off
 
 Generation uses the SDK's first-class `beta.messages.parse` with
@@ -167,6 +178,10 @@ contract or the two-request budget:
   explicit approval from the repository owner; it is not run automatically.
 - Deferred: image-prompt construction, Replicate/image generation, Celery,
   a generation endpoint, results UI, inspiration influence and refinement.
+- Phase 13 (ADR 0014) delivered metadata-only inspiration influence, extending
+  the stale-input protection above to also cover the exact inspiration-context
+  snapshot and its hash, and adding a post-output check that no selected
+  inspiration's audit-only title/attribution leaks into generated text.
 
 ## Alternatives considered
 

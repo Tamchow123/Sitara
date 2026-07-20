@@ -81,7 +81,7 @@ The phased implementation roadmap (with per-phase scope, non-goals, commands, te
 - No user image uploads.
 - No custom/fine-tuned model training — prompt engineering over hosted models only.
 - No scraping of bridal websites or social media; catalogue is manually curated with recorded rights.
-- No image conditioning in the first implementation (MVP limitation, revisit in Phase 13 — see §9 note).
+- No image conditioning in the first implementation (MVP limitation; Phase 13 delivered metadata-only influence per this limitation, not the reference-image alternative — see `docs/decisions/0014-inspiration-metadata-influence.md`; the mandatory Phase 2 three-mode comparison this paragraph anticipates has still not been run as a live, paid evaluation).
 - No social features: sharing links, likes, public galleries, comments.
 - No mobile app; responsive web only.
 - No microservices; no DB-managed prompt templates; no speculative eval/budget admin before the core vertical slice works.

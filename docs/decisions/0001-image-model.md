@@ -232,6 +232,14 @@ as a premium benchmark for future tiers. Refinement-continuity and
 inspiration-influence promises remain UNDECIDED until their stages run —
 nothing in the application may assume them yet.
 
+**Phase 13 implementation note:** the "rights-approved inspiration influence
+testing" stage above still has not run as a live, paid comparison. Phase 13
+(ADR 0014) implements metadata-only inspiration influence as an MVP
+mechanism — curated catalogue text reaching FLUX only indirectly through the
+structured DesignSpec — without evidence that it outperforms direct
+reference-image conditioning. `black-forest-labs/flux-1.1-pro` and
+`PROMPT_BUILDER_VERSION` are unchanged by Phase 13.
+
 ## Alternatives considered
 
 - **flux-2-pro** — numerically best pooled mean, but one hard-failure flag,

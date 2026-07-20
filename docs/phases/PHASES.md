@@ -234,13 +234,47 @@ Standing rules across all phases:
 > (Phase 17) remain later phases; the Phase 10 **paid live checkpoint
 > remains pending**.
 
-## Phase 13 — Optional inspiration metadata/reference support
-- **Scope:** wire selected InspirationAsset tags/metadata into the Claude context (text-only, labelled as the MVP mechanism); design-note in `docs/decisions/0002-inspiration-influence.md` recording text-only as an MVP limitation and the upgrade path (Replicate wrapper already accepts reference images — enabling image conditioning is a wrapper + eval change, not a redesign); optionally a spike behind a dev-only flag if Phase 2 findings justify it.
-- **Non-goals:** no production image conditioning; no new FLUX model commitments without repeating a scoped Phase-2-style eval.
-- **Commands:** `pytest backend/`; manual budgeted live run with and without inspirations selected.
-- **Automated tests:** spec-generation context includes selected asset tags (fixture assertion); ≤3 enforcement still holds through generation; no image bytes sent to Anthropic (wrapper-level assertion).
-- **Manual checkpoint:** two live runs differing only in inspiration selection show visible, sensible influence; decision record updated with observations.
-- **Commit:** `feat(generation): inspiration metadata influence with documented image-conditioning upgrade path`
+## Phase 13 — Rights-safe inspiration metadata influence
+- **Scope:** wire selected inspiration images' frozen catalogue metadata (`garment_type`, `alt_text`, `cultural_context`) into structured DesignSpec generation as curated, versioned, hashed "provider cues" — never image bytes, a URL or a storage key; a private, historical `inspiration_acknowledgements` result field (title/attribution only); honest frontend disclosure that this is metadata-only influence, not reference-image conditioning.
+- **Non-goals:** direct reference-image conditioning (remains fail-closed, no implementation to enable); a new FLUX model or Replicate parameter; user-uploaded inspirations; a generic tags/ontology engine; refinement; demo fixture matching; rate limits/cost ceilings.
+- **Commands:** `docker compose exec api pytest`; `docker compose exec web npm test -- --run`; `docker compose exec web npm run build`.
+- **Automated tests:** provider cues reach the trusted JSON in order, restricted to four fields; unsafe/ineligible metadata blocks before any provider selection; a metadata/rights change mid-generation persists nothing and never retries; generated output leaking an inspiration's title/attribution is rejected and retried; reference-image rejection stays fail-closed with every live gate open; result acknowledgements read only the persisted historical snapshot.
+- **Manual checkpoint:** synthetic rights-cleared assets selected across two otherwise-identical designs; provider-free `GenerationContext` inspected to confirm only the four cue fields are present; one asset retired after generation still shows its stored acknowledgement while blocking new selection.
+- **Commit:** `feat(generation): apply curated inspiration metadata to DesignSpec`
+
+> **Delivered (ADR 0014)** as three commits — `feat(inspiration): add
+> versioned inspiration context provenance` (Part A), `feat(generation):
+> apply curated inspiration metadata to DesignSpec` (Part B),
+> `feat(frontend): disclose inspiration influence and acknowledgements`
+> (Part C). Part A adds a strict, versioned Pydantic snapshot
+> (`inspiration_context.py`, schema version 1, canonical-JSON SHA-256
+> hashed) built only from already-frozen, already-safety-scanned catalogue
+> fields, persisted on `DesignVersion` under new all-or-none/fixed-schema/
+> hash-shape/requires-spec database constraints; the reusable safety-scan
+> primitives moved to a new dependency-free `sitara/content_safety.py` leaf
+> module so catalogue's new approval-time defence could reuse them without
+> reversing the app-dependency direction. Part B wires the validated
+> snapshot into `GenerationContext`, adds `curated_inspiration_cues` to the
+> trusted JSON and inspiration-cue guidance to the system prompt
+> (`SPEC_TEMPLATE_VERSION` deliberately `1.0.0` → `2.0.0`;
+> `DESIGN_SPEC_SCHEMA_VERSION` and `PROMPT_BUILDER_VERSION` unchanged),
+> rejects any inspiration title/attribution leaking into generated output
+> (token-boundary matched, two-word minimum to avoid a common-word false
+> positive), extends the pre-persistence freshness fingerprint to the exact
+> snapshot content and hash, and locks the selected
+> `DesignInspiration`/`InspirationAsset`/`UsageRights` rows in one
+> documented order before persisting the snapshot atomically with the
+> DesignSpec — any change discards the result with no provider retry. The
+> private result API additively gains `inspiration_acknowledgements`, read
+> only from the persisted historical snapshot. Part C adds honest,
+> non-technical disclosure copy to the inspiration picker and review
+> summary, a conditional "Inspiration acknowledgements" section on the
+> results page and in the copy/download brief, and a runtime shape
+> validator for the new field — all React-escaped, no links, no asset UUID
+> or provider cue ever shown. Direct reference-image conditioning remains
+> unimplemented and fail-closed; the paid live influence checkpoint remains
+> pending and is not required before merge, only before Sitara claims
+> visible inspiration influence or before Phase 16 public live generation.
 
 ## Phase 14 — Refinement
 - **Scope:** refinement chips + capped note UI; `/designs/{id}/refine/`; Claude spec-edit flow ("change only what was asked", same structured-output schema); prompt rebuild + regeneration (seed reuse as continuity aid only); v1/v2 side-by-side UI **with explicit copy that the refined image is a fresh generation and may differ substantially**; refinement limit enforced in application code via `MAX_DESIGN_VERSIONS=2`.
