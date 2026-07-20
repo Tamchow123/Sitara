@@ -135,6 +135,70 @@ class TestAvailabilityAndStatus:
                     enqueue_task=_Recorder(),
                 )
 
+    def test_generation_failed_design_from_a_resolved_refinement_failure_is_refinable(self):
+        """A prior refinement attempt that failed cleanly (no staged image, no
+        unresolved provider spend) leaves the Design in generation_failed —
+        _finalise_failure never restores it to generated, since no new
+        version was produced. That must not permanently block every future
+        retry: version 1 is still complete and readable, so a fresh
+        refinement request is accepted (regression test for a cross-commit
+        defect between the Part C enqueue gate and the Part D frontend's
+        retry-after-failure UI)."""
+        from django.utils import timezone
+
+        design, v1 = _generated_design_with_v1()
+        GenerationAttempt.objects.create(
+            design=design,
+            idempotency_key=uuid.uuid4(),
+            status=_Status.FAILED,
+            error_code="refinement_no_change",
+            completed_at=timezone.now(),
+            generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
+            source_design_version=v1,
+            refinement_request=_request().model_dump(mode="json"),
+            refinement_request_schema_version=1,
+            refinement_request_sha256="c" * 64,
+        )
+        design.status = Design.Status.GENERATION_FAILED
+        design.save(update_fields=["status"])
+        recorder = _Recorder()
+        with mock.patch(_AVAILABLE, return_value=True):
+            attempt, created = enqueue_design_refinement(
+                design,
+                source_version_id=v1.pk,
+                refinement_request=_request(),
+                idempotency_key=uuid.uuid4(),
+                enqueue_task=recorder,
+            )
+        assert created is True
+        assert attempt.status == _Status.QUEUED
+        assert (
+            GenerationAttempt.objects.filter(
+                design=design, generation_kind=GenerationAttempt.GenerationKind.REFINEMENT
+            ).count()
+            == 2
+        )
+
+    def test_generation_failed_design_with_no_version_is_source_unavailable_not_refinable(self):
+        """A generation_failed Design from a failed INITIAL generation (no
+        version 1 ever created) must not be treated as refinable just because
+        the status check was relaxed — the source-version lookup fails
+        closed instead, distinguishing this from the resolved-refinement-
+        failure case above."""
+        design = make_complete_design()
+        design.status = Design.Status.GENERATION_FAILED
+        design.save(update_fields=["status"])
+        with mock.patch(_AVAILABLE, return_value=True):
+            with pytest.raises(RefinementSourceUnavailable):
+                enqueue_design_refinement(
+                    design,
+                    source_version_id=uuid.uuid4(),
+                    refinement_request=_request(),
+                    idempotency_key=uuid.uuid4(),
+                    enqueue_task=_Recorder(),
+                )
+        assert GenerationAttempt.objects.count() == 0
+
 
 class TestSourceVersionValidation:
     def test_foreign_source_version_is_rejected(self):

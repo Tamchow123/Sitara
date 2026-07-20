@@ -249,8 +249,11 @@ class QueueUnavailable(Exception):
 class DesignNotRefinable(Exception):
     """The Design's status does not support refinement (Phase 14). -> 409.
 
-    Only a ``generated`` Design may be refined — a draft, currently
-    generating, or failed design has no complete version-1 result to edit."""
+    A ``generated`` Design may be refined, as may a ``generation_failed``
+    Design left by a resolved prior refinement failure (see
+    :func:`enqueue_design_refinement` for the exact precondition) — a draft,
+    currently generating, or generation_failed-with-no-usable-version-1
+    design is rejected here or by the downstream source-version check."""
 
 
 # ---------------------------------------------------------------------------
@@ -481,8 +484,11 @@ def enqueue_design_refinement(
     Mirrors :func:`enqueue_design_generation`'s shape and guarantees exactly
     (idempotent replay first, availability gate, one short transaction under
     the Design row lock, Celery submission on commit) but validates the
-    refinement-specific preconditions: the Design must be ``generated``, the
-    source version must belong to this Design and pass
+    refinement-specific preconditions: the Design must be ``generated`` OR
+    ``generation_failed`` from a resolved prior refinement failure (never
+    from an initial-generation failure — there is no version 1 to refine in
+    that case, so the source-version lookup below fails closed), the source
+    version must belong to this Design and pass
     :func:`~sitara.generation.refinement_service.validate_source_version`,
     no child version may already exist, and no other attempt for this Design
     may be in progress or carry unresolved provider-spend evidence.
@@ -537,8 +543,17 @@ def enqueue_design_refinement(
         ).exists():
             raise GenerationInProgress("a generation job is already in progress for this design")
 
-        # 4. Only a fully generated Design may be refined.
-        if locked.status != Design.Status.GENERATED:
+        # 4. A fully generated Design may be refined. A Design left in
+        #    generation_failed by a RESOLVED refinement failure (no unresolved
+        #    spend, no staged-but-unlinked image — checked below) is also
+        #    eligible: the failure never restores status to generated (there
+        #    is no new version to finalise), so gating on GENERATED alone
+        #    would permanently block every retry after any refinement
+        #    failure, however clean. A generation_failed Design with no
+        #    version 1 at all (an initial-generation failure) is still
+        #    correctly rejected below: source_version_id cannot resolve to
+        #    any row, raising RefinementSourceUnavailable.
+        if locked.status not in (Design.Status.GENERATED, Design.Status.GENERATION_FAILED):
             raise DesignNotRefinable("this design cannot be refined")
 
         # 5. The source version must belong to this Design and pass every
