@@ -22,12 +22,26 @@ The curated payload this module builds is a purpose-built, user-facing shape
 model/token provenance, storage keys, hashes, staged metadata and every
 signed URL; Phase 11's image endpoint remains the only signed-image URL
 issuer.
+
+Additive (Phase 13): ``inspiration_acknowledgements`` is built ONLY from the
+persisted ``DesignVersion.inspiration_context`` snapshot — never by
+re-querying the live catalogue, so a later asset retirement/expiry never
+rewrites a historical result. It carries position/title/attribution only;
+provider cues, the asset UUID, garment type, alt text and cultural context
+are never included. Legacy (pre-Phase-13) versions with no snapshot yield an
+empty list — inspiration context is never a readiness requirement.
 """
 
 from pydantic import ValidationError
 
 from sitara.generation.design_spec import DESIGN_SPEC_SCHEMA_VERSION, DesignSpec
 from sitara.generation.input_safety import GeneratedContentRejected
+from sitara.generation.inspiration_context import (
+    INSPIRATION_CONTEXT_SCHEMA_VERSION,
+    InspirationContextSnapshot,
+    inspiration_acknowledgements,
+    inspiration_context_sha256,
+)
 from sitara.generation.services import scan_design_spec_or_raise
 
 from .jobs import _iso
@@ -83,9 +97,40 @@ def load_validated_design_spec(version: DesignVersion) -> DesignSpec:
     return spec
 
 
-def design_result_payload(version: DesignVersion, spec: DesignSpec) -> dict:
+def load_inspiration_acknowledgements(version: DesignVersion) -> list[dict]:
+    """The audit-only acknowledgement list for one DesignVersion's persisted
+    inspiration-context snapshot.
+
+    A legacy (pre-Phase-13) version with no snapshot returns an empty list —
+    this is never a result-readiness requirement. Raises
+    :class:`DesignResultUnavailable` when the persisted content is corrupt,
+    its schema version is unsupported, or it fails hash verification —
+    never exposing the raw stored content."""
+    if version.inspiration_context is None:
+        return []
+
+    if version.inspiration_context_schema_version != INSPIRATION_CONTEXT_SCHEMA_VERSION:
+        raise DesignResultUnavailable(
+            "persisted inspiration context schema version is not supported"
+        )
+
+    try:
+        snapshot = InspirationContextSnapshot.model_validate(version.inspiration_context)
+    except ValidationError as exc:
+        raise DesignResultUnavailable("stored inspiration context failed validation") from exc
+
+    if inspiration_context_sha256(snapshot) != version.inspiration_context_sha256:
+        raise DesignResultUnavailable("stored inspiration context failed hash verification")
+
+    return inspiration_acknowledgements(snapshot)
+
+
+def design_result_payload(
+    version: DesignVersion, spec: DesignSpec, acknowledgements: list[dict]
+) -> dict:
     """The curated ``{"result": {...}}`` body for one owned, ready
-    DesignVersion and its revalidated DesignSpec."""
+    DesignVersion, its revalidated DesignSpec and its inspiration
+    acknowledgements (see :func:`load_inspiration_acknowledgements`)."""
     return {
         "result": {
             "design_id": str(version.design_id),
@@ -136,5 +181,6 @@ def design_result_payload(version: DesignVersion, spec: DesignSpec) -> dict:
             "construction_caveats": list(spec.construction_caveats),
             "image_alt_text": spec.image_alt_text,
             "created_at": _iso(version.design_spec_generated_at),
+            "inspiration_acknowledgements": list(acknowledgements),
         }
     }

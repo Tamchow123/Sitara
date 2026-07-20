@@ -17,6 +17,8 @@ from django.core.files.storage import default_storage
 from django.db import transaction
 from django.utils import timezone
 
+from sitara.content_safety import GeneratedContentRejected, scan_generated_text
+
 from .image_processing import process_inspiration_upload
 from .models import InspirationAsset, UsageRights
 
@@ -190,6 +192,19 @@ def approve_inspiration_asset(asset: InspirationAsset, *, approved_by) -> Inspir
             raise AssetApprovalError("A title is required before approval.")
         if not locked.alt_text.strip():
             raise AssetApprovalError("Alt text is required before approval.")
+        # Defence in depth (Phase 13): the same generated-content safety scan
+        # applied to inspiration metadata at generation time also gates
+        # approval, so an unsafe alt_text/cultural_context can never become
+        # approved in the first place. Selection-time revalidation remains
+        # the authoritative pre-spend gate for already-approved legacy assets.
+        try:
+            scan_generated_text(locked.alt_text)
+            if locked.cultural_context.strip():
+                scan_generated_text(locked.cultural_context)
+        except GeneratedContentRejected as exc:
+            raise AssetApprovalError(
+                "The asset's metadata failed the content safety check."
+            ) from exc
         if locked.usage_rights_id is None:
             raise AssetApprovalError("A usage rights record is required before approval.")
         rights = UsageRights.objects.select_for_update().get(pk=locked.usage_rights_id)

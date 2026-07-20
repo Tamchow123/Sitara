@@ -41,6 +41,10 @@ export function InspirationPicker({ assets, selection, max, onChange }: Props) {
     <div className="inspiration">
       <p className="field-help" id="inspiration-help">
         Choose up to {max} inspiration images (optional). {selectedCount} of {max} selected.
+        Sitara uses each selected image&apos;s staff-written description as a secondary visual
+        cue — your questionnaire answers remain authoritative, the image files themselves are not
+        sent to the AI models in this version, and the generated concept will not be an exact
+        copy.
       </p>
 
       {unavailable.length > 0 && (

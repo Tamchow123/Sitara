@@ -35,13 +35,22 @@ indistinguishable-404 discipline as every other private design endpoint, adds
 sections (title, concept summary, garment breakdown, colour story, fabrics
 and texture, embellishment plan, coverage and drape, cultural context,
 styling notes, construction caveats) plus `image_alt_text` and `created_at`.
-It never returns `source_selections`, questionnaire answers, inspiration
+It never returns `source_selections`, questionnaire answers, raw inspiration
 selections, the image prompt, prompt-builder version, DesignSpec
 provider/model, token counts, provider prediction ID, seed, staging metadata,
 storage keys, hashes, or any signed URL — image delivery stays exclusively
 Phase 11's job. Documentation-only DRF serializers follow the existing
 `apps/api/sitara/designs/openapi.py` convention; the frontend never
 hand-maintains a competing result type.
+
+**Phase 13 amendment (ADR 0014):** the payload additively gains
+`inspiration_acknowledgements` (position/title/attribution only), read solely
+from the persisted `DesignVersion.inspiration_context` snapshot — never a
+live catalogue re-query — with its own schema-version and hash verification
+before use, mapped to the same `503 design_result_unavailable` on corruption.
+A legacy pre-Phase-13 version returns an empty list; this remains additive
+and is never a readiness requirement, so the "purpose-built curated payload"
+principle above is preserved, not weakened.
 
 ### Readiness is re-derived, not inferred from status
 

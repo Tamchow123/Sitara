@@ -92,6 +92,7 @@ function result(overrides: Partial<DesignResultType> = {}): DesignResultType {
     ],
     image_alt_text: "A model in an ivory flared lehenga with gold embroidery.",
     created_at: "2026-07-19T12:00:00Z",
+    inspiration_acknowledgements: [],
     ...overrides,
   };
 }

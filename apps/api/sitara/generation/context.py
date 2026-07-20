@@ -12,9 +12,15 @@ canonical machine value(s) and the resolved option label(s). Free-text answers
 are treated as UNTRUSTED preference data (scanned, capped, JSON-encoded and
 placed in a delimited section by the prompt builder).
 
+Selected-inspiration metadata (Phase 13) is sent only as the curated,
+versioned ``curated_inspiration_cues`` built by
+:mod:`sitara.generation.inspiration_context` — garment type, visual
+description and cultural context ONLY, re-validated and safety-scanned here,
+strictly before any provider is selected.
+
 What is NEVER sent: the full questionnaire schema, hidden answers, rights
-records/evidence, catalogue storage keys, image bytes, selected-inspiration
-metadata (deferred to Phase 13), user/session identifiers, email addresses,
+records/evidence, catalogue storage keys, image bytes, inspiration asset
+UUIDs/titles/attribution, user/session identifiers, email addresses,
 timestamps or internal database metadata.
 """
 
@@ -30,6 +36,13 @@ from sitara.questionnaire.rules import build_selected, questions_by_id, visible_
 
 from .design_spec import SourceSelections
 from .input_safety import scan_user_text
+from .inspiration_context import (
+    InspirationAssetIneligible,
+    InspirationContextSnapshot,
+    InspirationMetadataUnavailable,
+    build_inspiration_context_snapshot,
+    provider_inspiration_cues,
+)
 
 # The DesignSpec.source_selections fields map 1:1 onto questionnaire question
 # ids of the same name. This is a fixed CONTRACT mapping, not conditional UI
@@ -70,6 +83,8 @@ class GenerationContext:
     source_selections: dict
     trusted_answers: list[dict]
     untrusted_texts: list[dict]
+    inspiration_context: InspirationContextSnapshot
+    inspiration_cues: list[dict]
 
 
 def _option_labels(schema: dict) -> dict[str, dict[str, str]]:
@@ -182,10 +197,29 @@ def build_generation_context(design) -> GenerationContext:
                 }
             )
 
+    # Selected-inspiration eligibility and metadata safety, re-validated
+    # strictly before any provider is selected (design_completion_errors
+    # above already checked coarse eligibility; this is the precise,
+    # defence-in-depth recheck that also builds the versioned snapshot).
+    try:
+        inspiration_context = build_inspiration_context_snapshot(design)
+    except InspirationAssetIneligible:
+        raise DesignNotReady(
+            "inspiration_unavailable",
+            "A selected inspiration is no longer available.",
+        ) from None
+    except InspirationMetadataUnavailable:
+        raise DesignNotReady(
+            "inspiration_metadata_unavailable",
+            "Selected inspiration metadata is unavailable.",
+        ) from None
+
     return GenerationContext(
         source_selections=source_selections,
         trusted_answers=trusted_answers,
         untrusted_texts=untrusted_texts,
+        inspiration_context=inspiration_context,
+        inspiration_cues=provider_inspiration_cues(inspiration_context),
     )
 
 

@@ -2,7 +2,10 @@
 // actions. Includes only user-facing DesignSpec content — never an id,
 // signed URL, source selection, questionnaire answer, provider detail,
 // storage metadata or prompt text (none of that is even reachable from the
-// curated DesignResult type this function accepts).
+// curated DesignResult type this function accepts). When present,
+// inspiration_acknowledgements contributes only title/attribution and the
+// metadata-only limitation note — never a provider cue, alt text, cultural
+// context, asset id or URL (also not reachable from this type).
 
 import type { DesignResult } from "@/lib/api";
 
@@ -62,6 +65,23 @@ export function formatDesignBrief(result: DesignResult): string {
   lines.push("Construction caveats");
   for (const caveat of result.construction_caveats) lines.push(`- ${caveat}`);
   lines.push("");
+
+  if (result.inspiration_acknowledgements.length > 0) {
+    lines.push("Inspiration acknowledgements");
+    for (const acknowledgement of result.inspiration_acknowledgements) {
+      lines.push(
+        acknowledgement.attribution
+          ? `- ${acknowledgement.title} — ${acknowledgement.attribution}`
+          : `- ${acknowledgement.title}`,
+      );
+    }
+    lines.push(
+      "Selected inspirations influenced this concept through staff-curated descriptions. " +
+        "The source images themselves were not sent to the generation models, and the result " +
+        "is not an exact reproduction.",
+    );
+    lines.push("");
+  }
 
   lines.push(GENERIC_DISCLAIMER);
 

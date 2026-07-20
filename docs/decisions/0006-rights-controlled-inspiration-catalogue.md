@@ -91,3 +91,18 @@ in-memory storage backend (CI has no MinIO).
   asset freeze in admin.
 - Deferred: signed URLs, design-to-inspiration linking, any user-facing
   upload, search/ranking, caption or moderation AI.
+
+**Phase 13 amendment (ADR 0014):** once a design is generated with a
+selected inspiration, an exact, versioned, hashed snapshot of that
+selection's frozen `garment_type`/`alt_text`/`cultural_context` (the
+provider-facing cues) and `title`/attribution (audit-only, never sent to a
+provider) is persisted on the `DesignVersion`. This is the one exception to
+"nothing about a selection is copied out of the catalogue" recorded above:
+the historical snapshot is what lets a generated design keep displaying its
+inspiration acknowledgement even after the source asset is later retired,
+expires, or otherwise becomes ineligible — future generation is still
+blocked by current eligibility, but an existing private result is never
+silently rewritten. `approve_inspiration_asset` additionally now runs the
+same generated-content safety scan used for provider-facing text before
+allowing approval, as defence in depth alongside the selection-time
+recheck.

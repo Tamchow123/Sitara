@@ -80,4 +80,18 @@ describe("InspirationPicker", () => {
     render(<InspirationPicker assets={[]} selection={[]} max={3} onChange={vi.fn()} />);
     expect(screen.getByText(/No inspiration images are available yet/i)).toBeInTheDocument();
   });
+
+  it("explains the metadata-only influence and associates it with the picker", () => {
+    const { container } = render(
+      <InspirationPicker assets={[asset("a")]} selection={[]} max={3} onChange={vi.fn()} />,
+    );
+    const help = document.getElementById("inspiration-help");
+    expect(help).toHaveTextContent(/optional/i);
+    expect(help).toHaveTextContent(/staff-written description/i);
+    expect(help).toHaveTextContent(/questionnaire answers remain authoritative/i);
+    expect(help).toHaveTextContent(/not sent to the ai models/i);
+    expect(help).toHaveTextContent(/will not be an exact copy/i);
+    const grid = container.querySelector("ul.inspiration-grid");
+    expect(grid).toHaveAttribute("aria-describedby", "inspiration-help");
+  });
 });

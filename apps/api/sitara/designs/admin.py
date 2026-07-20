@@ -86,6 +86,11 @@ class DesignVersionAdmin(admin.ModelAdmin):
         "design_spec_generated_at",
         "image_prompt",
         "prompt_builder_version",
+        # Inspiration-context provenance (Phase 13) is immutable audit data —
+        # read-only everywhere; never rendered as a link or preview.
+        "inspiration_context",
+        "inspiration_context_schema_version",
+        "inspiration_context_sha256",
         # Permanent-image provenance (Phase 11) is immutable audit data —
         # read-only everywhere; no preview or URL is ever rendered.
         "image_storage_key",

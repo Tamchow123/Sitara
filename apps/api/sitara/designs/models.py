@@ -202,6 +202,16 @@ class DesignVersion(models.Model):
     # provider call, model id, seed, negative prompt or reference-image data.
     image_prompt = models.TextField(blank=True)
     prompt_builder_version = models.CharField(max_length=32, blank=True)
+    # Versioned inspiration-context provenance (Phase 13). Present exactly
+    # when a snapshot was built for this version — including an EMPTY item
+    # list when no inspiration was selected (all-or-none constraint below).
+    # NEVER stores image bytes, storage keys, image hashes, dimensions,
+    # rights UUIDs/basis, source/licence URLs, evidence references or
+    # verifier/staff identity; audit-only title/attribution are the only
+    # caller-visible identity of a selected inspiration.
+    inspiration_context = models.JSONField(null=True, blank=True)
+    inspiration_context_schema_version = models.PositiveSmallIntegerField(null=True, blank=True)
+    inspiration_context_sha256 = models.CharField(max_length=64, blank=True)
     # --- Permanent private image provenance (Phase 11) --------------------
     # Written EXACTLY ONCE by the canonical ingest service and immutable
     # afterwards (all-or-none constraint below; a future processor version
@@ -299,6 +309,39 @@ class DesignVersion(models.Model):
             models.CheckConstraint(
                 condition=Q(image_prompt="") | Q(design_spec__isnull=False),
                 name="designs_designversion_image_prompt_requires_spec",
+            ),
+            # Inspiration-context provenance (Phase 13) is all-or-none: either
+            # no snapshot was built (legacy/pre-Phase-13 rows) or every field
+            # is present — including an empty item list, which is itself a
+            # valid, hashed snapshot recording "no inspiration selected".
+            models.CheckConstraint(
+                condition=(
+                    Q(inspiration_context__isnull=True)
+                    & Q(inspiration_context_schema_version__isnull=True)
+                    & Q(inspiration_context_sha256="")
+                )
+                | (
+                    Q(inspiration_context__isnull=False)
+                    & Q(inspiration_context_schema_version__isnull=False)
+                    & ~Q(inspiration_context_sha256="")
+                ),
+                name="designs_designversion_inspiration_context_all_or_none",
+            ),
+            models.CheckConstraint(
+                condition=Q(inspiration_context__isnull=True)
+                | Q(inspiration_context_schema_version=1),
+                name="designs_designversion_inspiration_context_schema_version_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(inspiration_context_sha256="")
+                | Q(inspiration_context_sha256__regex=r"^[0-9a-f]{64}$"),
+                name="designs_designversion_inspiration_context_sha256_shape",
+            ),
+            # An inspiration-context snapshot can only exist when a DesignSpec
+            # exists; legacy rows without a spec never carry one.
+            models.CheckConstraint(
+                condition=Q(inspiration_context__isnull=True) | Q(design_spec__isnull=False),
+                name="designs_designversion_inspiration_context_requires_spec",
             ),
             # Permanent-image provenance (Phase 11) is all-or-none: EVERY
             # field absent (legacy and Phase 10 rows), or EVERY field present

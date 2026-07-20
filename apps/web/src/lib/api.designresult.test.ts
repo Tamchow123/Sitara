@@ -77,6 +77,7 @@ const RESULT = {
     construction_caveats: ["This is a concept visualisation, not a sewing pattern."],
     image_alt_text: "A model in an ivory lehenga.",
     created_at: "2026-07-19T12:00:00Z",
+    inspiration_acknowledgements: [],
   },
 };
 
@@ -172,5 +173,36 @@ describe("fetchDesignResult", () => {
     expect(outcome.ok).toBe(true);
     const raw = JSON.stringify(outcome);
     expect(raw).not.toMatch(/https?:\/\//);
+  });
+
+  it("accepts a populated inspiration_acknowledgements array", async () => {
+    const withInspiration = {
+      result: {
+        ...RESULT.result,
+        inspiration_acknowledgements: [
+          { position: 1, title: "Emerald look", attribution: "Studio A" },
+        ],
+      },
+    };
+    installFetchSpy(() => json(withInspiration));
+    const outcome = await fetchDesignResult("d", "v");
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.result.inspiration_acknowledgements).toEqual([
+        { position: 1, title: "Emerald look", attribution: "Studio A" },
+      ]);
+    }
+  });
+
+  it("rejects a malformed inspiration_acknowledgements entry as invalid_response", async () => {
+    const malformed = {
+      result: {
+        ...RESULT.result,
+        inspiration_acknowledgements: [{ position: "1", title: "x", attribution: "" }],
+      },
+    };
+    installFetchSpy(() => json(malformed));
+    const outcome = await fetchDesignResult("d", "v");
+    expect(outcome).toMatchObject({ ok: false, status: 200, code: "invalid_response" });
   });
 });

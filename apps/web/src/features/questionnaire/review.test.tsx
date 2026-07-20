@@ -167,6 +167,38 @@ describe("ReviewSummary", () => {
     expect(await screen.findByText(/no longer available/i)).toBeInTheDocument();
   });
 
+  it("explains that questionnaire answers take priority when an inspiration is selected", async () => {
+    mocks.fetchDesign.mockResolvedValue(
+      design({
+        selected_inspirations: [
+          {
+            id: "a",
+            position: 1,
+            available: true,
+            asset: {
+              id: "a",
+              title: "Emerald look",
+              alt_text: "Alt",
+              garment_type: "lehenga",
+              cultural_context: "",
+              attribution: "",
+              image_url: "/api/v1/inspiration-assets/a/image/",
+              thumbnail_url: "/api/v1/inspiration-assets/a/thumbnail/",
+            },
+          },
+        ],
+      }),
+    );
+    render(<ReviewSummary designId="d1" />);
+    expect(await screen.findByText(/answers always take priority/i)).toBeInTheDocument();
+  });
+
+  it("omits the priority note when no inspiration is selected", async () => {
+    render(<ReviewSummary designId="d1" />);
+    expect(await screen.findByText("No inspiration images selected.")).toBeInTheDocument();
+    expect(screen.queryByText(/answers always take priority/i)).not.toBeInTheDocument();
+  });
+
   describe("Generate my concept", () => {
     it("enables the button when valid and generation is enabled", async () => {
       render(<ReviewSummary designId="d1" />);

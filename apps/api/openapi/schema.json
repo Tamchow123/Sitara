@@ -1636,6 +1636,12 @@
                     "created_at": {
                         "type": "string",
                         "format": "date-time"
+                    },
+                    "inspiration_acknowledgements": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/InspirationAcknowledgementResult"
+                        }
                     }
                 },
                 "required": [
@@ -1651,6 +1657,7 @@
                     "fabrics_and_texture",
                     "garment_breakdown",
                     "image_alt_text",
+                    "inspiration_acknowledgements",
                     "styling_notes",
                     "title",
                     "version_number"
@@ -1949,6 +1956,26 @@
                 },
                 "required": [
                     "job"
+                ]
+            },
+            "InspirationAcknowledgementResult": {
+                "type": "object",
+                "description": "One private audit acknowledgement from the persisted, historical\ninspiration-context snapshot (Phase 13). Deliberately excludes the asset\nUUID, provider cues (garment type, visual description, cultural\ncontext), storage data and every URL — never reconstructed from the\nlive catalogue, so a later asset retirement never rewrites it.",
+                "properties": {
+                    "position": {
+                        "type": "integer"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "attribution": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "attribution",
+                    "position",
+                    "title"
                 ]
             },
             "InspirationCatalogueResponse": {

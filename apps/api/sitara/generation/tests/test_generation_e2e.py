@@ -116,6 +116,41 @@ def test_end_to_end_generation_succeeds_via_eager_task(settings, monkeypatch):
 
 
 @pytest.mark.django_db(transaction=True)
+def test_end_to_end_generation_with_inspiration_never_sends_a_reference_image(
+    settings, monkeypatch, inmemory_storage
+):
+    """Phase 13: an inspiration selected through the full async pipeline still
+    reaches Replicate with an empty ``reference_image_urls`` tuple, the
+    persisted DesignVersion carries the exact snapshot, and zero catalogue
+    storage reads occur outside asset approval/ingest."""
+    from sitara.catalogue.tests.utils import make_eligible_asset
+    from sitara.designs.models import DesignInspiration
+    from sitara.generation.inspiration_context import build_inspiration_context_snapshot
+
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    _open_all_gates(settings)
+    storage = InMemoryStorage()
+    fake_image = FakeImageProvider()
+    _inject_fakes(monkeypatch, storage, image=fake_image)
+
+    design = make_complete_design()
+    asset = make_eligible_asset()
+    DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+    expected_snapshot = build_inspiration_context_snapshot(design)
+
+    attempt, created = enqueue_design_generation(design, idempotency_key=uuid.uuid4())
+    assert created is True
+    attempt.refresh_from_db()
+    assert attempt.status == _Status.SUCCEEDED
+
+    assert fake_image.last_request is not None
+    assert fake_image.last_request.reference_image_urls == ()
+
+    version = DesignVersion.objects.get(design=design)
+    assert version.inspiration_context == expected_snapshot.model_dump(mode="json")
+
+
+@pytest.mark.django_db(transaction=True)
 def test_worker_restart_reuses_prediction_without_new_calls(settings, monkeypatch):
     _open_all_gates(settings)
     storage = InMemoryStorage()

@@ -134,12 +134,17 @@ def create_ready_design_version(
     schema_version: int = 1,
     image_prompt: str = "A test prompt.",
     with_storage_objects: bool = True,
+    inspiration_context: dict | None = None,
+    inspiration_context_schema_version: int | None = None,
+    inspiration_context_sha256: str = "",
 ) -> DesignVersion:
     """A DesignVersion with every DesignSpec and permanent-image provenance
     field populated — the shared "fully ready" fixture for both the Phase 11
     image-delivery tests and the Phase 12 result-endpoint tests. Pass
     `with_storage_objects=False` when a test only needs the database row
-    (e.g. the result endpoint, which never checks object-store existence)."""
+    (e.g. the result endpoint, which never checks object-store existence).
+    The `inspiration_context*` fields default to absent (a legacy,
+    pre-Phase-13 row); pass all three together for a Phase 13 snapshot."""
     version = DesignVersion.objects.create(
         design_id=design_id,
         version_number=version_number,
@@ -151,6 +156,9 @@ def create_ready_design_version(
         design_spec_generated_at=timezone.now(),
         image_prompt=image_prompt,
         prompt_builder_version="3.0.0",
+        inspiration_context=inspiration_context,
+        inspiration_context_schema_version=inspiration_context_schema_version,
+        inspiration_context_sha256=inspiration_context_sha256,
         image_storage_key=f"design-images/{design_id}/v1/original.webp",
         image_sha256="a" * 64,
         image_size_bytes=1000,
