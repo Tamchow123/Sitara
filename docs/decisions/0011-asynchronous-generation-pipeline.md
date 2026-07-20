@@ -168,3 +168,25 @@ The staged raw object and its metadata are retained after ingest (crash
 recovery across the non-atomic object-storage/PostgreSQL boundary); purging
 them remains Phase 16 work. See
 `docs/decisions/0012-private-design-image-storage.md`.
+
+## Amendment: Phase 14 refinement branch and resume rules
+
+Phase 14 (ADR 0015) does not add a second pipeline. `GenerationAttempt`
+gains `generation_kind` (`initial`/`refinement`); `enqueue_design_refinement`
+mirrors this ADR's precondition ordering above (idempotent replay, queue
+availability, in-progress-attempt check, staged/unresolved-spend checks)
+with refinement-specific substitutions — the `Design` must already be
+`GENERATED`, and the source `DesignVersion` is independently re-validated
+rather than assumed valid from a prior read. `_execute()` branches on
+`generation_kind` only for the text stage
+(`_run_refinement_text_stage` vs. the existing `_run_text_stage`); every
+other stage this ADR documents — image submission, polling, staging,
+permanent ingest, the spend-resolved/ambiguous error taxonomy, the
+deterministic Celery task id equal to the attempt UUID — is unmodified and
+shared by both kinds. A refinement attempt reuses the source attempt's
+recorded seed when available (a continuity aid only, never a guarantee); it
+never has network access to the original image's bytes, URL, or storage
+key. On resume, a refinement attempt with complete image provenance already
+recorded finalises the same way an initial attempt does — no new resume
+rule was introduced, only a new field this ADR's existing resume logic
+already treats identically to any other persisted marker.

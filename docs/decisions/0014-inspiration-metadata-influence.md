@@ -63,6 +63,17 @@ pattern. A Phase-13-generated `DesignVersion` always records a snapshot, even
 an empty one when no inspiration was selected — the absence of the three
 fields is reserved exclusively for legacy, pre-Phase-13 rows.
 
+**Phase 14 note (ADR 0015):** a refined `DesignVersion`'s
+`inspiration_context`/`_schema_version`/`_sha256` are copied byte-for-byte
+from its parent version at persistence time, never rebuilt from a fresh live
+catalogue query. Refinement never re-selects inspirations and never
+re-validates them against `publicly_eligible()` — it inherits exactly the
+influence (or lack of it) its source version already had, consistent with
+this section's "immutable audit data" invariant: a later asset retirement or
+rights change still cannot alter what an already-generated version's
+acknowledgement displays, whether that version is an initial generation or a
+refinement of one.
+
 ### Every selected inspiration is re-validated, twice, before it can influence a design
 
 Before any provider is selected, `build_inspiration_context_snapshot`

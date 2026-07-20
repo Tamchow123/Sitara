@@ -103,6 +103,7 @@ class TestLatestJob:
             "design_version_id",
             "status",
             "error_code",
+            "generation_kind",
             "created_at",
             "updated_at",
             "started_at",

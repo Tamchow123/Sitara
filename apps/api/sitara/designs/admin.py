@@ -91,6 +91,12 @@ class DesignVersionAdmin(admin.ModelAdmin):
         "inspiration_context",
         "inspiration_context_schema_version",
         "inspiration_context_sha256",
+        # Refinement lineage provenance (Phase 14) is immutable audit data —
+        # read-only everywhere.
+        "parent_version",
+        "refinement_request",
+        "refinement_request_schema_version",
+        "refinement_request_sha256",
         # Permanent-image provenance (Phase 11) is immutable audit data —
         # read-only everywhere; no preview or URL is ever rendered.
         "image_storage_key",
@@ -129,6 +135,12 @@ class GenerationAttemptAdmin(admin.ModelAdmin):
         "error_code",
         "started_at",
         "completed_at",
+        "generation_kind",
+        "source_design_version",
+        "seed_reused",
+        "refinement_request",
+        "refinement_request_schema_version",
+        "refinement_request_sha256",
         "image_provider",
         "image_model",
         "image_prediction_id",

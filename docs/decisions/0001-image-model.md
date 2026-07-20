@@ -240,6 +240,16 @@ structured DesignSpec — without evidence that it outperforms direct
 reference-image conditioning. `black-forest-labs/flux-1.1-pro` and
 `PROMPT_BUILDER_VERSION` are unchanged by Phase 13.
 
+**Phase 14 implementation note:** the "one constrained refinement test (fresh
+regeneration vs image editing)" stage above still has not run as a live, paid
+comparison. Phase 14 (ADR 0015) implements single-round refinement as fresh
+text-to-image generation only, with seed reuse documented everywhere as a
+continuity aid rather than a guarantee — without evidence that it preserves
+more visual continuity than true image-to-image editing would.
+`black-forest-labs/flux-1.1-pro` and `PROMPT_BUILDER_VERSION` are unchanged by
+Phase 14; refinement uses the same model and the same deterministic
+image-prompt builder as initial generation.
+
 ## Alternatives considered
 
 - **flux-2-pro** — numerically best pooled mean, but one hard-failure flag,

@@ -83,7 +83,7 @@ class ProviderIdentityChanged(Exception):
 
 
 @dataclass(frozen=True)
-class _AggregatedUsage:
+class AggregatedUsage:
     """Provider/model identity and TOTAL token usage across every returned
     response of one generation operation. A token total is None when ANY
     response lacked that dimension (never a misleading partial)."""
@@ -94,7 +94,7 @@ class _AggregatedUsage:
     output_tokens: int | None
 
 
-def _aggregate_usage(responses: list) -> _AggregatedUsage:
+def aggregate_usage(responses: list) -> AggregatedUsage:
     """Sum usage across all returned responses. Provider/model identity must be
     consistent; a missing dimension on any response yields None for that
     total."""
@@ -114,7 +114,7 @@ def _aggregate_usage(responses: list) -> _AggregatedUsage:
             output_known = False
         else:
             output_total += response.output_tokens
-    return _AggregatedUsage(
+    return AggregatedUsage(
         provider=first.provider,
         model=first.model,
         # A known-but-zero total would violate the positive-token DB constraint;
@@ -172,7 +172,7 @@ def _lock_key(design_id) -> int:
 
 
 @contextlib.contextmanager
-def _advisory_lock(design_id):
+def advisory_lock(design_id):
     """Non-blocking session advisory lock keyed by the Design UUID. Raises
     GenerationLocked if another generation already holds it; always released."""
     key = _lock_key(design_id)
@@ -289,7 +289,7 @@ def _generate_valid_spec(provider, context: GenerationContext, design_id, genera
             else:
                 # Aggregate usage over every response consumed so far (an
                 # invalid first attempt still spent tokens).
-                return spec, _aggregate_usage(responses), attempts
+                return spec, aggregate_usage(responses), attempts
     raise GenerationFailed(attempts)
 
 
@@ -333,7 +333,7 @@ def _rebuild_input_snapshot_locked(locked_design: Design) -> _InputSnapshot | No
 
 
 def _finalise_atomic(
-    design, spec: DesignSpec, usage: _AggregatedUsage, input_snapshot: _InputSnapshot, attempt=None
+    design, spec: DesignSpec, usage: AggregatedUsage, input_snapshot: _InputSnapshot, attempt=None
 ):
     """Re-check freshness and persist the DesignVersion in ONE transaction under
     the Design row lock.
@@ -414,7 +414,7 @@ def generate_design_spec_for_design(design, *, provider=None, attempt=None):
     # The advisory lock is a SESSION-level lock, deliberately NOT a row lock or
     # an open transaction — no database transaction is held across the network
     # request.
-    with _advisory_lock(design.id):
+    with advisory_lock(design.id):
         # Close the race: another holder may have generated between the
         # pre-check and acquiring the lock.
         if design.versions.exists():

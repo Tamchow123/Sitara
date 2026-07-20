@@ -78,6 +78,18 @@ shape and the system prompt, `SPEC_TEMPLATE_VERSION` bumped `1.0.0` →
 `2.0.0` with a recomputed `PROMPT_TEMPLATE_HASH`; `DESIGN_SPEC_SCHEMA_VERSION`
 stays `1` (no DesignSpec field changed).
 
+**Phase 14 amendment (ADR 0015):** refinement does not reuse or extend this
+system prompt — it uses a wholly separate structured-output prompt in
+`apps/api/sitara/generation/refinement_prompting.py`, versioned independently
+(`REFINEMENT_TEMPLATE_VERSION = "1.0.0"`, its own
+`refinement_prompt_template_fingerprint()`/hash guard), since its task (apply
+exactly one allowlisted DesignSpec edit) differs from this prompt's task
+(author a DesignSpec from questionnaire answers). `SPEC_TEMPLATE_VERSION` and
+this prompt's `PROMPT_TEMPLATE_HASH` are untouched by Phase 14.
+`DESIGN_SPEC_SCHEMA_VERSION` stays `1` for a refined DesignSpec too — the
+refinement prompt still produces (an edited copy of) the same DesignSpec
+shape this ADR defines.
+
 ### Anthropic structured output, one controlled retry, SDK retries off
 
 Generation uses the SDK's first-class `beta.messages.parse` with
@@ -182,6 +194,11 @@ contract or the two-request budget:
   the stale-input protection above to also cover the exact inspiration-context
   snapshot and its hash, and adding a post-output check that no selected
   inspiration's audit-only title/attribution leaks into generated text.
+- Phase 14 (ADR 0015) delivered single-round refinement using a separate
+  structured-output prompt that edits a copy of this DesignSpec schema under
+  an exact per-category diff allowlist; this ADR's validators, semantic
+  invariants and stale-input protections apply unchanged to a refined
+  DesignSpec.
 
 ## Alternatives considered
 

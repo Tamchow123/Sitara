@@ -91,6 +91,7 @@ _RESULT_SECTION_KEYS = {
     "image_alt_text",
     "created_at",
     "inspiration_acknowledgements",
+    "lineage",
 }
 
 
@@ -148,6 +149,11 @@ class TestAuthorisedAccess:
         assert result["construction_caveats"]
         assert result["image_alt_text"]
         assert result["created_at"]
+        assert result["lineage"] == {
+            "kind": "initial",
+            "parent_version_id": None,
+            "refinement": None,
+        }
 
     def test_authenticated_owner_receives_it(self):
         client = csrf_client()

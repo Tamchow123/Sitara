@@ -66,6 +66,27 @@ IMAGE_INGEST_UNVERIFIED = "image_ingest_unverified"
 # Confirmed corrupt, conflicting or invalid permanent content.
 IMAGE_INGEST_FAILED = "image_ingest_failed"
 
+# Refinement (Phase 14) text stage. Distinguished from the initial-generation
+# structured-stage codes so a client/frontend can render honest refinement
+# wording without inspecting generation_kind.
+# The client-submitted refinement request itself was invalid or its note
+# failed the pre-provider safety scan — a controlled 400 at enqueue time; this
+# code is never persisted onto a GenerationAttempt (the request is rejected
+# before any attempt is created), but is listed here so it can share the same
+# stable-code contract as every other refinement/API error surface.
+REFINEMENT_INVALID = "refinement_invalid"
+# Every allowed attempt produced output identical to the source DesignSpec.
+REFINEMENT_NO_CHANGE = "refinement_no_change"
+# A technical structured-generation failure other than "no change" (invalid
+# output after retries, a disallowed field change, an unsafe output).
+REFINEMENT_GENERATION_FAILED = "refinement_generation_failed"
+# This design has already been refined once, or MAX_DESIGN_VERSIONS is
+# already reached.
+REFINEMENT_LIMIT_REACHED = "refinement_limit_reached"
+# The source version is missing, not version 1, or its persisted provenance
+# (spec/prompt/image/inspiration-context) is incomplete or corrupt.
+REFINEMENT_SOURCE_UNAVAILABLE = "refinement_source_unavailable"
+
 # The ingest-stage terminal codes the operator recovery path may act on —
 # defined ONCE so the ``ingest_design_image`` command's admission gate and
 # ``pipeline.finalise_ingest_recovery``'s completion guard can never drift.
@@ -98,6 +119,11 @@ GENERATION_ERROR_CODES = frozenset(
         IMAGE_STAGING_UNVERIFIED,
         IMAGE_INGEST_UNVERIFIED,
         IMAGE_INGEST_FAILED,
+        REFINEMENT_INVALID,
+        REFINEMENT_NO_CHANGE,
+        REFINEMENT_GENERATION_FAILED,
+        REFINEMENT_LIMIT_REACHED,
+        REFINEMENT_SOURCE_UNAVAILABLE,
         INTERNAL_GENERATION_ERROR,
     }
 )

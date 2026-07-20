@@ -10,20 +10,26 @@ from sitara.content_safety import (
     GeneratedContentRejected,
     RejectionCategory,
     UnsafeUserTextError,
+    contains_markup,
     contains_phrase,
+    contains_url,
     iter_strings,
     scan_design_spec,
     scan_generated_text,
     scan_user_text,
+    strip_format_characters,
 )
 
 __all__ = [
     "GeneratedContentRejected",
     "RejectionCategory",
     "UnsafeUserTextError",
+    "contains_markup",
     "contains_phrase",
+    "contains_url",
     "iter_strings",
     "scan_design_spec",
     "scan_generated_text",
     "scan_user_text",
+    "strip_format_characters",
 ]

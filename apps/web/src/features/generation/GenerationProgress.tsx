@@ -8,11 +8,16 @@
 
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { fetchGenerationJob, GenerationJobNotFoundError, type GenerationJob } from "@/lib/api";
 import { friendlyGenerationError } from "./generation-errors";
 import { pollingIntervalMs } from "./generation-status";
+import {
+  REFINEMENT_PROGRESS_NOTES,
+  refinementProgressExplanation,
+  refinementProgressHeading,
+} from "./refinement-progress-copy";
 
 type Props = { designId: string; jobId: string };
 
@@ -34,6 +39,12 @@ function stageIndexFor(status: GenerationJob["status"]): number {
 
 export function GenerationProgress({ designId, jobId }: Props) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Since Phase 14: RefinementPanel appends the source version id so a
+  // refinement's progress/failure screens can link back to the still-private,
+  // still-readable original concept. Purely a navigation convenience — never
+  // trusted for anything security-sensitive, never persisted anywhere.
+  const originalVersionId = searchParams.get("from");
 
   const query = useQuery({
     queryKey: ["generation-job", jobId],
@@ -123,6 +134,8 @@ export function GenerationProgress({ designId, jobId }: Props) {
     );
   }
 
+  const isRefinement = job.generation_kind === "refinement";
+
   if (job.status === "failed") {
     const friendly = friendlyGenerationError(job.error_code);
     return (
@@ -135,6 +148,13 @@ export function GenerationProgress({ designId, jobId }: Props) {
               <a href={`/design/${designId}`}>Return to the questionnaire</a>
             </p>
           )}
+          {isRefinement && originalVersionId && (
+            <p>
+              <a href={`/design/${designId}/result/${originalVersionId}`}>
+                Return to your original concept
+              </a>
+            </p>
+          )}
         </div>
         <p className="generation-privacy-note">
           Your private design details are never made public during generation.
@@ -144,14 +164,16 @@ export function GenerationProgress({ designId, jobId }: Props) {
   }
 
   const stageIndex = stageIndexFor(job.status);
-  const heading =
-    job.status === "queued"
+  const heading = isRefinement
+    ? refinementProgressHeading(job.status)
+    : job.status === "queued"
       ? "Preparing your concept"
       : job.status === "running_text"
         ? "Creating your design brief"
         : "Creating your visual concept";
-  const explanation =
-    job.status === "queued"
+  const explanation = isRefinement
+    ? refinementProgressExplanation(job.status)
+    : job.status === "queued"
       ? "Your generation job is waiting to start."
       : job.status === "running_text"
         ? "The details you selected are being converted into a structured concept."
@@ -181,6 +203,13 @@ export function GenerationProgress({ designId, jobId }: Props) {
         <h1>{heading}</h1>
         <p>{explanation}</p>
       </div>
+      {isRefinement && (
+        <ul className="refinement-progress-notes">
+          {REFINEMENT_PROGRESS_NOTES.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
       <p className="generation-privacy-note">
         Your private design details are never made public during generation.
       </p>

@@ -8,6 +8,7 @@
 // HttpOnly cookie the JS cannot read. Safe GETs may go through the generated
 // typed client (api/client.ts); both share the transport below.
 
+import { apiClient } from "@/api/client";
 import type { components } from "@/api/schema";
 import { REQUEST_TIMEOUT_MS, fetchWithTimeout } from "@/lib/transport";
 
@@ -319,6 +320,19 @@ export function validateDesignDraft(
   );
 }
 
+// GET a single design through the generated typed client (ownership enforced
+// by the session cookie server-side; a foreign/nonexistent design is an
+// indistinguishable 404 → thrown here). A generic single-design read, so it
+// lives here alongside the other design wrappers rather than inside any one
+// feature that happens to consume it (questionnaire/, results/).
+export async function fetchDesign(designId: string): Promise<DesignDraft> {
+  const { data } = await apiClient.GET("/api/v1/designs/{design_id}/", {
+    params: { path: { design_id: designId } },
+  });
+  if (!data) throw new Error("not_found");
+  return data;
+}
+
 // ---------------------------------------------------------------------------
 // Generation jobs (Phase 10) — CSRF-aware start + GET-only poll
 // ---------------------------------------------------------------------------
@@ -379,6 +393,59 @@ export async function startDesignGeneration(
   return toDraftFailure(status, data);
 }
 
+// ---------------------------------------------------------------------------
+// Refinement (Phase 14) — CSRF-aware start, reusing the exact same transport
+// discipline as startDesignGeneration but with a real JSON body (source
+// version + one allowlisted category + an optional bounded note).
+// ---------------------------------------------------------------------------
+
+export type ChangeType = components["schemas"]["ChangeTypeEnum"];
+export type RefinementRequestBody = components["schemas"]["RefinementWriteRequest"];
+
+async function sendRefine(
+  path: string,
+  body: RefinementRequestBody,
+  idempotencyKey: string,
+  hasRetried = false,
+): Promise<ApiEnvelope<GenerationJobResponse & ErrorBody>> {
+  const token = await ensureCsrfToken();
+  const response = await fetchWithTimeout(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRFToken": token,
+      "Idempotency-Key": idempotencyKey,
+    },
+    body: JSON.stringify(body),
+  });
+  const data = (await response.json()) as GenerationJobResponse & ErrorBody;
+  if (response.status === 403 && data?.error?.code === "csrf_failed" && !hasRetried) {
+    csrfToken = null;
+    return sendRefine(path, body, idempotencyKey, true);
+  }
+  return { ok: response.ok, status: response.status, data };
+}
+
+export async function startDesignRefinement(
+  designId: string,
+  request: RefinementRequestBody,
+  idempotencyKey: string,
+): Promise<GenerationResult> {
+  let envelope: ApiEnvelope<GenerationJobResponse & ErrorBody>;
+  try {
+    envelope = await sendRefine(
+      `/api/v1/designs/${encodeURIComponent(designId)}/refine/`,
+      request,
+      idempotencyKey,
+    );
+  } catch {
+    return UNREACHABLE;
+  }
+  const { ok, status, data } = envelope;
+  if (ok) return { ok: true, data: data as GenerationJobResponse };
+  return toDraftFailure(status, data);
+}
+
 // Three distinct, narrow error types so a caller (the progress polling hook)
 // can tell an owned-but-missing job apart from a transient outage and from a
 // malformed response, instead of one generic thrown Error.
@@ -414,6 +481,10 @@ const KNOWN_JOB_STATUSES: ReadonlySet<string> = new Set([
   "failed",
 ]);
 
+// Since Phase 14: which pipeline branch a job runs. A value outside this set
+// is treated as malformed, matching KNOWN_JOB_STATUSES's discipline.
+const KNOWN_GENERATION_KINDS: ReadonlySet<string> = new Set(["initial", "refinement"]);
+
 function isGenerationJob(value: unknown): value is GenerationJob {
   if (typeof value !== "object" || value === null) return false;
   const job = value as Record<string, unknown>;
@@ -426,6 +497,8 @@ function isGenerationJob(value: unknown): value is GenerationJob {
     typeof job.status === "string" &&
     KNOWN_JOB_STATUSES.has(job.status) &&
     (job.error_code === null || typeof job.error_code === "string") &&
+    typeof job.generation_kind === "string" &&
+    KNOWN_GENERATION_KINDS.has(job.generation_kind) &&
     typeof job.created_at === "string" &&
     typeof job.updated_at === "string" &&
     (job.started_at === null || typeof job.started_at === "string") &&
@@ -654,6 +727,37 @@ function isInspirationAcknowledgement(
   );
 }
 
+const KNOWN_CHANGE_TYPES: ReadonlySet<string> = new Set([
+  "colour_story",
+  "fabric_and_texture",
+  "embellishment",
+  "sleeves_and_coverage",
+  "neckline",
+  "dupatta_or_saree_drape",
+  "silhouette_detail",
+  "styling_details",
+]);
+
+function isRefinementLineage(
+  value: unknown,
+): value is NonNullable<DesignResult["lineage"]["refinement"]> {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.change_type === "string" && KNOWN_CHANGE_TYPES.has(v.change_type);
+}
+
+// Since Phase 14: additive parent-child lineage. Never validates/exposes the
+// raw note, refinement-request hash, its schema version, a seed or the
+// source attempt — the backend payload structurally excludes them.
+function isLineage(value: unknown): value is DesignResult["lineage"] {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if (v.kind !== "initial" && v.kind !== "refinement") return false;
+  if (v.parent_version_id !== null && typeof v.parent_version_id !== "string") return false;
+  if (v.refinement === null) return true;
+  return isRefinementLineage(v.refinement);
+}
+
 function isDesignResult(value: unknown): value is DesignResult {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
@@ -677,7 +781,8 @@ function isDesignResult(value: unknown): value is DesignResult {
     typeof v.image_alt_text === "string" &&
     typeof v.created_at === "string" &&
     Array.isArray(v.inspiration_acknowledgements) &&
-    v.inspiration_acknowledgements.every(isInspirationAcknowledgement)
+    v.inspiration_acknowledgements.every(isInspirationAcknowledgement) &&
+    isLineage(v.lineage)
   );
 }
 

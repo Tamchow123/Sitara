@@ -199,3 +199,11 @@ version bump.
 - Inspiration influence and image generation remain out of scope; no provider
   call, no Replicate identifier, no seed and no reference-image field are
   introduced. The Phase 8 paid live checkpoint remains pending.
+
+**Phase 14 note (ADR 0015):** refinement introduces no second prompt-builder
+path. `build_image_prompt(spec)` is called identically for an initial and a
+refined `DesignVersion` — it is a pure projection of whatever validated
+DesignSpec it is given, with no branch on `generation_kind`. A refined
+version's image prompt therefore carries the same `PROMPT_BUILDER_VERSION`
+(`3.0.0`, unchanged) and the same reproducibility/snapshot guarantees as any
+initial version's.

@@ -67,6 +67,20 @@ from .context import DesignNotReady
 from .image_download import MAX_REDIRECTS
 from .prompt_builder import ImagePromptBuildError
 from .prompt_service import ImagePromptImmutable, build_and_store_image_prompt
+from .refinement import (
+    REFINEMENT_REQUEST_SCHEMA_VERSION,
+    RefinementRequest,
+    refinement_request_sha256,
+)
+from .refinement_service import (
+    DesignChangedDuringRefinement,
+    RefinementGenerationFailed,
+    RefinementLimitReached,
+    RefinementNoChangeProduced,
+    RefinementSourceUnavailable,
+    generate_refined_design_spec_for_design,
+    validate_source_version,
+)
 from .services import (
     DesignChangedDuringGeneration,
     GenerationFailed,
@@ -230,6 +244,16 @@ class DesignIncomplete(Exception):
 
 class QueueUnavailable(Exception):
     """The broker rejected the task after the attempt committed. -> 503."""
+
+
+class DesignNotRefinable(Exception):
+    """The Design's status does not support refinement (Phase 14). -> 409.
+
+    A ``generated`` Design may be refined, as may a ``generation_failed``
+    Design left by a resolved prior refinement failure (see
+    :func:`enqueue_design_refinement` for the exact precondition) — a draft,
+    currently generating, or generation_failed-with-no-usable-version-1
+    design is rejected here or by the downstream source-version check."""
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +465,163 @@ def enqueue_design_generation(
 
 
 # ---------------------------------------------------------------------------
+# Refinement enqueue service (Phase 14)
+# ---------------------------------------------------------------------------
+
+
+def enqueue_design_refinement(
+    design,
+    *,
+    source_version_id,
+    refinement_request: RefinementRequest,
+    idempotency_key,
+    enqueue_task=None,
+    require_availability=True,
+):
+    """Create or idempotently replay one queued REFINEMENT attempt for
+    ``design``.
+
+    Mirrors :func:`enqueue_design_generation`'s shape and guarantees exactly
+    (idempotent replay first, availability gate, one short transaction under
+    the Design row lock, Celery submission on commit) but validates the
+    refinement-specific preconditions: the Design must be ``generated`` OR
+    ``generation_failed`` from a resolved prior refinement failure (never
+    from an initial-generation failure — there is no version 1 to refine in
+    that case, so the source-version lookup below fails closed), the source
+    version must belong to this Design and pass
+    :func:`~sitara.generation.refinement_service.validate_source_version`,
+    no child version may already exist, and no other attempt for this Design
+    may be in progress or carry unresolved provider-spend evidence.
+
+    ``refinement_request`` must already be validated (Part A's
+    ``normalise_refinement_request``) — this function performs no client-input
+    validation itself.
+
+    Returns ``(attempt, created)``. Raises GenerationUnavailable /
+    DesignNotRefinable / RefinementSourceUnavailable / GenerationInProgress /
+    RefinementLimitReached during the transaction (no attempt is created), or
+    QueueUnavailable if the broker rejects the task after commit."""
+    submit = enqueue_task or _submit_to_celery
+    outcome: dict = {"attempt": None}
+
+    def _on_commit():
+        attempt = outcome["attempt"]
+        try:
+            submit(attempt)
+        except Exception as exc:
+            logger.warning(
+                "refinement enqueue broker failure attempt=%s design=%s exception_type=%s",
+                attempt.id,
+                attempt.design_id,
+                type(exc).__name__,
+            )
+            _mark_queue_unavailable(attempt)
+            raise QueueUnavailable("the generation queue is temporarily unavailable") from exc
+
+    with transaction.atomic():
+        locked = Design.objects.select_for_update().get(pk=design.pk)
+
+        # 1. Idempotent replay: return an existing attempt for this exact key
+        #    unchanged, regardless of the current provider gates.
+        existing = GenerationAttempt.objects.filter(
+            design=locked, idempotency_key=idempotency_key
+        ).first()
+        if existing is not None:
+            return existing, False
+
+        # 2. New key: enforce availability BEFORE any work (public API only).
+        if require_availability and not generation_is_available():
+            raise GenerationUnavailable("live generation is not currently available")
+
+        # 3. Reject if another attempt is already in progress (Design-scoped,
+        #    same constraint the initial pipeline relies on). Checked BEFORE
+        #    the status gate below: a Design sitting in GENERATING because of
+        #    that in-progress attempt must surface as "in progress", not the
+        #    coarser "not refinable".
+        if GenerationAttempt.objects.filter(
+            design=locked, status__in=GenerationAttempt.IN_PROGRESS_STATUSES
+        ).exists():
+            raise GenerationInProgress("a generation job is already in progress for this design")
+
+        # 4. A fully generated Design may be refined. A Design left in
+        #    generation_failed by a RESOLVED refinement failure (no unresolved
+        #    spend, no staged-but-unlinked image — checked below) is also
+        #    eligible: the failure never restores status to generated (there
+        #    is no new version to finalise), so gating on GENERATED alone
+        #    would permanently block every retry after any refinement
+        #    failure, however clean. A generation_failed Design with no
+        #    version 1 at all (an initial-generation failure) is still
+        #    correctly rejected below: source_version_id cannot resolve to
+        #    any row, raising RefinementSourceUnavailable.
+        if locked.status not in (Design.Status.GENERATED, Design.Status.GENERATION_FAILED):
+            raise DesignNotRefinable("this design cannot be refined")
+
+        # 5. The source version must belong to this Design and pass every
+        #    structural/safety pre-spend check.
+        source_version = DesignVersion.objects.filter(design=locked, pk=source_version_id).first()
+        if source_version is None:
+            raise RefinementSourceUnavailable("the source version is not available")
+        validate_source_version(source_version)  # raises RefinementSourceUnavailable
+
+        # 6. A completed refinement, a staged-but-unresolved refinement
+        #    attempt, or an attempt with unresolved provider-spend evidence
+        #    all block a fresh refinement the same way DesignAlreadyGenerated
+        #    blocks a fresh initial generation (spec §20: "no ambiguous text/
+        #    image submission marker exists; no recoverable staged or
+        #    permanent output exists").
+        staged_elsewhere = (
+            GenerationAttempt.objects.filter(
+                design=locked, generation_kind=GenerationAttempt.GenerationKind.REFINEMENT
+            )
+            .exclude(staged_image_storage_key="")
+            .exclude(status=_Status.FAILED, error_code=errors.IMAGE_STAGING_FAILED)
+            .exists()
+        )
+        unresolved_spend = (
+            GenerationAttempt.objects.filter(
+                design=locked,
+                generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
+                status=_Status.FAILED,
+            )
+            .exclude(error_code__in=_SPEND_RESOLVED_CODES)
+            .filter(
+                Q(image_submission_in_flight=True)
+                | ~Q(image_prediction_id="")
+                | Q(text_submission_in_flight=True)
+            )
+            .exists()
+        )
+        if source_version.refined_versions.exists() or staged_elsewhere or unresolved_spend:
+            raise RefinementLimitReached("this design has already been refined")
+
+        # 7. Create the queued refinement attempt, carrying its own durable
+        #    copy of the canonical refinement request (the child DesignVersion
+        #    does not exist yet to carry Part A's copy).
+        refinement_request_hash = refinement_request_sha256(refinement_request)
+        attempt = GenerationAttempt.objects.create(
+            design=locked,
+            idempotency_key=idempotency_key,
+            status=_Status.QUEUED,
+            generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
+            source_design_version=source_version,
+            refinement_request=refinement_request.model_dump(mode="json"),
+            refinement_request_schema_version=REFINEMENT_REQUEST_SCHEMA_VERSION,
+            refinement_request_sha256=refinement_request_hash,
+        )
+        attempt.celery_task_id = str(attempt.id)
+        attempt.save(update_fields=["celery_task_id", "updated_at"])
+
+        # 8. Move the Design into the generating state.
+        locked.status = Design.Status.GENERATING
+        locked.save(update_fields=["status", "updated_at"])
+
+        outcome["attempt"] = attempt
+        transaction.on_commit(_on_commit)
+
+    return outcome["attempt"], True
+
+
+# ---------------------------------------------------------------------------
 # Attempt execution lock
 # ---------------------------------------------------------------------------
 
@@ -584,10 +765,15 @@ def _execute(
     seed_factory,
     config,
 ):
-    # Stage A — claim and pre-check.
+    # Stage A — claim and pre-check. The completeness re-check applies only to
+    # INITIAL generation (it validates questionnaire/inspiration readiness,
+    # which is irrelevant once a design is already generated and refinement
+    # edits an existing DesignSpec instead); a refinement's own freshness
+    # re-check happens inside generate_refined_design_spec_for_design.
     _set_started(attempt)
     design = Design.objects.get(pk=attempt.design_id)
-    if design_completion_errors(design):
+    is_refinement = attempt.generation_kind == GenerationAttempt.GenerationKind.REFINEMENT
+    if not is_refinement and design_completion_errors(design):
         raise _TerminalGenerationError(errors.DESIGN_CHANGED)
 
     attempt.refresh_from_db()
@@ -595,7 +781,10 @@ def _execute(
     # Stage B — DesignSpec (only when no version is linked yet).
     if attempt.design_version_id is None:
         _set_status(attempt, _Status.RUNNING_TEXT)
-        version = _run_text_stage(design, attempt, structured_provider)
+        if is_refinement:
+            version = _run_refinement_text_stage(design, attempt, structured_provider)
+        else:
+            version = _run_text_stage(design, attempt, structured_provider)
     else:
         version = DesignVersion.objects.get(pk=attempt.design_version_id)
         if version.design_id != attempt.design_id:
@@ -712,6 +901,65 @@ def _run_text_stage(design, attempt, structured_provider) -> DesignVersion:
         ) from exc
     # Success: the marker was cleared atomically with the version linkage in
     # services._finalise_atomic; nothing further to write here.
+    attempt.refresh_from_db()
+    return version
+
+
+def _run_refinement_text_stage(design, attempt, structured_provider) -> DesignVersion:
+    """Stage B for a REFINEMENT attempt (Phase 14) — mirrors
+    :func:`_run_text_stage`'s crash-window guard and error taxonomy exactly,
+    but calls :func:`~sitara.generation.refinement_service.generate_refined_design_spec_for_design`
+    against the persisted source version and the attempt's own durable copy
+    of the canonical refinement request, never the raw questionnaire."""
+    provider = structured_provider
+    if provider is None:
+        from sitara.ai_gateway.policy import get_structured_design_generation_provider
+
+        provider = get_structured_design_generation_provider()
+
+    if attempt.text_submission_in_flight:
+        raise _TerminalGenerationError(errors.STRUCTURED_SUBMISSION_AMBIGUOUS)
+
+    source_version = attempt.source_design_version
+    if source_version is None or attempt.refinement_request is None:
+        # Defence in depth: the enqueue guard never creates a refinement
+        # attempt without both. Unreachable in practice.
+        raise _TerminalGenerationError(errors.REFINEMENT_SOURCE_UNAVAILABLE)
+    try:
+        refinement_request = RefinementRequest.model_validate(attempt.refinement_request)
+    except Exception as exc:  # noqa: BLE001 - corrupt persisted JSON is a safety boundary
+        raise _TerminalGenerationError(errors.REFINEMENT_SOURCE_UNAVAILABLE) from exc
+
+    try:
+        version = generate_refined_design_spec_for_design(
+            design, source_version, refinement_request, provider=provider, attempt=attempt
+        )
+    except GenerationRefused as exc:
+        raise _TerminalGenerationError(
+            errors.STRUCTURED_PROVIDER_REFUSED, clear_text_marker=True
+        ) from exc
+    except DesignChangedDuringRefinement as exc:
+        raise _TerminalGenerationError(errors.DESIGN_CHANGED, clear_text_marker=True) from exc
+    except RefinementSourceUnavailable as exc:
+        raise _TerminalGenerationError(
+            errors.REFINEMENT_SOURCE_UNAVAILABLE, clear_text_marker=True
+        ) from exc
+    except RefinementLimitReached as exc:
+        raise _TerminalGenerationError(
+            errors.REFINEMENT_LIMIT_REACHED, clear_text_marker=True
+        ) from exc
+    except RefinementNoChangeProduced as exc:
+        raise _TerminalGenerationError(errors.REFINEMENT_NO_CHANGE, clear_text_marker=True) from exc
+    except (RefinementGenerationFailed, ProviderIdentityChanged) as exc:
+        raise _TerminalGenerationError(
+            errors.REFINEMENT_GENERATION_FAILED, clear_text_marker=True
+        ) from exc
+    except StructuredDesignProviderError as exc:
+        if exc.ambiguous_acceptance:
+            raise _TerminalGenerationError(errors.STRUCTURED_SUBMISSION_AMBIGUOUS) from exc
+        raise _TerminalGenerationError(
+            errors.REFINEMENT_GENERATION_FAILED, clear_text_marker=True
+        ) from exc
     attempt.refresh_from_db()
     return version
 
@@ -913,10 +1161,22 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
         raise _TerminalGenerationError(errors.IMAGE_SUBMISSION_AMBIGUOUS)
 
     # Reuse a seed persisted by an earlier (pre-acceptance) attempt; only
-    # generate one the first time so a restart never produces a second seed.
+    # choose one the first time so a restart never produces a second seed.
     seed = attempt.image_seed
+    seed_reused = attempt.seed_reused
     if seed is None:
-        seed = int(seed_factory()) if seed_factory is not None else _generate_seed()
+        # Phase 14: a refinement attempt tries to copy the succeeded initial
+        # attempt's seed for the SAME source version first (a continuity aid
+        # only — never a guarantee); falls back to a fresh seed exactly like
+        # initial generation when none is available.
+        if attempt.generation_kind == GenerationAttempt.GenerationKind.REFINEMENT:
+            copied = _find_source_attempt_seed(attempt)
+            if copied is not None:
+                seed = copied
+                seed_reused = True
+        if seed is None:
+            seed = int(seed_factory()) if seed_factory is not None else _generate_seed()
+            seed_reused = False
     if seed < 0:
         raise _TerminalGenerationError(errors.INTERNAL_GENERATION_ERROR)
     model = config.model or provider.name
@@ -934,6 +1194,7 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
         locked.image_provider = provider.name
         locked.image_model = model
         locked.image_seed = seed
+        locked.seed_reused = seed_reused
         locked.image_parameters = parameters
         locked.image_submission_in_flight = True
         locked.save(
@@ -941,6 +1202,7 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
                 "image_provider",
                 "image_model",
                 "image_seed",
+                "seed_reused",
                 "image_parameters",
                 "image_submission_in_flight",
                 "updated_at",
@@ -1235,6 +1497,31 @@ def fail_attempt(attempt_id, code: str) -> None:
 def _generate_seed() -> int:
     """A cryptographically-generated non-negative 32-bit seed (zero allowed)."""
     return secrets.randbelow(2**32)
+
+
+def _find_source_attempt_seed(attempt: GenerationAttempt) -> int | None:
+    """The persisted, non-negative seed of the SUCCEEDED initial attempt that
+    produced ``attempt``'s source version, or ``None`` when unavailable
+    (Phase 14 §18).
+
+    Deliberately never derived from user data, an id, prompt text or a hash —
+    only ever copied verbatim from a prior attempt's own securely-generated
+    seed, matching the SAME Design as ``attempt``."""
+    source_version_id = attempt.source_design_version_id
+    if source_version_id is None:
+        return None
+    succeeded = (
+        GenerationAttempt.objects.filter(
+            design_id=attempt.design_id,
+            design_version_id=source_version_id,
+            generation_kind=GenerationAttempt.GenerationKind.INITIAL,
+            status=_Status.SUCCEEDED,
+        )
+        .exclude(image_seed__isnull=True)
+        .order_by("-created_at", "-id")
+        .first()
+    )
+    return succeeded.image_seed if succeeded is not None else None
 
 
 # ---------------------------------------------------------------------------

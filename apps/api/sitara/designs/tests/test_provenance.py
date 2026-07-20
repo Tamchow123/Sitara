@@ -104,7 +104,20 @@ class TestTokenCounts:
 class TestExistingRowsRemainValid:
     def test_legacy_version_without_spec_is_unaffected(self):
         # A version created before Phase 8 (no spec) still saves cleanly.
-        version = make_version(version_number=2, image_storage_key="")
+        # Phase 14: version_number==2 now always requires refinement
+        # provenance (parent + request), so this exercises that alongside
+        # the pre-Phase-8 spec-less state.
+        design = Design.objects.create(design_session=DesignSession.objects.create())
+        v1 = make_version(design=design, version_number=1)
+        version = make_version(
+            design=design,
+            version_number=2,
+            image_storage_key="",
+            parent_version=v1,
+            refinement_request={"schema_version": 1, "change_type": "colour_story", "note": ""},
+            refinement_request_schema_version=1,
+            refinement_request_sha256="e" * 64,
+        )
         assert DesignVersion.objects.filter(pk=version.pk).exists()
 
 

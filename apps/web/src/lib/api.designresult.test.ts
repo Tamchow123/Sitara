@@ -78,6 +78,7 @@ const RESULT = {
     image_alt_text: "A model in an ivory lehenga.",
     created_at: "2026-07-19T12:00:00Z",
     inspiration_acknowledgements: [],
+    lineage: { kind: "initial", parent_version_id: null, refinement: null },
   },
 };
 

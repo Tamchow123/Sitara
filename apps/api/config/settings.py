@@ -360,6 +360,21 @@ SPECTACULAR_SETTINGS = {
     ],
     # No Django admin, no served schema route in the contract.
     "SCHEMA_PATH_PREFIX": r"/api/v1",
+    # Phase 14: two DIFFERENT serializer fields — GenerationJobSerializer.
+    # generation_kind and DesignVersionLineageSerializer.kind — legitimately
+    # share the exact same two-value choice set (a generation attempt and a
+    # version's lineage are both "initial" or "refinement"), which
+    # drf-spectacular otherwise names ambiguously per field. Both fields are
+    # built with ``.values`` (a flat value list, matching this file's
+    # existing ``status``/``error_code`` field style), so the override's
+    # (value, label) pairs must match DRF's auto-generated label-equals-value
+    # form exactly, not the model's title-cased GenerationKind.choices — a
+    # plain literal (rather than a dotted import path) because GenerationKind
+    # is a class nested inside the GenerationAttempt model, one level deeper
+    # than drf-spectacular's dotted-path resolver supports.
+    "ENUM_NAME_OVERRIDES": {
+        "GenerationKindEnum": [("initial", "initial"), ("refinement", "refinement")],
+    },
 }
 
 # ---------------------------------------------------------------------------

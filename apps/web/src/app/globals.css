@@ -532,6 +532,176 @@ textarea:focus-visible,
   font-size: 0.9rem;
 }
 
+/* ------------------------------------------------------------------ */
+/* Refinement panel (Phase 14)                                        */
+/* ------------------------------------------------------------------ */
+.refinement-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-top: 1rem;
+}
+
+.refinement-chip-group {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+.refinement-chip-group legend {
+  font-weight: bold;
+  padding: 0 0 0.5rem;
+}
+
+.refinement-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.refinement-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+.refinement-chip-selected {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: bold;
+  background: #faf3ee;
+}
+
+.refinement-note-count {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.refinement-drift-warning {
+  border-left: 4px solid var(--bad);
+  padding: 0.75rem 1.1rem;
+  background: #fdeceb;
+  border-radius: 0 8px 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.refinement-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.refinement-actions button {
+  padding: 0.65rem 1.3rem;
+  font: inherit;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+.refinement-actions button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.refinement-error {
+  border: 2px solid var(--bad);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  background: #fdeceb;
+}
+
+.refinement-running-notice {
+  border-left: 4px solid var(--accent);
+  padding: 0.75rem 1.1rem;
+  background: #faf3ee;
+  border-radius: 0 8px 8px 0;
+}
+
+.refinement-failed-notice {
+  border: 2px solid var(--bad);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  background: #fdeceb;
+}
+.refinement-failed-notice h2 {
+  color: var(--bad);
+  margin-top: 0;
+}
+
+.refinement-progress-notes {
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding-left: 1.25rem;
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Version comparison (Phase 14)                                      */
+/* ------------------------------------------------------------------ */
+.version-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 64rem;
+}
+
+.comparison-disclosure {
+  border-left: 4px solid var(--accent);
+  padding: 0.75rem 1.1rem;
+  background: #faf3ee;
+  border-radius: 0 8px 8px 0;
+}
+
+.comparison-grid {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.version-card {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.version-card-title {
+  font-weight: bold;
+  margin: 0;
+}
+
+.version-card-summary {
+  margin: 0;
+  color: var(--muted);
+}
+
+.version-card-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: bold;
+}
+
+@media (max-width: 48rem) {
+  .comparison-grid {
+    flex-direction: column;
+  }
+}
+
 @media (max-width: 34rem) {
   .result-actions {
     flex-direction: column;
@@ -539,6 +709,10 @@ textarea:focus-visible,
   }
   .generation-stages {
     flex-direction: column;
+  }
+  .refinement-chips {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 

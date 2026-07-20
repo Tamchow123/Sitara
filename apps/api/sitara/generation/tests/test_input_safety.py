@@ -7,9 +7,12 @@ from sitara.generation.input_safety import (
     GeneratedContentRejected,
     RejectionCategory,
     UnsafeUserTextError,
+    contains_markup,
+    contains_url,
     scan_design_spec,
     scan_generated_text,
     scan_user_text,
+    strip_format_characters,
 )
 
 from .utils import VALID_FIXTURES, a_valid_spec_dict, load_spec_dict
@@ -299,3 +302,36 @@ class TestScanUserText:
         with pytest.raises(UnsafeUserTextError) as excinfo:
             scan_user_text("make it like Sabyasachi")
         assert "sabyasachi" not in str(excinfo.value).lower()
+
+
+_ZWSP = "​"  # ZERO WIDTH SPACE (Unicode category Cf)
+
+
+class TestFormatCharacterHardening:
+    """A zero-width/invisible Unicode character must never split a
+    denylisted phrase or pattern into pieces that no longer match."""
+
+    def test_strip_format_characters_removes_zero_width_space(self):
+        assert strip_format_characters(f"sew{_ZWSP}ing") == "sewing"
+
+    def test_strip_format_characters_preserves_ordinary_text(self):
+        assert strip_format_characters("A silk lehenga.") == "A silk lehenga."
+
+    def test_markup_bypass_with_zero_width_space_is_still_caught(self):
+        # No "**" is adjacent in the raw string (each asterisk pair is split
+        # by a ZWSP); only after stripping does "**bold**" appear.
+        assert contains_markup(f"*{_ZWSP}*bold*{_ZWSP}*")
+
+    def test_url_bypass_with_zero_width_space_is_still_caught(self):
+        assert contains_url(f"visit exam{_ZWSP}ple.com now")
+
+    def test_designer_name_split_by_zero_width_space_is_still_caught(self):
+        with pytest.raises(GeneratedContentRejected) as excinfo:
+            scan_generated_text(f"Style it like Sabya{_ZWSP}sachi.")
+        assert excinfo.value.category == RejectionCategory.DESIGNER_OR_BRAND
+
+    def test_ordinary_markup_free_text_is_not_flagged(self):
+        assert not contains_markup("A silk lehenga with gold zari work.")
+
+    def test_ordinary_url_free_text_is_not_flagged(self):
+        assert not contains_url("A silk lehenga with gold zari work.")

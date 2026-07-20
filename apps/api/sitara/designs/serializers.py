@@ -58,6 +58,33 @@ class DesignWriteSerializer(serializers.Serializer):
         return super().to_internal_value(data)
 
 
+class RefinementWriteSerializer(serializers.Serializer):
+    """Coarse wire-shape validation for a refinement request (Phase 14):
+    exactly ``source_version_id``, ``change_type`` and an optional ``note``.
+
+    Deliberately loose on ``change_type``/``note`` content — the strict
+    allowlist/schema/safety-scan validation belongs to
+    ``sitara.generation.refinement.normalise_refinement_request``, which the
+    view calls next; this layer only rejects unknown fields and wrong JSON
+    types, matching ``DesignWriteSerializer``'s pattern."""
+
+    source_version_id = serializers.UUIDField()
+    change_type = serializers.CharField()
+    note = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def to_internal_value(self, data):
+        if not isinstance(data, dict):
+            raise serializers.ValidationError(
+                {"non_field_errors": ["The request body must be a JSON object."]}
+            )
+        unknown = sorted(set(data) - set(self.fields))
+        if unknown:
+            raise serializers.ValidationError(
+                {name: ["This field cannot be set."] for name in unknown}
+            )
+        return super().to_internal_value(data)
+
+
 def _questionnaire_payload(design: Design) -> dict | None:
     """The linked questionnaire as {id, version, schema}, or None for legacy
     (Phase 4) designs that were never linked to a questionnaire."""

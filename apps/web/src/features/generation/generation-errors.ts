@@ -141,6 +141,36 @@ const GENERATION_ERROR_MESSAGES = {
     message: "An unexpected problem occurred while generating your concept. Please try again.",
     editable: false,
   },
+  // Since Phase 14: a client-submitted refinement request is rejected as a
+  // controlled 400 before any attempt is created, so this code is never
+  // actually persisted onto a job — kept here only so the exhaustive map
+  // compiles against the full backend error-code enum.
+  refinement_invalid: {
+    heading: "We couldn't start that refinement",
+    message: "Please choose one change and check your note, then try again.",
+    editable: false,
+  },
+  refinement_no_change: {
+    heading: "No change was made",
+    message:
+      "We weren't able to produce an actual change for your selected category. Please try a different note or category.",
+    editable: false,
+  },
+  refinement_generation_failed: {
+    heading: "We couldn't refine your concept",
+    message: "Something went wrong while updating your design brief. Please try again shortly.",
+    editable: false,
+  },
+  refinement_limit_reached: {
+    heading: "This design has already been refined",
+    message: "Only one refinement is available per concept.",
+    editable: false,
+  },
+  refinement_source_unavailable: {
+    heading: "This concept can't be refined right now",
+    message: "The original concept is not available for refinement. Please try again shortly.",
+    editable: false,
+  },
 } satisfies Record<GenerationErrorCode, FriendlyGenerationError>;
 
 // Runtime defence: an error code the frontend does not recognise (a future

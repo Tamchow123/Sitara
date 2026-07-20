@@ -237,8 +237,15 @@ class TestConcurrencyAndState:
         from sitara.generation.pipeline import DesignNotGeneratable
 
         design = make_complete_design()
-        DesignVersion.objects.create(design=design, version_number=1)
-        DesignVersion.objects.create(design=design, version_number=2)
+        v1 = DesignVersion.objects.create(design=design, version_number=1)
+        DesignVersion.objects.create(
+            design=design,
+            version_number=2,
+            parent_version=v1,
+            refinement_request={"schema_version": 1, "change_type": "colour_story", "note": ""},
+            refinement_request_schema_version=1,
+            refinement_request_sha256="e" * 64,
+        )
         with mock.patch(_AVAILABLE, return_value=True):
             with pytest.raises(DesignNotGeneratable):
                 enqueue_design_generation(
