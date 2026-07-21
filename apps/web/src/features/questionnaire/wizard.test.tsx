@@ -366,4 +366,65 @@ describe("QuestionnaireWizard", () => {
       expect(mocks.replace).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("inspiration catalogue", () => {
+    async function goToInspirationStep() {
+      fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
+      await screen.findByText("Saved");
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      fireEvent.click(await screen.findByRole("radio", { name: "Flared" }));
+      await waitFor(() => expect(mocks.updateDesignDraft).toHaveBeenCalled());
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      await screen.findByRole("heading", { name: "Inspiration images" });
+    }
+
+    it("loads and renders the catalogue on the final step", async () => {
+      render(<QuestionnaireWizard />);
+      await goToInspirationStep();
+      expect(mocks.fetchCatalogue).toHaveBeenCalledTimes(1);
+      expect(
+        await screen.findByText(/No inspiration images are available yet/i),
+      ).toBeInTheDocument();
+    });
+
+    // Regression test: the loading effect used to depend on catalogue.status,
+    // state the SAME effect sets synchronously (idle -> loading). Setting
+    // that state always schedules a re-render in which the dependency array
+    // has changed, so React tears the effect down (cancelled = true) and
+    // re-runs it BEFORE a real (non-instant) fetch has a chance to resolve.
+    // The re-run's guard then sees "loading" (not "idle") and bails out
+    // without starting a replacement fetch, so when the original fetch
+    // finally resolves, its result is discarded by the stale cancelled flag
+    // — the catalogue is stuck on "Loading inspiration images…" forever, for
+    // any fetch slower than one React render (i.e. every real network call).
+    it("does not get stuck loading when the fetch resolves after the effect's own re-render", async () => {
+      mocks.fetchCatalogue.mockReset();
+      mocks.fetchCatalogue.mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve({ assets: [] }), 20)),
+      );
+      render(<QuestionnaireWizard />);
+      await goToInspirationStep();
+      await waitFor(
+        () => expect(screen.queryByText(/Loading inspiration images/i)).not.toBeInTheDocument(),
+        { timeout: 2000 },
+      );
+      expect(
+        await screen.findByText(/No inspiration images are available yet/i),
+      ).toBeInTheDocument();
+    });
+
+    it("recovers from a catalogue fetch failure via Try again", async () => {
+      mocks.fetchCatalogue.mockReset();
+      mocks.fetchCatalogue.mockRejectedValueOnce(new Error("network"));
+      mocks.fetchCatalogue.mockResolvedValueOnce({ assets: [] });
+      render(<QuestionnaireWizard />);
+      await goToInspirationStep();
+      expect(await screen.findByText(/temporarily unavailable/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      await waitFor(() => expect(mocks.fetchCatalogue).toHaveBeenCalledTimes(2));
+      expect(
+        await screen.findByText(/No inspiration images are available yet/i),
+      ).toBeInTheDocument();
+    });
+  });
 });

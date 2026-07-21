@@ -46,6 +46,7 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
   const [answers, setAnswers] = useState<Answers>({});
   const [selection, setSelection] = useState<string[]>([]);
   const [catalogue, setCatalogue] = useState<CatalogueState>({ status: "idle", assets: [] });
+  const [catalogueAttempt, setCatalogueAttempt] = useState(0);
   const [stepIndex, setStepIndex] = useState(0);
   const [errorTick, setErrorTick] = useState(0);
 
@@ -158,8 +159,17 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
   }, [initialDesignId, reloadCounter, setAnswersSynced, adopt]);
 
   // -- Catalogue (loaded lazily; empty is valid, failure is distinct) --------
+  // Gated on catalogueAttempt (an explicit trigger), never on catalogue.status
+  // itself: setting catalogue.status inside this effect always schedules a
+  // re-render in which the effect's own dependency array has changed, so
+  // React tears the effect down (cancelled = true) and re-runs it — the
+  // re-run's guard then sees "loading" (not "idle") and bails out without
+  // starting a replacement fetch, so when the original fetch resolves (which
+  // it always does after that re-render for any real, non-instant network
+  // call) its result is discarded by the stale cancelled flag, leaving the
+  // catalogue stuck loading forever.
   useEffect(() => {
-    if (load !== "ready" || !onInspirationStep || catalogue.status !== "idle") return;
+    if (load !== "ready" || !onInspirationStep) return;
     let cancelled = false;
     setCatalogue({ status: "loading", assets: [] });
     fetchCatalogue()
@@ -174,7 +184,7 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [load, onInspirationStep, catalogue.status]);
+  }, [load, onInspirationStep, catalogueAttempt]);
 
   useEffect(() => {
     if (errorTick > 0) errorSummaryRef.current?.focus();
@@ -337,7 +347,7 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
               <p>Inspiration images are temporarily unavailable.</p>
               <button
                 type="button"
-                onClick={() => setCatalogue({ status: "idle", assets: [] })}
+                onClick={() => setCatalogueAttempt((attempt) => attempt + 1)}
               >
                 Try again
               </button>
