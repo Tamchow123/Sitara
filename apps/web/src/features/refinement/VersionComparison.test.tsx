@@ -174,6 +174,16 @@ describe("VersionComparison", () => {
     expect(headings[1]).toHaveTextContent(/refined concept/i);
   });
 
+  it("labels each version from its own persisted is_demo, never inferred together", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result({ is_demo: true }) });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    renderComparison({ is_demo: false });
+    await screen.findByRole("heading", { name: /original concept/i });
+    const headings = screen.getAllByRole("heading", { level: 2, name: /— version \d/ });
+    expect(headings[0]).toHaveTextContent(/demo/i);
+    expect(headings[1]).toHaveTextContent(/live/i);
+  });
+
   it("displays the selected refinement category in human-readable form", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });

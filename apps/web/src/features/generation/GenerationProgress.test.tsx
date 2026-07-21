@@ -115,6 +115,38 @@ describe("GenerationProgress", () => {
     expect(complete.closest("li")).not.toHaveAttribute("aria-current");
   });
 
+  it("uses honest demo wording for a demo job, never claiming a live provider", async () => {
+    mocks.fetchGenerationJob.mockResolvedValue(
+      job({ status: "running_text", is_demo: true }),
+    );
+    renderProgress();
+    expect(await screen.findByText(/Building your deterministic design brief/i)).toBeInTheDocument();
+    const page = document.body.textContent ?? "";
+    expect(page).not.toMatch(/claude/i);
+    expect(page).not.toMatch(/flux/i);
+    expect(page).not.toMatch(/replicate/i);
+    expect(page).not.toMatch(/newly generat/i);
+    expect(page).not.toMatch(/%/);
+  });
+
+  it("uses honest demo wording for each stage of a demo job", async () => {
+    mocks.fetchGenerationJob.mockResolvedValue(job({ status: "queued", is_demo: true }));
+    renderProgress();
+    expect(await screen.findByText(/Preparing your demo concept/i)).toBeInTheDocument();
+
+    mocks.fetchGenerationJob.mockResolvedValue(job({ status: "running_image", is_demo: true }));
+    renderProgress();
+    expect(
+      await screen.findByText(/Selecting and processing your demo visual/i),
+    ).toBeInTheDocument();
+  });
+
+  it("uses live wording (unchanged) for a non-demo job", async () => {
+    mocks.fetchGenerationJob.mockResolvedValue(job({ status: "queued", is_demo: false }));
+    renderProgress();
+    expect(await screen.findByText(/^Preparing your concept$/i)).toBeInTheDocument();
+  });
+
   it("redirects to the result route on succeeded with a version id", async () => {
     mocks.fetchGenerationJob.mockResolvedValue(
       job({ status: "succeeded", design_version_id: "v1" }),

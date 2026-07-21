@@ -7,6 +7,7 @@
 // metadata-only limitation note — never a provider cue, alt text, cultural
 // context, asset id or URL (also not reachable from this type).
 
+import { DEMO_RESULT_DISCLOSURE } from "./demo-disclosure";
 import type { DesignResult } from "@/lib/api";
 
 const GENERIC_DISCLAIMER =
@@ -84,6 +85,9 @@ export function formatDesignBrief(result: DesignResult): string {
   }
 
   lines.push(GENERIC_DISCLAIMER);
+  if (result.is_demo) {
+    lines.push("", DEMO_RESULT_DISCLOSURE);
+  }
 
   return lines.join("\n");
 }

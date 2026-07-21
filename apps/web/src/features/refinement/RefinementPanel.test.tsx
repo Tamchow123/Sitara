@@ -93,6 +93,23 @@ describe("RefinementPanel — drift acknowledgement", () => {
     acknowledge();
     expect(screen.getByRole("button", { name: /request refinement/i })).toBeEnabled();
   });
+
+  it("shows honest demo disclosure text and never claims image editing or seed continuity", () => {
+    render(<RefinementPanel designId="d1" sourceVersionId="v1" isDemo />);
+    const disclaimer = screen.getByRole("note", { name: /refinement disclaimer/i });
+    expect(disclaimer).toHaveTextContent(/deterministic design brief/i);
+    expect(disclaimer).toHaveTextContent(/another curated image may be selected/i);
+    expect(disclaimer).toHaveTextContent(/not edited/i);
+    expect(disclaimer).toHaveTextContent(/never sent anywhere/i);
+    expect(disclaimer.textContent).not.toMatch(/seed/i);
+    expect(disclaimer.textContent).not.toMatch(/fresh AI-generated image/i);
+  });
+
+  it("associates the disclosure with the submit button", () => {
+    render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
+    const button = screen.getByRole("button", { name: /request refinement/i });
+    expect(button.getAttribute("aria-describedby")).toContain("refinement-disclaimer");
+  });
 });
 
 describe("RefinementPanel — submission", () => {

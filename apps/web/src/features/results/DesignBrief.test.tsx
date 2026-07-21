@@ -59,6 +59,26 @@ function result(overrides: Partial<DesignResult> = {}): DesignResult {
   };
 }
 
+describe("DesignBrief — demo disclosure", () => {
+  it("shows the demo disclaimer when the result is_demo", () => {
+    render(<DesignBrief result={result({ is_demo: true })} />);
+    const disclaimer = screen.getByRole("note", { name: /demo disclaimer/i });
+    expect(disclaimer).toHaveTextContent(/curated demo pack/i);
+    expect(disclaimer).toHaveTextContent(/not newly generated/i);
+  });
+
+  it("does not show the demo disclaimer for a live result", () => {
+    render(<DesignBrief result={result({ is_demo: false })} />);
+    expect(screen.queryByRole("note", { name: /demo disclaimer/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps the concept disclaimer alongside the demo disclaimer", () => {
+    render(<DesignBrief result={result({ is_demo: true })} />);
+    expect(screen.getByRole("note", { name: /concept disclaimer/i })).toBeInTheDocument();
+    expect(screen.getByRole("note", { name: /demo disclaimer/i })).toBeInTheDocument();
+  });
+});
+
 describe("DesignBrief — inspiration acknowledgements", () => {
   it("renders no acknowledgement section when the list is empty", () => {
     render(<DesignBrief result={result()} />);
