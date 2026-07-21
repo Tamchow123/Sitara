@@ -206,7 +206,12 @@ class TestDeterminism:
                 capture_output=True,
                 text=True,
                 env={**os.environ, "PYTHONHASHSEED": seed},
-                cwd="/app",
+                # The subprocess needs the same Django project root pytest
+                # itself is already running from (os.getcwd()) — never a
+                # hardcoded path, which only happens to exist inside the
+                # local Docker container's /app and breaks in CI, where the
+                # workflow's own working-directory is elsewhere.
+                cwd=os.getcwd(),
                 timeout=60,
             )
             assert completed.returncode == 0, completed.stderr
