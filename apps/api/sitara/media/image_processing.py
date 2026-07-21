@@ -14,15 +14,30 @@ identical output bytes (fixed resampling filter, fixed encoder parameters).
 the observable output requires a version bump plus a reviewed golden-manifest
 update (see the processor-golden tests).
 
+The shared decode/flatten/encode/verify primitives live in
+:mod:`sitara.image_sanitize` (also used by
+``sitara.catalogue.image_processing`` and ``sitara.generation.demo.ingest``);
+this module owns only the design-image-specific policy: byte/pixel gating,
+two-derivative thumbnailing at this pipeline's fixed resampling/encoder
+choices, and this app's own exception type.
+
 Error messages are generic and structural — they never echo image bytes,
 hashes or metadata.
 """
 
 import hashlib
 from dataclasses import dataclass
-from io import BytesIO
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image
+
+from sitara.image_sanitize import (
+    ImageSanitizeRejected,
+    encode_clean_webp,
+    flatten_to_rgb,
+    load_and_orient,
+    open_and_validate,
+    verify_webp,
+)
 
 from .exceptions import DesignImageProcessingError
 
@@ -31,13 +46,6 @@ from .exceptions import DesignImageProcessingError
 # processor version must create new DesignVersions, never rewrite existing
 # permanent images.
 DESIGN_IMAGE_PROCESSOR_VERSION = "1.0.0"
-
-# The staged formats Phase 10 verified and may hand to ingest.
-_ALLOWED_DECODED_FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
-
-# Documented neutral studio-grey composite background for alpha-bearing
-# input (same neutral tone the catalogue pipeline uses).
-_COMPOSITE_BACKGROUND_RGB = (242, 242, 242)
 
 # Deterministic encoder/resampling choices — part of the versioned behaviour.
 _RESAMPLING_FILTER = Image.Resampling.LANCZOS
@@ -62,60 +70,6 @@ def _reject(reason: str) -> None:
     raise DesignImageProcessingError(reason)
 
 
-def _open_staged(data: bytes) -> Image.Image:
-    try:
-        image = Image.open(BytesIO(data))
-    except Image.DecompressionBombError:
-        _reject("The image dimensions are outside the accepted bounds.")
-    except (UnidentifiedImageError, OSError, ValueError):
-        _reject("The data is not a decodable image.")
-    if (image.format or "").upper() not in _ALLOWED_DECODED_FORMATS:
-        _reject("Only JPEG, PNG and WebP images are accepted.")
-    if getattr(image, "is_animated", False) or getattr(image, "n_frames", 1) > 1:
-        _reject("Animated or multi-frame images are not accepted.")
-    return image
-
-
-def _flatten_to_rgb(image: Image.Image) -> Image.Image:
-    """Composite any transparency onto the neutral background; plain RGB out."""
-    has_alpha = image.mode in ("RGBA", "LA", "PA") or (
-        image.mode == "P" and "transparency" in image.info
-    )
-    try:
-        if has_alpha:
-            rgba = image.convert("RGBA")
-            background = Image.new("RGBA", rgba.size, _COMPOSITE_BACKGROUND_RGB + (255,))
-            return Image.alpha_composite(background, rgba).convert("RGB")
-        return image.convert("RGB")
-    except (OSError, ValueError):
-        _reject("The image colour mode cannot be safely converted.")
-
-
-def _encode_webp(image: Image.Image, quality: int) -> bytes:
-    # A fresh copy with an EMPTY info dict: Pillow's WebP encoder reads
-    # exif/xmp/icc_profile from image.info, so an empty dict guarantees no
-    # metadata survives into the output.
-    clean = image.copy()
-    clean.info = {}
-    buffer = BytesIO()
-    clean.save(buffer, format="WEBP", quality=quality, method=_WEBP_METHOD)
-    return buffer.getvalue()
-
-
-def _verify_webp(data: bytes) -> tuple[int, int]:
-    """Reopen a produced file and prove it is a decodable single-frame WebP."""
-    try:
-        produced = Image.open(BytesIO(data))
-        if produced.format != "WEBP":
-            raise ValueError
-        if getattr(produced, "is_animated", False) or getattr(produced, "n_frames", 1) > 1:
-            raise ValueError
-        produced.load()
-    except (UnidentifiedImageError, OSError, ValueError):
-        _reject("The processed image failed verification.")
-    return produced.size
-
-
 def process_design_image(
     raw_bytes: bytes,
     *,
@@ -137,39 +91,35 @@ def process_design_image(
     if len(raw_bytes) > max_bytes:
         _reject("The staged image exceeds the maximum allowed size.")
 
-    image = _open_staged(raw_bytes)
-
-    width, height = image.size
-    if width < 1 or height < 1 or width * height > max_pixels:
-        # Header dimensions gate the decode: a decompression bomb is rejected
-        # before its pixels are ever allocated.
-        _reject("The image dimensions are outside the accepted bounds.")
-
     try:
-        image.load()  # force a complete decode to catch truncation
-        image = ImageOps.exif_transpose(image)
-    except Image.DecompressionBombError:
-        _reject("The image dimensions are outside the accepted bounds.")
-    except (OSError, SyntaxError, ValueError):
-        _reject("The data is not a decodable image.")
+        image = open_and_validate(raw_bytes)
 
-    flattened = _flatten_to_rgb(image)
+        width, height = image.size
+        if width < 1 or height < 1 or width * height > max_pixels:
+            # Header dimensions gate the decode: a decompression bomb is
+            # rejected before its pixels are ever allocated.
+            raise ImageSanitizeRejected("The image dimensions are outside the accepted bounds.")
 
-    main = flattened.copy()
-    # thumbnail() only ever downscales, preserving aspect ratio — input at or
-    # below the cap keeps its native size (never upscaled).
-    main.thumbnail((max_edge, max_edge), _RESAMPLING_FILTER)
-    thumb = flattened.copy()
-    thumb.thumbnail((thumbnail_edge, thumbnail_edge), _RESAMPLING_FILTER)
+        image = load_and_orient(image)
+        flattened = flatten_to_rgb(image)
 
-    original_bytes = _encode_webp(main, full_quality)
-    thumbnail_bytes = _encode_webp(thumb, thumbnail_quality)
+        main = flattened.copy()
+        # thumbnail() only ever downscales, preserving aspect ratio — input
+        # at or below the cap keeps its native size (never upscaled).
+        main.thumbnail((max_edge, max_edge), _RESAMPLING_FILTER)
+        thumb = flattened.copy()
+        thumb.thumbnail((thumbnail_edge, thumbnail_edge), _RESAMPLING_FILTER)
 
-    original_size = _verify_webp(original_bytes)
-    thumbnail_size = _verify_webp(thumbnail_bytes)
-    if original_size != main.size or thumbnail_size != thumb.size:
-        # The encoded files must carry exactly the dimensions being persisted.
-        _reject("The processed image failed verification.")
+        original_bytes = encode_clean_webp(main, quality=full_quality, method=_WEBP_METHOD)
+        thumbnail_bytes = encode_clean_webp(thumb, quality=thumbnail_quality, method=_WEBP_METHOD)
+
+        original_size = verify_webp(original_bytes)
+        thumbnail_size = verify_webp(thumbnail_bytes)
+        if original_size != main.size or thumbnail_size != thumb.size:
+            # The encoded files must carry exactly the dimensions being persisted.
+            raise ImageSanitizeRejected("The processed image failed verification.")
+    except ImageSanitizeRejected as exc:
+        _reject(str(exc))
 
     return ProcessedDesignImage(
         original_bytes=original_bytes,
