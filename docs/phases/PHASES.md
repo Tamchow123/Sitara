@@ -333,6 +333,41 @@ Standing rules across all phases:
 - **Manual checkpoint:** run the entire user journey (questionnaire → generate → results → refine) in demo mode with no API keys configured at all; confirm it is indistinguishable in shape from live mode and honest in its demo labelling.
 - **Commit:** `feat: deterministic zero-cost demo engine with reviewed asset manifest`
 
+> **Delivered (ADR 0016)** as five commits — `chore(dev): gitignore local
+> docker-compose port overrides` (Part 0), `feat(demo): add versioned demo
+> asset manifest and selector` (Part A), `feat(demo): add deterministic
+> design and refinement engines` (Part B), `feat(demo): route the
+> asynchronous pipeline through local adapters` (Part C),
+> `feat(frontend): add honest deterministic demo experience` (Part D). Part
+> A adds the strict Pydantic `DemoManifest` contract
+> (`DEMO_MANIFEST_SCHEMA_VERSION 1`), the deterministic
+> `select_demo_asset` selector (`DEMO_SELECTOR_VERSION 1.0.0`, exact
+> garment hard filtering, weighted scoring, stable SHA-256 tie-break), the
+> private content-addressed demo-source storage key builder, the
+> `install_demo_asset_pack` command, and the development-only synthetic
+> pack. Part B adds the deterministic local `DesignSpec`/refinement engines
+> (`DEMO_SPEC_TEMPLATE_VERSION`/`DEMO_REFINEMENT_TEMPLATE_VERSION 1.0.0`)
+> and their `StructuredDesignProvider` adapters, and removes the obsolete
+> Phase 3A synchronous demo provider/getter scaffolding. Part C wires the
+> local adapters into the real asynchronous pipeline: a three-mode
+> `resolve_generation_mode()` (`demo`/`live`/`unavailable`) with demo taking
+> absolute precedence over every paid flag, `GenerationAttempt.is_demo`/
+> `demo_selection` and `DesignVersion.is_demo` persisted identity/provenance
+> (migration `0012`), the `demo-asset://` asynchronous image adapter and its
+> dedicated downloader, a deterministic non-negative demo seed derived from
+> the persisted prompt/manifest hash/selector version, and the bounded
+> `DEMO_STAGE_DELAY_MS` setting. Mode is resolved and its availability
+> checked before the Design row lock is acquired, then frozen onto the
+> attempt and never re-derived from live settings during execution. Part D
+> adds the persistent accessible demo banner, questionnaire/review and
+> result/refinement disclosure, honest progress-stage wording, and
+> per-version demo/live labelling sourced from each version's own persisted
+> `is_demo` — reusing the existing typed API client and TanStack Query
+> lifecycle throughout, with no demo API client, mock fetch layer, or demo
+> route aliases. The reviewed production asset pack remains a separate,
+> pending, manually budgeted checkpoint; the development-only synthetic
+> pack is never used as production content.
+
 ## Phase 16 — Security and live-generation cost controls
 - **Scope:** `LIVE_GENERATION_ENABLED` flag with `503 live_generation_disabled` when off; per-session + per-IP DRF/Redis throttles and daily generation count limit (`429 generation_limit_reached`); **hard daily cost ceiling with atomic reserve-before-spend**: compute a conservative maximum estimated cost for the call, atomically reserve it in Redis via a Lua script (or equivalent atomic transaction) *before* provider invocation, reject with `503 live_generation_budget_exhausted` if the reservation would exceed the ceiling, reconcile the reservation down to the estimated actual cost after the call, and release unused reservation on failure paths where no spend occurred — no check-then-increment race between workers. Security hardening pass (headers, CSP, cookie flags, admin lockdown; CORS surface stays minimal thanks to same-origin `/api/`); retention purge + stuck-job reconciler beat tasks; Sentry + structured logging correlation.
 - **Non-goals:** no BudgetWindow table unless the Redis mechanism proves insufficient; no spend dashboard (ad-hoc GenerationAttempt queries only).

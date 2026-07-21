@@ -25,6 +25,7 @@ import type { ChangeType } from "@/lib/api";
 type Props = {
   designId: string;
   sourceVersionId: string;
+  isDemo?: boolean;
   onRequiresRecheck?: () => void;
 };
 
@@ -34,9 +35,20 @@ const DRIFT_WARNING =
   "embroidery placement may still differ substantially. Reusing the original " +
   "seed is only a continuity aid, not a guarantee.";
 
+const DEMO_DRIFT_WARNING =
+  "In demo mode, refinement updates your deterministic design brief within the selected " +
+  "category only. Another curated image may be selected to match the updated brief — the " +
+  "image itself is not edited, and your original image is never sent anywhere. Visual " +
+  "differences from your original concept may still be substantial.";
+
 type SubmitState = { status: "idle" } | { status: "submitting" } | { status: "error"; message: string };
 
-export function RefinementPanel({ designId, sourceVersionId, onRequiresRecheck }: Props) {
+export function RefinementPanel({
+  designId,
+  sourceVersionId,
+  isDemo = false,
+  onRequiresRecheck,
+}: Props) {
   const router = useRouter();
   const [changeType, setChangeType] = useState<ChangeType | null>(null);
   const [note, setNote] = useState("");
@@ -152,25 +164,36 @@ export function RefinementPanel({ designId, sourceVersionId, onRequiresRecheck }
         )}
       </div>
 
-      <div className="refinement-drift-warning" role="note" aria-label="Refinement disclaimer">
-        <p>{DRIFT_WARNING}</p>
+      <div
+        id="refinement-disclaimer"
+        className="refinement-drift-warning"
+        role="note"
+        aria-label="Refinement disclaimer"
+      >
+        <p>{isDemo ? DEMO_DRIFT_WARNING : DRIFT_WARNING}</p>
         <label className="refinement-ack">
           <input
             type="checkbox"
             checked={acknowledged}
             onChange={(event) => setAcknowledged(event.target.checked)}
           />
-          I understand the refined image is a new generation and may differ substantially from the
-          original.
+          {isDemo
+            ? "I understand the refined image is selected from the demo pack and may differ substantially from the original."
+            : "I understand the refined image is a new generation and may differ substantially from the original."}
         </label>
       </div>
 
       <div className="refinement-actions">
-        <button type="button" onClick={() => void handleSubmit()} disabled={!canSubmit}>
+        <button
+          type="button"
+          onClick={() => void handleSubmit()}
+          disabled={!canSubmit}
+          aria-describedby="refinement-disclaimer refinement-submit-note"
+        >
           {submitting ? "Starting…" : "Request refinement"}
         </button>
       </div>
-      <p role="status" aria-live="polite" className="field-help">
+      <p id="refinement-submit-note" role="status" aria-live="polite" className="field-help">
         {submitting
           ? "Starting your refinement…"
           : changeType === null

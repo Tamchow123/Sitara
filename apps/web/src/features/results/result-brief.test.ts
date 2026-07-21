@@ -53,6 +53,7 @@ const RESULT: DesignResult = {
   created_at: "2026-07-19T12:00:00Z",
   inspiration_acknowledgements: [],
   lineage: { kind: "initial", parent_version_id: null, refinement: null },
+  is_demo: false,
 };
 
 describe("formatDesignBrief", () => {
@@ -85,6 +86,21 @@ describe("formatDesignBrief", () => {
     expect(text).toMatch(/AI-assisted visual concept/i);
     expect(text).toMatch(/not a photograph/i);
     expect(text).toMatch(/does not guarantee/i);
+  });
+
+  it("includes a concise demo disclosure when is_demo, with no internal provenance", () => {
+    const demoResult = { ...RESULT, is_demo: true };
+    const text = formatDesignBrief(demoResult);
+    expect(text).toMatch(/curated demo pack/i);
+    expect(text).toMatch(/not newly generated/i);
+    expect(text).not.toMatch(/demo-asset/i);
+    expect(text).not.toMatch(/seed/i);
+    expect(text).not.toMatch(/manifest/i);
+  });
+
+  it("omits the demo disclosure for a live result", () => {
+    const text = formatDesignBrief(RESULT);
+    expect(text).not.toMatch(/curated demo pack/i);
   });
 
   it("handles a null regional direction without a Regional direction line", () => {

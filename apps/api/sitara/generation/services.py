@@ -372,6 +372,10 @@ def _finalise_atomic(
         version.design_spec_input_tokens = usage.input_tokens
         version.design_spec_output_tokens = usage.output_tokens
         version.design_spec_generated_at = timezone.now()
+        # Frozen from the creating attempt (Phase 15) — never re-derived from
+        # current settings, so a later settings change can never relabel an
+        # already-generated version's historical demo/live identity.
+        version.is_demo = attempt.is_demo if attempt is not None else False
         version.inspiration_context = fresh.inspiration_context.model_dump(mode="json")
         version.inspiration_context_schema_version = fresh.inspiration_context.schema_version
         version.inspiration_context_sha256 = fresh.inspiration_context_sha256

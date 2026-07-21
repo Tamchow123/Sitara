@@ -89,6 +89,9 @@ class GenerationJobSerializer(serializers.Serializer):
     # version, refinement request text/hash, seed, seed-reuse or any
     # provider/storage provenance.
     generation_kind = serializers.ChoiceField(choices=GenerationAttempt.GenerationKind.values)
+    # Since Phase 15: the FROZEN historical demo/live mode this attempt ran
+    # in. Never provider, model, manifest or asset details.
+    is_demo = serializers.BooleanField()
     created_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()
     started_at = serializers.DateTimeField(allow_null=True)
@@ -258,6 +261,8 @@ class DesignResultSerializer(serializers.Serializer):
     inspiration_acknowledgements = InspirationAcknowledgementResultSerializer(many=True)
     # Since Phase 14: additive parent-child lineage.
     lineage = DesignVersionLineageSerializer()
+    # Since Phase 15: this version's own frozen historical demo/live mode.
+    is_demo = serializers.BooleanField()
 
 
 class DesignResultResponseSerializer(serializers.Serializer):

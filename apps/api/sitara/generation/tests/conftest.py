@@ -33,3 +33,15 @@ def no_network(monkeypatch):
         raise AssertionError("network access attempted during a generation test")
 
     monkeypatch.setattr(socket.socket, "connect", guard)
+
+
+@pytest.fixture(autouse=True)
+def live_mode_by_default(settings):
+    """Most generation tests exercise the LIVE pipeline (mocking
+    ``generation_is_available``/injecting fixture providers) and predate
+    Phase 15's demo/live mode precedence — default DEMO_MODE to False here
+    so ``enqueue_design_generation``/``enqueue_design_refinement`` evaluate
+    live readiness (and therefore an existing mocked
+    ``generation_is_available``) exactly as before. A demo-specific test
+    sets ``settings.DEMO_MODE = True`` explicitly."""
+    settings.DEMO_MODE = False

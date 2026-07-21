@@ -35,6 +35,12 @@ const GENERATION_ERROR_MESSAGES = {
       "Concept generation is not available right now. Please try again later.",
     editable: false,
   },
+  demo_assets_unavailable: {
+    heading: "Demo generation is not currently available",
+    message:
+      "The demo concept library is not available right now. Please try again later.",
+    editable: false,
+  },
   design_incomplete: {
     heading: "Your design isn't complete yet",
     message:

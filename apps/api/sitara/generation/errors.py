@@ -13,6 +13,11 @@ against it in tests and a reviewer can see the complete surface at a glance.
 # Enqueue / availability boundary.
 QUEUE_UNAVAILABLE = "queue_unavailable"
 GENERATION_UNAVAILABLE = "generation_unavailable"
+# Demo mode is active but its asset pack is not ready: missing/invalid
+# manifest, required garment coverage absent, a selected asset missing or
+# hash-mismatched, or private demo storage unavailable. Never exposes which
+# internal object or path failed; never falls back to a paid provider.
+DEMO_ASSETS_UNAVAILABLE = "demo_assets_unavailable"
 
 # Domain-readiness failures discovered during the task.
 DESIGN_INCOMPLETE = "design_incomplete"
@@ -101,6 +106,7 @@ GENERATION_ERROR_CODES = frozenset(
     {
         QUEUE_UNAVAILABLE,
         GENERATION_UNAVAILABLE,
+        DEMO_ASSETS_UNAVAILABLE,
         DESIGN_INCOMPLETE,
         DESIGN_CHANGED,
         STRUCTURED_GENERATION_FAILED,

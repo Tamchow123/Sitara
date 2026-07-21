@@ -23,6 +23,10 @@ apps/web/out/
 Thumbs.db
 .DS_Store
 
+# Local-only docker compose port overrides (never committed)
+compose.override.yaml
+docker-compose.override.yml
+
 # run-phase review-council transient state (config is committed; live state is not)
 .claude/review/runtime/*
 !.claude/review/runtime/.gitignore

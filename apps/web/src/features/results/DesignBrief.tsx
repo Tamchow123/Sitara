@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 
+import { DEMO_RESULT_DISCLOSURE } from "./demo-disclosure";
 import { formatDesignBrief } from "./result-brief";
 import type { DesignResult } from "@/lib/api";
 
@@ -65,6 +66,12 @@ export function DesignBrief({ result }: Props) {
           fine details may differ when interpreted physically.
         </p>
       </div>
+
+      {result.is_demo && (
+        <div className="demo-disclaimer" role="note" aria-label="Demo disclaimer">
+          <p>{DEMO_RESULT_DISCLOSURE}</p>
+        </div>
+      )}
 
       <section aria-labelledby="brief-summary">
         <h2 id="brief-summary">Concept summary</h2>

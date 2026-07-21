@@ -409,6 +409,41 @@ class TestImageGenerationSettings:
         assert "not-a-number" not in result.stderr
 
 
+class TestDemoStageDelaySettings:
+    """Phase 15 DEMO_STAGE_DELAY_MS: a strictly bounded, non-negative
+    integer that never echoes a rejected value."""
+
+    def test_absent_defaults_to_zero(self):
+        result = load_settings({})
+        assert result.returncode == 0, result.stderr
+
+    def test_negative_value_refuses_startup(self):
+        result = load_settings({"DEMO_STAGE_DELAY_MS": "-1"})
+        assert result.returncode != 0
+        assert "DEMO_STAGE_DELAY_MS" in result.stderr
+        assert "ImproperlyConfigured" in result.stderr
+
+    def test_non_numeric_value_refuses_startup(self):
+        result = load_settings({"DEMO_STAGE_DELAY_MS": "not-a-number"})
+        assert result.returncode != 0
+        assert "DEMO_STAGE_DELAY_MS" in result.stderr
+        assert "not-a-number" not in result.stderr
+
+    def test_value_above_maximum_refuses_startup(self):
+        result = load_settings({"DEMO_STAGE_DELAY_MS": "5001"})
+        assert result.returncode != 0
+        assert "DEMO_STAGE_DELAY_MS" in result.stderr
+        assert "ImproperlyConfigured" in result.stderr
+
+    def test_value_at_maximum_loads(self):
+        result = load_settings({"DEMO_STAGE_DELAY_MS": "5000"})
+        assert result.returncode == 0, result.stderr
+
+    def test_zero_loads(self):
+        result = load_settings({"DEMO_STAGE_DELAY_MS": "0"})
+        assert result.returncode == 0, result.stderr
+
+
 class TestPaidGateCredentialValidation:
     """With the paid gates OPEN, placeholder-marked provider credentials are a
     misconfiguration and refuse startup (naming only the setting, never the

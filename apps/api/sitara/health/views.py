@@ -13,7 +13,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from sitara.ai_gateway.policy import generation_is_available
+from sitara.ai_gateway.policy import generation_is_available, resolve_generation_mode
 
 from . import checks
 from .openapi import LiveResponseSerializer, PublicConfigSerializer, ReadyResponseSerializer
@@ -84,14 +84,18 @@ def ready(request):
 def public_config(request):
     """Safe public configuration for the frontend.
 
-    generation_enabled comes from the central capability policy
-    (environment authorisation AND implementation availability), so this
-    endpoint can never claim generation exists when no paid provider is
-    implemented — even with both environment gates open."""
+    generation_enabled preserves its existing meaning unchanged: the LIVE
+    paid-generation capability policy (environment authorisation AND
+    implementation availability) — it stays False in demo mode, exactly as
+    before Phase 15. generation_mode is additive: the three-way public
+    outcome ("demo" | "live" | "unavailable") demo mode actually produces,
+    with demo taking precedence over every paid flag and never falling back
+    to live."""
     return Response(
         {
             "demo_mode": settings.DEMO_MODE,
             "generation_enabled": generation_is_available(),
+            "generation_mode": resolve_generation_mode(),
             "max_inspiration_images": settings.MAX_INSPIRATION_IMAGES,
             "max_refinements": settings.MAX_REFINEMENTS,
         }

@@ -378,6 +378,9 @@ def _finalise_refinement_atomic(
         version.design_spec_input_tokens = usage.input_tokens
         version.design_spec_output_tokens = usage.output_tokens
         version.design_spec_generated_at = timezone.now()
+        # A refinement ALWAYS inherits its source version's mode (Phase 15) —
+        # never independently chosen — so a demo/live lineage can never mix.
+        version.is_demo = locked_source.is_demo
         # The historical inspiration-context snapshot is COPIED verbatim from
         # the source version — never rebuilt from the live catalogue. A later
         # asset retirement, expiry or rights revocation must never rewrite an
