@@ -16,6 +16,11 @@ _ASSET_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
 _PACK_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
+# The single source of truth for the demo-source-asset size bound, shared by
+# the install command (enforced at write time) and the runtime downloader
+# (enforced at read time) — a single definition so the two can never drift.
+DEMO_SOURCE_ASSET_MAX_BYTES = 8_000_000
+
 
 def build_demo_asset_key(*, pack_id: str, manifest_hash: str, asset_id: str) -> str:
     """The deterministic private storage key for one demo source asset.

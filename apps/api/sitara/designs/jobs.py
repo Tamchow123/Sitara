@@ -53,7 +53,10 @@ def public_job_payload(attempt: GenerationAttempt) -> dict:
     message. ``generation_kind`` (Phase 14) is the one safe addition beyond
     lifecycle fields — it lets the frontend render honest refinement-specific
     progress wording without exposing the source version, refinement request
-    text/hash, seed, seed-reuse, prompt or any provider/storage provenance."""
+    text/hash, seed, seed-reuse, prompt or any provider/storage provenance.
+    ``is_demo`` (Phase 15) is the FROZEN historical mode this attempt ran in
+    — safe to expose (unlike provider/model/manifest/asset details), and
+    never re-derived from the current DEMO_MODE setting."""
     return {
         "job": {
             "id": str(attempt.id),
@@ -64,6 +67,7 @@ def public_job_payload(attempt: GenerationAttempt) -> dict:
             "status": attempt.status,
             "error_code": _public_error_code(attempt.error_code),
             "generation_kind": attempt.generation_kind,
+            "is_demo": attempt.is_demo,
             "created_at": _iso(attempt.created_at),
             "updated_at": _iso(attempt.updated_at),
             "started_at": _iso(attempt.started_at),

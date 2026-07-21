@@ -53,6 +53,7 @@ function job(overrides: Partial<GenerationJob> = {}): GenerationJob {
     status: "queued",
     error_code: null,
     generation_kind: "initial",
+    is_demo: false,
     created_at: new Date().toISOString(),
     updated_at: "t",
     started_at: null,

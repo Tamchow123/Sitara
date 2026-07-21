@@ -15,3 +15,15 @@ def inmemory_storage(settings):
     storages = copy.deepcopy(settings.STORAGES)
     storages["default"] = {"BACKEND": "django.core.files.storage.InMemoryStorage"}
     settings.STORAGES = storages
+
+
+@pytest.fixture(autouse=True)
+def live_mode_by_default(settings):
+    """Most generation/refinement HTTP tests exercise the LIVE pipeline
+    (mocking ``generation_is_available``) and predate Phase 15's demo/live
+    mode precedence — default DEMO_MODE to False here so
+    ``enqueue_design_generation``/``enqueue_design_refinement`` evaluate
+    live readiness (and therefore an existing mocked
+    ``generation_is_available``) exactly as before. A demo-specific test
+    sets ``settings.DEMO_MODE = True`` explicitly."""
+    settings.DEMO_MODE = False

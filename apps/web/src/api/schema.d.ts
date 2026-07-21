@@ -591,6 +591,7 @@ export interface components {
             created_at: string;
             inspiration_acknowledgements: components["schemas"]["InspirationAcknowledgementResult"][];
             lineage: components["schemas"]["DesignVersionLineage"];
+            is_demo: boolean;
         };
         DesignResultResponse: {
             result: components["schemas"]["DesignResult"];
@@ -627,7 +628,8 @@ export interface components {
             restraint_notes: string;
         };
         /**
-         * @description * `design_changed` - design_changed
+         * @description * `demo_assets_unavailable` - demo_assets_unavailable
+         *     * `design_changed` - design_changed
          *     * `design_incomplete` - design_incomplete
          *     * `generation_unavailable` - generation_unavailable
          *     * `image_download_failed` - image_download_failed
@@ -655,7 +657,7 @@ export interface components {
          *     * `structured_submission_ambiguous` - structured_submission_ambiguous
          * @enum {string}
          */
-        ErrorCodeEnum: "design_changed" | "design_incomplete" | "generation_unavailable" | "image_download_failed" | "image_ingest_failed" | "image_ingest_unverified" | "image_output_invalid" | "image_poll_timeout" | "image_prediction_aborted" | "image_prediction_canceled" | "image_prediction_failed" | "image_provider_unavailable" | "image_staging_failed" | "image_staging_unverified" | "image_submission_ambiguous" | "internal_generation_error" | "prompt_build_failed" | "queue_unavailable" | "refinement_generation_failed" | "refinement_invalid" | "refinement_limit_reached" | "refinement_no_change" | "refinement_source_unavailable" | "structured_generation_failed" | "structured_provider_refused" | "structured_submission_ambiguous";
+        ErrorCodeEnum: "demo_assets_unavailable" | "design_changed" | "design_incomplete" | "generation_unavailable" | "image_download_failed" | "image_ingest_failed" | "image_ingest_unverified" | "image_output_invalid" | "image_poll_timeout" | "image_prediction_aborted" | "image_prediction_canceled" | "image_prediction_failed" | "image_provider_unavailable" | "image_staging_failed" | "image_staging_unverified" | "image_submission_ambiguous" | "internal_generation_error" | "prompt_build_failed" | "queue_unavailable" | "refinement_generation_failed" | "refinement_invalid" | "refinement_limit_reached" | "refinement_no_change" | "refinement_source_unavailable" | "structured_generation_failed" | "structured_provider_refused" | "structured_submission_ambiguous";
         ErrorDetail: {
             /** @description Stable machine-readable error code. */
             code: string;
@@ -705,6 +707,7 @@ export interface components {
             status: components["schemas"]["StatusEnum"];
             error_code: (components["schemas"]["ErrorCodeEnum"] | components["schemas"]["NullEnum"]) | null;
             generation_kind: components["schemas"]["GenerationKindEnum"];
+            is_demo: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -723,6 +726,13 @@ export interface components {
          * @enum {string}
          */
         GenerationKindEnum: "initial" | "refinement";
+        /**
+         * @description * `demo` - demo
+         *     * `live` - live
+         *     * `unavailable` - unavailable
+         * @enum {string}
+         */
+        GenerationModeEnum: "demo" | "live" | "unavailable";
         /**
          * @description One private audit acknowledgement from the persisted, historical
          *     inspiration-context snapshot (Phase 13). Deliberately excludes the asset
@@ -781,6 +791,14 @@ export interface components {
             demo_mode: boolean;
             /** @description True only when environment gates AND a paid provider implementation allow it. */
             generation_enabled: boolean;
+            /**
+             * @description The public generation outcome. Demo takes precedence over every paid flag and never falls back to live.
+             *
+             *     * `demo` - demo
+             *     * `live` - live
+             *     * `unavailable` - unavailable
+             */
+            generation_mode: components["schemas"]["GenerationModeEnum"];
             max_inspiration_images: number;
             max_refinements: number;
         };

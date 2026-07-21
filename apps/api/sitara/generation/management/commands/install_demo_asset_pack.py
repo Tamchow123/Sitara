@@ -25,21 +25,26 @@ from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand, CommandError
 from pydantic import ValidationError
 
+from sitara.generation.demo.config import ACTIVE_MANIFEST_KEY
 from sitara.generation.demo.ingest import DemoAssetImageError, sanitise_demo_source_image
 from sitara.generation.demo.manifest import (
     DemoManifest,
     ManifestCoverageError,
     assert_production_content_ready,
+    canonical_manifest_json,
     manifest_sha256,
     validate_manifest_coverage,
 )
-from sitara.generation.demo.storage import build_demo_asset_key, demo_asset_storage
+from sitara.generation.demo.storage import (
+    DEMO_SOURCE_ASSET_MAX_BYTES,
+    build_demo_asset_key,
+    demo_asset_storage,
+)
 from sitara.generation.demo.synthetic_pack import (
     SyntheticPackNotAllowed,
     build_synthetic_demo_pack,
 )
 
-_MAX_SOURCE_BYTES = 8_000_000
 _MAX_SOURCE_PIXELS = 4096 * 4096
 
 
@@ -178,7 +183,9 @@ class Command(BaseCommand):
                 if sanitize:
                     try:
                         sanitised = sanitise_demo_source_image(
-                            raw_bytes, max_bytes=_MAX_SOURCE_BYTES, max_pixels=_MAX_SOURCE_PIXELS
+                            raw_bytes,
+                            max_bytes=DEMO_SOURCE_ASSET_MAX_BYTES,
+                            max_pixels=_MAX_SOURCE_PIXELS,
                         )
                     except DemoAssetImageError as exc:
                         raise _asset_error(
@@ -235,6 +242,18 @@ class Command(BaseCommand):
                 except OSError:
                     pass
             raise
+
+        if not verify_only:
+            # Activate ONLY after every asset in the pack has succeeded above.
+            # The storage backend never overwrites an existing key in place
+            # (file_overwrite=False), so the previous pointer (if any) is
+            # removed first — the pack it names remains fully installed and
+            # addressable by its own content-hashed keys regardless.
+            if storage.exists(ACTIVE_MANIFEST_KEY):
+                storage.delete(ACTIVE_MANIFEST_KEY)
+            storage.save(
+                ACTIVE_MANIFEST_KEY, ContentFile(canonical_manifest_json(manifest).encode("utf-8"))
+            )
 
         self.stdout.write(self.style.SUCCESS("Demo asset pack processed successfully."))
         self.stdout.write(f"pack_id: {manifest.pack_id}")

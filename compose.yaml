@@ -57,6 +57,10 @@ x-api-environment: &api-environment
   # Application-level cap on versions per design (initial concept + one
   # refinement). Strict positive integer; invalid values refuse startup.
   MAX_DESIGN_VERSIONS: ${MAX_DESIGN_VERSIONS:-2}
+  # Deterministic zero-cost demo pipeline (Phase 15). A modest local-dev
+  # default (milliseconds) keeps demo progress stages visible for a manual
+  # walkthrough; strictly bounded (0-5000) and applies only to demo attempts.
+  DEMO_STAGE_DELAY_MS: ${DEMO_STAGE_DELAY_MS:-400}
   # Inspiration-catalogue ingestion bounds (Phase 5B). Strict positive
   # integers; invalid values refuse startup.
   INSPIRATION_MAX_UPLOAD_BYTES: ${INSPIRATION_MAX_UPLOAD_BYTES:-15000000}

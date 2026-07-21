@@ -53,6 +53,7 @@ const RESULT: DesignResult = {
   created_at: "2026-07-19T12:00:00Z",
   inspiration_acknowledgements: [],
   lineage: { kind: "initial", parent_version_id: null, refinement: null },
+  is_demo: false,
 };
 
 describe("formatDesignBrief", () => {

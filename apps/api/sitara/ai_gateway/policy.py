@@ -34,6 +34,11 @@ from .providers import (
     StructuredDesignProvider,
 )
 
+# Phase 15: the deterministic zero-cost demo pipeline is implemented. A
+# code-level flag (never an environment variable), matching the discipline
+# every other capability flag in this module already follows.
+DEMO_PIPELINE_IMPLEMENTED = True
+
 # ---------------------------------------------------------------------------
 # CODE-LEVEL capability flags — deliberately NOT environment variables.
 # ---------------------------------------------------------------------------
@@ -130,6 +135,25 @@ def generation_is_available() -> bool:
         and image_generation_is_available()
         and FULL_GENERATION_PIPELINE_IMPLEMENTED
     )
+
+
+def resolve_generation_mode() -> str:
+    """The single source of truth for the PUBLIC three-mode generation
+    outcome: ``"demo"``, ``"live"`` or ``"unavailable"``.
+
+    Precedence (Phase 15): when ``DEMO_MODE=true``, ONLY demo readiness is
+    evaluated — live readiness is NEVER evaluated as a fallback from failed
+    demo readiness, so a fully-configured paid provider can never make demo
+    mode spend money and an unready demo pack never silently falls back to
+    a paid provider. When ``DEMO_MODE=false``, only live readiness (the
+    existing :func:`generation_is_available`) is evaluated."""
+    if settings.DEMO_MODE:
+        from sitara.generation.demo.config import demo_generation_is_available
+
+        if DEMO_PIPELINE_IMPLEMENTED and demo_generation_is_available():
+            return "demo"
+        return "unavailable"
+    return "live" if generation_is_available() else "unavailable"
 
 
 def get_image_generation_provider_async():

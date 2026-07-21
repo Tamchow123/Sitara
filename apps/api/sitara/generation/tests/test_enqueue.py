@@ -331,3 +331,161 @@ def test_two_concurrent_different_keys_admit_exactly_one():
     assert outcomes[0] in ("error", "in_progress")
     assert outcomes[1] == "ok"
     assert len(submitted) == 1
+
+
+_DEMO_AVAILABLE = "sitara.generation.pipeline.demo_generation_is_available"
+
+
+class TestDemoMode:
+    """Phase 15 Part C spec §18/§27: demo takes absolute precedence over
+    every paid flag/key when ``DEMO_MODE=True``, and the resolved mode is
+    frozen onto the attempt at enqueue time — never re-derived later."""
+
+    def test_demo_available_creates_a_demo_attempt(
+        self, settings, django_capture_on_commit_callbacks
+    ):
+        settings.DEMO_MODE = True
+        design = make_complete_design()
+        recorder = _Recorder()
+        with mock.patch(_DEMO_AVAILABLE, return_value=True):
+            with django_capture_on_commit_callbacks(execute=True):
+                attempt, created = enqueue_design_generation(
+                    design, idempotency_key=uuid.uuid4(), enqueue_task=recorder
+                )
+        assert created is True
+        assert attempt.is_demo is True
+
+    def test_demo_unavailable_with_no_pack_raises_generation_unavailable(self, settings):
+        settings.DEMO_MODE = True
+        design = make_complete_design()
+        recorder = _Recorder()
+        with mock.patch(_DEMO_AVAILABLE, return_value=False):
+            with pytest.raises(GenerationUnavailable):
+                enqueue_design_generation(
+                    design, idempotency_key=uuid.uuid4(), enqueue_task=recorder
+                )
+        assert GenerationAttempt.objects.count() == 0
+        assert recorder.calls == []
+
+    def test_demo_takes_precedence_over_paid_flags_and_keys_without_evaluating_live(self, settings):
+        settings.DEMO_MODE = True
+        settings.ALLOW_PAID_AI_CALLS = True
+        settings.LIVE_GENERATION_ENABLED = True
+        settings.REPLICATE_API_TOKEN = "r8_test_not_a_real_token"
+        settings.ANTHROPIC_API_KEY = "sk-ant-test-not-a-real-key"
+        design = make_complete_design()
+        recorder = _Recorder()
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("live readiness must never be evaluated when DEMO_MODE=True")
+
+        with (
+            mock.patch(_DEMO_AVAILABLE, return_value=True),
+            mock.patch(_AVAILABLE, side_effect=_boom),
+        ):
+            attempt, created = enqueue_design_generation(
+                design, idempotency_key=uuid.uuid4(), enqueue_task=recorder
+            )
+        assert created is True
+        assert attempt.is_demo is True
+
+    def test_resuming_an_incomplete_version_inherits_its_frozen_demo_mode(self, settings):
+        # A first attempt links a DesignVersion under demo mode, then fails
+        # at the image stage (a linked, incomplete version is left behind).
+        # A brand-new enqueue call resuming that version previews it BEFORE
+        # checking availability (spec §27 step 1), so it correctly checks
+        # DEMO readiness for this resume even though DEMO_MODE has since
+        # flipped to False — the linked version's mode wins over whatever
+        # current settings would otherwise pick, so a settings change can
+        # never turn an existing demo version into a live (paid)
+        # continuation.
+        from django.utils import timezone
+
+        settings.DEMO_MODE = True
+        design = make_complete_design()
+        design.status = Design.Status.GENERATING
+        design.save(update_fields=["status"])
+        first = GenerationAttempt.objects.create(design=design, status=_Status.QUEUED, is_demo=True)
+        version = DesignVersion.objects.create(
+            design=design,
+            version_number=1,
+            design_spec={"title": "A placeholder demo concept."},
+            design_spec_schema_version=1,
+            design_spec_template_version="demo-1.0.0",
+            design_spec_provider="demo",
+            design_spec_model="demo-spec-1.0.0",
+            design_spec_generated_at=timezone.now(),
+            image_prompt="A deterministic placeholder prompt.",
+            prompt_builder_version="3.0.0",
+            is_demo=True,
+        )
+        GenerationAttempt.objects.filter(pk=first.pk).update(
+            status=_Status.FAILED,
+            design_version=version,
+            error_code=errors.IMAGE_PREDICTION_FAILED,
+            completed_at=first.created_at,
+        )
+        design.status = Design.Status.GENERATION_FAILED
+        design.save(update_fields=["status"])
+
+        settings.DEMO_MODE = False
+        recorder = _Recorder()
+        with mock.patch(_DEMO_AVAILABLE, return_value=True):
+            attempt, created = enqueue_design_generation(
+                design, idempotency_key=uuid.uuid4(), enqueue_task=recorder
+            )
+        assert created is True
+        assert attempt.is_demo is True
+        assert attempt.design_version_id == version.id
+
+
+class TestResolveGenerationModeAgreesWithEnqueue:
+    """The public ``resolve_generation_mode()`` (ai_gateway.policy, used by
+    the /config endpoint) and ``enqueue_design_generation``'s own admit/
+    reject decision are two independently-maintained implementations of the
+    same demo-precedence rule (spec §18/§27). This regression test asserts
+    they stay behaviourally consistent across the settings matrix, so any
+    future drift between them fails CI immediately instead of silently."""
+
+    @pytest.mark.parametrize(
+        "demo_mode,demo_ready,live_ready",
+        [
+            (True, True, True),
+            (True, True, False),
+            (True, False, True),
+            (True, False, False),
+            (False, True, True),
+            (False, True, False),
+            (False, False, True),
+            (False, False, False),
+        ],
+    )
+    def test_resolved_mode_matches_enqueue_outcome(
+        self, settings, demo_mode, demo_ready, live_ready
+    ):
+        from sitara.ai_gateway.policy import resolve_generation_mode
+
+        settings.DEMO_MODE = demo_mode
+        with (
+            mock.patch(_DEMO_AVAILABLE, return_value=demo_ready),
+            mock.patch(
+                "sitara.generation.demo.config.demo_generation_is_available",
+                return_value=demo_ready,
+            ),
+            mock.patch(_AVAILABLE, return_value=live_ready),
+            mock.patch("sitara.ai_gateway.policy.generation_is_available", return_value=live_ready),
+        ):
+            mode = resolve_generation_mode()
+            design = make_complete_design()
+            recorder = _Recorder()
+            if mode == "unavailable":
+                with pytest.raises(GenerationUnavailable):
+                    enqueue_design_generation(
+                        design, idempotency_key=uuid.uuid4(), enqueue_task=recorder
+                    )
+            else:
+                attempt, created = enqueue_design_generation(
+                    design, idempotency_key=uuid.uuid4(), enqueue_task=recorder
+                )
+                assert created is True
+                assert attempt.is_demo is (mode == "demo")

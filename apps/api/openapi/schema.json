@@ -1776,6 +1776,9 @@
                     },
                     "lineage": {
                         "$ref": "#/components/schemas/DesignVersionLineage"
+                    },
+                    "is_demo": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
@@ -1792,6 +1795,7 @@
                     "garment_breakdown",
                     "image_alt_text",
                     "inspiration_acknowledgements",
+                    "is_demo",
                     "lineage",
                     "styling_notes",
                     "title",
@@ -1917,6 +1921,7 @@
             },
             "ErrorCodeEnum": {
                 "enum": [
+                    "demo_assets_unavailable",
                     "design_changed",
                     "design_incomplete",
                     "generation_unavailable",
@@ -1945,7 +1950,7 @@
                     "structured_submission_ambiguous"
                 ],
                 "type": "string",
-                "description": "* `design_changed` - design_changed\n* `design_incomplete` - design_incomplete\n* `generation_unavailable` - generation_unavailable\n* `image_download_failed` - image_download_failed\n* `image_ingest_failed` - image_ingest_failed\n* `image_ingest_unverified` - image_ingest_unverified\n* `image_output_invalid` - image_output_invalid\n* `image_poll_timeout` - image_poll_timeout\n* `image_prediction_aborted` - image_prediction_aborted\n* `image_prediction_canceled` - image_prediction_canceled\n* `image_prediction_failed` - image_prediction_failed\n* `image_provider_unavailable` - image_provider_unavailable\n* `image_staging_failed` - image_staging_failed\n* `image_staging_unverified` - image_staging_unverified\n* `image_submission_ambiguous` - image_submission_ambiguous\n* `internal_generation_error` - internal_generation_error\n* `prompt_build_failed` - prompt_build_failed\n* `queue_unavailable` - queue_unavailable\n* `refinement_generation_failed` - refinement_generation_failed\n* `refinement_invalid` - refinement_invalid\n* `refinement_limit_reached` - refinement_limit_reached\n* `refinement_no_change` - refinement_no_change\n* `refinement_source_unavailable` - refinement_source_unavailable\n* `structured_generation_failed` - structured_generation_failed\n* `structured_provider_refused` - structured_provider_refused\n* `structured_submission_ambiguous` - structured_submission_ambiguous"
+                "description": "* `demo_assets_unavailable` - demo_assets_unavailable\n* `design_changed` - design_changed\n* `design_incomplete` - design_incomplete\n* `generation_unavailable` - generation_unavailable\n* `image_download_failed` - image_download_failed\n* `image_ingest_failed` - image_ingest_failed\n* `image_ingest_unverified` - image_ingest_unverified\n* `image_output_invalid` - image_output_invalid\n* `image_poll_timeout` - image_poll_timeout\n* `image_prediction_aborted` - image_prediction_aborted\n* `image_prediction_canceled` - image_prediction_canceled\n* `image_prediction_failed` - image_prediction_failed\n* `image_provider_unavailable` - image_provider_unavailable\n* `image_staging_failed` - image_staging_failed\n* `image_staging_unverified` - image_staging_unverified\n* `image_submission_ambiguous` - image_submission_ambiguous\n* `internal_generation_error` - internal_generation_error\n* `prompt_build_failed` - prompt_build_failed\n* `queue_unavailable` - queue_unavailable\n* `refinement_generation_failed` - refinement_generation_failed\n* `refinement_invalid` - refinement_invalid\n* `refinement_limit_reached` - refinement_limit_reached\n* `refinement_no_change` - refinement_no_change\n* `refinement_source_unavailable` - refinement_source_unavailable\n* `structured_generation_failed` - structured_generation_failed\n* `structured_provider_refused` - structured_provider_refused\n* `structured_submission_ambiguous` - structured_submission_ambiguous"
             },
             "ErrorDetail": {
                 "type": "object",
@@ -2086,6 +2091,9 @@
                     "generation_kind": {
                         "$ref": "#/components/schemas/GenerationKindEnum"
                     },
+                    "is_demo": {
+                        "type": "boolean"
+                    },
                     "created_at": {
                         "type": "string",
                         "format": "date-time"
@@ -2113,6 +2121,7 @@
                     "error_code",
                     "generation_kind",
                     "id",
+                    "is_demo",
                     "started_at",
                     "status",
                     "updated_at"
@@ -2136,6 +2145,15 @@
                 ],
                 "type": "string",
                 "description": "* `initial` - initial\n* `refinement` - refinement"
+            },
+            "GenerationModeEnum": {
+                "enum": [
+                    "demo",
+                    "live",
+                    "unavailable"
+                ],
+                "type": "string",
+                "description": "* `demo` - demo\n* `live` - live\n* `unavailable` - unavailable"
             },
             "InspirationAcknowledgementResult": {
                 "type": "object",
@@ -2300,6 +2318,14 @@
                         "type": "boolean",
                         "description": "True only when environment gates AND a paid provider implementation allow it."
                     },
+                    "generation_mode": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/GenerationModeEnum"
+                            }
+                        ],
+                        "description": "The public generation outcome. Demo takes precedence over every paid flag and never falls back to live.\n\n* `demo` - demo\n* `live` - live\n* `unavailable` - unavailable"
+                    },
                     "max_inspiration_images": {
                         "type": "integer"
                     },
@@ -2310,6 +2336,7 @@
                 "required": [
                     "demo_mode",
                     "generation_enabled",
+                    "generation_mode",
                     "max_inspiration_images",
                     "max_refinements"
                 ]

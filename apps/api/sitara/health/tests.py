@@ -53,9 +53,12 @@ class TestPublicConfig:
         settings.ALLOW_PAID_AI_CALLS = False
         response = client.get(reverse("config-public"))
         assert response.status_code == 200
+        # No demo pack is installed in this test, so demo mode itself is
+        # reported "unavailable" (never a silent fallback to live).
         assert response.json() == {
             "demo_mode": True,
             "generation_enabled": False,
+            "generation_mode": "unavailable",
             "max_inspiration_images": 3,
             "max_refinements": 1,
         }
@@ -93,9 +96,11 @@ class TestPublicConfig:
         settings.DEFAULT_IMAGE_MODEL = "black-forest-labs/flux-1.1-pro"
         body = client.get(reverse("config-public")).json()
         assert body["generation_enabled"] is True
+        assert body["generation_mode"] == "live"
         assert set(body) == {
             "demo_mode",
             "generation_enabled",
+            "generation_mode",
             "max_inspiration_images",
             "max_refinements",
         }

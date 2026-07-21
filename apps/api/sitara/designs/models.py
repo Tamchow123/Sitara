@@ -232,6 +232,15 @@ class DesignVersion(models.Model):
     refinement_request = models.JSONField(null=True, blank=True)
     refinement_request_schema_version = models.PositiveSmallIntegerField(null=True, blank=True)
     refinement_request_sha256 = models.CharField(max_length=64, blank=True)
+    # True when this version was produced by the deterministic zero-cost demo
+    # pipeline (Phase 15), never a live provider. Frozen from the creating
+    # GenerationAttempt.is_demo at version creation and never changed
+    # afterwards; a refinement always inherits its source version's value
+    # (enforced by the refinement enqueue service, never chosen
+    # independently) so a demo/live lineage can never mix. Safe to expose
+    # publicly (unlike provider/model/manifest details) as a simple
+    # demo-or-live historical indicator.
+    is_demo = models.BooleanField(default=False)
     # --- Permanent private image provenance (Phase 11) --------------------
     # Written EXACTLY ONCE by the canonical ingest service and immutable
     # afterwards (all-or-none constraint below; a future processor version
@@ -592,6 +601,21 @@ class GenerationAttempt(models.Model):
     refinement_request_schema_version = models.PositiveSmallIntegerField(null=True, blank=True)
     refinement_request_sha256 = models.CharField(max_length=64, blank=True)
 
+    # True when this attempt runs the deterministic zero-cost demo pipeline
+    # (Phase 15) rather than a live provider. FROZEN at enqueue time from the
+    # resolved public generation mode and never changed by a later settings
+    # change or worker redelivery — a demo attempt never checks or uses
+    # provider credentials, and a live attempt never silently becomes demo.
+    # Safe to expose publicly as a simple demo-or-live historical indicator.
+    is_demo = models.BooleanField(default=False)
+    # Minimal PRIVATE demo selection provenance (manifest schema version,
+    # manifest SHA-256, selector version, selected asset id) — present
+    # exactly when is_demo is True and a selection has been made (all-or-none
+    # by construction: one JSON object, never scattered columns). NEVER the
+    # source filename or private storage key. NEVER exposed through any
+    # public API.
+    demo_selection = models.JSONField(null=True, blank=True)
+
     # --- Private provider-submission provenance (image + text; never exposed) ---
     image_provider = models.CharField(max_length=32, blank=True)
     image_model = models.CharField(max_length=100, blank=True)
@@ -765,6 +789,18 @@ class GenerationAttempt(models.Model):
                 condition=Q(generation_kind="initial", refinement_request__isnull=True)
                 | Q(generation_kind="refinement", refinement_request__isnull=False),
                 name="designs_attempt_generation_kind_refinement_request_consistent",
+            ),
+            # Demo selection provenance is never present for a live attempt.
+            models.CheckConstraint(
+                condition=Q(demo_selection__isnull=True) | Q(is_demo=True),
+                name="designs_attempt_demo_selection_requires_demo",
+            ),
+            # A succeeded demo attempt must carry its selection provenance.
+            models.CheckConstraint(
+                condition=~Q(status="succeeded")
+                | ~Q(is_demo=True)
+                | Q(demo_selection__isnull=False),
+                name="designs_attempt_demo_succeeded_requires_selection",
             ),
         ]
 

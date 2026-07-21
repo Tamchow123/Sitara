@@ -14,10 +14,14 @@ Two public entry points:
   regenerated.
 
 The image provider, downloader and storage are INJECTED (fakes in tests, the
-offline command's fixtures). When not injected, the LIVE factories at the bottom
-of this module resolve the gated Replicate provider and the hardened downloader
-(Part B) — always fail-closed, constructing no network client unless every gate
-passes. A non-blocking PostgreSQL advisory lock (in the two-integer lock space,
+offline command's fixtures). When not injected, resolution branches on the
+FROZEN ``GenerationAttempt.is_demo`` flag (Phase 15), never on live settings:
+a demo attempt resolves the local, zero-network demo adapters
+(:mod:`sitara.generation.demo`); a live attempt resolves the LIVE factories at
+the bottom of this module, which construct the gated Replicate provider and
+the hardened downloader (Part B) — always fail-closed, constructing no
+network client unless every gate passes. A non-blocking PostgreSQL advisory
+lock (in the two-integer lock space,
 distinct from the Design-level spec lock's bigint space) guarantees duplicate
 broker delivery never executes one attempt twice. Logs carry only operation
 names, row UUIDs and exception types — never a prompt, answer, output URL,
@@ -25,6 +29,7 @@ storage key or provider error body.
 """
 
 import contextlib
+import dataclasses
 import hashlib
 import io
 import logging
@@ -42,6 +47,7 @@ from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
+from pydantic import ValidationError
 
 from sitara.ai_gateway.image_generation import (
     PREDICTION_ABORTED,
@@ -63,7 +69,20 @@ from sitara.media.exceptions import (
 from sitara.media.ingest import ingest_staged_design_image
 
 from . import errors
-from .context import DesignNotReady
+from .context import DesignNotReady, build_generation_context
+from .demo.config import (
+    DemoAssetsUnavailable,
+    demo_generation_is_available,
+    load_active_demo_manifest,
+)
+from .demo.image_provider import DemoImageProvider, demo_image_downloader
+from .demo.manifest import DemoManifest
+from .demo.provider import (
+    DemoRefinementStructuredDesignProvider,
+    DemoStructuredDesignProvider,
+)
+from .demo.selector import DemoAssetSelection, DemoAssetUnavailable, select_demo_asset
+from .design_spec import DesignSpec
 from .image_download import MAX_REDIRECTS
 from .prompt_builder import ImagePromptBuildError
 from .prompt_service import ImagePromptImmutable, build_and_store_image_prompt
@@ -120,6 +139,10 @@ _SPEND_RESOLVED_CODES = (
 # inject a deterministic clock.
 _monotonic = time.monotonic
 
+# Sleep primitive, indirected the same way so tests can inject a no-op —
+# used only by the bounded demo progress delay (Phase 15) below.
+_sleep = time.sleep
+
 # The reviewed Phase 2 rendering profile and safe pipeline bounds. Part B wires
 # the environment-driven values (model, timeouts, size caps) into this config
 # from Django settings; the defaults here keep Part A self-contained and make
@@ -153,6 +176,13 @@ class PipelineConfig:
     poll_timeout_seconds: float = 0.0
     raw_max_bytes: int = 20_000_000
     raw_max_pixels: int = 40_000_000
+    # Bounded delay (Phase 15) applied only to demo attempts, only between
+    # stages, never while a database lock or transaction is held — keeps the
+    # genuine persisted progress states visible for a demonstration. Zero by
+    # default (and always zero unless built from settings via
+    # ``build_pipeline_config``, which every test-constructed PipelineConfig
+    # bypasses).
+    demo_stage_delay_seconds: float = 0.0
 
 
 def build_pipeline_config() -> "PipelineConfig":
@@ -175,7 +205,31 @@ def build_pipeline_config() -> "PipelineConfig":
         poll_timeout_seconds=float(timeout),
         raw_max_bytes=settings.GENERATION_RAW_MAX_BYTES,
         raw_max_pixels=settings.GENERATION_RAW_MAX_PIXELS,
+        demo_stage_delay_seconds=settings.DEMO_STAGE_DELAY_MS / 1000.0,
     )
+
+
+def _demo_pipeline_config(config: "PipelineConfig") -> "PipelineConfig":
+    """The config a demo attempt actually executes with: an empty ``model``
+    (so ``_ensure_prediction`` falls back to the demo provider's own
+    ``name``, never the configured live image model) and trivial poll
+    bounds (the demo image provider always resolves on the first poll).
+    Everything else — including ``demo_stage_delay_seconds`` — is preserved
+    from the live/base config."""
+    return dataclasses.replace(
+        config,
+        model="",
+        poll_interval_seconds=0.0,
+        poll_max_attempts=1,
+        poll_timeout_seconds=0.0,
+    )
+
+
+def _demo_delay(config: "PipelineConfig") -> None:
+    """A bounded, lock-free delay applied only to demo attempts, only
+    between stages — never while a database lock or transaction is held."""
+    if config.demo_stage_delay_seconds > 0:
+        _sleep(config.demo_stage_delay_seconds)
 
 
 # Worst-case wall-clock allowance (seconds) for stage E — canonical permanent
@@ -358,20 +412,62 @@ def enqueue_design_generation(
             _mark_queue_unavailable(attempt)
             raise QueueUnavailable("the generation queue is temporarily unavailable") from exc
 
+    # Idempotent replay: an unlocked read is safe here — the transaction
+    # below re-checks it before ever writing, so a concurrent commit between
+    # this read and the lock is still caught.
+    existing = GenerationAttempt.objects.filter(
+        design=design, idempotency_key=idempotency_key
+    ).first()
+    if existing is not None:
+        return existing, False
+
+    # Resolve and freeze the public generation mode BEFORE opening the
+    # transaction/row lock (public API only) — availability I/O (a private
+    # storage read for demo readiness, or the in-memory live gate check)
+    # never runs while holding the Design row lock, keeping the locked
+    # transaction below short. A fresh attempt resuming an existing
+    # (incomplete) version must inherit THAT version's mode, never
+    # re-resolve from current settings — the same demo/live lineage rule
+    # refinement enforces — so the resumable version (if any) is previewed
+    # here to pick the correct mode to check; the transaction below
+    # re-queries it under the lock and is the sole authority for the value
+    # actually persisted. Demo takes precedence over every paid flag — when
+    # DEMO_MODE is true, ONLY demo readiness is evaluated; live readiness is
+    # NEVER evaluated as a fallback from failed demo readiness. A demo
+    # attempt's is_demo flag is the ONLY thing later pipeline stages
+    # consult; they never re-read DEMO_MODE, so a later settings change can
+    # never make an already-queued demo attempt spend money or a live
+    # attempt silently become free. When require_availability is False (the
+    # offline fixture command only), is_demo stays False here: that path
+    # always injects its own zero-network
+    # FixtureStructuredDesignProvider/FakeImageProvider directly, never the
+    # real demo engine, so labelling it "demo" would be inaccurate and would
+    # incorrectly trigger the demo pipeline-config overrides below.
+    is_demo = False
+    if require_availability:
+        preview_version = (
+            DesignVersion.objects.filter(design=design).order_by("version_number").first()
+        )
+        is_demo = preview_version.is_demo if preview_version is not None else settings.DEMO_MODE
+        if is_demo:
+            if not demo_generation_is_available():
+                raise GenerationUnavailable("generation is not currently available")
+        elif not generation_is_available():
+            raise GenerationUnavailable("generation is not currently available")
+
     with transaction.atomic():
         locked = Design.objects.select_for_update().get(pk=design.pk)
 
-        # 1. Idempotent replay: return an existing attempt for this exact key
-        #    unchanged, regardless of the current provider gates.
+        # 1. Idempotent replay, re-checked inside the lock: a concurrent
+        #    request could have committed between the read above and here.
         existing = GenerationAttempt.objects.filter(
             design=locked, idempotency_key=idempotency_key
         ).first()
         if existing is not None:
             return existing, False
 
-        # 2. New key: enforce availability BEFORE any work (public API only).
-        if require_availability and not generation_is_available():
-            raise GenerationUnavailable("live generation is not currently available")
+        # 2. Generation mode and availability were already resolved above,
+        #    before acquiring the row lock.
 
         # 3. Re-run authoritative completeness (questionnaire + inspiration).
         completion_errors = design_completion_errors(locked)
@@ -443,6 +539,23 @@ def enqueue_design_generation(
         if resume_version is not None and resume_version.image_storage_key:
             # A final ingested image (Phase 11) means the design is complete.
             raise DesignAlreadyGenerated("this design has already been generated")
+        if resume_version is not None:
+            # A fresh attempt resuming an existing (incomplete) version must
+            # inherit THAT version's mode, never re-resolve from current
+            # settings — the same demo/live lineage rule refinement
+            # enforces. This re-confirms the pre-lock preview above against
+            # the freshly locked query; the only way it could legitimately
+            # differ is a version appearing between the preview and the
+            # lock, in which case THIS freshly queried value is
+            # authoritative for the attempt actually created below. This
+            # override does NOT re-check availability for the (possibly
+            # different) resulting mode — that is safe only because step 4's
+            # GenerationInProgress check above already rejects the sole
+            # interleaving that could make this value differ from the
+            # pre-lock preview (a concurrent in-progress attempt for the
+            # same design); a future change must not let this override run
+            # for a mode whose readiness was never confirmed.
+            is_demo = resume_version.is_demo
 
         # 6. Create the queued attempt (resuming an incomplete version if any).
         attempt = GenerationAttempt.objects.create(
@@ -450,6 +563,7 @@ def enqueue_design_generation(
             design_version=resume_version,
             idempotency_key=idempotency_key,
             status=_Status.QUEUED,
+            is_demo=is_demo,
         )
         attempt.celery_task_id = str(attempt.id)
         attempt.save(update_fields=["celery_task_id", "updated_at"])
@@ -518,20 +632,48 @@ def enqueue_design_refinement(
             _mark_queue_unavailable(attempt)
             raise QueueUnavailable("the generation queue is temporarily unavailable") from exc
 
+    # Idempotent replay: an unlocked read is safe here — the transaction
+    # below re-checks it before ever writing.
+    existing = GenerationAttempt.objects.filter(
+        design=design, idempotency_key=idempotency_key
+    ).first()
+    if existing is not None:
+        return existing, False
+
+    # A refinement's mode is INHERITED from its source version, never
+    # independently resolved from current settings, so the readiness check
+    # must be for that specific mode, not whatever DEMO_MODE would currently
+    # pick. Availability I/O never runs while holding the Design row lock —
+    # resolved here from an unlocked preview of the source version, before
+    # the transaction opens; the transaction below re-fetches and fully
+    # validates the source version under the lock and is the sole authority
+    # for the value actually persisted.
+    is_demo = False
+    if require_availability:
+        preview_source = DesignVersion.objects.filter(design=design, pk=source_version_id).first()
+        if preview_source is not None:
+            is_demo = preview_source.is_demo
+        if is_demo:
+            if not demo_generation_is_available():
+                raise GenerationUnavailable("generation is not currently available")
+        elif not generation_is_available():
+            raise GenerationUnavailable("generation is not currently available")
+
     with transaction.atomic():
         locked = Design.objects.select_for_update().get(pk=design.pk)
 
-        # 1. Idempotent replay: return an existing attempt for this exact key
-        #    unchanged, regardless of the current provider gates.
+        # 1. Idempotent replay, re-checked inside the lock: a concurrent
+        #    request could have committed between the read above and here.
         existing = GenerationAttempt.objects.filter(
             design=locked, idempotency_key=idempotency_key
         ).first()
         if existing is not None:
             return existing, False
 
-        # 2. New key: enforce availability BEFORE any work (public API only).
-        if require_availability and not generation_is_available():
-            raise GenerationUnavailable("live generation is not currently available")
+        # 2. Generation mode and availability were already resolved above,
+        #    before acquiring the row lock, from a preview of the source
+        #    version — step 5b below re-confirms the mode against the
+        #    freshly locked query.
 
         # 3. Reject if another attempt is already in progress (Design-scoped,
         #    same constraint the initial pipeline relies on). Checked BEFORE
@@ -562,6 +704,20 @@ def enqueue_design_refinement(
         if source_version is None:
             raise RefinementSourceUnavailable("the source version is not available")
         validate_source_version(source_version)  # raises RefinementSourceUnavailable
+
+        # 5b. A refinement's mode is INHERITED from its source version — a
+        #     demo source can never be refined through the live path and a
+        #     live source can never be refined through the demo path,
+        #     regardless of the CURRENT DEMO_MODE setting. Re-confirms the
+        #     pre-lock preview above against the freshly locked query; this
+        #     does NOT re-check availability for a (possibly different)
+        #     resulting mode — that is safe only because step 3's
+        #     GenerationInProgress check above already rejects the sole
+        #     interleaving that could make this value differ from the
+        #     pre-lock preview (a concurrent in-progress attempt for the
+        #     same design); a future change must not let this override run
+        #     for a mode whose readiness was never confirmed.
+        is_demo = source_version.is_demo
 
         # 6. A completed refinement, a staged-but-unresolved refinement
         #    attempt, or an attempt with unresolved provider-spend evidence
@@ -607,6 +763,7 @@ def enqueue_design_refinement(
             refinement_request=refinement_request.model_dump(mode="json"),
             refinement_request_schema_version=REFINEMENT_REQUEST_SCHEMA_VERSION,
             refinement_request_sha256=refinement_request_hash,
+            is_demo=is_demo,
         )
         attempt.celery_task_id = str(attempt.id)
         attempt.save(update_fields=["celery_task_id", "updated_at"])
@@ -765,6 +922,14 @@ def _execute(
     seed_factory,
     config,
 ):
+    # A demo attempt executes with the demo pipeline config (empty model so
+    # the persisted image_model is the demo provider's own honest identity,
+    # trivial poll bounds) regardless of what the caller passed — branching
+    # purely on the FROZEN attempt.is_demo flag, never on live settings, so
+    # a later settings change can never affect an already-queued attempt.
+    if attempt.is_demo:
+        config = _demo_pipeline_config(config)
+
     # Stage A — claim and pre-check. The completeness re-check applies only to
     # INITIAL generation (it validates questionnaire/inspiration readiness,
     # which is irrelevant once a design is already generated and refinement
@@ -782,9 +947,9 @@ def _execute(
     if attempt.design_version_id is None:
         _set_status(attempt, _Status.RUNNING_TEXT)
         if is_refinement:
-            version = _run_refinement_text_stage(design, attempt, structured_provider)
+            version = _run_refinement_text_stage(design, attempt, structured_provider, config)
         else:
-            version = _run_text_stage(design, attempt, structured_provider)
+            version = _run_text_stage(design, attempt, structured_provider, config)
     else:
         version = DesignVersion.objects.get(pk=attempt.design_version_id)
         if version.design_id != attempt.design_id:
@@ -838,15 +1003,30 @@ def _set_status(attempt: GenerationAttempt, status: str) -> None:
         attempt.status = status
 
 
-def _run_text_stage(design, attempt, structured_provider) -> DesignVersion:
-    provider = structured_provider
-    if provider is None:
-        # Live gated Anthropic provider (Phase 8). Only reached when a caller
-        # did not inject one (never in Part A tests).
-        from sitara.ai_gateway.policy import get_structured_design_generation_provider
+def _resolve_structured_provider_impl(attempt, demo_factory):
+    """Shared structured-design provider resolution: ``demo_factory()`` for a
+    demo attempt, or the live gated Anthropic provider otherwise. Branches
+    purely on the FROZEN ``attempt.is_demo``, never on live settings. Used by
+    both the initial-generation and refinement resolution points below — the
+    only difference between them is how the demo provider is built."""
+    if attempt.is_demo:
+        return demo_factory()
+    from sitara.ai_gateway.policy import get_structured_design_generation_provider
 
-        provider = get_structured_design_generation_provider()
+    return get_structured_design_generation_provider()
 
+
+def _resolve_structured_provider(design, attempt):
+    """The initial-generation structured-design provider: the local
+    deterministic demo adapter (built from a freshly re-validated
+    GenerationContext — never a parsed prompt) for a demo attempt, or the
+    live gated Anthropic provider otherwise."""
+    return _resolve_structured_provider_impl(
+        attempt, lambda: DemoStructuredDesignProvider(context=build_generation_context(design))
+    )
+
+
+def _run_text_stage(design, attempt, structured_provider, config) -> DesignVersion:
     # Crash-window guard (mirrors ``_ensure_prediction``): a prior delivery
     # began a text submission (marker set) but never linked a version — the
     # provider MAY have accepted and billed the request, and the private
@@ -858,7 +1038,15 @@ def _run_text_stage(design, attempt, structured_provider) -> DesignVersion:
     if attempt.text_submission_in_flight:
         raise _TerminalGenerationError(errors.STRUCTURED_SUBMISSION_AMBIGUOUS)
 
+    if attempt.is_demo:
+        _demo_delay(config)
+
     try:
+        provider = (
+            structured_provider
+            if structured_provider is not None
+            else _resolve_structured_provider(design, attempt)
+        )
         version = generate_design_spec_for_design(design, provider=provider, attempt=attempt)
     except GenerationRefused as exc:
         # The provider ANSWERED (a refusal): spend resolved; the marker is
@@ -905,18 +1093,25 @@ def _run_text_stage(design, attempt, structured_provider) -> DesignVersion:
     return version
 
 
-def _run_refinement_text_stage(design, attempt, structured_provider) -> DesignVersion:
+def _resolve_refinement_structured_provider(source_version, refinement_request, attempt):
+    """The refinement structured-design provider: the local deterministic
+    demo adapter (built from the persisted source spec — never a parsed
+    prompt) for a demo attempt, or the live gated Anthropic provider
+    otherwise."""
+    return _resolve_structured_provider_impl(
+        attempt,
+        lambda: DemoRefinementStructuredDesignProvider(
+            source_spec=source_version.design_spec, refinement_request=refinement_request
+        ),
+    )
+
+
+def _run_refinement_text_stage(design, attempt, structured_provider, config) -> DesignVersion:
     """Stage B for a REFINEMENT attempt (Phase 14) — mirrors
     :func:`_run_text_stage`'s crash-window guard and error taxonomy exactly,
     but calls :func:`~sitara.generation.refinement_service.generate_refined_design_spec_for_design`
     against the persisted source version and the attempt's own durable copy
     of the canonical refinement request, never the raw questionnaire."""
-    provider = structured_provider
-    if provider is None:
-        from sitara.ai_gateway.policy import get_structured_design_generation_provider
-
-        provider = get_structured_design_generation_provider()
-
     if attempt.text_submission_in_flight:
         raise _TerminalGenerationError(errors.STRUCTURED_SUBMISSION_AMBIGUOUS)
 
@@ -930,7 +1125,17 @@ def _run_refinement_text_stage(design, attempt, structured_provider) -> DesignVe
     except Exception as exc:  # noqa: BLE001 - corrupt persisted JSON is a safety boundary
         raise _TerminalGenerationError(errors.REFINEMENT_SOURCE_UNAVAILABLE) from exc
 
+    if attempt.is_demo:
+        _demo_delay(config)
+
     try:
+        provider = (
+            structured_provider
+            if structured_provider is not None
+            else _resolve_refinement_structured_provider(
+                source_version, refinement_request, attempt
+            )
+        )
         version = generate_refined_design_spec_for_design(
             design, source_version, refinement_request, provider=provider, attempt=attempt
         )
@@ -1072,6 +1277,70 @@ def _recover_staged_object(store, attempt, config) -> bool:
     return False
 
 
+def _select_demo_asset_for_attempt(attempt, version) -> tuple[DemoAssetSelection, DemoManifest]:
+    """Resolve this attempt's demo asset selection, reusing a persisted
+    selection on resume rather than reselecting (spec §31). Raises
+    :class:`_TerminalGenerationError` with ``demo_assets_unavailable`` for
+    every failure mode — a missing/invalid active manifest, a missing
+    persisted spec, or no compatible asset — never exposing which internal
+    object or path failed."""
+    try:
+        manifest = load_active_demo_manifest()
+    except DemoAssetsUnavailable as exc:
+        raise _TerminalGenerationError(errors.DEMO_ASSETS_UNAVAILABLE) from exc
+
+    if attempt.demo_selection:
+        stored = attempt.demo_selection
+        return (
+            DemoAssetSelection(
+                asset_id=stored["asset_id"],
+                manifest_hash=stored["manifest_hash"],
+                manifest_schema_version=stored["manifest_schema_version"],
+                selector_version=stored["selector_version"],
+            ),
+            manifest,
+        )
+
+    try:
+        spec = DesignSpec.model_validate(version.design_spec)
+    except ValidationError as exc:
+        raise _TerminalGenerationError(errors.DEMO_ASSETS_UNAVAILABLE) from exc
+    try:
+        selection = select_demo_asset(spec, version.image_prompt, manifest)
+    except DemoAssetUnavailable as exc:
+        raise _TerminalGenerationError(errors.DEMO_ASSETS_UNAVAILABLE) from exc
+
+    GenerationAttempt.objects.filter(pk=attempt.pk).update(
+        demo_selection={
+            "asset_id": selection.asset_id,
+            "manifest_hash": selection.manifest_hash,
+            "manifest_schema_version": selection.manifest_schema_version,
+            "selector_version": selection.selector_version,
+        },
+        updated_at=timezone.now(),
+    )
+    attempt.demo_selection = {
+        "asset_id": selection.asset_id,
+        "manifest_hash": selection.manifest_hash,
+        "manifest_schema_version": selection.manifest_schema_version,
+        "selector_version": selection.selector_version,
+    }
+    return selection, manifest
+
+
+def _demo_seed_factory(version, selection: DemoAssetSelection):
+    """A deterministic non-negative seed from the persisted image prompt,
+    manifest hash and selector version only — never a Design/attempt UUID,
+    user identity, the current time or process randomness (spec §25)."""
+
+    def factory() -> int:
+        payload = f"{version.image_prompt}:{selection.manifest_hash}:{selection.selector_version}"
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        return int(digest[:8], 16)
+
+    return factory
+
+
 def _run_image_stage(
     attempt, version, image_provider, image_downloader, storage, seed_factory, config
 ) -> None:
@@ -1079,6 +1348,8 @@ def _run_image_stage(
 
     _set_status(attempt, _Status.RUNNING_IMAGE)
     attempt.refresh_from_db()
+    if attempt.is_demo:
+        _demo_delay(config)
 
     # Resume with persisted metadata: VERIFY the staged object still exists and
     # matches before finalising — never a false success on missing/corrupt data.
@@ -1100,13 +1371,29 @@ def _run_image_stage(
     # Provider/downloader resolution is DEFERRED until a provider operation is
     # actually required: the verify/recover paths above must finalise already-
     # paid output even when the live gates are closed (a closed gate would
-    # otherwise fail the resume terminally before touching storage).
-    provider = image_provider if image_provider is not None else _live_image_provider(config)
-    downloader = (
-        image_downloader if image_downloader is not None else _live_image_downloader(config)
-    )
+    # otherwise fail the resume terminally before touching storage). Branches
+    # purely on the FROZEN attempt.is_demo, never on live settings.
+    demo_selection = None
+    if image_provider is not None:
+        provider = image_provider
+    elif attempt.is_demo:
+        demo_selection, demo_manifest = _select_demo_asset_for_attempt(attempt, version)
+        provider = DemoImageProvider(selection=demo_selection, manifest=demo_manifest)
+    else:
+        provider = _live_image_provider(config)
 
-    prediction_id = _ensure_prediction(attempt, version, provider, seed_factory, config)
+    if image_downloader is not None:
+        downloader = image_downloader
+    elif attempt.is_demo:
+        downloader = demo_image_downloader
+    else:
+        downloader = _live_image_downloader(config)
+
+    effective_seed_factory = seed_factory
+    if effective_seed_factory is None and attempt.is_demo and demo_selection is not None:
+        effective_seed_factory = _demo_seed_factory(version, demo_selection)
+
+    prediction_id = _ensure_prediction(attempt, version, provider, effective_seed_factory, config)
     prediction = _poll(provider, prediction_id, config)
 
     if prediction.status == PREDICTION_FAILED:
