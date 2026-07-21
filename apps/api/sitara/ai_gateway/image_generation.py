@@ -16,12 +16,12 @@ exists (default empty tuple) but a non-empty collection must be rejected before
 any provider call — never silently ignored.
 
 This ASYNCHRONOUS prediction contract (``ImageProvider``) is the authoritative
-image-generation boundary for any real/live path from Phase 10 onward. The
-older synchronous ``ImageGenerationProvider`` / ``get_image_generation_provider``
-in :mod:`sitara.ai_gateway.providers` / :mod:`sitara.ai_gateway.policy` is
-Phase 3A demo scaffolding (``generate_image(prompt, model) -> dict``) and is not
-used by the generation pipeline; it will be folded in or removed in a later
-phase.
+image-generation boundary for any real/live path from Phase 10 onward, and
+(via :mod:`sitara.generation.demo.image_provider`'s ``DemoImageProvider``,
+added in Phase 15) for the deterministic zero-cost demo path too — both
+implement this exact protocol. The older synchronous
+``ImageGenerationProvider`` / ``get_image_generation_provider`` (Phase 3A demo
+scaffolding, never used by the generation pipeline) was removed in Phase 15.
 """
 
 from dataclasses import dataclass, field

@@ -21,7 +21,7 @@ Sitara is for **concept visualisation only** — no sewing patterns, manufacturi
 
 ## 3. Current repository state
 
-Phases 1–14 are delivered and merged to `main` (Phase 14: single-round constrained refinement, ADR 0015). Phase 15 (deterministic zero-cost demo engine) is next: it replaces the earlier fixture-lookup sketch with a demo path that builds a real DesignSpec locally, reuses the existing deterministic image-prompt builder unchanged, deterministically selects from a small reviewed fixture-image manifest, and runs the result through the same durable generation pipeline, storage, job/result APIs and frontend UI as live generation — never a separate toy frontend or a mock hidden behind the paid-provider wrapper. Delivered: Phase 2 image-model evaluation; app foundation; session auth/CSRF; anonymous + authenticated design ownership; versioned questionnaire; rights-controlled catalogue; OpenAPI-generated client; structured DesignSpec generation; deterministic image-prompt builder; async Celery/Replicate generation; permanent design-image storage; generation-progress and private results; curated inspiration-metadata influence on generation; single-round constrained refinement with version comparison.
+Phases 1–15 are delivered and merged to `main` (Phase 15: deterministic zero-cost demo engine, ADR 0016). Phase 16 (security and live-generation cost controls) is next. Delivered: Phase 2 image-model evaluation; app foundation; session auth/CSRF; anonymous + authenticated design ownership; versioned questionnaire; rights-controlled catalogue; OpenAPI-generated client; structured DesignSpec generation; deterministic image-prompt builder; async Celery/Replicate generation; permanent design-image storage; generation-progress and private results; curated inspiration-metadata influence on generation; single-round constrained refinement with version comparison; deterministic zero-cost demo generation reusing the same asynchronous pipeline, storage, job/result APIs and frontend UI as live generation.
 
 `docs/phases/PHASES.md` is authoritative for future work — always inspect the current branch and that file rather than relying on this paragraph.
 
@@ -35,7 +35,7 @@ black-forest-labs/flux-1.1-pro
 
 For any substantial task, read the relevant code plus `README.md`, `docs/PROPOSAL.md`, `docs/phases/PHASES.md`, `docs/decisions/`, `compose.yaml`, `.github/workflows/ci.yml`. For a phase task with its own spec file, read that file in full before editing.
 
-ADRs currently on record: 0001 image model, 0002 application foundation, 0003 session authentication, 0004 private design ownership, 0005 versioned questionnaire schema, 0006 rights-controlled inspiration catalogue, 0007 OpenAPI generated client, 0008 questionnaire draft and wizard, 0009 structured design-spec generation, 0010 deterministic image-prompt builder, 0011 asynchronous generation pipeline, 0012 private design-image storage, 0013 generation progress and results, 0014 rights-safe inspiration metadata influence, 0015 single-round constrained refinement.
+ADRs currently on record: 0001 image model, 0002 application foundation, 0003 session authentication, 0004 private design ownership, 0005 versioned questionnaire schema, 0006 rights-controlled inspiration catalogue, 0007 OpenAPI generated client, 0008 questionnaire draft and wizard, 0009 structured design-spec generation, 0010 deterministic image-prompt builder, 0011 asynchronous generation pipeline, 0012 private design-image storage, 0013 generation progress and results, 0014 rights-safe inspiration metadata influence, 0015 single-round constrained refinement, 0016 deterministic demo mode.
 
 ## 5. Repository layout
 
@@ -48,7 +48,7 @@ docs/           Proposal, roadmap, ADRs and project documentation
 compose.yaml    Local PostgreSQL, Redis, MinIO, API, web and Celery stack
 ```
 
-Django apps under `apps/api/sitara/`: `accounts`, `designs`, `questionnaire`, `catalogue`, `health`, `ai_gateway` (fail-closed provider gateway: gating policy, Anthropic/Replicate wrappers), `generation` (pipeline orchestration, DesignSpec generation, prompt builder/service, Celery tasks, demo fixtures). `apps/api/sitara/media/` is a support package (image processing, ingest, signed delivery) for permanent design images — not a Django app.
+Django apps under `apps/api/sitara/`: `accounts`, `designs`, `questionnaire`, `catalogue`, `health`, `ai_gateway` (fail-closed live-provider gateway: gating policy, Anthropic/Replicate wrappers, `resolve_generation_mode()`), `generation` (pipeline orchestration, DesignSpec generation, prompt builder/service, Celery tasks; `generation/demo/` is the deterministic zero-cost demo engine — manifest, selector, local structured/image adapters — reached only through the same asynchronous pipeline, never a mock behind `ai_gateway`). `apps/api/sitara/media/` is a support package (image processing, ingest, signed delivery) for permanent design images — not a Django app.
 
 ## 6. Technology and version discipline
 
@@ -58,7 +58,7 @@ Use the versions pinned by the repository; do not opportunistically upgrade. Bas
 
 Safety gates (`apps/api/config/settings.py`): `DEMO_MODE=true`, `ALLOW_PAID_AI_CALLS=false`, `LIVE_GENERATION_ENABLED=false`. `LIVE_GENERATION_ENABLED` gates the PUBLIC end-to-end generation API — a present token, both provider gates open, and complete provider config are still not enough; the operator must also set this flag. Public live generation must not be enabled before Phase 16 rate-limit/cost-ceiling safeguards exist.
 
-Related settings: `DEFAULT_IMAGE_MODEL`, `FAST_IMAGE_MODEL`, `ANTHROPIC_MODEL`, `ANTHROPIC_API_KEY`, `REPLICATE_API_TOKEN`, `REPLICATE_TIMEOUT_SECONDS`, `REPLICATE_POLL_INTERVAL_SECONDS`/`_TIMEOUT_SECONDS`, `GENERATION_RAW_MAX_BYTES`/`_MAX_PIXELS`, `DESIGN_SPEC_MAX_INPUT_CHARS`/`_MAX_OUTPUT_TOKENS`, `ANTHROPIC_TIMEOUT_SECONDS`, `MAX_DESIGN_VERSIONS`, `MAX_INSPIRATION_IMAGES`/`MAX_REFINEMENTS`. Some older roadmap text uses superseded names (e.g. `ALLOW_PROVIDER_CALLS`); do not reintroduce them without an explicit migration decision.
+Related settings: `DEFAULT_IMAGE_MODEL`, `FAST_IMAGE_MODEL`, `ANTHROPIC_MODEL`, `ANTHROPIC_API_KEY`, `REPLICATE_API_TOKEN`, `REPLICATE_TIMEOUT_SECONDS`, `REPLICATE_POLL_INTERVAL_SECONDS`/`_TIMEOUT_SECONDS`, `GENERATION_RAW_MAX_BYTES`/`_MAX_PIXELS`, `DESIGN_SPEC_MAX_INPUT_CHARS`/`_MAX_OUTPUT_TOKENS`, `ANTHROPIC_TIMEOUT_SECONDS`, `MAX_DESIGN_VERSIONS`, `MAX_INSPIRATION_IMAGES`/`MAX_REFINEMENTS`, `DEMO_STAGE_DELAY_MS` (demo-only, strictly bounded 0–5000, never applies to live generation). Some older roadmap text uses superseded names (e.g. `ALLOW_PROVIDER_CALLS`); do not reintroduce them without an explicit migration decision.
 
 Rules:
 

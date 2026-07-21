@@ -27,13 +27,6 @@ from dataclasses import dataclass
 
 from django.conf import settings
 
-from .providers import (
-    DemoImageGenerationProvider,
-    DemoStructuredDesignProvider,
-    ImageGenerationProvider,
-    StructuredDesignProvider,
-)
-
 # Phase 15: the deterministic zero-cost demo pipeline is implemented. A
 # code-level flag (never an environment variable), matching the discipline
 # every other capability flag in this module already follows.
@@ -213,26 +206,6 @@ def _refuse(policy: GenerationPolicy, implemented: bool, capability_label: str) 
     else:  # pragma: no cover - unreachable when the capability is implemented
         reason = "paid generation is unavailable"
     return PaidGenerationDisabled(f"paid generation refused: {reason}")
-
-
-def get_structured_design_provider() -> StructuredDesignProvider:
-    """Legacy Phase 3A demo scaffolding (brief -> dict). Demo mode only; the
-    gated Phase 8 structured-text path is
-    ``get_structured_design_generation_provider``."""
-    policy = GenerationPolicy.from_settings()
-    if policy.demo_mode:
-        return DemoStructuredDesignProvider()
-    raise _refuse(policy, implemented=False, capability_label="demo structured-design")
-
-
-def get_image_generation_provider() -> ImageGenerationProvider:
-    """Legacy Phase 3A demo scaffolding (``generate_image(prompt, model)`` ->
-    dict). Demo mode only; the gated Phase 10 async image path is
-    ``get_image_generation_provider_async`` (the Replicate provider)."""
-    policy = GenerationPolicy.from_settings()
-    if policy.demo_mode:
-        return DemoImageGenerationProvider()
-    raise _refuse(policy, implemented=False, capability_label="demo image generation")
 
 
 def get_structured_design_generation_provider():

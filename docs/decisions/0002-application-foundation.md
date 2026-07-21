@@ -118,6 +118,26 @@ exists for documented internal reverse-proxy deployments); and production
 CORS/CSRF origin lists must be non-empty and scheme-qualified unless
 `SAME_ORIGIN_DEPLOYMENT=true`.
 
+## Phase 15 implementation note (2026-07-21)
+
+The "Provider abstraction" paragraph above describes `sitara.ai_gateway`'s
+Phase 3A synchronous `StructuredDesignProvider`/`ImageGenerationProvider`
+protocols and their deterministic, network-free demo implementations. That
+scaffolding was never wired into the real asynchronous generation pipeline
+and has been removed by Phase 15 (`docs/decisions/0016-deterministic-demo-mode.md`),
+which replaces it with a real, asynchronous, pipeline-integrated demo path
+(`sitara.generation.demo`) reachable through the same `GenerationAttempt`
+Celery state machine live generation uses. `sitara.ai_gateway` is now
+paid-provider-only: `get_structured_design_generation_provider`/
+`get_image_generation_provider_async` (the live, fail-closed gated
+factories) and `resolve_generation_mode()` (the three-mode `demo`/`live`/
+`unavailable` public source of truth) remain the sanctioned way to obtain a
+live provider or resolve public availability. Fail-closed demo/paid-AI
+precedence (`DEMO_MODE=true`/`ALLOW_PAID_AI_CALLS=false` defaults, a
+configured token never enabling paid calls) is unchanged and now further
+strengthened: demo mode takes absolute precedence over every paid flag with
+no live fallback, structurally rather than by convention.
+
 ## Alternatives considered
 
 - Single Next.js full-stack app — rejected: the Python evaluation/provider
