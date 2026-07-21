@@ -92,6 +92,7 @@ _RESULT_SECTION_KEYS = {
     "created_at",
     "inspiration_acknowledgements",
     "lineage",
+    "is_demo",
 }
 
 

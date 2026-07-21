@@ -104,6 +104,7 @@ class TestLatestJob:
             "status",
             "error_code",
             "generation_kind",
+            "is_demo",
             "created_at",
             "updated_at",
             "started_at",

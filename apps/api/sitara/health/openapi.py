@@ -31,5 +31,12 @@ class PublicConfigSerializer(serializers.Serializer):
     generation_enabled = serializers.BooleanField(
         help_text="True only when environment gates AND a paid provider implementation allow it."
     )
+    generation_mode = serializers.ChoiceField(
+        choices=["demo", "live", "unavailable"],
+        help_text=(
+            "The public generation outcome. Demo takes precedence over every paid "
+            "flag and never falls back to live."
+        ),
+    )
     max_inspiration_images = serializers.IntegerField()
     max_refinements = serializers.IntegerField()

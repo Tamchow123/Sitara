@@ -52,6 +52,9 @@ function VersionCard({
     <article className="version-card" aria-labelledby={headingId}>
       <h2 id={headingId}>
         {label} — version {result.version_number}
+        <span className="version-mode-label" data-mode={result.is_demo ? "demo" : "live"}>
+          {result.is_demo ? "Demo" : "Live"}
+        </span>
       </h2>
       <ResultImage
         images={side.images}

@@ -662,6 +662,31 @@ MAX_REFINEMENTS = 1
 MAX_DESIGN_VERSIONS = env_positive_int("MAX_DESIGN_VERSIONS", 2)
 
 # ---------------------------------------------------------------------------
+# Deterministic zero-cost demo pipeline (Phase 15). The active demo manifest
+# itself is resolved from private object storage (see
+# sitara.generation.demo.config), never a filesystem path setting, so it
+# stays valid across every configured storage backend. DEMO_STAGE_DELAY_MS
+# only keeps the genuine persisted progress states visible for a
+# demonstration; it is strictly bounded and applies only to demo attempts.
+# ---------------------------------------------------------------------------
+_DEMO_STAGE_DELAY_MS_MAXIMUM = 5000
+
+_raw_demo_stage_delay_ms = os.getenv("DEMO_STAGE_DELAY_MS")
+if _raw_demo_stage_delay_ms is None:
+    DEMO_STAGE_DELAY_MS = 0
+else:
+    _stripped_demo_stage_delay_ms = _raw_demo_stage_delay_ms.strip()
+    if (
+        not _stripped_demo_stage_delay_ms.isdigit()
+        or int(_stripped_demo_stage_delay_ms) > _DEMO_STAGE_DELAY_MS_MAXIMUM
+    ):
+        raise ImproperlyConfigured(
+            "DEMO_STAGE_DELAY_MS must be a non-negative integer of at most "
+            f"{_DEMO_STAGE_DELAY_MS_MAXIMUM}"
+        )
+    DEMO_STAGE_DELAY_MS = int(_stripped_demo_stage_delay_ms)
+
+# ---------------------------------------------------------------------------
 # Inspiration catalogue (Phase 5B) — staff-only image ingestion bounds.
 # Strict positive integers; invalid values refuse startup in EVERY
 # environment. Uploads above INSPIRATION_MAX_UPLOAD_BYTES are rejected

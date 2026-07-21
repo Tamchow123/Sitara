@@ -102,6 +102,7 @@ function result(overrides: Partial<DesignResultType> = {}): DesignResultType {
     created_at: "2026-07-19T12:00:00Z",
     inspiration_acknowledgements: [],
     lineage: { kind: "initial", parent_version_id: null, refinement: null },
+    is_demo: false,
     ...overrides,
   };
 }
@@ -637,6 +638,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
           status: "succeeded",
           error_code: null,
           generation_kind: "refinement",
+          is_demo: false,
           created_at: "t",
           updated_at: "t",
           started_at: "t",
@@ -671,6 +673,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
           status: "running_image",
           error_code: null,
           generation_kind: "refinement",
+          is_demo: false,
           created_at: "t",
           updated_at: "t",
           started_at: "t",
@@ -697,6 +700,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
           status: "failed",
           error_code: "refinement_generation_failed",
           generation_kind: "refinement",
+          is_demo: false,
           created_at: "t",
           updated_at: "t",
           started_at: "t",

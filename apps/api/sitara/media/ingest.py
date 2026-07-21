@@ -218,7 +218,7 @@ def _read_verified_staged_bytes(staging_store, attempt: GenerationAttempt) -> by
             image_format = (image.format or "").upper()
             width, height = image.size
     except Image.DecompressionBombError as exc:
-        # Same classification discipline as image_processing._open_staged:
+        # Same classification discipline as image_sanitize.open_and_validate:
         # confirmed-bad content, never an unclassified internal error.
         raise DesignImageIngestFailed("the staged object failed verification") from exc
     except (UnidentifiedImageError, OSError, ValueError) as exc:

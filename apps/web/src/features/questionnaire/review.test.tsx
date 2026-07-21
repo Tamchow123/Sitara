@@ -221,6 +221,52 @@ describe("ReviewSummary", () => {
       expect(note.textContent).not.toMatch(/key/i);
     });
 
+    it("shows the demo disclosure and associates it with the submit button when demo_mode is true", async () => {
+      mocks.fetchPublicConfig.mockResolvedValue({
+        demo_mode: true,
+        generation_enabled: true,
+        generation_mode: "demo",
+        max_inspiration_images: 3,
+        max_refinements: 1,
+      });
+      render(<ReviewSummary designId="d1" />);
+      const button = await screen.findByRole("button", { name: /Generate my concept/i });
+      const disclosure = screen.getByRole("note", { name: /demo disclosure/i });
+      expect(disclosure).toHaveTextContent(/deterministic design brief/i);
+      expect(disclosure).toHaveTextContent(/curated pack/i);
+      expect(button.getAttribute("aria-describedby")).toContain("demo-disclosure");
+    });
+
+    it("does not show the demo disclosure when demo_mode is false", async () => {
+      mocks.fetchPublicConfig.mockResolvedValue({
+        demo_mode: false,
+        generation_enabled: true,
+        generation_mode: "live",
+        max_inspiration_images: 3,
+        max_refinements: 1,
+      });
+      render(<ReviewSummary designId="d1" />);
+      await screen.findByRole("button", { name: /Generate my concept/i });
+      expect(screen.queryByRole("note", { name: /demo disclosure/i })).not.toBeInTheDocument();
+    });
+
+    it("shows a demo-specific unavailable message when the demo asset pack is not ready", async () => {
+      mocks.fetchPublicConfig.mockResolvedValue({
+        demo_mode: true,
+        generation_enabled: false,
+        generation_mode: "unavailable",
+        max_inspiration_images: 3,
+        max_refinements: 1,
+      });
+      render(<ReviewSummary designId="d1" />);
+      const button = await screen.findByRole("button", { name: /Generate my concept/i });
+      expect(button).toBeDisabled();
+      const note = screen.getByText(/visual library is not ready/i);
+      expect(note.textContent).not.toMatch(/key/i);
+      expect(note.textContent).not.toMatch(/storage/i);
+      expect(note.textContent).not.toMatch(/manifest/i);
+    });
+
     it("keeps the button disabled for an invalid design even when generation is enabled", async () => {
       mocks.validateDesignDraft.mockResolvedValue({
         ok: false,

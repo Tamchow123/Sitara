@@ -722,3 +722,44 @@ textarea:focus-visible,
     animation: none !important;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Deterministic demo mode (Phase 15)                                 */
+/* ------------------------------------------------------------------ */
+.demo-banner {
+  border-bottom: 3px solid var(--ok);
+  background: #eaf5ee;
+  color: var(--ink);
+  padding: 0.6rem 1.25rem;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.demo-banner strong {
+  color: var(--ok);
+}
+
+.demo-disclosure,
+.demo-disclaimer {
+  border-left: 4px solid var(--ok);
+  padding: 0.75rem 1.1rem;
+  background: #eaf5ee;
+  border-radius: 0 8px 8px 0;
+}
+
+.version-mode-label {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  margin-left: 0.5rem;
+}
+
+.version-mode-label[data-mode="demo"] {
+  border-color: var(--ok);
+  color: var(--ok);
+}

@@ -45,7 +45,9 @@ def _request(change_type="colour_story", note=""):
     )
 
 
-def _generated_design_with_v1(*, questionnaire=None) -> tuple[Design, DesignVersion]:
+def _generated_design_with_v1(
+    *, questionnaire=None, is_demo: bool = False
+) -> tuple[Design, DesignVersion]:
     """A Design in GENERATED status with a complete, valid version 1 —
     created directly via ORM (no provider call), matching the shape a real
     initial-generation pipeline would leave behind. Pass a shared
@@ -85,6 +87,7 @@ def _generated_design_with_v1(*, questionnaire=None) -> tuple[Design, DesignVers
     version.thumbnail_height = 260
     version.image_processor_version = "1.0.0"
     version.image_ingested_at = timezone.now()
+    version.is_demo = is_demo
     version.save()
     design.status = Design.Status.GENERATED
     design.save(update_fields=["status"])
@@ -472,3 +475,76 @@ class TestConcurrency:
         assert len(created) == 1
         assert len(refused) == 2
         assert GenerationAttempt.objects.filter(design=design).count() == 1
+
+
+_DEMO_AVAILABLE = "sitara.generation.pipeline.demo_generation_is_available"
+
+
+class TestDemoRefinementInheritance:
+    """Phase 15 Part C spec §20: a refinement's mode is INHERITED from its
+    source version, never independently resolved from current settings — a
+    demo source can never be refined through the live path and a live source
+    can never be refined through the demo path."""
+
+    def test_refinement_of_a_demo_source_is_demo_and_checks_demo_readiness(self, settings):
+        design, v1 = _generated_design_with_v1(is_demo=True)
+        settings.DEMO_MODE = False  # current setting must be irrelevant
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("a demo-sourced refinement must never check live readiness")
+
+        with (
+            mock.patch(_DEMO_AVAILABLE, return_value=True),
+            mock.patch(_AVAILABLE, side_effect=_boom),
+        ):
+            attempt, created = enqueue_design_refinement(
+                design,
+                source_version_id=v1.pk,
+                refinement_request=_request(),
+                idempotency_key=uuid.uuid4(),
+                enqueue_task=_Recorder(),
+            )
+        assert created is True
+        assert attempt.is_demo is True
+
+    def test_refinement_of_a_live_source_is_live_and_checks_live_readiness(self, settings):
+        design, v1 = _generated_design_with_v1(is_demo=False)
+        settings.DEMO_MODE = True  # current setting must be irrelevant
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("a live-sourced refinement must never check demo readiness")
+
+        with (
+            mock.patch(_AVAILABLE, return_value=True),
+            mock.patch(_DEMO_AVAILABLE, side_effect=_boom),
+        ):
+            attempt, created = enqueue_design_refinement(
+                design,
+                source_version_id=v1.pk,
+                refinement_request=_request(),
+                idempotency_key=uuid.uuid4(),
+                enqueue_task=_Recorder(),
+            )
+        assert created is True
+        assert attempt.is_demo is False
+
+    def test_demo_refinement_unavailable_when_the_pack_is_missing(self, settings):
+        design, v1 = _generated_design_with_v1(is_demo=True)
+        settings.DEMO_MODE = True
+        recorder = _Recorder()
+        with mock.patch(_DEMO_AVAILABLE, return_value=False):
+            with pytest.raises(GenerationUnavailable):
+                enqueue_design_refinement(
+                    design,
+                    source_version_id=v1.pk,
+                    refinement_request=_request(),
+                    idempotency_key=uuid.uuid4(),
+                    enqueue_task=recorder,
+                )
+        assert (
+            GenerationAttempt.objects.filter(
+                design=design, generation_kind=GenerationAttempt.GenerationKind.REFINEMENT
+            ).count()
+            == 0
+        )
+        assert recorder.calls == []

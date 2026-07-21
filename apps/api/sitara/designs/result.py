@@ -223,5 +223,11 @@ def design_result_payload(
             "created_at": _iso(version.design_spec_generated_at),
             "inspiration_acknowledgements": list(acknowledgements),
             "lineage": lineage,
+            # Since Phase 15: this VERSION's own frozen historical demo/live
+            # mode — never inferred from the current public config, so a
+            # demo version stays labelled demo even if the environment later
+            # runs live (and vice versa). Never provider/model/manifest/
+            # asset details.
+            "is_demo": version.is_demo,
         }
     }

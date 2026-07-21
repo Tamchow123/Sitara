@@ -196,6 +196,7 @@ export function DesignResult({ designId, versionId }: Props) {
         <RefinementPanel
           designId={designId}
           sourceVersionId={versionId}
+          isDemo={result.is_demo}
           onRequiresRecheck={handleRequiresRecheck}
         />
       )}

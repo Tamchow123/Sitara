@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { fetchGenerationJob, GenerationJobNotFoundError, type GenerationJob } from "@/lib/api";
+import { demoProgressExplanation, demoProgressHeading } from "./demo-progress-copy";
 import { friendlyGenerationError } from "./generation-errors";
 import { pollingIntervalMs } from "./generation-status";
 import {
@@ -164,20 +165,24 @@ export function GenerationProgress({ designId, jobId }: Props) {
   }
 
   const stageIndex = stageIndexFor(job.status);
-  const heading = isRefinement
-    ? refinementProgressHeading(job.status)
-    : job.status === "queued"
-      ? "Preparing your concept"
-      : job.status === "running_text"
-        ? "Creating your design brief"
-        : "Creating your visual concept";
-  const explanation = isRefinement
-    ? refinementProgressExplanation(job.status)
-    : job.status === "queued"
-      ? "Your generation job is waiting to start."
-      : job.status === "running_text"
-        ? "The details you selected are being converted into a structured concept."
-        : "Your image is being generated, verified and stored privately.";
+  const heading = job.is_demo
+    ? demoProgressHeading(job.status, isRefinement)
+    : isRefinement
+      ? refinementProgressHeading(job.status)
+      : job.status === "queued"
+        ? "Preparing your concept"
+        : job.status === "running_text"
+          ? "Creating your design brief"
+          : "Creating your visual concept";
+  const explanation = job.is_demo
+    ? demoProgressExplanation(job.status, isRefinement)
+    : isRefinement
+      ? refinementProgressExplanation(job.status)
+      : job.status === "queued"
+        ? "Your generation job is waiting to start."
+        : job.status === "running_text"
+          ? "The details you selected are being converted into a structured concept."
+          : "Your image is being generated, verified and stored privately.";
 
   return (
     <main className="generation-progress">

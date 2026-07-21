@@ -11,6 +11,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 
+import { DemoBanner } from "@/features/config/DemoBanner";
 import { AuthProvider } from "@/lib/auth";
 
 function createQueryClient(): QueryClient {
@@ -33,7 +34,10 @@ export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(createQueryClient);
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>{children}</AuthProvider>
+      <AuthProvider>
+        <DemoBanner />
+        {children}
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

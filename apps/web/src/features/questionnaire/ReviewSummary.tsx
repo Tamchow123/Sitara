@@ -19,6 +19,7 @@ import { fetchDesign, fetchPublicConfig, startDesignGeneration, validateDesignDr
 import { answerLabels } from "./answer-utils";
 import { visibleQuestions } from "./rules";
 import { resolveDesignLifecycleTarget } from "@/lib/design-lifecycle";
+import type { PublicConfig } from "@/lib/api";
 import type { Answers, DesignDraft, QuestionnaireSchema } from "./types";
 
 type Props = { designId: string };
@@ -39,6 +40,8 @@ type State =
       valid: boolean;
       errors: Record<string, string[]>;
       generationEnabled: boolean;
+      demoMode: boolean;
+      generationMode: PublicConfig["generation_mode"] | null;
     };
 
 type SubmitState = { status: "idle" } | { status: "submitting" } | { status: "error"; message: string };
@@ -86,6 +89,8 @@ export function ReviewSummary({ designId }: Props) {
         ]);
         if (cancelled) return;
         const generationEnabled = config?.generation_enabled === true;
+        const demoMode = config?.demo_mode === true;
+        const generationMode = config?.generation_mode ?? null;
         if (validation.ok) {
           setState({
             phase: "ready",
@@ -94,6 +99,8 @@ export function ReviewSummary({ designId }: Props) {
             valid: true,
             errors: {},
             generationEnabled,
+            demoMode,
+            generationMode,
           });
           return;
         }
@@ -107,6 +114,8 @@ export function ReviewSummary({ designId }: Props) {
             valid: false,
             errors: validation.fields ?? {},
             generationEnabled,
+            demoMode,
+            generationMode,
           });
         } else {
           setState({ phase: "validation_unavailable" });
@@ -221,12 +230,14 @@ export function ReviewSummary({ designId }: Props) {
     );
   }
 
-  const { design, schema, valid, errors, generationEnabled } = state;
+  const { design, schema, valid, errors, generationEnabled, demoMode, generationMode } = state;
   const answers = (design.answers ?? {}) as Answers;
   const visibility = visibleQuestions(schema, answers);
   const editHref = `/design/${design.id}`;
   const submitting = submit.status === "submitting";
   const canGenerate = valid && generationEnabled && !submitting;
+  const demoAssetsUnavailable = demoMode && generationMode === "unavailable";
+  const describedBy = demoMode ? "generate-note demo-disclosure" : "generate-note";
 
   return (
     <main className="review">
@@ -328,13 +339,24 @@ export function ReviewSummary({ designId }: Props) {
         patterns and does not guarantee that a garment can be constructed exactly as shown.
       </p>
 
+      {demoMode && (
+        <div id="demo-disclosure" className="demo-disclosure" role="note" aria-label="Demo disclosure">
+          <p>
+            In demo mode, your structured selections determine a deterministic design brief, and
+            any approved inspiration descriptions may influence that brief. Free-text
+            interpretation is limited in demo mode. The visual is selected from a curated pack of
+            pre-generated concepts and may not show every detail in the brief.
+          </p>
+        </div>
+      )}
+
       <div className="wizard-nav">
         <Link href={editHref}>Back to questionnaire</Link>
         <button
           type="button"
           onClick={() => void handleGenerate()}
           disabled={!canGenerate}
-          aria-describedby="generate-note"
+          aria-describedby={describedBy}
         >
           {submitting ? "Starting…" : "Generate my concept"}
         </button>
@@ -343,7 +365,9 @@ export function ReviewSummary({ designId }: Props) {
         {!valid
           ? "Complete the highlighted items above before generating."
           : !generationEnabled
-            ? "Concept generation is not currently available."
+            ? demoAssetsUnavailable
+              ? "Demo generation is temporarily unavailable because its visual library is not ready."
+              : "Concept generation is not currently available."
             : submitting
               ? "Starting your generation…"
               : "Ready to generate your concept."}

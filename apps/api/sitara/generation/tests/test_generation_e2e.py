@@ -109,6 +109,7 @@ def test_end_to_end_generation_succeeds_via_eager_task(settings, monkeypatch):
         "status",
         "error_code",
         "generation_kind",
+        "is_demo",
         "created_at",
         "updated_at",
         "started_at",
@@ -310,3 +311,116 @@ def test_pipeline_ingested_version_delivers_through_the_images_endpoint(settings
     )
     assert Design.objects.filter(pk=design.pk).exists()
     assert DesignSession.objects.filter(pk=design.design_session_id).exists()
+
+
+# ---------------------------------------------------------------------------
+# Phase 15 Part C: the same full journey through the REAL local demo adapters
+# (never fakes injected in place of the demo engine — those would test the
+# fakes, not the demo pipeline) with live provider construction monkeypatched
+# to raise, proving the demo journey never reaches it.
+# ---------------------------------------------------------------------------
+
+
+def _boom(*args, **kwargs):
+    raise AssertionError("a demo attempt must never construct or call a live provider")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_end_to_end_demo_generation_succeeds_via_eager_task_and_never_touches_live_gates(
+    settings, monkeypatch, inmemory_storage
+):
+    from django.core.management import call_command
+
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.DEMO_MODE = True
+    call_command("install_demo_asset_pack", "--dev-synthetic")
+    monkeypatch.setattr("sitara.ai_gateway.policy.get_structured_design_generation_provider", _boom)
+    monkeypatch.setattr("sitara.generation.pipeline._live_image_provider", _boom)
+    monkeypatch.setattr("sitara.generation.pipeline._live_image_downloader", _boom)
+
+    design = make_complete_design()
+    attempt, created = enqueue_design_generation(design, idempotency_key=uuid.uuid4())
+    assert created is True
+    attempt.refresh_from_db()
+    assert attempt.status == _Status.SUCCEEDED
+    assert attempt.is_demo is True
+    design.refresh_from_db()
+    assert design.status == Design.Status.GENERATED
+
+    version = DesignVersion.objects.get(design=design)
+    assert version.is_demo is True
+    assert version.has_permanent_image
+    assert version.design_spec_provider == "demo"
+
+    job = public_job_payload(attempt)["job"]
+    assert job["is_demo"] is True
+    assert set(job) == {
+        "id",
+        "design_id",
+        "design_version_id",
+        "status",
+        "error_code",
+        "generation_kind",
+        "is_demo",
+        "created_at",
+        "updated_at",
+        "started_at",
+        "completed_at",
+    }
+
+    # The real HTTP result and signed-image endpoints deliver unchanged.
+    client = Client()
+    client.get("/api/v1/auth/csrf/")
+    session = client.session
+    session[DESIGN_SESSION_KEY] = str(design.design_session_id)
+    session.save()
+    result_response = client.get(f"/api/v1/designs/{design.id}/versions/{version.id}/result/")
+    assert result_response.status_code == 200, result_response.content
+    assert result_response.json()["result"]["is_demo"] is True
+
+    images_response = client.get(f"/api/v1/designs/{design.id}/versions/{version.id}/images/")
+    assert images_response.status_code == 200, images_response.content
+    assert version.image_storage_key in images_response.json()["images"]["original"]["url"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_end_to_end_demo_refinement_succeeds_via_eager_task(
+    settings, monkeypatch, inmemory_storage
+):
+    from django.core.management import call_command
+
+    from sitara.generation.pipeline import enqueue_design_refinement
+    from sitara.generation.refinement import normalise_refinement_request
+
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.DEMO_MODE = True
+    call_command("install_demo_asset_pack", "--dev-synthetic")
+    monkeypatch.setattr("sitara.ai_gateway.policy.get_structured_design_generation_provider", _boom)
+    monkeypatch.setattr("sitara.generation.pipeline._live_image_provider", _boom)
+    monkeypatch.setattr("sitara.generation.pipeline._live_image_downloader", _boom)
+
+    design = make_complete_design()
+    attempt, _created = enqueue_design_generation(design, idempotency_key=uuid.uuid4())
+    attempt.refresh_from_db()
+    assert attempt.status == _Status.SUCCEEDED
+    v1 = DesignVersion.objects.get(design=design)
+
+    refinement_request = normalise_refinement_request(
+        {"schema_version": 1, "change_type": "colour_story", "note": "Try a cooler palette."}
+    )
+    refine_attempt, refine_created = enqueue_design_refinement(
+        design,
+        source_version_id=v1.pk,
+        refinement_request=refinement_request,
+        idempotency_key=uuid.uuid4(),
+    )
+    assert refine_created is True
+    refine_attempt.refresh_from_db()
+    assert refine_attempt.status == _Status.SUCCEEDED
+    assert refine_attempt.is_demo is True
+
+    assert DesignVersion.objects.filter(design=design).count() == 2
+    v2 = DesignVersion.objects.get(design=design, version_number=2)
+    assert v2.is_demo is True
+    assert v2.parent_version_id == v1.pk
+    assert v2.has_permanent_image
