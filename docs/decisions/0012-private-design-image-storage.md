@@ -212,6 +212,10 @@ public ACLs, no public URLs, no sharing surface.
   refresh while a results page stays open.
 - Phase 16 owns staging retention/purge, stuck-attempt reconciliation and
   rate/cost safeguards; until then staged objects accumulate privately.
+  *Delivered in Phase 16 (ADR 0017):* `purge_expired_designs` (Celery Beat)
+  deletes each expired design's permanent **and** Phase 10 staging objects
+  before its row, under a row lock, aborting that design without orphaning
+  objects if a storage delete fails.
 - The Phase 10 paid live checkpoint remains pending and unaffected.
 
 ## Amendment: delivery latency is bounded in-process, not by client timeouts

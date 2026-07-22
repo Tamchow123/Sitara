@@ -18,6 +18,9 @@ x-api-environment: &api-environment
   REDIS_URL: redis://redis:6379/0
   # Separate logical DB for the Django cache (auth rate limiting).
   REDIS_CACHE_URL: redis://redis:6379/1
+  # Dedicated logical DB for the live-generation budget ledger (Phase 16). Inert
+  # under DEMO_MODE=true; requires standalone Redis with no budget-key eviction.
+  LIVE_GENERATION_BUDGET_REDIS_URL: redis://redis:6379/2
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0
   CORS_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001
@@ -179,6 +182,20 @@ services:
     # (the latter keeps the health ping working). Explicit -Q so routing is
     # unambiguous on every host (no native invocation on Windows).
     command: ["celery", "-A", "config", "worker", "-Q", "generation,celery", "--loglevel=info"]
+    environment: *api-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    build: apps/api
+    # Phase 16: schedule the periodic maintenance tasks (stuck-job reconciler,
+    # expired-design purge). A static settings-based schedule — no separate
+    # scheduler database. Runs as its own process so a single Beat instance owns
+    # scheduling while the worker above executes the tasks.
+    command: ["celery", "-A", "config", "beat", "--loglevel=info"]
     environment: *api-environment
     depends_on:
       migrate:

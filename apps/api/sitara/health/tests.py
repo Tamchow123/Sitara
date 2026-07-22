@@ -49,8 +49,16 @@ class TestReadiness:
 
 class TestPublicConfig:
     def test_reports_demo_mode_and_generation_disabled(self, client, settings):
+        import copy
+
         settings.DEMO_MODE = True
         settings.ALLOW_PAID_AI_CALLS = False
+        # Isolate the demo asset storage to an EMPTY in-memory store so this test
+        # is deterministic regardless of any demo pack left in the shared MinIO
+        # volume — with no active manifest, demo mode is genuinely "unavailable".
+        storages = copy.deepcopy(settings.STORAGES)
+        storages["default"] = {"BACKEND": "django.core.files.storage.InMemoryStorage"}
+        settings.STORAGES = storages
         response = client.get(reverse("config-public"))
         assert response.status_code == 200
         # No demo pack is installed in this test, so demo mode itself is
@@ -94,6 +102,14 @@ class TestPublicConfig:
         settings.ANTHROPIC_MODEL = "claude-sonnet-4-6"
         settings.REPLICATE_API_TOKEN = "r8_test_not_a_real_token"
         settings.DEFAULT_IMAGE_MODEL = "black-forest-labs/flux-1.1-pro"
+        # Phase 16: public live availability also requires a valid cost config —
+        # a positive daily budget ceiling AND a valid pricing profile with a
+        # POSITIVE price for every billable stage (a zero price fails closed).
+        settings.LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = 1_000_000
+        settings.LIVE_GENERATION_PRICING_PROFILE = "test-profile-1"
+        settings.ANTHROPIC_INPUT_MICRO_USD_PER_MTOK = 3_000_000
+        settings.ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK = 15_000_000
+        settings.REPLICATE_MAX_IMAGE_MICRO_USD = 40_000
         body = client.get(reverse("config-public")).json()
         assert body["generation_enabled"] is True
         assert body["generation_mode"] == "live"

@@ -68,7 +68,7 @@ from sitara.media.exceptions import (
 )
 from sitara.media.ingest import ingest_staged_design_image
 
-from . import errors
+from . import cost_accounting, cost_control, errors
 from .context import DesignNotReady, build_generation_context
 from .demo.config import (
     DemoAssetsUnavailable,
@@ -357,11 +357,23 @@ def _submit_to_celery(attempt: GenerationAttempt) -> None:
     )
 
 
+def _release_live_count(design_id, idempotency_key) -> None:
+    """Best-effort return of a global daily count slot on a definite pre-provider
+    failure. A ledger outage only leaves the slot counted (conservative); never
+    crash. Idempotent — a missing/demo reservation is a harmless no-op."""
+    try:
+        cost_control.release_count(cost_control.count_reservation_id(design_id, idempotency_key))
+    except cost_control.BudgetLedgerUnavailable:
+        logger.warning("live count release unavailable design=%s", design_id)
+
+
 def _mark_queue_unavailable(attempt: GenerationAttempt) -> None:
     """A broker submission failure AFTER commit: the attempt is queued in the
     database but was never actually submitted. Mark it failed and move the
-    Design to generation_failed so no orphan queued job survives. Runs in its
-    own transaction (the enqueue transaction has already committed)."""
+    Design to generation_failed so no orphan queued job survives. The global
+    daily count slot this attempt reserved is returned — queue submission
+    definitely failed before any provider work could occur. Runs in its own
+    transaction (the enqueue transaction has already committed)."""
     with transaction.atomic():
         locked = GenerationAttempt.objects.select_for_update().get(pk=attempt.pk)
         if locked.status in (_Status.SUCCEEDED, _Status.FAILED):
@@ -373,6 +385,8 @@ def _mark_queue_unavailable(attempt: GenerationAttempt) -> None:
         Design.objects.filter(pk=locked.design_id).update(
             status=Design.Status.GENERATION_FAILED, updated_at=timezone.now()
         )
+    if not attempt.is_demo:
+        _release_live_count(attempt.design_id, attempt.idempotency_key)
 
 
 def enqueue_design_generation(
@@ -557,23 +571,50 @@ def enqueue_design_generation(
             # for a mode whose readiness was never confirmed.
             is_demo = resume_version.is_demo
 
-        # 6. Create the queued attempt (resuming an incomplete version if any).
-        attempt = GenerationAttempt.objects.create(
-            design=locked,
-            design_version=resume_version,
-            idempotency_key=idempotency_key,
-            status=_Status.QUEUED,
-            is_demo=is_demo,
-        )
-        attempt.celery_task_id = str(attempt.id)
-        attempt.save(update_fields=["celery_task_id", "updated_at"])
+        # 5b. Global daily count (Phase 16 Part B). Reserved atomically here —
+        #     AFTER every rejection check passes and using the FINAL is_demo, so
+        #     only a genuinely new LIVE attempt consumes a slot (demo never
+        #     counts, no rejected request counts, and an idempotent replay
+        #     returned long before this line). A rejected reservation raises
+        #     CountLimitReached and rolls back this short transaction (nothing
+        #     was created); a ledger outage fails closed. The Redis reservation
+        #     is NOT covered by this transaction's rollback, so if a later DB
+        #     statement raises (e.g. the (design, idempotency_key) UniqueConstraint
+        #     backstop, or a transient DB error) the reservation is compensated in
+        #     the except below — a rolled-back enqueue is a definite pre-provider
+        #     failure. The bounded in-lock Redis call is an accepted trade-off
+        #     (per-design scope) for reserving atomically with the creation
+        #     decision. The slot is also returned by _mark_queue_unavailable if
+        #     the post-commit broker submit fails.
+        _count_reserved = require_availability and not is_demo
+        if _count_reserved:
+            cost_control.reserve_count(
+                cost_control.count_reservation_id(locked.id, idempotency_key)
+            )
+        try:
+            # 6. Create the queued attempt (resuming an incomplete version if any).
+            attempt = GenerationAttempt.objects.create(
+                design=locked,
+                design_version=resume_version,
+                idempotency_key=idempotency_key,
+                status=_Status.QUEUED,
+                is_demo=is_demo,
+            )
+            attempt.celery_task_id = str(attempt.id)
+            attempt.save(update_fields=["celery_task_id", "updated_at"])
 
-        # 7. Move the Design into the generating state.
-        locked.status = Design.Status.GENERATING
-        locked.save(update_fields=["status", "updated_at"])
+            # 7. Move the Design into the generating state.
+            locked.status = Design.Status.GENERATING
+            locked.save(update_fields=["status", "updated_at"])
 
-        outcome["attempt"] = attempt
-        transaction.on_commit(_on_commit)
+            outcome["attempt"] = attempt
+            transaction.on_commit(_on_commit)
+        except Exception:
+            # The DB side rolls back with the transaction; compensate the Redis
+            # count reservation so a rolled-back enqueue never orphans a slot.
+            if _count_reserved:
+                _release_live_count(locked.id, idempotency_key)
+            raise
 
     return outcome["attempt"], True
 
@@ -750,30 +791,46 @@ def enqueue_design_refinement(
         if source_version.refined_versions.exists() or staged_elsewhere or unresolved_spend:
             raise RefinementLimitReached("this design has already been refined")
 
-        # 7. Create the queued refinement attempt, carrying its own durable
-        #    copy of the canonical refinement request (the child DesignVersion
-        #    does not exist yet to carry Part A's copy).
-        refinement_request_hash = refinement_request_sha256(refinement_request)
-        attempt = GenerationAttempt.objects.create(
-            design=locked,
-            idempotency_key=idempotency_key,
-            status=_Status.QUEUED,
-            generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
-            source_design_version=source_version,
-            refinement_request=refinement_request.model_dump(mode="json"),
-            refinement_request_schema_version=REFINEMENT_REQUEST_SCHEMA_VERSION,
-            refinement_request_sha256=refinement_request_hash,
-            is_demo=is_demo,
-        )
-        attempt.celery_task_id = str(attempt.id)
-        attempt.save(update_fields=["celery_task_id", "updated_at"])
+        # 6b. Global daily count (Phase 16 Part B) — a refinement is a new live
+        #     billable attempt too. Reserved atomically after every rejection
+        #     check, using the FINAL is_demo (demo never counts). The Redis
+        #     reservation is compensated in the except below if any later DB
+        #     statement rolls this transaction back. See the initial-generation
+        #     enqueue for the full rationale.
+        _count_reserved = require_availability and not is_demo
+        if _count_reserved:
+            cost_control.reserve_count(
+                cost_control.count_reservation_id(locked.id, idempotency_key)
+            )
+        try:
+            # 7. Create the queued refinement attempt, carrying its own durable
+            #    copy of the canonical refinement request (the child DesignVersion
+            #    does not exist yet to carry Part A's copy).
+            refinement_request_hash = refinement_request_sha256(refinement_request)
+            attempt = GenerationAttempt.objects.create(
+                design=locked,
+                idempotency_key=idempotency_key,
+                status=_Status.QUEUED,
+                generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
+                source_design_version=source_version,
+                refinement_request=refinement_request.model_dump(mode="json"),
+                refinement_request_schema_version=REFINEMENT_REQUEST_SCHEMA_VERSION,
+                refinement_request_sha256=refinement_request_hash,
+                is_demo=is_demo,
+            )
+            attempt.celery_task_id = str(attempt.id)
+            attempt.save(update_fields=["celery_task_id", "updated_at"])
 
-        # 8. Move the Design into the generating state.
-        locked.status = Design.Status.GENERATING
-        locked.save(update_fields=["status", "updated_at"])
+            # 8. Move the Design into the generating state.
+            locked.status = Design.Status.GENERATING
+            locked.save(update_fields=["status", "updated_at"])
 
-        outcome["attempt"] = attempt
-        transaction.on_commit(_on_commit)
+            outcome["attempt"] = attempt
+            transaction.on_commit(_on_commit)
+        except Exception:
+            if _count_reserved:
+                _release_live_count(locked.id, idempotency_key)
+            raise
 
     return outcome["attempt"], True
 
@@ -901,6 +958,19 @@ def run_generation_attempt(
             raise GenerationRetry(errors.INTERNAL_GENERATION_ERROR) from exc
         except _TerminalGenerationError as exc:
             _finalise_failure(attempt, exc.code, clear_text_marker=exc.clear_text_marker)
+            return GenerationAttempt.objects.get(pk=attempt.pk)
+        except cost_control.BudgetExhausted:
+            # A pre-spend reservation would have exceeded the hard daily ceiling
+            # (text stage). No provider call ran; the submission marker (if any)
+            # is preserved as evidence of an EARLIER billable call in this attempt.
+            logger.info("generation budget exhausted at provider boundary attempt=%s", attempt.id)
+            _finalise_failure(attempt, errors.LIVE_GENERATION_BUDGET_EXHAUSTED)
+            return GenerationAttempt.objects.get(pk=attempt.pk)
+        except cost_control.BudgetLedgerUnavailable:
+            # The budget ledger could not be reached — fail closed; no provider
+            # call ran. Never echo the ledger exception content.
+            logger.warning("generation budget ledger unavailable attempt=%s", attempt.id)
+            _finalise_failure(attempt, errors.INTERNAL_GENERATION_ERROR)
             return GenerationAttempt.objects.get(pk=attempt.pk)
         except Exception as exc:  # noqa: BLE001 - deliberate task boundary
             logger.warning(
@@ -1474,6 +1544,27 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
         "safety_tolerance": config.safety_tolerance,
         "prompt_upsampling": config.prompt_upsampling,
     }
+    # Cost control (Phase 16, Part A): reserve the conservative maximum image-call
+    # cost BEFORE the in-flight marker and the provider create call. A rejected or
+    # unavailable reservation fails closed — the provider is never invoked. Demo
+    # attempts never reach the ledger. The reservation identity is deterministic
+    # (attempt + image_submission stage + pricing profile), so a bounded retry of
+    # a pre-acceptance failure re-reserves cleanly and a redelivery never
+    # double-reserves.
+    cost_on = cost_accounting.cost_enabled(attempt)
+    profile = cost_control.active_pricing_profile()
+    if cost_on:
+        try:
+            cost_accounting.reserve(
+                attempt,
+                cost_control.STAGE_IMAGE_SUBMISSION,
+                cost_control.replicate_call_max_micro_usd(profile),
+                profile,
+            )
+        except cost_control.BudgetExhausted as exc:
+            raise _TerminalGenerationError(errors.LIVE_GENERATION_BUDGET_EXHAUSTED) from exc
+        except cost_control.BudgetLedgerUnavailable as exc:
+            raise _TerminalGenerationError(errors.INTERNAL_GENERATION_ERROR) from exc
     # Persist seed + parameters + provider/model AND set the in-flight marker
     # BEFORE the provider call, all in one transaction.
     with transaction.atomic():
@@ -1511,11 +1602,16 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
         prediction = provider.create_prediction(request)
     except ImageProviderError as exc:
         if exc.ambiguous_acceptance:
-            # The provider may already have accepted the request; never
-            # resubmit. Leave the marker set and end terminally.
+            # The provider may already have accepted (and billed) the request;
+            # never resubmit and RETAIN the full reservation as unresolved spend.
+            if cost_on:
+                cost_accounting.retain(attempt, cost_control.STAGE_IMAGE_SUBMISSION, profile)
             raise _TerminalGenerationError(errors.IMAGE_SUBMISSION_AMBIGUOUS) from exc
         # Definitely pre-acceptance transient failure: nothing was accepted, so
-        # clear the marker and allow a bounded retry to resubmit (same seed).
+        # RELEASE the reservation, clear the marker and allow a bounded retry to
+        # resubmit (same seed, a fresh re-reservation).
+        if cost_on:
+            cost_accounting.release(attempt, cost_control.STAGE_IMAGE_SUBMISSION, profile)
         GenerationAttempt.objects.filter(pk=attempt.pk).update(
             image_submission_in_flight=False, updated_at=timezone.now()
         )
@@ -1525,10 +1621,15 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
     if not prediction.prediction_id or len(prediction.prediction_id) > 128:
         # Defence in depth (the provider adapter already rejects this): an
         # accepted create with no persistable id can never be reconciled —
-        # resolve conservatively as ambiguous; the marker stays set.
+        # resolve conservatively as ambiguous and retain; the marker stays set.
+        if cost_on:
+            cost_accounting.retain(attempt, cost_control.STAGE_IMAGE_SUBMISSION, profile)
         raise _TerminalGenerationError(errors.IMAGE_SUBMISSION_AMBIGUOUS)
 
-    # Persist the accepted prediction id and clear the marker together; never
+    # Persist the accepted prediction id and clear the marker together FIRST —
+    # this is the authoritative evidence of a real, already-billed provider
+    # submission and the only handle to poll/cancel it, so it must be durably
+    # recorded before the non-authoritative best-effort cost audit runs. Never
     # clear or replace the id afterwards.
     GenerationAttempt.objects.filter(pk=attempt.pk).update(
         image_prediction_id=prediction.prediction_id,
@@ -1537,6 +1638,19 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
     )
     attempt.image_prediction_id = prediction.prediction_id
     attempt.image_submission_in_flight = False
+    # An accepted prediction is a DEFINITE billable submission. Reconcile the
+    # reservation to the configured conservative maximum as the estimated actual
+    # (Replicate exposes no trustworthy per-call billing through the safe
+    # boundary) — never released later merely because polling/download/staging/
+    # ingest fails. This best-effort audit fold runs AFTER the prediction id is
+    # durably saved and can never break the pipeline (its DB write is guarded).
+    if cost_on:
+        cost_accounting.reconcile_fixed(
+            attempt,
+            cost_control.STAGE_IMAGE_SUBMISSION,
+            profile,
+            cost_control.replicate_call_max_micro_usd(profile),
+        )
     return prediction.prediction_id
 
 
@@ -1738,6 +1852,8 @@ def _mark_attempt_succeeded(locked: GenerationAttempt) -> None:
     Design.objects.filter(pk=locked.design_id).update(
         status=Design.Status.GENERATED, updated_at=timezone.now()
     )
+    # No reservation is left dangling once the attempt is terminal.
+    cost_accounting.mark_complete(locked)
 
 
 def _finalise_success(attempt) -> None:
@@ -1748,11 +1864,64 @@ def _finalise_success(attempt) -> None:
         _mark_attempt_succeeded(locked)
 
 
+def _retain_unresolved_submissions(
+    attempt, *, image_unresolved: bool, text_unresolved: bool
+) -> None:
+    """Record any still-in-flight provider submission as unresolved (assume-spent)
+    audit cost when an attempt terminalises. A submission marker still set at
+    finalisation means the provider MAY have accepted and billed the request but
+    its outcome was never resolved — the crash-window redelivery guards, the
+    stuck-job reaper (``reconcile_if_stuck``) and an ambiguous-acceptance terminal
+    all reach here with the marker set. ``cost_accounting.retain`` transitions the
+    reservation from ``reserved`` and folds ``cost_estimated``/``cost_unresolved``
+    so the attempt's audit columns reflect the possible spend for incident
+    reconciliation (ADR 0017), instead of looking like a clean pre-spend release.
+
+    Idempotent and conservative: retaining a stage that the in-stage path already
+    reconciled/retained, or whose reservation expired, is a no-op (the ledger
+    returns ``already``/``missing`` and nothing is folded). The exact in-flight
+    structured stage (initial vs retry) is not recorded on the single marker, so
+    both candidate stages of the relevant family are retained — only the
+    genuinely-``reserved`` one transitions.
+
+    A swallowed retain (ledger outage) durably clears the attempt's
+    ``cost_accounting_settled`` flag via the accounting bridge, so completion is
+    not later falsely claimed. The reservation is reconciled against the
+    pricing-profile version FROZEN on the attempt at reserve time
+    (``cost_pricing_profile_version``), NOT the currently active one: a profile
+    rotation between reserve and this terminal retain would otherwise derive a
+    different reservation id and silently miss the reservation."""
+    if not cost_accounting.cost_enabled(attempt) or not (image_unresolved or text_unresolved):
+        return
+    profile = cost_control.active_pricing_profile()
+    frozen_version = attempt.cost_pricing_profile_version
+    if frozen_version:
+        profile = dataclasses.replace(profile, version=frozen_version)
+    if image_unresolved:
+        cost_accounting.retain(attempt, cost_control.STAGE_IMAGE_SUBMISSION, profile)
+    if text_unresolved:
+        if attempt.source_design_version_id is not None:
+            stages = (
+                cost_control.STAGE_STRUCTURED_REFINEMENT_INITIAL,
+                cost_control.STAGE_STRUCTURED_REFINEMENT_RETRY,
+            )
+        else:
+            stages = (cost_control.STAGE_STRUCTURED_INITIAL, cost_control.STAGE_STRUCTURED_RETRY)
+        for stage in stages:
+            cost_accounting.retain(attempt, stage, profile)
+
+
 def _finalise_failure(attempt, code: str, *, clear_text_marker: bool = False) -> None:
     with transaction.atomic():
         locked = GenerationAttempt.objects.select_for_update().get(pk=attempt.pk)
         if locked.status in (_Status.SUCCEEDED, _Status.FAILED):
             return
+        # A submission marker still set at terminalisation is possible unresolved
+        # spend. Capture BEFORE optionally clearing the text marker below (a
+        # cleared text marker means the provider definitively answered and the
+        # in-stage path already reconciled that reservation to its actual).
+        image_unresolved = locked.image_submission_in_flight
+        text_unresolved = locked.text_submission_in_flight and not clear_text_marker
         locked.status = _Status.FAILED
         locked.error_code = code
         locked.completed_at = timezone.now()
@@ -1769,6 +1938,24 @@ def _finalise_failure(attempt, code: str, *, clear_text_marker: bool = False) ->
         Design.objects.filter(pk=locked.design_id).update(
             status=Design.Status.GENERATION_FAILED, updated_at=timezone.now()
         )
+        # Record any still-in-flight submission as unresolved (assume-spent) audit
+        # cost, then mark no reservation left dangling. Retain is idempotent, so a
+        # reservation already reconciled/retained/released in-stage is untouched.
+        # DELIBERATELY inside the terminal transaction (unlike the enqueue-time
+        # ledger calls, which run outside any lock): folding the audit cost
+        # atomically with the FAILED transition avoids a split-brain window where
+        # a crash between two transactions could durably fail an attempt whose
+        # ambiguous spend is never recorded. The ledger call is bounded by
+        # LIVE_GENERATION_BUDGET_REDIS_TIMEOUT_SECONDS and its failure is swallowed
+        # (the reservation stays conservatively counted), so a Redis outage only
+        # briefly extends the row-lock hold and never blocks terminalisation.
+        _retain_unresolved_submissions(
+            locked, image_unresolved=image_unresolved, text_unresolved=text_unresolved
+        )
+        # Claim accounting complete only when every reconcile/retain/release for
+        # this attempt settled at the ledger (mark_complete reads the durable
+        # cost_accounting_settled flag, cleared by any swallowed ledger op).
+        cost_accounting.mark_complete(locked)
 
 
 def fail_attempt(attempt_id, code: str) -> None:
@@ -1779,6 +1966,58 @@ def fail_attempt(attempt_id, code: str) -> None:
     attempt = GenerationAttempt.objects.filter(pk=attempt_id).first()
     if attempt is not None:
         _finalise_failure(attempt, code)
+
+
+def reconcile_if_stuck(attempt_id, cutoff) -> str:
+    """Reconcile ONE possibly-stuck attempt (Phase 16, Part C stuck-job reaper).
+
+    Uses the SAME non-blocking attempt advisory lock the pipeline execution
+    holds, so an attempt a live worker is actively running is never touched
+    (returns "skipped"). Under the lock it re-reads the attempt: only one still
+    in a non-terminal state AND still idle since ``cutoff`` (its ``updated_at``
+    did not advance after the caller's query) is marked failed with the stable
+    ``generation_stuck`` code — via the shared ``_finalise_failure``, which
+    preserves every submission marker, prediction id, staged/permanent output
+    and the (unresolved) cost reservation, moves the Design to
+    ``generation_failed`` and NEVER enqueues replacement paid work.
+
+    Returns "reconciled", "skipped" (lock held by an active worker) or
+    "progressed" (no longer stuck / already terminal / gone)."""
+    if not isinstance(attempt_id, uuid.UUID):
+        attempt_id = uuid.UUID(str(attempt_id))
+    with _attempt_advisory_lock(attempt_id) as acquired:
+        if not acquired:
+            return "skipped"
+        fresh = GenerationAttempt.objects.filter(pk=attempt_id).first()
+        if fresh is None or fresh.status not in GenerationAttempt.IN_PROGRESS_STATUSES:
+            return "progressed"
+        if fresh.updated_at > cutoff:
+            # Progressed since the batch query — a live worker is advancing it.
+            return "progressed"
+        _finalise_failure(fresh, errors.GENERATION_STUCK)
+        # Release the global daily count slot ONLY when durable state proves no
+        # provider call could have occurred (no submission marker, no accepted
+        # prediction id, no staged output) — otherwise the reservation is kept,
+        # conservative, because the attempt may already have entered provider
+        # processing. The cost reservation itself is always retained: it is made
+        # inside the pipeline only after a marker is set, so a provably-pre-
+        # provider attempt has none to release.
+        if not fresh.is_demo and _provably_no_provider_call(fresh):
+            _release_live_count(fresh.design_id, fresh.idempotency_key)
+        return "reconciled"
+
+
+def _provably_no_provider_call(attempt) -> bool:
+    """True only when durable attempt state proves no provider request was ever
+    made: no text/image submission-in-flight marker, no accepted prediction id
+    and no staged output. Each provider call persists its marker BEFORE the
+    request, so their combined absence is conclusive."""
+    return (
+        not attempt.text_submission_in_flight
+        and not attempt.image_submission_in_flight
+        and not attempt.image_prediction_id
+        and not attempt.staged_image_storage_key
+    )
 
 
 def _generate_seed() -> int:

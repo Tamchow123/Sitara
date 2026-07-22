@@ -23,7 +23,10 @@ from django.utils import timezone
 from pydantic import ValidationError
 
 from sitara.ai_gateway.policy import get_structured_design_generation_provider
-from sitara.ai_gateway.structured_design import StructuredDesignRequest
+from sitara.ai_gateway.structured_design import (
+    StructuredDesignProviderError,
+    StructuredDesignRequest,
+)
 from sitara.catalogue.models import InspirationAsset, UsageRights
 from sitara.designs.models import Design, GenerationAttempt
 from sitara.designs.services import (
@@ -31,6 +34,7 @@ from sitara.designs.services import (
     design_completion_errors,
 )
 
+from . import cost_accounting, cost_control
 from .context import DesignNotReady, GenerationContext, build_generation_context
 from .design_spec import DESIGN_SPEC_SCHEMA_VERSION, SPEC_TEMPLATE_VERSION, DesignSpec
 from .input_safety import GeneratedContentRejected, RejectionCategory, contains_phrase, iter_strings
@@ -46,6 +50,14 @@ from .prompting import SYSTEM_PROMPT, build_user_message
 logger = logging.getLogger(__name__)
 
 MAX_PROVIDER_REQUESTS = 2
+
+# Deterministic cost-reservation stage per Anthropic request number for INITIAL
+# generation. The controlled validation retry is a DISTINCT logical billable
+# call and therefore has its own reservation stage.
+_INITIAL_STRUCTURED_STAGES = {
+    1: cost_control.STAGE_STRUCTURED_INITIAL,
+    2: cost_control.STAGE_STRUCTURED_RETRY,
+}
 
 
 class GenerationLocked(Exception):
@@ -251,6 +263,11 @@ def _generate_valid_spec(provider, context: GenerationContext, design_id, genera
     clears it on definitive outcomes."""
     responses: list = []  # every StructuredDesignResult actually returned
     attempts = 0
+    # Live cost accounting applies only to a live attempt; a demo attempt never
+    # reaches the ledger (BudgetExhausted / BudgetLedgerUnavailable propagate to
+    # the pipeline text stage, which fails the attempt closed — no provider call).
+    cost_on = cost_accounting.cost_enabled(generation_attempt)
+    profile = cost_control.active_pricing_profile()
     for attempt in range(1, MAX_PROVIDER_REQUESTS + 1):
         attempts += 1
         request = StructuredDesignRequest(
@@ -260,12 +277,49 @@ def _generate_valid_spec(provider, context: GenerationContext, design_id, genera
             max_output_tokens=settings.DESIGN_SPEC_MAX_OUTPUT_TOKENS,
             attempt=attempt,
         )
+        stage = _INITIAL_STRUCTURED_STAGES[attempt]
+        # Reserve BEFORE the submission marker (spec Part A §6 ordering); a
+        # rejected or unavailable reservation raises and no provider call runs.
+        if cost_on:
+            cost_accounting.reserve(
+                generation_attempt,
+                stage,
+                cost_control.anthropic_call_max_micro_usd(profile, request.max_output_tokens),
+                profile,
+            )
         if generation_attempt is not None:
             GenerationAttempt.objects.filter(pk=generation_attempt.pk).update(
                 text_submission_in_flight=True, updated_at=timezone.now()
             )
             generation_attempt.text_submission_in_flight = True
-        result = provider.generate(request)  # StructuredDesignProviderError propagates
+        try:
+            result = provider.generate(request)  # StructuredDesignProviderError propagates
+        except StructuredDesignProviderError as exc:
+            # An ambiguous acceptance may already have billed — retain the full
+            # reservation; a definitive pre-request answer never billed — release.
+            if cost_on:
+                if getattr(exc, "ambiguous_acceptance", False):
+                    cost_accounting.retain(generation_attempt, stage, profile)
+                else:
+                    cost_accounting.release(generation_attempt, stage, profile)
+            raise
+        # The provider answered — the call is billable. Reconcile to reported
+        # usage ONLY when BOTH token counts are present: a partial usage report
+        # (one dimension missing) would reconcile the missing dimension as zero
+        # and refund that portion of the conservative reservation, undercounting
+        # spend. Any missing dimension therefore retains the full conservative
+        # reservation instead. (A genuine reported 0 is not None and reconciles.)
+        if cost_on:
+            if result.input_tokens is not None and result.output_tokens is not None:
+                cost_accounting.reconcile_actual(
+                    generation_attempt,
+                    stage,
+                    profile,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                )
+            else:
+                cost_accounting.retain(generation_attempt, stage, profile)
         responses.append(result)
         if result.refused:
             logger.warning(

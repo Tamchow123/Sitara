@@ -375,6 +375,28 @@ Standing rules across all phases:
 - **Automated tests:** disabled live generation → 503 + code; limits → 429 + code; ceiling exhaustion → `503 live_generation_budget_exhausted`, never an unhandled 5xx; **concurrency test: N parallel reservation attempts against a ceiling that fits N−1 admit exactly N−1** (proves atomicity); reservation reconciled after success and released after pre-spend failure; purge deletes rows *and* storage objects; stuck job (>10 min) reconciled to failed; throttle counters keyed by session and hashed IP.
 - **Manual checkpoint:** self-run abuse drill locally (rapid-fire generates from two simulated IPs → throttled; force ceiling to $0 → correct `503 live_generation_budget_exhausted` UX with no live call attempted; flip `LIVE_GENERATION_ENABLED` off → correct 503 UX).
 - **Commit:** `feat: live-generation gating, rate limits, atomic cost ceiling, and security hardening`
+- **Delivered (ADR 0017):** shipped as six focused commits — atomic
+  reserve-before-spend budget accounting in integer micro-USD via dedicated-Redis
+  Lua scripts (`generation/cost_control.py`, `cost_accounting.py`) with a
+  reserve→reconcile / retain-on-ambiguous / release-on-proven-no-spend state
+  machine and durable per-attempt `GenerationAttempt` cost/token columns; live
+  admission control (`generation/admission.py`) with `503
+  live_generation_disabled`, ownership-first per-session/hashed-IP throttles and a
+  global UTC daily count limit (`429 generation_limit_reached`), and a budget
+  preflight (`503 live_generation_budget_exhausted`); retention purge (deletes rows
+  **and** storage objects, completing Phase 10 staging cleanup) and stuck-job
+  reconciliation (`generation/maintenance.py`) on a Celery Beat schedule
+  (`celery-beat` service); production security hardening (strict CSP middleware,
+  HSTS/cookie/referrer/COOP headers, matching frontend headers, admin mounted only
+  when `DJANGO_ADMIN_ENABLED`); correlation-aware structured JSON logging
+  (`config/correlation.py`, `config/logging.py`, exception-**type**-only) with
+  Celery log-hijack disabled; and privacy-safe, DSN-gated Sentry for Django and
+  Next.js (no PII, no locals, no log→event, exception reduced to type). **Live
+  generation remains disabled**; provider prices are operator-configured and
+  **unverified** (all default to 0, ceiling defaults to 0), and the budget Redis
+  must be persistent + `noeviction` + standalone. The manual budgeted live
+  checkpoint remains pending. Demo mode is untouched and stays zero-cost. Marked
+  Phases 1–16 delivered; Phase 17 is next.
 
 ## Phase 17 — UI polish and accessibility
 - **Scope:** visual design pass (typography, spacing, colour system suited to bridal aesthetic), responsive behaviour, WCAG 2.1 AA pass on wizard/catalogue/results (focus management in the wizard, aria-live on progress states, alt text everywhere, contrast), empty/loading/error state polish, privacy + disclaimer pages.

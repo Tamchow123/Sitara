@@ -26,10 +26,14 @@ from django.utils import timezone
 from pydantic import ValidationError
 
 from sitara.ai_gateway.policy import get_structured_design_generation_provider
-from sitara.ai_gateway.structured_design import StructuredDesignRequest
+from sitara.ai_gateway.structured_design import (
+    StructuredDesignProviderError,
+    StructuredDesignRequest,
+)
 from sitara.designs.models import Design, DesignVersion, GenerationAttempt
 from sitara.designs.services import DesignVersionLimitReached, create_next_design_version_locked
 
+from . import cost_accounting, cost_control
 from .design_spec import DESIGN_SPEC_SCHEMA_VERSION, DesignSpec
 from .input_safety import GeneratedContentRejected, contains_phrase, iter_strings
 from .inspiration_context import InspirationContextSnapshot, inspiration_context_sha256
@@ -60,6 +64,13 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 MAX_REFINEMENT_PROVIDER_REQUESTS = 2
+
+# Deterministic cost-reservation stage per Anthropic request number for a
+# REFINEMENT attempt. The controlled validation retry is a distinct billable call.
+_REFINEMENT_STRUCTURED_STAGES = {
+    1: cost_control.STAGE_STRUCTURED_REFINEMENT_INITIAL,
+    2: cost_control.STAGE_STRUCTURED_REFINEMENT_RETRY,
+}
 
 # Namespaced so the persisted DesignVersion.design_spec_template_version can
 # never be confused with an initial-generation SPEC_TEMPLATE_VERSION value —
@@ -274,6 +285,8 @@ def _generate_valid_refined_spec(
     responses: list = []
     attempts = 0
     no_change_only = True
+    cost_on = cost_accounting.cost_enabled(generation_attempt)
+    profile = cost_control.active_pricing_profile()
     for attempt in range(1, MAX_REFINEMENT_PROVIDER_REQUESTS + 1):
         attempts += 1
         request = StructuredDesignRequest(
@@ -285,12 +298,45 @@ def _generate_valid_refined_spec(
             max_output_tokens=settings.DESIGN_SPEC_MAX_OUTPUT_TOKENS,
             attempt=attempt,
         )
+        stage = _REFINEMENT_STRUCTURED_STAGES[attempt]
+        # Reserve BEFORE the submission marker (spec Part A §6); a rejected or
+        # unavailable reservation raises and no provider call runs.
+        if cost_on:
+            cost_accounting.reserve(
+                generation_attempt,
+                stage,
+                cost_control.anthropic_call_max_micro_usd(profile, request.max_output_tokens),
+                profile,
+            )
         if generation_attempt is not None:
             GenerationAttempt.objects.filter(pk=generation_attempt.pk).update(
                 text_submission_in_flight=True, updated_at=timezone.now()
             )
             generation_attempt.text_submission_in_flight = True
-        result = provider.generate(request)  # StructuredDesignProviderError propagates
+        try:
+            result = provider.generate(request)  # StructuredDesignProviderError propagates
+        except StructuredDesignProviderError as exc:
+            if cost_on:
+                if getattr(exc, "ambiguous_acceptance", False):
+                    cost_accounting.retain(generation_attempt, stage, profile)
+                else:
+                    cost_accounting.release(generation_attempt, stage, profile)
+            raise
+        if cost_on:
+            # Reconcile to reported usage ONLY when BOTH token counts are present:
+            # a partial report (one dimension missing) would reconcile the missing
+            # dimension as zero and refund that portion, undercounting spend. Any
+            # missing dimension retains the full conservative reservation instead.
+            if result.input_tokens is not None and result.output_tokens is not None:
+                cost_accounting.reconcile_actual(
+                    generation_attempt,
+                    stage,
+                    profile,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                )
+            else:
+                cost_accounting.retain(generation_attempt, stage, profile)
         responses.append(result)
         if result.refused:
             logger.warning("design refinement refused design=%s attempt=%s", design_id, attempt)

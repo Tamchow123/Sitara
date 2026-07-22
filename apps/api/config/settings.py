@@ -57,6 +57,21 @@ def env_positive_int(name: str, default: int) -> int:
     return int(value)
 
 
+def env_nonnegative_int(name: str, default: int) -> int:
+    """Strict non-negative-integer parsing (zero permitted); never echoes the
+    supplied value. Used for fail-closed cost ceilings and prices where zero is
+    a meaningful "no budget"/"unconfigured" value rather than an error."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    if not value.isdigit():
+        raise ImproperlyConfigured(
+            f"{name} must be a non-negative integer; the supplied value is not recognised"
+        )
+    return int(value)
+
+
 def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
 
@@ -229,6 +244,8 @@ INSTALLED_APPS = [
 AUTH_USER_MODEL = "accounts.User"
 
 MIDDLEWARE = [
+    # Outermost: establish the request correlation id before anything logs.
+    "config.middleware.RequestCorrelationMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -237,6 +254,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "config.middleware.ContentSecurityPolicyMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -285,6 +303,9 @@ CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 # queue explicitly, so routing is correct even if this table is missed.
 CELERY_TASK_ROUTES = {
     "sitara.generation.tasks.generate_design_attempt": {"queue": "generation"},
+    # Phase 16 maintenance tasks share the generation worker/queue.
+    "sitara.generation.tasks.purge_expired_designs": {"queue": "generation"},
+    "sitara.generation.tasks.reconcile_stuck_generations": {"queue": "generation"},
 }
 # Deterministic, bounded task behaviour: acknowledge late (redeliver on worker
 # loss) and never let a result linger unboundedly. Per-task time limits and the
@@ -292,6 +313,13 @@ CELERY_TASK_ROUTES = {
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+# Phase 16 (Part E): do NOT let the worker hijack/redirect logging. By default a
+# Celery worker replaces the root logger's handlers on startup, which would strip
+# the JSON formatter + CorrelationFilter that ``LOGGING`` configures, leaving
+# generation-worker logs unstructured and without request_id/attempt_id. Keeping
+# both off preserves the correlated, structured logs the async pipeline needs.
+CELERY_WORKER_HIJACK_ROOT_LOGGER = False
+CELERY_WORKER_REDIRECT_STDOUTS = False
 
 # Django cache (rate limiting) — Redis DB 1, separate from Celery's DB 0.
 # Uses Django's built-in Redis cache backend; no extra client package.
@@ -662,6 +690,97 @@ MAX_REFINEMENTS = 1
 MAX_DESIGN_VERSIONS = env_positive_int("MAX_DESIGN_VERSIONS", 2)
 
 # ---------------------------------------------------------------------------
+# Live-generation cost controls (Phase 16, Part A). Integer micro-US-dollars
+# throughout (1 USD = 1_000_000 micro-USD); binary floating point is never used
+# for pricing, reservations, reconciliation, totals or ceiling comparisons.
+#
+# Every value fails closed. The daily budget defaults to ZERO, so live spend is
+# impossible until an operator deliberately configures a positive ceiling AND a
+# valid pricing profile. Demo mode NEVER depends on any of these — demo cannot
+# spend money by construction. Pricing remains operator configuration verified
+# against official provider sources on a recorded date; it is never a hard-coded
+# consequence of a model identifier, and no value here is exposed through the
+# public config endpoint. Names/values never echo a rejected input on error.
+# The micro-USD unit (1 USD = 1_000_000 micro-USD) is defined once in
+# ``sitara.generation.cost_control`` where the arithmetic lives.
+# ---------------------------------------------------------------------------
+
+# Hard daily ceiling (micro-USD) for accepted live-provider spend, UTC-day
+# windowed. Zero (the default) means no live spend can ever be reserved.
+LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = env_nonnegative_int(
+    "LIVE_GENERATION_DAILY_BUDGET_MICRO_USD", 0
+)
+
+# Live admission controls (Phase 16, Part B). Global cap on newly accepted live
+# generation attempts per UTC day (zero admits none); per-session and per-IP
+# request throttles (a zero limit rejects every request — fail closed; windows
+# must be strictly positive). The global daily COUNT uses the dedicated budget
+# Redis database (atomic Lua, like the cost ledger); the per-session/per-IP
+# THROTTLES reuse the existing Django cache backend shared with
+# ``sitara.accounts.rate_limits``. Both use HMAC-SHA256 identifiers keyed by
+# SECRET_KEY, so no raw IP, session key, workspace UUID, user id or email is
+# ever stored.
+LIVE_GENERATION_DAILY_COUNT_LIMIT = env_nonnegative_int("LIVE_GENERATION_DAILY_COUNT_LIMIT", 0)
+LIVE_GENERATION_SESSION_LIMIT = env_nonnegative_int("LIVE_GENERATION_SESSION_LIMIT", 0)
+LIVE_GENERATION_SESSION_WINDOW_SECONDS = env_positive_int(
+    "LIVE_GENERATION_SESSION_WINDOW_SECONDS", 3600
+)
+LIVE_GENERATION_IP_LIMIT = env_nonnegative_int("LIVE_GENERATION_IP_LIMIT", 0)
+LIVE_GENERATION_IP_WINDOW_SECONDS = env_positive_int("LIVE_GENERATION_IP_WINDOW_SECONDS", 3600)
+
+# Versioned pricing-profile identifier. Reservations and reconciliations are
+# stamped with this so a provider-model or price change (which MUST bump this
+# value) can never silently continue accounting under stale, unreviewed prices.
+# Blank is invalid for live availability (fail closed).
+LIVE_GENERATION_PRICING_PROFILE = os.getenv("LIVE_GENERATION_PRICING_PROFILE", "").strip()
+
+# Provider prices in micro-USD. Anthropic text prices are per one million
+# tokens; the Replicate value is a single conservative maximum per image call.
+# All default to zero (unconfigured → live unavailable); none is derived from a
+# model id. Operator must verify against official provider pricing.
+ANTHROPIC_INPUT_MICRO_USD_PER_MTOK = env_nonnegative_int("ANTHROPIC_INPUT_MICRO_USD_PER_MTOK", 0)
+ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK = env_nonnegative_int("ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK", 0)
+REPLICATE_MAX_IMAGE_MICRO_USD = env_nonnegative_int("REPLICATE_MAX_IMAGE_MICRO_USD", 0)
+
+# Conservative upper bound on the Anthropic input-token count for one assembled
+# request, used with the input price to compute a never-under-reserving maximum.
+# Bounded by DESIGN_SPEC_MAX_INPUT_CHARS-derived worst case; a request that would
+# exceed it fails closed rather than under-reserving.
+ANTHROPIC_MAX_INPUT_TOKENS = env_positive_int("ANTHROPIC_MAX_INPUT_TOKENS", 8192)
+
+# Dedicated Redis logical database for the live-generation budget ledger and the
+# global daily count reservation. Kept separate from Celery (DB 0) and the
+# Django cache/throttles (DB 1) so budget keys have an exclusive namespace and
+# are never evicted by unrelated cache pressure. See ADR 0017 for the durability
+# / no-eviction operational requirement.
+LIVE_GENERATION_BUDGET_REDIS_URL = os.getenv(
+    "LIVE_GENERATION_BUDGET_REDIS_URL", "redis://localhost:6379/2"
+)
+# Bounded socket timeout (seconds) for every budget-ledger Redis operation, so a
+# stalled ledger fails closed promptly rather than hanging a worker.
+LIVE_GENERATION_BUDGET_REDIS_TIMEOUT_SECONDS = env_positive_int(
+    "LIVE_GENERATION_BUDGET_REDIS_TIMEOUT_SECONDS", 5
+)
+
+# ---------------------------------------------------------------------------
+# Retention and stuck-job maintenance (Phase 16, Part C). Celery Beat runs two
+# bounded, idempotent periodic tasks. All strict positive integers.
+# ---------------------------------------------------------------------------
+# Designs older than this are purged (rows + permanent AND staging objects). The
+# design purge is also the cleanup boundary for retained crash-recovery staging
+# objects (ADR 0017): a design's staging objects live at most this long.
+DESIGN_RETENTION_DAYS = env_positive_int("DESIGN_RETENTION_DAYS", 30)
+# An attempt in a non-terminal state (queued/running_text/running_image) with no
+# progress for this long is treated as stuck and reconciled to failed.
+GENERATION_STUCK_AFTER_SECONDS = env_positive_int("GENERATION_STUCK_AFTER_SECONDS", 600)
+# Bounded batch sizes so one maintenance run never monopolises the worker.
+DESIGN_PURGE_BATCH_SIZE = env_positive_int("DESIGN_PURGE_BATCH_SIZE", 50)
+GENERATION_STUCK_BATCH_SIZE = env_positive_int("GENERATION_STUCK_BATCH_SIZE", 50)
+# How often (seconds) Celery Beat runs each maintenance task.
+DESIGN_PURGE_INTERVAL_SECONDS = env_positive_int("DESIGN_PURGE_INTERVAL_SECONDS", 3600)
+GENERATION_STUCK_INTERVAL_SECONDS = env_positive_int("GENERATION_STUCK_INTERVAL_SECONDS", 120)
+
+# ---------------------------------------------------------------------------
 # Deterministic zero-cost demo pipeline (Phase 15). The active demo manifest
 # itself is resolved from private object storage (see
 # sitara.generation.demo.config), never a filesystem path setting, so it
@@ -749,16 +868,110 @@ SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
+# Referrer policy and cross-origin opener policy applied to every response by
+# Django's SecurityMiddleware. "same-origin" never leaks a full URL (e.g. a
+# signed-image path) cross-origin; COOP isolates our browsing context.
+SECURE_REFERRER_POLICY = "same-origin"
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
+
+# Bounded request body / field counts (defence in depth for the JSON API — the
+# per-endpoint bounds still apply). Strict positive integers.
+DATA_UPLOAD_MAX_MEMORY_SIZE = env_positive_int("DATA_UPLOAD_MAX_MEMORY_SIZE", 5 * 1024 * 1024)
+DATA_UPLOAD_MAX_NUMBER_FIELDS = env_positive_int("DATA_UPLOAD_MAX_NUMBER_FIELDS", 1000)
 
 if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", default=IS_PRODUCTION)
-    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "3600" if IS_PRODUCTION else "0"))
+    SECURE_HSTS_SECONDS = int(
+        os.getenv("SECURE_HSTS_SECONDS", "31536000" if IS_PRODUCTION else "0")
+    )
+    # HSTS for subdomains is justified for a single-origin deployment; preload is
+    # NEVER enabled casually (it is effectively irreversible for the domain).
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool(
+        "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=IS_PRODUCTION
+    )
+    SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", default=False)
 
-# Behind a TLS-terminating proxy in production, enable via environment.
+# Behind a TLS-terminating proxy in production, enable via environment. Trusting
+# X-Forwarded-Proto is opt-in only — no proxy header is trusted by default.
 if env_bool("USE_X_FORWARDED_PROTO", default=False):
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# ---------------------------------------------------------------------------
+# Structured logging (Phase 16, Part E). Production emits one JSON line per
+# record with only safe fields + correlation ids; development keeps readable
+# console logs. The correlation filter injects the request/attempt ids.
+# ---------------------------------------------------------------------------
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "correlation": {"()": "config.logging.CorrelationFilter"},
+    },
+    "formatters": {
+        "json": {"()": "config.logging.JsonFormatter"},
+        "console": {"format": "%(levelname)s %(name)s %(request_id)s %(message)s"},
+    },
+    "handlers": {
+        "default": {
+            "class": "logging.StreamHandler",
+            "filters": ["correlation"],
+            "formatter": "json" if IS_PRODUCTION else "console",
+        },
+    },
+    "root": {"handlers": ["default"], "level": os.getenv("LOG_LEVEL", "INFO")},
+    "loggers": {
+        # Django's request logger is noisy at WARNING for 4xx; keep it but route
+        # through our handler/formatter like everything else.
+        "django": {"handlers": ["default"], "level": "INFO", "propagate": False},
+    },
+}
+
+# Django's deploy check emits security.W021 recommending HSTS *preload*. We
+# deliberately do NOT enable preload by default — it is effectively irreversible
+# for a domain and is an operator opt-in (SECURE_HSTS_PRELOAD env), never a
+# casual default (spec Part D / ADR 0017). Silencing ONLY this one advisory
+# keeps `manage.py check --deploy --fail-level WARNING` green while every other
+# security warning still fails the deploy check.
+SILENCED_SYSTEM_CHECKS = ["security.W021"]
+
+# ---------------------------------------------------------------------------
+# Content Security Policy (Phase 16, Part D). Applied by
+# config.middleware.ContentSecurityPolicyMiddleware. The JSON API loads no
+# resources, so it gets the most restrictive policy; the Django admin (only when
+# mounted) gets a policy compatible with its own inline styles/scripts.
+# ---------------------------------------------------------------------------
+API_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+ADMIN_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; "
+    "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; "
+    "object-src 'none'"
+)
+
+# ---------------------------------------------------------------------------
+# Django admin enablement (Phase 16, Part D). The admin is a staff-only
+# operational surface, never a public application surface. In production it is
+# DISABLED by default (the route is not mounted at all — see config/urls.py);
+# enabling it is a deliberate operator choice and NEVER bypasses Django's
+# staff/superuser checks. In development it is enabled for convenience.
+# ---------------------------------------------------------------------------
+ADMIN_ENABLED = env_bool("DJANGO_ADMIN_ENABLED", default=not IS_PRODUCTION)
+
+# ---------------------------------------------------------------------------
+# Sentry (Phase 16, Part E). Disabled entirely without a DSN (the default), so
+# tests and CI never construct a Sentry client or make any network call. When a
+# DSN is set, config.sentry.init_sentry configures a PII-free client (no request
+# bodies, cookies/auth headers/query strings stripped, no user identity, tracing
+# off) with the request/attempt correlation ids attached as tags.
+# ---------------------------------------------------------------------------
+SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+SENTRY_RELEASE = os.getenv("SENTRY_RELEASE", "").strip()
+if SENTRY_DSN:
+    from config.sentry import init_sentry
+
+    init_sentry(dsn=SENTRY_DSN, environment=APP_ENV, release=SENTRY_RELEASE)
 
 # ---------------------------------------------------------------------------
 # I18n / misc

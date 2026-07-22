@@ -631,6 +631,7 @@ export interface components {
          * @description * `demo_assets_unavailable` - demo_assets_unavailable
          *     * `design_changed` - design_changed
          *     * `design_incomplete` - design_incomplete
+         *     * `generation_stuck` - generation_stuck
          *     * `generation_unavailable` - generation_unavailable
          *     * `image_download_failed` - image_download_failed
          *     * `image_ingest_failed` - image_ingest_failed
@@ -645,6 +646,7 @@ export interface components {
          *     * `image_staging_unverified` - image_staging_unverified
          *     * `image_submission_ambiguous` - image_submission_ambiguous
          *     * `internal_generation_error` - internal_generation_error
+         *     * `live_generation_budget_exhausted` - live_generation_budget_exhausted
          *     * `prompt_build_failed` - prompt_build_failed
          *     * `queue_unavailable` - queue_unavailable
          *     * `refinement_generation_failed` - refinement_generation_failed
@@ -657,7 +659,7 @@ export interface components {
          *     * `structured_submission_ambiguous` - structured_submission_ambiguous
          * @enum {string}
          */
-        ErrorCodeEnum: "demo_assets_unavailable" | "design_changed" | "design_incomplete" | "generation_unavailable" | "image_download_failed" | "image_ingest_failed" | "image_ingest_unverified" | "image_output_invalid" | "image_poll_timeout" | "image_prediction_aborted" | "image_prediction_canceled" | "image_prediction_failed" | "image_provider_unavailable" | "image_staging_failed" | "image_staging_unverified" | "image_submission_ambiguous" | "internal_generation_error" | "prompt_build_failed" | "queue_unavailable" | "refinement_generation_failed" | "refinement_invalid" | "refinement_limit_reached" | "refinement_no_change" | "refinement_source_unavailable" | "structured_generation_failed" | "structured_provider_refused" | "structured_submission_ambiguous";
+        ErrorCodeEnum: "demo_assets_unavailable" | "design_changed" | "design_incomplete" | "generation_stuck" | "generation_unavailable" | "image_download_failed" | "image_ingest_failed" | "image_ingest_unverified" | "image_output_invalid" | "image_poll_timeout" | "image_prediction_aborted" | "image_prediction_canceled" | "image_prediction_failed" | "image_provider_unavailable" | "image_staging_failed" | "image_staging_unverified" | "image_submission_ambiguous" | "internal_generation_error" | "live_generation_budget_exhausted" | "prompt_build_failed" | "queue_unavailable" | "refinement_generation_failed" | "refinement_invalid" | "refinement_limit_reached" | "refinement_no_change" | "refinement_source_unavailable" | "structured_generation_failed" | "structured_provider_refused" | "structured_submission_ambiguous";
         ErrorDetail: {
             /** @description Stable machine-readable error code. */
             code: string;
@@ -1422,7 +1424,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description generation_unavailable / queue_unavailable. */
+            /** @description generation_limit_reached (per-session/IP or global daily count). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description generation_unavailable / queue_unavailable / live_generation_disabled / live_generation_budget_exhausted. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -1496,7 +1507,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description generation_unavailable / queue_unavailable. */
+            /** @description generation_limit_reached (per-session/IP or global daily count). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description generation_unavailable / queue_unavailable / live_generation_disabled / live_generation_budget_exhausted. */
             503: {
                 headers: {
                     [name: string]: unknown;

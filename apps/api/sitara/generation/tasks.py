@@ -73,3 +73,23 @@ def generate_design_attempt(self, attempt_id):
             max_retries=MAX_TRANSIENT_RETRIES,
             exc=exc,
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Periodic maintenance tasks (Phase 16, Part C) — scheduled by Celery Beat.
+# Both are bounded and idempotent, so a duplicate Beat delivery is safe: the
+# purge re-selects a fresh batch and re-deletes idempotently, and the stuck
+# reconciler re-checks each attempt under the advisory lock.
+# ---------------------------------------------------------------------------
+@shared_task(name="sitara.generation.tasks.purge_expired_designs")
+def purge_expired_designs():
+    from .maintenance import purge_expired_designs as _purge
+
+    return _purge()
+
+
+@shared_task(name="sitara.generation.tasks.reconcile_stuck_generations")
+def reconcile_stuck_generations():
+    from .maintenance import reconcile_stuck_generations as _reconcile
+
+    return _reconcile()

@@ -5,12 +5,18 @@ import copy
 import logging
 
 import pytest
+from django.conf import settings
 from django.utils import timezone
 
 from sitara.ai_gateway.structured_design import StructuredDesignResult
-from sitara.designs.models import Design, DesignVersion
+from sitara.designs.models import Design, DesignVersion, GenerationAttempt
+from sitara.generation import cost_control
 from sitara.generation.context import build_generation_context
-from sitara.generation.design_spec import DESIGN_SPEC_SCHEMA_VERSION, SPEC_TEMPLATE_VERSION
+from sitara.generation.design_spec import (
+    DESIGN_SPEC_SCHEMA_VERSION,
+    SPEC_TEMPLATE_VERSION,
+    DesignSpec,
+)
 from sitara.generation.fixture_provider import build_fixture_spec
 from sitara.generation.inspiration_context import (
     InspirationAcknowledgement,
@@ -29,6 +35,7 @@ from sitara.generation.refinement_service import (
     RefinementLimitReached,
     RefinementNoChangeProduced,
     RefinementSourceUnavailable,
+    _generate_valid_refined_spec,
     generate_refined_design_spec_for_design,
 )
 
@@ -553,3 +560,54 @@ class TestDesignChangedDuringRefinement:
         assert not DesignVersion.objects.filter(design=design, version_number=2).exists()
         # The provider was NOT retried after the persistence-time freshness check failed.
         assert provider.calls == 1
+
+
+class TestRefinementPartialUsageRetainsReservation:
+    """P1: the refinement text stage must reconcile only when BOTH token counts
+    are present; a partial usage report retains the full conservative reservation
+    (mirrors the initial-generation fix) rather than refunding the unknown
+    dimension and undercounting spend."""
+
+    def _refined_result(self, refined_payload, *, input_tokens, output_tokens):
+        return StructuredDesignResult(
+            payload=refined_payload,
+            provider=_TEST_PROVIDER,
+            model=_TEST_MODEL,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            stop_reason="end_turn",
+        )
+
+    def _run_refinement(self, input_tokens, output_tokens):
+        design, _source, spec_payload = make_ready_design()
+        source_spec = DesignSpec.model_validate(spec_payload)
+        refined = apply_allowed_edit(spec_payload, "colour_story")
+        provider = SequenceProvider(
+            [self._refined_result(refined, input_tokens=input_tokens, output_tokens=output_tokens)]
+        )
+        attempt = GenerationAttempt.objects.create(
+            design=design, status=GenerationAttempt.Status.QUEUED
+        )
+        _generate_valid_refined_spec(
+            provider, source_spec, "colour_story", "", design.id, generation_attempt=attempt
+        )
+        attempt.refresh_from_db()
+        text_max = cost_control.anthropic_call_max_micro_usd(
+            cost_control.active_pricing_profile(), settings.DESIGN_SPEC_MAX_OUTPUT_TOKENS
+        )
+        return attempt, text_max
+
+    def test_missing_output_tokens_retains_full_reservation(self, in_memory_budget_ledger):
+        attempt, text_max = self._run_refinement(input_tokens=1000, output_tokens=None)
+        assert attempt.cost_unresolved_micro_usd == text_max  # retained, not partial
+
+    def test_missing_input_tokens_retains_full_reservation(self, in_memory_budget_ledger):
+        attempt, text_max = self._run_refinement(input_tokens=None, output_tokens=1000)
+        assert attempt.cost_unresolved_micro_usd == text_max  # retained, not partial
+
+    def test_both_tokens_present_reconciles_down(self, in_memory_budget_ledger):
+        attempt, text_max = self._run_refinement(input_tokens=1, output_tokens=1)
+        # With both present it reconciles to the (tiny) measured actual, well below
+        # the conservative reservation, so nothing stays unresolved.
+        assert attempt.cost_unresolved_micro_usd == 0
+        assert attempt.cost_estimated_micro_usd < text_max

@@ -118,15 +118,22 @@ def image_generation_is_available() -> bool:
 def generation_is_available() -> bool:
     """The single source of truth for whether the PUBLIC END-TO-END generation
     API is available: ``LIVE_GENERATION_ENABLED`` AND live structured generation
-    AND live image generation AND the full pipeline implementation. Defaults to
-    False (LIVE_GENERATION_ENABLED defaults false), so the public config
-    endpoint and the enqueue gate never admit generation until an operator
-    deliberately enables it on top of complete, gated provider configuration."""
+    AND live image generation AND the full pipeline implementation AND a valid
+    live cost configuration (a positive daily budget ceiling and a valid pricing
+    profile — Phase 16). Defaults to False (LIVE_GENERATION_ENABLED defaults
+    false), so the public config endpoint and the enqueue gate never admit
+    generation until an operator deliberately enables it on top of complete,
+    gated provider configuration AND reviewed cost controls."""
+    # Imported lazily to avoid a load-time cycle (cost_control imports settings
+    # only, but the generation package is heavier than this gateway module).
+    from sitara.generation.cost_control import live_cost_config_is_valid
+
     return (
         bool(settings.LIVE_GENERATION_ENABLED)
         and structured_design_generation_is_available()
         and image_generation_is_available()
         and FULL_GENERATION_PIPELINE_IMPLEMENTED
+        and live_cost_config_is_valid()
     )
 
 

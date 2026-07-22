@@ -97,6 +97,23 @@ REFINEMENT_SOURCE_UNAVAILABLE = "refinement_source_unavailable"
 # ``pipeline.finalise_ingest_recovery``'s completion guard can never drift.
 INGEST_STAGE_ERROR_CODES = frozenset({IMAGE_INGEST_FAILED, IMAGE_INGEST_UNVERIFIED})
 
+# Live-generation cost control (Phase 16). Raised when the atomic pre-spend
+# reservation immediately before a billable provider call would exceed the hard
+# daily budget ceiling. The reservation fails BEFORE any submission marker is
+# set, so the attempt carries no submission evidence and is freely retryable
+# (it is deliberately NOT in ``_SPEND_RESOLVED_CODES`` and provably never billed).
+# Also returned as a synchronous 503 by the cheap enqueue-time budget preflight
+# (Phase 16 Part B) — the same stable code across both transport positions.
+LIVE_GENERATION_BUDGET_EXHAUSTED = "live_generation_budget_exhausted"
+
+# The stuck-generation reconciler (Phase 16, Part C) marks an attempt that has
+# been non-terminal with no progress past GENERATION_STUCK_AFTER_SECONDS as
+# failed with this stable code. It is deliberately NOT in _SPEND_RESOLVED_CODES:
+# a stuck attempt's provider spend is unresolved, so it preserves every
+# submission marker / prediction id / cost reservation and keeps the enqueue
+# guard blocking regeneration whenever spend may have occurred.
+GENERATION_STUCK = "generation_stuck"
+
 # Catch-all for anything unclassified — an unexpected exception becomes this,
 # never a raw message.
 INTERNAL_GENERATION_ERROR = "internal_generation_error"
@@ -130,6 +147,8 @@ GENERATION_ERROR_CODES = frozenset(
         REFINEMENT_GENERATION_FAILED,
         REFINEMENT_LIMIT_REACHED,
         REFINEMENT_SOURCE_UNAVAILABLE,
+        LIVE_GENERATION_BUDGET_EXHAUSTED,
+        GENERATION_STUCK,
         INTERNAL_GENERATION_ERROR,
     }
 )
