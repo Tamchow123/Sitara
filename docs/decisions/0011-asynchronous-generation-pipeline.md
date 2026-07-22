@@ -112,10 +112,16 @@ already-paid output).
 - Phase 12 owns the progress/results UI; Phase 15 owns demo generation; Phase 16
   owns rate limits, cost ceilings and the stuck-job reconciler.
 - **Live generation must not be publicly enabled before the Phase 16
-  safeguards** (rate limits + atomic cost ceiling) are in place.
+  safeguards** (rate limits + atomic cost ceiling) are in place. *Delivered in
+  Phase 16 (ADR 0017):* the safeguards now exist, but live generation stays
+  disabled by default and enabling it additionally requires operator-set dated
+  pricing, a positive ceiling and a persistent no-eviction budget Redis.
 - Operational reconciliation of an attempt stranded in-progress by a hard worker
   loss is deferred to Phase 16; the bounded task time limits, `conn_max_age`
-  and idempotent writes limit the blast radius in the interim.
+  and idempotent writes limit the blast radius in the interim. *Delivered in
+  Phase 16 (ADR 0017):* `reconcile_stuck_generations` (Celery Beat) fails an
+  attempt stuck past `GENERATION_STUCK_AFTER_SECONDS` with a controlled
+  `generation_stuck` result so a design never polls forever.
 
 ## Amendment: unresolved-spend regeneration block (review hardening)
 
