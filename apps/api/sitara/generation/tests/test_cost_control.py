@@ -10,6 +10,8 @@ in-memory-ledger fixture.
 from __future__ import annotations
 
 import concurrent.futures
+import os
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
@@ -18,9 +20,18 @@ from config.settings import env_nonnegative_int
 from sitara.generation import cost_control
 from sitara.generation.tests.cost_fakes import InMemoryBudgetLedger
 
-# Real Redis logical DB reserved for this test module (separate from Celery/
-# cache/the app's budget DB). Reachable as ``redis`` inside the compose network.
-_REDIS_URL = "redis://redis:6379/15"
+
+def _test_redis_url() -> str:
+    """Real Redis endpoint for this module's concurrency proof, on a dedicated
+    logical DB 15 (separate from Celery/cache/the app's budget DB). Derived from
+    ``REDIS_URL`` so the host resolves in BOTH environments — ``redis`` inside the
+    compose network and ``localhost`` for the CI Redis service — rather than a
+    hard-coded hostname that only exists in compose."""
+    parts = urlsplit(os.environ.get("REDIS_URL", "redis://redis:6379/0"))
+    return urlunsplit((parts.scheme, parts.netloc, "/15", "", ""))
+
+
+_REDIS_URL = _test_redis_url()
 
 
 @pytest.fixture(autouse=True)
