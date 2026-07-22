@@ -55,6 +55,12 @@ _NAMESPACE = "sitara:livebudget"
 _TOTAL_PREFIX = f"{_NAMESPACE}:total:"  # + YYYYMMDD  (per-UTC-day accounted total)
 _RES_PREFIX = f"{_NAMESPACE}:res:"  # + reservation-id  (one reservation hash)
 
+# Global daily accepted-attempt count (Phase 16 Part B) — same dedicated Redis
+# database and atomic-scripting discipline as the cost ledger, deliberately NOT
+# a generic quota framework.
+_COUNT_TOTAL_PREFIX = f"{_NAMESPACE}:count:total:"  # + YYYYMMDD
+_COUNT_RES_PREFIX = f"{_NAMESPACE}:count:res:"  # + reservation-id
+
 # Bounded grace beyond the end of the UTC day so a reservation/total key always
 # outlives the day it belongs to (allowing a late reconcile) but is never
 # unbounded. Two days is generous for a minutes-long generation job.
@@ -91,6 +97,11 @@ class BudgetLedgerUnavailable(Exception):
 class BudgetExhausted(Exception):
     """Reserving the requested amount would exceed the hard daily ceiling. No
     mutation occurred; the provider MUST NOT be invoked."""
+
+
+class CountLimitReached(Exception):
+    """Admitting one more live attempt would exceed the global daily count. No
+    mutation occurred."""
 
 
 class BudgetLedgerInconsistent(BudgetLedgerUnavailable):
@@ -326,6 +337,45 @@ end
 """
 
 
+# Global daily accepted-attempt count. Reserve admits one more attempt only if
+# the day total is below the limit; an idempotent replay (same reservation id)
+# never increments; release decrements and deletes so a definite pre-provider
+# failure returns the slot. Never negative.
+_COUNT_RESERVE_LUA = """
+local res = KEYS[1]
+local total = KEYS[2]
+local day = ARGV[1]
+local limit = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+if redis.call('EXISTS', res) == 1 then
+  return {'replayed'}
+end
+local current = tonumber(redis.call('GET', total) or '0')
+if current + 1 > limit then
+  return {'rejected', tostring(current)}
+end
+redis.call('SET', res, day)
+redis.call('EXPIRE', res, ttl)
+redis.call('INCRBY', total, 1)
+redis.call('EXPIRE', total, ttl)
+return {'reserved'}
+"""
+
+_COUNT_RELEASE_LUA = """
+local res = KEYS[1]
+local prefix = ARGV[1]
+if redis.call('EXISTS', res) == 0 then
+  return {'missing'}
+end
+local day = redis.call('GET', res)
+local total = prefix .. day
+local cur = tonumber(redis.call('GET', total) or '0')
+if cur > 0 then redis.call('DECRBY', total, 1) end
+redis.call('DEL', res)
+return {'released'}
+"""
+
+
 def _utc_day() -> str:
     # Settings pin USE_TZ + UTC, so now() is UTC — the count and cost windows use
     # UTC calendar days by construction.
@@ -349,6 +399,8 @@ class RedisBudgetLedger:
         self._client = None
         self._reserve_script = None
         self._reconcile_script = None
+        self._count_reserve_script = None
+        self._count_release_script = None
 
     def _connect(self):
         if self._client is None:
@@ -362,7 +414,54 @@ class RedisBudgetLedger:
             )
             self._reserve_script = self._client.register_script(_RESERVE_LUA)
             self._reconcile_script = self._client.register_script(_RECONCILE_LUA)
+            self._count_reserve_script = self._client.register_script(_COUNT_RESERVE_LUA)
+            self._count_release_script = self._client.register_script(_COUNT_RELEASE_LUA)
         return self._client
+
+    def reserve_count(self, reservation_id: str, limit: int) -> str:
+        """Atomically admit one more live attempt for the current UTC day.
+        Returns "reserved" (new), "replayed" (idempotent), and raises
+        ``CountLimitReached`` when the limit would be exceeded (no mutation) or
+        ``BudgetLedgerUnavailable`` on any ledger failure (fail closed)."""
+        day = _utc_day()
+        total_key = f"{_COUNT_TOTAL_PREFIX}{day}"
+        res_key = f"{_COUNT_RES_PREFIX}{reservation_id}"
+        try:
+            self._connect()
+            raw = self._count_reserve_script(
+                keys=[res_key, total_key],
+                args=[day, str(int(limit)), str(_expiry_seconds())],
+            )
+        except Exception as exc:
+            raise BudgetLedgerUnavailable("count ledger unavailable") from exc
+        status = _to_str(raw[0]) if isinstance(raw, list | tuple) and raw else ""
+        if status == "rejected":
+            raise CountLimitReached("daily live-generation count reached")
+        if status in {"reserved", "replayed"}:
+            return status
+        raise BudgetLedgerUnavailable(f"unexpected count status: {status!r}")
+
+    def release_count(self, reservation_id: str) -> str:
+        """Return a previously reserved count slot (definite pre-provider
+        failure). Idempotent; never drives the total negative. Ledger failure is
+        raised so the caller can log it — the slot simply stays counted."""
+        res_key = f"{_COUNT_RES_PREFIX}{reservation_id}"
+        try:
+            self._connect()
+            raw = self._count_release_script(keys=[res_key], args=[_COUNT_TOTAL_PREFIX])
+        except Exception as exc:
+            raise BudgetLedgerUnavailable("count ledger unavailable") from exc
+        return _to_str(raw[0]) if isinstance(raw, list | tuple) and raw else ""
+
+    def read_day_budget_total(self) -> int:
+        """Read the current UTC-day accounted budget total (a cheap, non-mutating
+        read for the enqueue-time preflight only — never the hard boundary)."""
+        total_key = f"{_TOTAL_PREFIX}{_utc_day()}"
+        try:
+            raw = self._connect().get(total_key)
+        except Exception as exc:
+            raise BudgetLedgerUnavailable("budget ledger unavailable") from exc
+        return int(raw) if raw else 0
 
     def reserve(
         self, reservation_id: str, amount_micro_usd: int, profile: PricingProfile
@@ -509,3 +608,23 @@ def retain(reservation_id: str, profile: PricingProfile) -> ReconcileOutcome:
 
 def release(reservation_id: str, profile: PricingProfile) -> ReconcileOutcome:
     return get_ledger().release(reservation_id, profile)
+
+
+def reserve_count(reservation_id: str) -> str:
+    """Admit one more live attempt for today against the configured daily count
+    limit. Raises ``CountLimitReached`` / ``BudgetLedgerUnavailable``."""
+    return get_ledger().reserve_count(reservation_id, settings.LIVE_GENERATION_DAILY_COUNT_LIMIT)
+
+
+def release_count(reservation_id: str) -> str:
+    return get_ledger().release_count(reservation_id)
+
+
+def count_reservation_id(design_id, idempotency_key) -> str:
+    """Deterministic per-(design, idempotency-key) count reservation identity, so
+    a replay or concurrent same-key request never reserves a second slot."""
+    return f"{design_id}:{idempotency_key}"
+
+
+def day_budget_total_micro_usd() -> int:
+    return get_ledger().read_day_budget_total()

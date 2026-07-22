@@ -357,11 +357,23 @@ def _submit_to_celery(attempt: GenerationAttempt) -> None:
     )
 
 
+def _release_live_count(design_id, idempotency_key) -> None:
+    """Best-effort return of a global daily count slot on a definite pre-provider
+    failure. A ledger outage only leaves the slot counted (conservative); never
+    crash. Idempotent — a missing/demo reservation is a harmless no-op."""
+    try:
+        cost_control.release_count(cost_control.count_reservation_id(design_id, idempotency_key))
+    except cost_control.BudgetLedgerUnavailable:
+        logger.warning("live count release unavailable design=%s", design_id)
+
+
 def _mark_queue_unavailable(attempt: GenerationAttempt) -> None:
     """A broker submission failure AFTER commit: the attempt is queued in the
     database but was never actually submitted. Mark it failed and move the
-    Design to generation_failed so no orphan queued job survives. Runs in its
-    own transaction (the enqueue transaction has already committed)."""
+    Design to generation_failed so no orphan queued job survives. The global
+    daily count slot this attempt reserved is returned — queue submission
+    definitely failed before any provider work could occur. Runs in its own
+    transaction (the enqueue transaction has already committed)."""
     with transaction.atomic():
         locked = GenerationAttempt.objects.select_for_update().get(pk=attempt.pk)
         if locked.status in (_Status.SUCCEEDED, _Status.FAILED):
@@ -373,6 +385,8 @@ def _mark_queue_unavailable(attempt: GenerationAttempt) -> None:
         Design.objects.filter(pk=locked.design_id).update(
             status=Design.Status.GENERATION_FAILED, updated_at=timezone.now()
         )
+    if not attempt.is_demo:
+        _release_live_count(attempt.design_id, attempt.idempotency_key)
 
 
 def enqueue_design_generation(
@@ -557,23 +571,50 @@ def enqueue_design_generation(
             # for a mode whose readiness was never confirmed.
             is_demo = resume_version.is_demo
 
-        # 6. Create the queued attempt (resuming an incomplete version if any).
-        attempt = GenerationAttempt.objects.create(
-            design=locked,
-            design_version=resume_version,
-            idempotency_key=idempotency_key,
-            status=_Status.QUEUED,
-            is_demo=is_demo,
-        )
-        attempt.celery_task_id = str(attempt.id)
-        attempt.save(update_fields=["celery_task_id", "updated_at"])
+        # 5b. Global daily count (Phase 16 Part B). Reserved atomically here —
+        #     AFTER every rejection check passes and using the FINAL is_demo, so
+        #     only a genuinely new LIVE attempt consumes a slot (demo never
+        #     counts, no rejected request counts, and an idempotent replay
+        #     returned long before this line). A rejected reservation raises
+        #     CountLimitReached and rolls back this short transaction (nothing
+        #     was created); a ledger outage fails closed. The Redis reservation
+        #     is NOT covered by this transaction's rollback, so if a later DB
+        #     statement raises (e.g. the (design, idempotency_key) UniqueConstraint
+        #     backstop, or a transient DB error) the reservation is compensated in
+        #     the except below — a rolled-back enqueue is a definite pre-provider
+        #     failure. The bounded in-lock Redis call is an accepted trade-off
+        #     (per-design scope) for reserving atomically with the creation
+        #     decision. The slot is also returned by _mark_queue_unavailable if
+        #     the post-commit broker submit fails.
+        _count_reserved = require_availability and not is_demo
+        if _count_reserved:
+            cost_control.reserve_count(
+                cost_control.count_reservation_id(locked.id, idempotency_key)
+            )
+        try:
+            # 6. Create the queued attempt (resuming an incomplete version if any).
+            attempt = GenerationAttempt.objects.create(
+                design=locked,
+                design_version=resume_version,
+                idempotency_key=idempotency_key,
+                status=_Status.QUEUED,
+                is_demo=is_demo,
+            )
+            attempt.celery_task_id = str(attempt.id)
+            attempt.save(update_fields=["celery_task_id", "updated_at"])
 
-        # 7. Move the Design into the generating state.
-        locked.status = Design.Status.GENERATING
-        locked.save(update_fields=["status", "updated_at"])
+            # 7. Move the Design into the generating state.
+            locked.status = Design.Status.GENERATING
+            locked.save(update_fields=["status", "updated_at"])
 
-        outcome["attempt"] = attempt
-        transaction.on_commit(_on_commit)
+            outcome["attempt"] = attempt
+            transaction.on_commit(_on_commit)
+        except Exception:
+            # The DB side rolls back with the transaction; compensate the Redis
+            # count reservation so a rolled-back enqueue never orphans a slot.
+            if _count_reserved:
+                _release_live_count(locked.id, idempotency_key)
+            raise
 
     return outcome["attempt"], True
 
@@ -750,30 +791,46 @@ def enqueue_design_refinement(
         if source_version.refined_versions.exists() or staged_elsewhere or unresolved_spend:
             raise RefinementLimitReached("this design has already been refined")
 
-        # 7. Create the queued refinement attempt, carrying its own durable
-        #    copy of the canonical refinement request (the child DesignVersion
-        #    does not exist yet to carry Part A's copy).
-        refinement_request_hash = refinement_request_sha256(refinement_request)
-        attempt = GenerationAttempt.objects.create(
-            design=locked,
-            idempotency_key=idempotency_key,
-            status=_Status.QUEUED,
-            generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
-            source_design_version=source_version,
-            refinement_request=refinement_request.model_dump(mode="json"),
-            refinement_request_schema_version=REFINEMENT_REQUEST_SCHEMA_VERSION,
-            refinement_request_sha256=refinement_request_hash,
-            is_demo=is_demo,
-        )
-        attempt.celery_task_id = str(attempt.id)
-        attempt.save(update_fields=["celery_task_id", "updated_at"])
+        # 6b. Global daily count (Phase 16 Part B) — a refinement is a new live
+        #     billable attempt too. Reserved atomically after every rejection
+        #     check, using the FINAL is_demo (demo never counts). The Redis
+        #     reservation is compensated in the except below if any later DB
+        #     statement rolls this transaction back. See the initial-generation
+        #     enqueue for the full rationale.
+        _count_reserved = require_availability and not is_demo
+        if _count_reserved:
+            cost_control.reserve_count(
+                cost_control.count_reservation_id(locked.id, idempotency_key)
+            )
+        try:
+            # 7. Create the queued refinement attempt, carrying its own durable
+            #    copy of the canonical refinement request (the child DesignVersion
+            #    does not exist yet to carry Part A's copy).
+            refinement_request_hash = refinement_request_sha256(refinement_request)
+            attempt = GenerationAttempt.objects.create(
+                design=locked,
+                idempotency_key=idempotency_key,
+                status=_Status.QUEUED,
+                generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
+                source_design_version=source_version,
+                refinement_request=refinement_request.model_dump(mode="json"),
+                refinement_request_schema_version=REFINEMENT_REQUEST_SCHEMA_VERSION,
+                refinement_request_sha256=refinement_request_hash,
+                is_demo=is_demo,
+            )
+            attempt.celery_task_id = str(attempt.id)
+            attempt.save(update_fields=["celery_task_id", "updated_at"])
 
-        # 8. Move the Design into the generating state.
-        locked.status = Design.Status.GENERATING
-        locked.save(update_fields=["status", "updated_at"])
+            # 8. Move the Design into the generating state.
+            locked.status = Design.Status.GENERATING
+            locked.save(update_fields=["status", "updated_at"])
 
-        outcome["attempt"] = attempt
-        transaction.on_commit(_on_commit)
+            outcome["attempt"] = attempt
+            transaction.on_commit(_on_commit)
+        except Exception:
+            if _count_reserved:
+                _release_live_count(locked.id, idempotency_key)
+            raise
 
     return outcome["attempt"], True
 

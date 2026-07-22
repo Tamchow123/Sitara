@@ -18,8 +18,11 @@ class InMemoryBudgetLedger:
     def __init__(self):
         self.totals: dict[str, int] = {}
         self.reservations: dict[str, dict] = {}
+        # Global daily accepted-attempt count (Phase 16 Part B).
+        self.count_totals: dict[str, int] = {}
+        self.count_reservations: dict[str, str] = {}
         # When set, every operation raises BudgetLedgerUnavailable — used to
-        # prove a ledger outage fails closed (no provider call).
+        # prove a ledger outage fails closed (no provider call / no admission).
         self.fail = False
 
     # -- helpers -----------------------------------------------------------
@@ -102,9 +105,39 @@ class InMemoryBudgetLedger:
         res["unresolved"] = 0
         return cost_control.ReconcileOutcome("reconciled", actual, 0, dec)
 
+    # -- global daily count (matches RedisBudgetLedger) --------------------
+    def reserve_count(self, reservation_id, limit) -> str:
+        self._guard()
+        if reservation_id in self.count_reservations:
+            return "replayed"
+        day = self._day()
+        current = self.count_totals.get(day, 0)
+        if current + 1 > int(limit):
+            raise cost_control.CountLimitReached("daily live-generation count reached")
+        self.count_reservations[reservation_id] = day
+        self.count_totals[day] = current + 1
+        return "reserved"
+
+    def release_count(self, reservation_id) -> str:
+        self._guard()
+        day = self.count_reservations.pop(reservation_id, None)
+        if day is None:
+            return "missing"
+        cur = self.count_totals.get(day, 0)
+        if cur > 0:
+            self.count_totals[day] = cur - 1
+        return "released"
+
+    def read_day_budget_total(self) -> int:
+        self._guard()
+        return self.totals.get(self._day(), 0)
+
     # -- test introspection ------------------------------------------------
     def total_for_today(self) -> int:
         return self.totals.get(self._day(), 0)
 
     def reservation_count(self) -> int:
         return len(self.reservations)
+
+    def count_for_today(self) -> int:
+        return self.count_totals.get(self._day(), 0)

@@ -6,15 +6,19 @@
 // exception message; falls back to the server's own safe message text for
 // any code this map does not recognise.
 
+import { GENERATION_SUBMIT_MESSAGES } from "@/features/generation/submit-errors";
+
 const REFINEMENT_SUBMIT_MESSAGES: Record<string, string> = {
+  // Shared admission copy (Phase 16): live_generation_disabled,
+  // generation_limit_reached, live_generation_budget_exhausted,
+  // generation_unavailable, queue_unavailable.
+  ...GENERATION_SUBMIT_MESSAGES,
   refinement_invalid: "Please choose one change and check your note, then try again.",
   design_not_refinable: "This design cannot be refined right now.",
   refinement_source_unavailable:
     "The original concept is not available for refinement. Please try again shortly.",
   refinement_in_progress: "A refinement is already in progress for this design.",
   refinement_limit_reached: "This design has already been refined.",
-  generation_unavailable: "Concept generation is not available right now.",
-  queue_unavailable: "The generation queue is temporarily unavailable. Please try again shortly.",
 };
 
 // Codes after which the panel should stop offering itself for this design —

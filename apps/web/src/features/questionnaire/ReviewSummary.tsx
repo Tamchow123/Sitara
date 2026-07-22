@@ -19,6 +19,7 @@ import { fetchDesign, fetchPublicConfig, startDesignGeneration, validateDesignDr
 import { answerLabels } from "./answer-utils";
 import { visibleQuestions } from "./rules";
 import { resolveDesignLifecycleTarget } from "@/lib/design-lifecycle";
+import { generationSubmitErrorMessage } from "@/features/generation/submit-errors";
 import type { PublicConfig } from "@/lib/api";
 import type { Answers, DesignDraft, QuestionnaireSchema } from "./types";
 
@@ -182,8 +183,17 @@ export function ReviewSummary({ designId }: Props) {
       return;
     }
 
+    // Every other confirmed failure — including the Phase 16 admission states
+    // (live_generation_disabled, generation_limit_reached,
+    // live_generation_budget_exhausted) and a temporary admission outage — is
+    // shown as a clear, non-technical, terminal message. The draft is fully
+    // preserved on this review page and nothing retries automatically; the user
+    // may deliberately try again later.
     submittingRef.current = false;
-    setSubmit({ status: "error", message: result.message });
+    setSubmit({
+      status: "error",
+      message: generationSubmitErrorMessage(result.code, result.message),
+    });
   }, [designId, router]);
 
   if (state.phase === "loading" || state.phase === "redirecting") {

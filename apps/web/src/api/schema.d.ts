@@ -1423,7 +1423,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description generation_unavailable / queue_unavailable. */
+            /** @description generation_limit_reached (per-session/IP or global daily count). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description generation_unavailable / queue_unavailable / live_generation_disabled / live_generation_budget_exhausted. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -1497,7 +1506,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description generation_unavailable / queue_unavailable. */
+            /** @description generation_limit_reached (per-session/IP or global daily count). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description generation_unavailable / queue_unavailable / live_generation_disabled / live_generation_budget_exhausted. */
             503: {
                 headers: {
                     [name: string]: unknown;

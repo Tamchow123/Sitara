@@ -698,6 +698,23 @@ LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = env_nonnegative_int(
     "LIVE_GENERATION_DAILY_BUDGET_MICRO_USD", 0
 )
 
+# Live admission controls (Phase 16, Part B). Global cap on newly accepted live
+# generation attempts per UTC day (zero admits none); per-session and per-IP
+# request throttles (a zero limit rejects every request — fail closed; windows
+# must be strictly positive). The global daily COUNT uses the dedicated budget
+# Redis database (atomic Lua, like the cost ledger); the per-session/per-IP
+# THROTTLES reuse the existing Django cache backend shared with
+# ``sitara.accounts.rate_limits``. Both use HMAC-SHA256 identifiers keyed by
+# SECRET_KEY, so no raw IP, session key, workspace UUID, user id or email is
+# ever stored.
+LIVE_GENERATION_DAILY_COUNT_LIMIT = env_nonnegative_int("LIVE_GENERATION_DAILY_COUNT_LIMIT", 0)
+LIVE_GENERATION_SESSION_LIMIT = env_nonnegative_int("LIVE_GENERATION_SESSION_LIMIT", 0)
+LIVE_GENERATION_SESSION_WINDOW_SECONDS = env_positive_int(
+    "LIVE_GENERATION_SESSION_WINDOW_SECONDS", 3600
+)
+LIVE_GENERATION_IP_LIMIT = env_nonnegative_int("LIVE_GENERATION_IP_LIMIT", 0)
+LIVE_GENERATION_IP_WINDOW_SECONDS = env_positive_int("LIVE_GENERATION_IP_WINDOW_SECONDS", 3600)
+
 # Versioned pricing-profile identifier. Reservations and reconciliations are
 # stamped with this so a provider-model or price change (which MUST bump this
 # value) can never silently continue accounting under stale, unreviewed prices.

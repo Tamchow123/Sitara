@@ -32,6 +32,15 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from sitara.generation.admission import (
+    AdmissionControlUnavailable,
+    GenerationLimitReached,
+    LiveGenerationBudgetExhausted,
+    LiveGenerationDisabled,
+    daily_count_retry_after,
+    enforce_live_admission,
+)
+from sitara.generation.cost_control import BudgetLedgerUnavailable, CountLimitReached
 from sitara.generation.pipeline import (
     DesignAlreadyGenerated,
     DesignIncomplete,
@@ -63,7 +72,7 @@ from sitara.schema import (
 )
 
 from .jobs import _iso, public_job_payload
-from .models import Design, DesignVersion
+from .models import Design, DesignVersion, GenerationAttempt
 from .openapi import (
     DesignDetailResponseSerializer,
     DesignListResponseSerializer,
@@ -124,6 +133,58 @@ def _not_found() -> Response:
     # One indistinguishable answer for nonexistent, other-session and
     # other-user designs.
     return _error("not_found", "Not found.", status.HTTP_404_NOT_FOUND)
+
+
+def _generation_limit_response(retry_after: int) -> Response:
+    return _error(
+        "generation_limit_reached",
+        "You have reached the generation limit for now. Please try again later.",
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        headers={"Cache-Control": "no-store", "Retry-After": str(int(retry_after))},
+    )
+
+
+def _budget_exhausted_response() -> Response:
+    return _error(
+        "live_generation_budget_exhausted",
+        "The daily limit for generating new concepts has been reached. "
+        "Your design is saved — please try again later.",
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+
+
+def _is_idempotent_replay(design, idempotency_key) -> bool:
+    """A prior attempt already exists for this (design, key): the request is an
+    idempotent replay that will produce no new attempt, spend or count slot, so
+    it must not consume a session/IP throttle slot either — a legitimate client
+    retry (which reuses the same key) should never throttle the honest user out."""
+    return GenerationAttempt.objects.filter(design=design, idempotency_key=idempotency_key).exists()
+
+
+def _enforce_admission(request, design, source_version_id=None) -> Response | None:
+    """Run live admission AFTER ownership. Returns an error Response to send
+    immediately, or None to proceed. Demo generation is admitted transparently.
+    ``source_version_id`` is passed for a refinement so the mode gate resolves
+    from the named source version, matching the refinement enqueue."""
+    try:
+        enforce_live_admission(request, design, source_version_id)
+        return None
+    except LiveGenerationDisabled:
+        return _error(
+            "live_generation_disabled",
+            "Live concept generation is currently turned off.",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    except GenerationLimitReached as exc:
+        return _generation_limit_response(exc.retry_after)
+    except LiveGenerationBudgetExhausted:
+        return _budget_exhausted_response()
+    except AdmissionControlUnavailable:
+        return _error(
+            "generation_unavailable",
+            "Generation is not currently available. Please try again shortly.",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
 
 def _validation_failed(errors: dict) -> Response:
@@ -459,9 +520,16 @@ class DesignGenerateView(APIView):
                     "generation_in_progress / design_already_generated / design_not_generatable."
                 ),
             ),
+            429: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="generation_limit_reached (per-session/IP or global daily count).",
+            ),
             503: OpenApiResponse(
                 ErrorEnvelopeSerializer,
-                description="generation_unavailable / queue_unavailable.",
+                description=(
+                    "generation_unavailable / queue_unavailable / live_generation_disabled / "
+                    "live_generation_budget_exhausted."
+                ),
             ),
         },
         summary="Start a design generation job",
@@ -499,8 +567,25 @@ class DesignGenerateView(APIView):
                     status.HTTP_400_BAD_REQUEST,
                 )
 
+        # Live admission AFTER ownership (an inaccessible design already 404'd
+        # above): session/IP throttles, mode errors, budget preflight. Demo
+        # bypasses all of it, and a known idempotent replay skips it entirely so
+        # a legitimate retry never consumes a throttle slot.
+        if not _is_idempotent_replay(design, key):
+            admission_error = _enforce_admission(request, design)
+            if admission_error is not None:
+                return admission_error
+
         try:
             attempt, _created = enqueue_design_generation(design, idempotency_key=key)
+        except CountLimitReached:
+            return _generation_limit_response(daily_count_retry_after())
+        except BudgetLedgerUnavailable:
+            return _error(
+                "generation_unavailable",
+                "Generation is not currently available. Please try again shortly.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         except DesignIncomplete as exc:
             return _validation_failed(exc.field_errors)
         except GenerationInProgress:
@@ -766,9 +851,16 @@ class DesignRefineView(APIView):
                     "refinement_source_unavailable / design_not_refinable."
                 ),
             ),
+            429: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="generation_limit_reached (per-session/IP or global daily count).",
+            ),
             503: OpenApiResponse(
                 ErrorEnvelopeSerializer,
-                description="generation_unavailable / queue_unavailable.",
+                description=(
+                    "generation_unavailable / queue_unavailable / live_generation_disabled / "
+                    "live_generation_budget_exhausted."
+                ),
             ),
         },
         summary="Start a single constrained refinement job",
@@ -816,12 +908,32 @@ class DesignRefineView(APIView):
                 status.HTTP_400_BAD_REQUEST,
             )
 
+        # Live admission AFTER ownership (and after cheap request validation, so
+        # a malformed refinement is a 400, not a consumed throttle slot). Demo
+        # refinement bypasses all live quotas; a known idempotent replay skips it
+        # entirely. The mode gate resolves from the named source version, matching
+        # the refinement enqueue.
+        if not _is_idempotent_replay(design, key):
+            admission_error = _enforce_admission(
+                request, design, source_version_id=str(validated["source_version_id"])
+            )
+            if admission_error is not None:
+                return admission_error
+
         try:
             attempt, _created = enqueue_design_refinement(
                 design,
                 source_version_id=str(validated["source_version_id"]),
                 refinement_request=refinement_request,
                 idempotency_key=key,
+            )
+        except CountLimitReached:
+            return _generation_limit_response(daily_count_retry_after())
+        except BudgetLedgerUnavailable:
+            return _error(
+                "generation_unavailable",
+                "Generation is not currently available. Please try again shortly.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         except DesignNotRefinable:
             return _error(

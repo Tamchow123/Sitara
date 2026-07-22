@@ -669,6 +669,16 @@
                         },
                         "description": "generation_in_progress / design_already_generated / design_not_generatable."
                     },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "generation_limit_reached (per-session/IP or global daily count)."
+                    },
                     "503": {
                         "content": {
                             "application/json": {
@@ -677,7 +687,7 @@
                                 }
                             }
                         },
-                        "description": "generation_unavailable / queue_unavailable."
+                        "description": "generation_unavailable / queue_unavailable / live_generation_disabled / live_generation_budget_exhausted."
                     }
                 }
             }
@@ -786,6 +796,16 @@
                         },
                         "description": "refinement_limit_reached / refinement_in_progress / refinement_source_unavailable / design_not_refinable."
                     },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "generation_limit_reached (per-session/IP or global daily count)."
+                    },
                     "503": {
                         "content": {
                             "application/json": {
@@ -794,7 +814,7 @@
                                 }
                             }
                         },
-                        "description": "generation_unavailable / queue_unavailable."
+                        "description": "generation_unavailable / queue_unavailable / live_generation_disabled / live_generation_budget_exhausted."
                     }
                 }
             }

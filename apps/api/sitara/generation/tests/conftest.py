@@ -48,6 +48,9 @@ def in_memory_budget_ledger(settings):
 
     settings.LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = 1_000_000_000
     settings.LIVE_GENERATION_PRICING_PROFILE = "test-profile-1"
+    # Generous admission allowances so live-path enqueue tests are not blocked by
+    # the count/throttle limits; a limits-specific test overrides these.
+    settings.LIVE_GENERATION_DAILY_COUNT_LIMIT = 1_000_000
     ledger = InMemoryBudgetLedger()
     cost_control.set_ledger(ledger)
     yield ledger
