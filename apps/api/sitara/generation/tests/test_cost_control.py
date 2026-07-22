@@ -83,10 +83,49 @@ class TestConfigFailsClosed:
         settings.LIVE_GENERATION_PRICING_PROFILE = ""
         assert cost_control.live_cost_config_is_valid() is False
 
-    def test_positive_budget_and_profile_is_live_valid(self, settings):
-        settings.LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = 1_000
+    def _price(self, settings):
+        settings.ANTHROPIC_INPUT_MICRO_USD_PER_MTOK = 3_000_000
+        settings.ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK = 15_000_000
+        settings.REPLICATE_MAX_IMAGE_MICRO_USD = 40_000
+
+    def test_positive_budget_profile_and_prices_is_live_valid(self, settings):
+        settings.LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = 1_000_000
         settings.LIVE_GENERATION_PRICING_PROFILE = "p1"
+        self._price(settings)
         assert cost_control.live_cost_config_is_valid() is True
+
+    @pytest.mark.parametrize("zeroed", ["input", "output", "image"])
+    def test_any_zero_price_fails_closed(self, settings, zeroed):
+        # A profile name + positive budget must NOT enable live generation while
+        # any billable price is left at its default 0 — that would run paid calls
+        # with zero-value reservations that never consume the ceiling.
+        settings.LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = 1_000_000
+        settings.LIVE_GENERATION_PRICING_PROFILE = "p1"
+        self._price(settings)
+        setattr(
+            settings,
+            {
+                "input": "ANTHROPIC_INPUT_MICRO_USD_PER_MTOK",
+                "output": "ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK",
+                "image": "REPLICATE_MAX_IMAGE_MICRO_USD",
+            }[zeroed],
+            0,
+        )
+        assert cost_control.active_pricing_profile().is_valid is False
+        assert cost_control.live_cost_config_is_valid() is False
+
+    def test_prices_at_or_above_precision_bound_fail_closed(self, settings):
+        settings.LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = 1_000_000
+        settings.LIVE_GENERATION_PRICING_PROFILE = "p1"
+        self._price(settings)
+        settings.ANTHROPIC_INPUT_MICRO_USD_PER_MTOK = 2**53
+        assert cost_control.active_pricing_profile().is_valid is False
+
+    def test_budget_at_or_above_precision_bound_fails_closed(self, settings):
+        settings.LIVE_GENERATION_PRICING_PROFILE = "p1"
+        self._price(settings)
+        settings.LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = 2**53
+        assert cost_control.live_cost_config_is_valid() is False
 
 
 # ---------------------------------------------------------------------------

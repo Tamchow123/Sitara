@@ -98,10 +98,14 @@ class TestPublicGenerationGate:
         settings.ANTHROPIC_API_KEY = "sk-ant-test"
         settings.ANTHROPIC_MODEL = "claude-sonnet-4-6"
         settings.LIVE_GENERATION_ENABLED = True
-        # Phase 16: public live availability also requires a valid cost config
-        # (a positive daily budget ceiling and a valid pricing profile).
+        # Phase 16: public live availability also requires a valid cost config —
+        # a positive daily budget ceiling AND a pricing profile with a POSITIVE
+        # price for every billable stage (a zero price fails closed).
         settings.LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = 1_000_000
         settings.LIVE_GENERATION_PRICING_PROFILE = "test-profile-1"
+        settings.ANTHROPIC_INPUT_MICRO_USD_PER_MTOK = 3_000_000
+        settings.ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK = 15_000_000
+        settings.REPLICATE_MAX_IMAGE_MICRO_USD = 40_000
         assert generation_is_available() is True
 
     def test_live_flag_on_without_valid_cost_config_is_unavailable(self, settings):

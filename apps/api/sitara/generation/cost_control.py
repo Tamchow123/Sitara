@@ -49,6 +49,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 MICRO_USD_PER_USD = 1_000_000
 
+# Every integer this module reserves, accumulates and reconciles is handled by a
+# Redis Lua script, whose numbers are IEEE-754 doubles: only integers with
+# magnitude below 2**53 stay exact. Prices and the daily ceiling are bounded
+# below this so no reserved or day-total value can ever silently lose precision.
+_MAX_ACCOUNTED_MICRO_USD = 2**53
+
 # Exclusive namespace for every key this module writes. Nothing else in Sitara
 # writes under this prefix, and it lives in its own logical Redis database.
 _NAMESPACE = "sitara:livebudget"
@@ -128,12 +134,16 @@ class PricingProfile:
 
     @property
     def is_valid(self) -> bool:
-        # A live-usable profile needs a non-empty version and non-negative
-        # prices. Zero prices are permitted for a provider that is genuinely
-        # free, but the daily budget must still be positive for any live spend
-        # (checked separately by live_cost_config_is_valid()).
+        # A live-usable profile needs a non-empty version and a POSITIVE, bounded
+        # price for every provider stage Sitara actually bills: Anthropic input
+        # and output tokens, and the Replicate image call. A price of 0 is treated
+        # as UNCONFIGURED, never "free" — Sitara uses no free provider, and a
+        # zero price would let live generation run with zero-value reservations
+        # that never consume the daily ceiling (a silent fail-open). So a missing
+        # or non-positive price fails closed. Prices stay below 2**53 so every
+        # reserved/accumulated Lua integer remains exact.
         return bool(self.version) and all(
-            value >= 0
+            0 < value < _MAX_ACCOUNTED_MICRO_USD
             for value in (
                 self.anthropic_input_micro_usd_per_mtok,
                 self.anthropic_output_micro_usd_per_mtok,
@@ -156,9 +166,11 @@ def daily_budget_micro_usd() -> int:
 
 
 def live_cost_config_is_valid() -> bool:
-    """Public live generation may only be considered available when a positive
-    daily budget AND a valid pricing profile are configured. Fails closed."""
-    return daily_budget_micro_usd() > 0 and active_pricing_profile().is_valid
+    """Public live generation may only be considered available when a positive,
+    bounded daily budget AND a valid pricing profile (positive bounded prices for
+    every billable stage) are configured. Fails closed."""
+    budget = daily_budget_micro_usd()
+    return 0 < budget < _MAX_ACCOUNTED_MICRO_USD and active_pricing_profile().is_valid
 
 
 # ---------------------------------------------------------------------------

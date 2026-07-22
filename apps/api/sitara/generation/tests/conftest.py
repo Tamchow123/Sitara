@@ -48,6 +48,12 @@ def in_memory_budget_ledger(settings):
 
     settings.LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = 1_000_000_000
     settings.LIVE_GENERATION_PRICING_PROFILE = "test-profile-1"
+    # A valid live profile needs a POSITIVE price for every billable stage (a zero
+    # price fails closed); set generous defaults so live-path fixture providers run
+    # exactly as before. A cost-specific test overrides these.
+    settings.ANTHROPIC_INPUT_MICRO_USD_PER_MTOK = 3_000_000
+    settings.ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK = 15_000_000
+    settings.REPLICATE_MAX_IMAGE_MICRO_USD = 40_000
     # Generous admission allowances so live-path enqueue tests are not blocked by
     # the count/throttle limits; a limits-specific test overrides these.
     settings.LIVE_GENERATION_DAILY_COUNT_LIMIT = 1_000_000
