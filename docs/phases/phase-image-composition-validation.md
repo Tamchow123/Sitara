@@ -63,9 +63,12 @@ garment / coverage / dupatta spread.
    a valid `LIVE_GENERATION_PRICING_PROFILE`, a positive
    `LIVE_GENERATION_DAILY_BUDGET_MICRO_USD`, a persistent `noeviction` standalone
    budget Redis (`LIVE_GENERATION_BUDGET_REDIS_URL`), and valid provider
-   credentials. Rebuild the API image so `4.0.0` is actually running
-   (`docker compose build api && docker compose up -d api`) — the dev image bakes
-   in source, so an un-rebuilt container still serves the old builder.
+   credentials. Rebuild **the worker images** so the current builder is actually
+   running — generation executes in the **Celery worker**, not just the API:
+   `docker compose build api celery celery-beat && docker compose up -d api celery celery-beat`.
+   The dev images bake in source, so an un-rebuilt `celery` container silently
+   keeps serving the old builder version (verify with
+   `docker compose exec celery python -c "from sitara.generation.prompt_builder import PROMPT_BUILDER_VERSION; print(PROMPT_BUILDER_VERSION)"`).
 2. For each matrix row, drive the **normal product flow** in the web UI: complete
    the bridalwear questionnaire with the synthetic selections, then request
    generation. This exercises the same DesignSpec → `build_image_prompt` →
@@ -93,6 +96,40 @@ throttles, `prompt_builder_version == "4.0.0"` on the produced versions.
 Record a Pass/Fail for **each** criterion, not just an overall impression, and
 note any garment-type-specific failure (e.g. a saree that reads as a stitched
 gown, a gharara without the knee joint).
+
+## 5b. Coverage validation (`5.0.0`)
+
+**Live status so far:** `4.0.0` (composition-first) **passed** the framing rubric
+above in a real generation — full-length, head-to-foot, plain studio. That same
+generation then **failed coverage**: the model rendered an open blouse neckline
+and a bare head despite an explicit high-neck / head-covering DesignSpec, because
+the coverage instructions sat mid-prompt and advisory styling prose (neckline
+jewellery, a head ornament) contradicted them. `5.0.0` renders coverage as a
+high-priority conditional visual directive (second section) with a closing
+reinforcement, and stops rendering `styling_notes` / colour rationale.
+
+Score these coverage criteria **only for the selections the DesignSpec actually
+made** (they are conditional — a sleeveless design is not expected to cover the
+arms):
+
+| Coverage criterion | Pass condition |
+|---|---|
+| High neckline | When `high_neckline` selected: blouse neckline is closed and high over the collarbone/upper chest — not open, scooped or sweetheart |
+| Full sleeves | When `full_sleeves` selected: sleeves reach the wrists, arms fully covered |
+| Covered midriff | When `full_midriff` selected: no bare skin at the waist |
+| Covered back | When `full_back` selected: back not left open |
+| Head covering | When `head_drape_preferred` / dupatta `head_drape` selected: the pallu/dupatta is over the head as a veil, hair not visible |
+| No contradiction | No prominent neckline necklace / head ornament that fights the coverage |
+
+**Because provider adherence is stochastic, prefer a controlled before/after
+comparison over one-off runs.** Use a single **fixed synthetic DesignSpec** with
+strong coverage (e.g. saree, `high_neckline` + `full_sleeves` +
+`head_drape_preferred`, `seedha_pallu`) and generate one image on `4.0.0` and one
+on `5.0.0` from the identical spec, all provider params equal. Record the
+`prompt_builder_version` on each and score both against the coverage table. A
+knees-up/waist-up crop is a framing fail; an open neckline or visible hair on a
+covered-head spec is a coverage fail. Do not call `5.0.0` successful until the
+coverage comparison passes.
 
 ## 6. Results log (operator to complete)
 

@@ -3,7 +3,8 @@
 - **Status:** accepted
 - **Date:** 2026-07-18 (amended 2026-07-22 for Phase image-composition:
   composition-first ordering and catalogue framing, `PROMPT_BUILDER_VERSION`
-  `4.0.0`)
+  `4.0.0`; further amended 2026-07-22 for the coverage-first follow-up after live
+  evidence, `PROMPT_BUILDER_VERSION` `5.0.0`)
 - **Deciders:** Sitara maintainers
 - **Phase:** Phase 9 (see ../phases/PHASES.md); amended by Phase
   image-composition (see ../phases/phase-image-composition.md)
@@ -120,6 +121,56 @@ composition directive is fixed positive prose, there is still no negative prompt
 no JSON prompt, no hard-coded model identifier and no provider call, and
 identical validated input still yields byte-identical output guarded by the
 golden snapshots and combined-hash manifest.
+
+### Coverage-first rendering and portrait-cue removal (Phase image-composition follow-up, `5.0.0`)
+
+The first true live `4.0.0` generation (2026-07-22) confirmed composition-first
+**fixed the framing** — a full-length, head-to-foot, plain-studio catalogue image
+— but exposed a second failure: FLUX rendered an **open blouse neckline and a
+bare head** even though the DesignSpec explicitly specified a closed high neckline
+and a head-covering pallu, and the coverage instructions were present and correct
+in the prompt. Two causes: the coverage instructions sat in mid-prompt prose
+(FLUX weights the opening most), and the persisted `styling_notes` rendered
+advisory beauty text ("jewellery minimal at the neckline… a maang tikka or head
+ornament") that actively pulled toward an exposed neckline and a visible head.
+
+`5.0.0` therefore renders **coverage as an explicit, high-priority visual
+directive** rather than trusting mid-prompt narrative:
+
+- A concise, garment-neutral **coverage directive is the second section**,
+  immediately after composition, built deterministically from the canonical
+  `coverage_preferences` (and the head-covering signal). It states the
+  coverage-critical selections as concrete visual requirements — e.g. "a fully
+  closed high blouse neckline covering the collarbone and upper chest, not an
+  open, scooped or sweetheart neckline"; "full-length sleeves… with both arms
+  fully covered"; and, when a covered head was requested, "the [pallu/dupatta]
+  pulled up and over the head like a veil, completely covering the hair with no
+  hair visible". The clause set is a small source-controlled map keyed only on
+  canonical machine values (like the garment-integrity cues), **not** a broad
+  rules engine.
+- It is **strictly conditional**: only coverage-**increasing** selections get a
+  clause (sleeveless / short / elbow / three-quarter sleeves get none, so the
+  directive never contradicts a validated less-covered choice), and the
+  head-covering clause appears only when `head_drape_preferred` is chosen or the
+  dupatta is styled `head_drape`.
+- It is **garment-neutral**: the head covering references the saree **pallu** for
+  a saree, the **dupatta** for a non-saree, and never invents a dupatta for a
+  saree with `dupatta_style=None`.
+- The critical coverage requirements are **briefly restated last** (a short
+  positive reinforcement after the finishing directive), because the live
+  evidence shows a single early statement is insufficient. This is still one
+  positive natural-language prompt — no negative prompt.
+- **Advisory `styling_notes` and non-visual `colour_story.rationale` are no
+  longer rendered** into the image prompt. They are beauty/styling and
+  explanatory prose that pull toward portraiture and can contradict coverage;
+  they remain in the persisted DesignSpec brief, only the image prompt omits them
+  (which also trims length).
+
+Coverage correctness in the prompt is now deterministic and snapshot-guarded; the
+provider's adherence remains stochastic (a closed high neckline and especially a
+fully covered head fight strong FLUX priors), so acceptance requires an
+operator-run before/after comparison on a fixed DesignSpec, not wording
+inspection alone.
 
 ### Garment-integrity cues
 
@@ -243,7 +294,7 @@ manifest first and **refuses** to overwrite it when the rendered combined hash
 changed while `PROMPT_BUILDER_VERSION` did not — a deliberate version bump is
 required. After a bump it rewrites the snapshots and manifest; an unchanged hash
 is a no-op. Normal tests run comparison-only and never write files, so silent
-wording drift cannot slip past review. `PROMPT_BUILDER_VERSION` is `4.0.0`:
+wording drift cannot slip past review. `PROMPT_BUILDER_VERSION` is `5.0.0`:
 `2.0.0` introduced bounded rendering and canonical-selection authority; `3.0.0`
 finalised the no-embellishment rules (dropping the density line and switching to
 the unembellished finishing wording), made truncation total and added HTML/Markdown
@@ -251,7 +302,10 @@ rejection; `4.0.0` (Phase image-composition) moved the fixed composition
 directive to the front as the highest-priority section, reordered the
 garment-detail hierarchy (coverage ahead of colour/fabric), split the trailing
 block into finishing-only wording and tightened the `concept_summary` cap
-(700→400) — changing every fixture snapshot and requiring the version bump.
+(700→400); `5.0.0` (Phase image-composition follow-up) added the high-priority
+conditional coverage directive plus a closing reinforcement, and stopped
+rendering `styling_notes` and `colour_story.rationale` — each changing every
+fixture snapshot and requiring the version bump.
 Each bump rewrote snapshots deliberately through the regeneration command's
 version guard; persisted `image_prompt`/`prompt_builder_version` audit data on
 existing `DesignVersion` rows is never rewritten, so a builder change only
@@ -277,9 +331,16 @@ version's image prompt therefore carries the current `PROMPT_BUILDER_VERSION`
 version's, and the composition-first ordering applies identically to refined
 generations.
 
-**Phase image-composition note:** the composition-first restructure changed
-prompt wording and ordering only; it added no provider call, negative prompt,
-JSON prompt, model identifier, reference-image conditioning or seed, and did not
-alter the DesignSpec contract, the persistence/immutability model or any Phase
-16 cost/security control. It bumped `PROMPT_BUILDER_VERSION` to `4.0.0` and
-regenerated the golden snapshots and manifest.
+**Phase image-composition note:** the composition-first restructure (`4.0.0`) and
+the coverage-first follow-up (`5.0.0`) changed prompt wording and ordering only;
+they added no provider call, negative prompt, JSON prompt, model identifier,
+reference-image conditioning or seed, and did not alter the DesignSpec contract,
+the persistence/immutability model or any Phase 16 cost/security control. Live
+evidence drove the sequence: `4.0.0` (composition first) fixed the framing but a
+real generation then showed the provider ignoring an explicit high neckline and
+head covering, so `5.0.0` renders coverage as a high-priority conditional visual
+directive with a closing reinforcement and stops rendering advisory
+styling/rationale prose. Each bumped `PROMPT_BUILDER_VERSION` and regenerated the
+golden snapshots and manifest. Prompt-level coverage correctness is deterministic
+and snapshot-guarded; provider adherence stays stochastic and needs an
+operator-run before/after comparison.
