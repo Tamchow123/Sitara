@@ -152,6 +152,15 @@ class GenerationAttemptAdmin(admin.ModelAdmin):
         "staged_image_size_bytes",
         "staged_image_width",
         "staged_image_height",
+        # Private cost-accounting audit (Phase 16): read-only so a manual edit
+        # can never corrupt the reconciled spend record.
+        "cost_pricing_profile_version",
+        "cost_reserved_micro_usd",
+        "cost_estimated_micro_usd",
+        "cost_unresolved_micro_usd",
+        "cost_accounting_complete",
+        "accounted_input_tokens",
+        "accounted_output_tokens",
         "created_at",
         "updated_at",
     )

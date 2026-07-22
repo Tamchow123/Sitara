@@ -177,6 +177,15 @@ const GENERATION_ERROR_MESSAGES = {
     message: "The original concept is not available for refinement. Please try again shortly.",
     editable: false,
   },
+  // Since Phase 16: the daily limit for generating new concepts has been
+  // reached. Purely informational — retrying immediately will not help, so the
+  // copy invites the user to come back later rather than resubmitting.
+  live_generation_budget_exhausted: {
+    heading: "The daily concept limit has been reached",
+    message:
+      "We've reached today's limit for generating new concepts. Your design is saved — please try again later.",
+    editable: false,
+  },
 } satisfies Record<GenerationErrorCode, FriendlyGenerationError>;
 
 // Runtime defence: an error code the frontend does not recognise (a future

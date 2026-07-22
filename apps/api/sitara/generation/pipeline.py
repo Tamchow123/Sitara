@@ -68,7 +68,7 @@ from sitara.media.exceptions import (
 )
 from sitara.media.ingest import ingest_staged_design_image
 
-from . import errors
+from . import cost_accounting, cost_control, errors
 from .context import DesignNotReady, build_generation_context
 from .demo.config import (
     DemoAssetsUnavailable,
@@ -902,6 +902,19 @@ def run_generation_attempt(
         except _TerminalGenerationError as exc:
             _finalise_failure(attempt, exc.code, clear_text_marker=exc.clear_text_marker)
             return GenerationAttempt.objects.get(pk=attempt.pk)
+        except cost_control.BudgetExhausted:
+            # A pre-spend reservation would have exceeded the hard daily ceiling
+            # (text stage). No provider call ran; the submission marker (if any)
+            # is preserved as evidence of an EARLIER billable call in this attempt.
+            logger.info("generation budget exhausted at provider boundary attempt=%s", attempt.id)
+            _finalise_failure(attempt, errors.LIVE_GENERATION_BUDGET_EXHAUSTED)
+            return GenerationAttempt.objects.get(pk=attempt.pk)
+        except cost_control.BudgetLedgerUnavailable:
+            # The budget ledger could not be reached — fail closed; no provider
+            # call ran. Never echo the ledger exception content.
+            logger.warning("generation budget ledger unavailable attempt=%s", attempt.id)
+            _finalise_failure(attempt, errors.INTERNAL_GENERATION_ERROR)
+            return GenerationAttempt.objects.get(pk=attempt.pk)
         except Exception as exc:  # noqa: BLE001 - deliberate task boundary
             logger.warning(
                 "unexpected generation failure attempt=%s exception_type=%s",
@@ -1474,6 +1487,27 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
         "safety_tolerance": config.safety_tolerance,
         "prompt_upsampling": config.prompt_upsampling,
     }
+    # Cost control (Phase 16, Part A): reserve the conservative maximum image-call
+    # cost BEFORE the in-flight marker and the provider create call. A rejected or
+    # unavailable reservation fails closed — the provider is never invoked. Demo
+    # attempts never reach the ledger. The reservation identity is deterministic
+    # (attempt + image_submission stage + pricing profile), so a bounded retry of
+    # a pre-acceptance failure re-reserves cleanly and a redelivery never
+    # double-reserves.
+    cost_on = cost_accounting.cost_enabled(attempt)
+    profile = cost_control.active_pricing_profile()
+    if cost_on:
+        try:
+            cost_accounting.reserve(
+                attempt,
+                cost_control.STAGE_IMAGE_SUBMISSION,
+                cost_control.replicate_call_max_micro_usd(profile),
+                profile,
+            )
+        except cost_control.BudgetExhausted as exc:
+            raise _TerminalGenerationError(errors.LIVE_GENERATION_BUDGET_EXHAUSTED) from exc
+        except cost_control.BudgetLedgerUnavailable as exc:
+            raise _TerminalGenerationError(errors.INTERNAL_GENERATION_ERROR) from exc
     # Persist seed + parameters + provider/model AND set the in-flight marker
     # BEFORE the provider call, all in one transaction.
     with transaction.atomic():
@@ -1511,11 +1545,16 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
         prediction = provider.create_prediction(request)
     except ImageProviderError as exc:
         if exc.ambiguous_acceptance:
-            # The provider may already have accepted the request; never
-            # resubmit. Leave the marker set and end terminally.
+            # The provider may already have accepted (and billed) the request;
+            # never resubmit and RETAIN the full reservation as unresolved spend.
+            if cost_on:
+                cost_accounting.retain(attempt, cost_control.STAGE_IMAGE_SUBMISSION, profile)
             raise _TerminalGenerationError(errors.IMAGE_SUBMISSION_AMBIGUOUS) from exc
         # Definitely pre-acceptance transient failure: nothing was accepted, so
-        # clear the marker and allow a bounded retry to resubmit (same seed).
+        # RELEASE the reservation, clear the marker and allow a bounded retry to
+        # resubmit (same seed, a fresh re-reservation).
+        if cost_on:
+            cost_accounting.release(attempt, cost_control.STAGE_IMAGE_SUBMISSION, profile)
         GenerationAttempt.objects.filter(pk=attempt.pk).update(
             image_submission_in_flight=False, updated_at=timezone.now()
         )
@@ -1525,10 +1564,15 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
     if not prediction.prediction_id or len(prediction.prediction_id) > 128:
         # Defence in depth (the provider adapter already rejects this): an
         # accepted create with no persistable id can never be reconciled —
-        # resolve conservatively as ambiguous; the marker stays set.
+        # resolve conservatively as ambiguous and retain; the marker stays set.
+        if cost_on:
+            cost_accounting.retain(attempt, cost_control.STAGE_IMAGE_SUBMISSION, profile)
         raise _TerminalGenerationError(errors.IMAGE_SUBMISSION_AMBIGUOUS)
 
-    # Persist the accepted prediction id and clear the marker together; never
+    # Persist the accepted prediction id and clear the marker together FIRST —
+    # this is the authoritative evidence of a real, already-billed provider
+    # submission and the only handle to poll/cancel it, so it must be durably
+    # recorded before the non-authoritative best-effort cost audit runs. Never
     # clear or replace the id afterwards.
     GenerationAttempt.objects.filter(pk=attempt.pk).update(
         image_prediction_id=prediction.prediction_id,
@@ -1537,6 +1581,19 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
     )
     attempt.image_prediction_id = prediction.prediction_id
     attempt.image_submission_in_flight = False
+    # An accepted prediction is a DEFINITE billable submission. Reconcile the
+    # reservation to the configured conservative maximum as the estimated actual
+    # (Replicate exposes no trustworthy per-call billing through the safe
+    # boundary) — never released later merely because polling/download/staging/
+    # ingest fails. This best-effort audit fold runs AFTER the prediction id is
+    # durably saved and can never break the pipeline (its DB write is guarded).
+    if cost_on:
+        cost_accounting.reconcile_fixed(
+            attempt,
+            cost_control.STAGE_IMAGE_SUBMISSION,
+            profile,
+            cost_control.replicate_call_max_micro_usd(profile),
+        )
     return prediction.prediction_id
 
 
@@ -1738,6 +1795,8 @@ def _mark_attempt_succeeded(locked: GenerationAttempt) -> None:
     Design.objects.filter(pk=locked.design_id).update(
         status=Design.Status.GENERATED, updated_at=timezone.now()
     )
+    # No reservation is left dangling once the attempt is terminal.
+    cost_accounting.mark_complete(locked)
 
 
 def _finalise_success(attempt) -> None:
@@ -1769,6 +1828,9 @@ def _finalise_failure(attempt, code: str, *, clear_text_marker: bool = False) ->
         Design.objects.filter(pk=locked.design_id).update(
             status=Design.Status.GENERATION_FAILED, updated_at=timezone.now()
         )
+        # No reservation is left dangling once the attempt is terminal; any
+        # retained (unresolved) reservation stays recorded as ambiguous spend.
+        cost_accounting.mark_complete(locked)
 
 
 def fail_attempt(attempt_id, code: str) -> None:

@@ -27,6 +27,7 @@ const ALL_CODES: GenerationErrorCode[] = [
   "image_ingest_failed",
   "image_ingest_unverified",
   "internal_generation_error",
+  "live_generation_budget_exhausted",
 ];
 
 const FORBIDDEN_WORDS = [

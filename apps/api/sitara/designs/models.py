@@ -18,7 +18,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 
 DESIGN_TITLE_MAX_LENGTH = 120
@@ -655,6 +655,29 @@ class GenerationAttempt(models.Model):
     staged_image_width = models.PositiveIntegerField(null=True, blank=True)
     staged_image_height = models.PositiveIntegerField(null=True, blank=True)
 
+    # --- Private live-generation cost accounting (Phase 16, never exposed) ---
+    # Integer micro-USD (1 USD = 1_000_000 micro-USD). Demo attempts never enter
+    # the cost-control module, so these stay zero for demo. Values are folded in
+    # from the atomic Redis ledger only on a genuine first-time reservation /
+    # reconciliation, so a Celery redelivery does not double-count. Reserved is
+    # the total conservative maximum; estimated is the total accounted as spent;
+    # unresolved is the portion retained under ambiguous acceptance/billing. None
+    # of these fields is ever included in any job/design/result/public-config or
+    # OpenAPI response schema.
+    cost_pricing_profile_version = models.CharField(max_length=64, blank=True)
+    cost_reserved_micro_usd = models.BigIntegerField(default=0)
+    cost_estimated_micro_usd = models.BigIntegerField(default=0)
+    cost_unresolved_micro_usd = models.BigIntegerField(default=0)
+    # True once every reservation this attempt made has reached its terminal
+    # accounting state (reconciled/retained/released); unresolved may still be
+    # positive (conservative ambiguous spend) — "complete" means no reservation
+    # is left dangling mid-flight, not that no spend is unresolved.
+    cost_accounting_complete = models.BooleanField(default=False)
+    # Accumulated SAFE token counts from reported provider usage where available
+    # (image generation exposes none). Nullable; present only for measured usage.
+    accounted_input_tokens = models.PositiveIntegerField(null=True, blank=True)
+    accounted_output_tokens = models.PositiveIntegerField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -801,6 +824,24 @@ class GenerationAttempt(models.Model):
                 | ~Q(is_demo=True)
                 | Q(demo_selection__isnull=False),
                 name="designs_attempt_demo_succeeded_requires_selection",
+            ),
+            # Cost accounting (Phase 16): every micro-USD total is non-negative.
+            models.CheckConstraint(
+                condition=Q(cost_reserved_micro_usd__gte=0)
+                & Q(cost_estimated_micro_usd__gte=0)
+                & Q(cost_unresolved_micro_usd__gte=0),
+                name="designs_attempt_cost_non_negative",
+            ),
+            # Estimated (accounted-as-spent) can never exceed the conservative
+            # maximum reserved — reconciliation only ever lowers or retains.
+            models.CheckConstraint(
+                condition=Q(cost_estimated_micro_usd__lte=F("cost_reserved_micro_usd")),
+                name="designs_attempt_cost_estimated_within_reserved",
+            ),
+            # Unresolved (ambiguous-spend) is a subset of what was accounted spent.
+            models.CheckConstraint(
+                condition=Q(cost_unresolved_micro_usd__lte=F("cost_estimated_micro_usd")),
+                name="designs_attempt_cost_unresolved_within_estimated",
             ),
         ]
 

@@ -57,6 +57,21 @@ def env_positive_int(name: str, default: int) -> int:
     return int(value)
 
 
+def env_nonnegative_int(name: str, default: int) -> int:
+    """Strict non-negative-integer parsing (zero permitted); never echoes the
+    supplied value. Used for fail-closed cost ceilings and prices where zero is
+    a meaningful "no budget"/"unconfigured" value rather than an error."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    if not value.isdigit():
+        raise ImproperlyConfigured(
+            f"{name} must be a non-negative integer; the supplied value is not recognised"
+        )
+    return int(value)
+
+
 def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
 
@@ -660,6 +675,62 @@ MAX_REFINEMENTS = 1
 # limit. Strict parsing: an invalid value refuses startup in EVERY
 # environment, production included.
 MAX_DESIGN_VERSIONS = env_positive_int("MAX_DESIGN_VERSIONS", 2)
+
+# ---------------------------------------------------------------------------
+# Live-generation cost controls (Phase 16, Part A). Integer micro-US-dollars
+# throughout (1 USD = 1_000_000 micro-USD); binary floating point is never used
+# for pricing, reservations, reconciliation, totals or ceiling comparisons.
+#
+# Every value fails closed. The daily budget defaults to ZERO, so live spend is
+# impossible until an operator deliberately configures a positive ceiling AND a
+# valid pricing profile. Demo mode NEVER depends on any of these — demo cannot
+# spend money by construction. Pricing remains operator configuration verified
+# against official provider sources on a recorded date; it is never a hard-coded
+# consequence of a model identifier, and no value here is exposed through the
+# public config endpoint. Names/values never echo a rejected input on error.
+# The micro-USD unit (1 USD = 1_000_000 micro-USD) is defined once in
+# ``sitara.generation.cost_control`` where the arithmetic lives.
+# ---------------------------------------------------------------------------
+
+# Hard daily ceiling (micro-USD) for accepted live-provider spend, UTC-day
+# windowed. Zero (the default) means no live spend can ever be reserved.
+LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = env_nonnegative_int(
+    "LIVE_GENERATION_DAILY_BUDGET_MICRO_USD", 0
+)
+
+# Versioned pricing-profile identifier. Reservations and reconciliations are
+# stamped with this so a provider-model or price change (which MUST bump this
+# value) can never silently continue accounting under stale, unreviewed prices.
+# Blank is invalid for live availability (fail closed).
+LIVE_GENERATION_PRICING_PROFILE = os.getenv("LIVE_GENERATION_PRICING_PROFILE", "").strip()
+
+# Provider prices in micro-USD. Anthropic text prices are per one million
+# tokens; the Replicate value is a single conservative maximum per image call.
+# All default to zero (unconfigured → live unavailable); none is derived from a
+# model id. Operator must verify against official provider pricing.
+ANTHROPIC_INPUT_MICRO_USD_PER_MTOK = env_nonnegative_int("ANTHROPIC_INPUT_MICRO_USD_PER_MTOK", 0)
+ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK = env_nonnegative_int("ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK", 0)
+REPLICATE_MAX_IMAGE_MICRO_USD = env_nonnegative_int("REPLICATE_MAX_IMAGE_MICRO_USD", 0)
+
+# Conservative upper bound on the Anthropic input-token count for one assembled
+# request, used with the input price to compute a never-under-reserving maximum.
+# Bounded by DESIGN_SPEC_MAX_INPUT_CHARS-derived worst case; a request that would
+# exceed it fails closed rather than under-reserving.
+ANTHROPIC_MAX_INPUT_TOKENS = env_positive_int("ANTHROPIC_MAX_INPUT_TOKENS", 8192)
+
+# Dedicated Redis logical database for the live-generation budget ledger and the
+# global daily count reservation. Kept separate from Celery (DB 0) and the
+# Django cache/throttles (DB 1) so budget keys have an exclusive namespace and
+# are never evicted by unrelated cache pressure. See ADR 0017 for the durability
+# / no-eviction operational requirement.
+LIVE_GENERATION_BUDGET_REDIS_URL = os.getenv(
+    "LIVE_GENERATION_BUDGET_REDIS_URL", "redis://localhost:6379/2"
+)
+# Bounded socket timeout (seconds) for every budget-ledger Redis operation, so a
+# stalled ledger fails closed promptly rather than hanging a worker.
+LIVE_GENERATION_BUDGET_REDIS_TIMEOUT_SECONDS = env_positive_int(
+    "LIVE_GENERATION_BUDGET_REDIS_TIMEOUT_SECONDS", 5
+)
 
 # ---------------------------------------------------------------------------
 # Deterministic zero-cost demo pipeline (Phase 15). The active demo manifest

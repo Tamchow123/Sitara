@@ -36,6 +36,25 @@ def no_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def in_memory_budget_ledger(settings):
+    """Install a provider-free in-memory budget ledger for every generation test
+    (the real ledger talks to Redis, which the ``no_network`` guard blocks). A
+    generous default ceiling and a valid pricing profile let live-path fixture
+    providers run exactly as before; a cost-specific test overrides the ceiling,
+    prices or ledger to assert accounting behaviour. The real Redis concurrency
+    proof lives in its own module that overrides this fixture."""
+    from sitara.generation import cost_control
+    from sitara.generation.tests.cost_fakes import InMemoryBudgetLedger
+
+    settings.LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = 1_000_000_000
+    settings.LIVE_GENERATION_PRICING_PROFILE = "test-profile-1"
+    ledger = InMemoryBudgetLedger()
+    cost_control.set_ledger(ledger)
+    yield ledger
+    cost_control.reset_ledger()
+
+
+@pytest.fixture(autouse=True)
 def live_mode_by_default(settings):
     """Most generation tests exercise the LIVE pipeline (mocking
     ``generation_is_available``/injecting fixture providers) and predate
