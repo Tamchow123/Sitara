@@ -16,12 +16,35 @@ import os
 
 from celery import Celery
 from celery.schedules import schedule
+from celery.signals import task_postrun, task_prerun
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
 app = Celery("sitara")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
+
+_GENERATION_TASK = "sitara.generation.tasks.generate_design_attempt"
+
+
+@task_prerun.connect
+def _bind_correlation(task_id=None, task=None, **_kwargs):
+    """Bind the task's correlation context at entry (Phase 16, Part E): the task
+    id is the request id, and — for the generation task, whose task id IS the
+    attempt UUID — also the attempt id. Cleared in task_postrun's finally-like
+    handler so it never leaks between tasks on a reused worker."""
+    from config.correlation import set_attempt_id, set_request_id
+
+    set_request_id(str(task_id) if task_id else None)
+    name = getattr(task, "name", None)
+    set_attempt_id(str(task_id) if (task_id and name == _GENERATION_TASK) else None)
+
+
+@task_postrun.connect
+def _clear_correlation(**_kwargs):
+    from config.correlation import clear
+
+    clear()
 
 
 @app.on_after_configure.connect

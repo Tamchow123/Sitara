@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@hookform/resolvers": "3.9.1",
+    "@sentry/nextjs": "9.47.1",
     "@tanstack/react-query": "5.101.2",
     "next": "15.5.20",
     "openapi-fetch": "0.17.0",

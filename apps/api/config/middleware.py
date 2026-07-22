@@ -14,6 +14,34 @@ overwritten.
 
 from django.conf import settings
 
+from .correlation import coerce_request_id, set_attempt_id, set_request_id
+
+
+class RequestCorrelationMiddleware:
+    """Establish a request-local correlation id for the duration of the request
+    (Phase 16, Part E). Accepts a client ``X-Request-ID`` only when it is a valid
+    canonical UUID (otherwise a fresh one is generated), echoes the effective id
+    back in the ``X-Request-ID`` response header, and ALWAYS clears the context
+    afterwards — on success and on exception — so it never leaks between
+    requests on a reused worker thread."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        request_id = coerce_request_id(request.headers.get("X-Request-ID"))
+        request_token = set_request_id(request_id)
+        attempt_token = set_attempt_id(None)
+        try:
+            response = self.get_response(request)
+            response["X-Request-ID"] = request_id
+            return response
+        finally:
+            # Reset to the previous context values (None at request scope), so a
+            # reused thread never inherits this request's ids.
+            request_token.var.reset(request_token)
+            attempt_token.var.reset(attempt_token)
+
 
 class ContentSecurityPolicyMiddleware:
     def __init__(self, get_response):

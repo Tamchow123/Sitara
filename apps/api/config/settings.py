@@ -244,6 +244,8 @@ INSTALLED_APPS = [
 AUTH_USER_MODEL = "accounts.User"
 
 MIDDLEWARE = [
+    # Outermost: establish the request correlation id before anything logs.
+    "config.middleware.RequestCorrelationMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -311,6 +313,13 @@ CELERY_TASK_ROUTES = {
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+# Phase 16 (Part E): do NOT let the worker hijack/redirect logging. By default a
+# Celery worker replaces the root logger's handlers on startup, which would strip
+# the JSON formatter + CorrelationFilter that ``LOGGING`` configures, leaving
+# generation-worker logs unstructured and without request_id/attempt_id. Keeping
+# both off preserves the correlated, structured logs the async pipeline needs.
+CELERY_WORKER_HIJACK_ROOT_LOGGER = False
+CELERY_WORKER_REDIRECT_STDOUTS = False
 
 # Django cache (rate limiting) — Redis DB 1, separate from Celery's DB 0.
 # Uses Django's built-in Redis cache backend; no extra client package.
@@ -889,6 +898,36 @@ if not DEBUG:
 if env_bool("USE_X_FORWARDED_PROTO", default=False):
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# ---------------------------------------------------------------------------
+# Structured logging (Phase 16, Part E). Production emits one JSON line per
+# record with only safe fields + correlation ids; development keeps readable
+# console logs. The correlation filter injects the request/attempt ids.
+# ---------------------------------------------------------------------------
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "correlation": {"()": "config.logging.CorrelationFilter"},
+    },
+    "formatters": {
+        "json": {"()": "config.logging.JsonFormatter"},
+        "console": {"format": "%(levelname)s %(name)s %(request_id)s %(message)s"},
+    },
+    "handlers": {
+        "default": {
+            "class": "logging.StreamHandler",
+            "filters": ["correlation"],
+            "formatter": "json" if IS_PRODUCTION else "console",
+        },
+    },
+    "root": {"handlers": ["default"], "level": os.getenv("LOG_LEVEL", "INFO")},
+    "loggers": {
+        # Django's request logger is noisy at WARNING for 4xx; keep it but route
+        # through our handler/formatter like everything else.
+        "django": {"handlers": ["default"], "level": "INFO", "propagate": False},
+    },
+}
+
 # Django's deploy check emits security.W021 recommending HSTS *preload*. We
 # deliberately do NOT enable preload by default — it is effectively irreversible
 # for a domain and is an operator opt-in (SECURE_HSTS_PRELOAD env), never a
@@ -919,6 +958,20 @@ ADMIN_CONTENT_SECURITY_POLICY = (
 # staff/superuser checks. In development it is enabled for convenience.
 # ---------------------------------------------------------------------------
 ADMIN_ENABLED = env_bool("DJANGO_ADMIN_ENABLED", default=not IS_PRODUCTION)
+
+# ---------------------------------------------------------------------------
+# Sentry (Phase 16, Part E). Disabled entirely without a DSN (the default), so
+# tests and CI never construct a Sentry client or make any network call. When a
+# DSN is set, config.sentry.init_sentry configures a PII-free client (no request
+# bodies, cookies/auth headers/query strings stripped, no user identity, tracing
+# off) with the request/attempt correlation ids attached as tags.
+# ---------------------------------------------------------------------------
+SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+SENTRY_RELEASE = os.getenv("SENTRY_RELEASE", "").strip()
+if SENTRY_DSN:
+    from config.sentry import init_sentry
+
+    init_sentry(dsn=SENTRY_DSN, environment=APP_ENV, release=SENTRY_RELEASE)
 
 # ---------------------------------------------------------------------------
 # I18n / misc

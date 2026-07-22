@@ -41,6 +41,10 @@ anthropic==0.116.0
 # reaches Replicate (socket-denied). Only public async-prediction SDK
 # interfaces are used (no replicate.run(), no experimental replicate.use()).
 replicate==1.0.7
+# Privacy-safe error reporting (Phase 16, Part E). Disabled without a DSN, so
+# tests and CI construct no client and make no network call. Django + Celery
+# integrations only; no PII, no request bodies, tracing off by default.
+sentry-sdk==2.20.0
 
 # Development / CI
 pytest==8.3.4
