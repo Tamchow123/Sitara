@@ -20,19 +20,35 @@ NOT rendered, and no provider metadata, token usage, database identifier,
 questionnaire label/schema, inspiration metadata or raw questionnaire free text
 can appear (the DesignSpec contract carries none of those into this builder).
 
+## Composition- and coverage-first ordering
+
+The prompt LEADS with a fixed catalogue-composition directive (framing, studio
+backdrop, even lighting, garment as primary subject) so the highest-priority
+instruction is the first content the model reads and can never be displaced or
+truncated by lower-priority garment detail. A concrete, garment-neutral coverage
+directive follows immediately (rendering the canonical high-neckline / sleeve /
+midriff / back / head-covering selections as explicit visual requirements), so
+the coverage the provider most often ignores appears high in the prompt; the
+critical coverage requirements are briefly restated last. Garment-detail sections
+render in a documented priority order between them, and a short
+photographic-finishing directive precedes the closing coverage reinforcement.
+Advisory styling notes and non-visual colour rationale are NOT rendered (they
+pull the provider toward portraiture and can contradict coverage). See ADR 0010.
+
 ## Bounded rendering
 
 The DesignSpec schema permits several eight-item narrative lists and eight
 fabric entries, so per-slot caps alone cannot guarantee the global bound.
-Rendering therefore reserves space for the MANDATORY content first — garment
-and ceremony, the canonical silhouette, the garment-integrity cue, the canonical
-colour/fabric/embellishment selections, all canonical coverage preferences, the
-canonical dupatta/saree drape and the fixed presentation wording — and lets
-generated narrative consume only the remaining budget, shared across sections in
-fixed order. When a section's narrative exceeds its budget, lower-priority
-generated details are deterministically shortened at a word boundary or omitted;
-canonical selections, coverage, garment-integrity and presentation content are
-never removed, and the fully assembled prompt is never sliced.
+Rendering therefore reserves space for the MANDATORY content first — the leading
+composition directive, garment and ceremony, the canonical silhouette, the
+garment-integrity cue, the canonical colour/fabric/embellishment selections, all
+canonical coverage preferences, the canonical dupatta/saree drape and the fixed
+finishing wording — and lets generated narrative consume only the remaining
+budget, shared across sections in fixed order. When a section's narrative exceeds
+its budget, lower-priority generated details are deterministically shortened at a
+word boundary or omitted; the composition directive, canonical selections,
+coverage, garment-integrity and finishing content are never removed, and the
+fully assembled prompt is never sliced.
 """
 
 import re
@@ -46,7 +62,7 @@ from .input_safety import scan_design_spec, scan_generated_text
 # regeneration command REFUSES to overwrite committed snapshots unless this
 # value changes (see prompt_snapshots.evaluate_regeneration); the persisted
 # provenance records this value.
-PROMPT_BUILDER_VERSION = "3.0.0"
+PROMPT_BUILDER_VERSION = "5.0.0"
 
 # Hard upper bound on the assembled prompt. Guaranteed by construction: the
 # mandatory content is reserved first and generated narrative is budgeted into
@@ -64,34 +80,59 @@ _SEPARATOR_RESERVE = 128
 # budgeting may then shorten it further. Critical machine selections and coverage
 # choices are rendered directly from short machine values and are never subject
 # to these caps or to budgeting.
-_SUMMARY_CAP = 700
+# ``concept_summary`` is a model-authored whole-design PROSE restatement that
+# overlaps every structured section below it, so it is the single most redundant
+# slot. Its cap is deliberately tightened (700 -> 400) to bound that redundancy
+# on verbose specs; it never affects a canonical machine selection, coverage,
+# garment-integrity or the composition directive. The reviewed fixtures are all
+# well under 400, so this changes no committed golden snapshot.
+_SUMMARY_CAP = 400
 _NARRATIVE_CAP = 300
 _LIST_ITEM_CAP = 200
 
-# Fixed positive-only presentation instructions, following the Phase 2
-# evaluated path. These express the safeguards positively (original/non-branded
-# design, clean composition, natural anatomy); there is deliberately NO negative
-# prompt and NO universal modesty/sleeve/neckline suffix — coverage comes only
-# from the DesignSpec so a generic suffix can never contradict validated
-# choices.
-_PRESENTATION = (
-    "Present the concept as a full-length studio fashion photograph with the "
-    "entire garment visible from head to hem, set against a clean, uncluttered "
-    "studio background. Render an original, non-branded textile and embroidery "
-    "design with natural anatomy and coherent, naturally posed hands, lit by "
-    "soft, even lighting that shows the true fabric colour and embroidery detail."
+# Fixed, garment-agnostic catalogue-composition directive — the FIRST and
+# highest-priority section of every prompt (see ADR 0010). It fixes the framing
+# (exactly one adult model, standing, centred, full head-to-foot view with the
+# complete garment and any trailing fabric inside the frame), a seamless plain
+# neutral studio backdrop, soft even studio lighting, and the garment (not the
+# face, jewellery or setting) as the primary subject. It is positive natural
+# language only — no negative prompt — and applies across sarees, lehengas,
+# shararas/ghararas, anarkalis and kurta-style outfits. Because it is mandatory
+# and rendered first, lower-priority garment detail can never displace or
+# truncate it.
+_COMPOSITION = (
+    "Full-length South Asian bridalwear catalogue photograph of exactly one "
+    "adult model standing upright and primarily facing the camera, centred in "
+    "the frame. Place the camera far enough back that the top of the head, both "
+    "feet, the complete outfit, the garment hem, the dupatta fall and any train "
+    "or trailing fabric stay fully inside the frame, with clear breathing room "
+    "around the whole subject. Use a seamless plain neutral studio backdrop and "
+    "soft, even, shadow-controlled studio lighting. Keep the garment's "
+    "construction, drape, colour and embellishment the primary subject rather "
+    "than the face, jewellery or surroundings."
 )
 
-# Presentation for an unembellished garment (embellishment_styles == ["none"]).
-# Same positive framing and safeguards, but it does NOT ask for embroidery
-# detail — it directs attention to the plain textile, colour, texture, drape and
-# garment construction instead, so it never contradicts the "none" selection.
-_PRESENTATION_UNEMBELLISHED = (
-    "Present the concept as a full-length studio fashion photograph with the "
-    "entire garment visible from head to hem, set against a clean, uncluttered "
-    "studio background. Render an original, non-branded textile design with "
-    "natural anatomy and coherent, naturally posed hands, lit by soft, even "
-    "lighting that shows the true fabric colour, texture, drape and garment detail."
+# Fixed positive-only photographic-finishing directive — the LAST, lowest-priority
+# section. It carries only the design-integrity safeguards (original/non-branded
+# textile and embroidery, natural anatomy, coherent hands, colour-faithful even
+# lighting); all framing/backdrop/lighting composition now lives in _COMPOSITION,
+# so this wording no longer duplicates it. There is deliberately NO negative
+# prompt and NO universal modesty/sleeve/neckline suffix — coverage comes only
+# from the DesignSpec so a generic suffix can never contradict validated choices.
+_FINISHING = (
+    "Render an original, non-branded textile and embroidery design with natural "
+    "anatomy and coherent, naturally posed hands, keeping the even lighting true "
+    "to the real fabric colour and embroidery detail."
+)
+
+# Finishing directive for an unembellished garment (embellishment_styles ==
+# ["none"]). Same safeguards, but it does NOT ask for embroidery detail — it
+# directs attention to the plain textile, colour, texture, drape and garment
+# construction instead, so it never contradicts the "none" selection.
+_FINISHING_UNEMBELLISHED = (
+    "Render an original, non-branded textile design with natural anatomy and "
+    "coherent, naturally posed hands, keeping the even lighting true to the real "
+    "fabric colour, texture, drape and garment detail."
 )
 
 # Very small, source-controlled garment-integrity cues for the categories with
@@ -270,7 +311,10 @@ def _colour(spec: DesignSpec) -> list[_Piece]:
         pieces.append(_mandatory(f"The colour palette, in order, is {colours}"))
     pieces.append(_narrative(_slot(cs.palette_summary, _NARRATIVE_CAP)))
     pieces.append(_narrative(_slot(cs.placement, _NARRATIVE_CAP)))
-    pieces.append(_narrative(_slot(cs.rationale, _NARRATIVE_CAP)))
+    # colour_story.rationale (WHY the palette was chosen) is deliberately NOT
+    # rendered into the image prompt: palette + placement already convey the
+    # visual requirement, and the rationale is non-visual prose that only adds
+    # length. It remains in the persisted DesignSpec brief.
     return pieces
 
 
@@ -337,6 +381,97 @@ def _embellishment(spec: DesignSpec) -> list[_Piece]:
     return pieces
 
 
+# Concrete, garment-neutral VISUAL clauses for the coverage selections that FLUX
+# most often ignores or contradicts (Phase image-composition follow-up: 4.0.0
+# fixed framing but the model still rendered an open neckline and a bare head
+# despite an explicit high-neck/head-covering DesignSpec). Keyed only on the
+# canonical `coverage_preferences` machine values — a small, source-controlled
+# set like the garment-integrity cues, NOT a broad rules engine. Only
+# coverage-INCREASING selections get a clause; deliberately less-covered choices
+# (sleeveless, short/elbow/three-quarter sleeves) get none, so the directive can
+# never contradict a validated choice. Insertion order is the render order.
+_COVERAGE_CLAUSES = {
+    "full_sleeves": "full-length sleeves reaching the wrists, with both arms fully covered",
+    "high_neckline": (
+        "a fully closed high blouse neckline covering the collarbone and upper chest, "
+        "not an open, scooped or sweetheart neckline"
+    ),
+    "full_midriff": "the midriff kept covered, with no bare skin at the waist",
+    "full_back": "a covered back that is not left open",
+}
+# Short labels for the brief end-of-prompt reinforcement (same keys/order).
+_COVERAGE_REINFORCE = {
+    "full_sleeves": "full-length sleeves",
+    "high_neckline": "a closed high neckline",
+    "full_midriff": "a covered midriff",
+    "full_back": "a covered back",
+}
+# The user's explicit head-covering coverage preference, and the dupatta styling
+# that also means "worn over the head". Either signals that the hair must be
+# covered.
+_HEAD_COVER_PREF = "head_drape_preferred"
+_HEAD_DRAPE_DUPATTA = "head_drape"
+
+
+def _wants_head_covered(ss) -> bool:
+    return (
+        _HEAD_COVER_PREF in (ss.coverage_preferences or [])
+        or ss.dupatta_style == _HEAD_DRAPE_DUPATTA
+    )
+
+
+def _head_cover_reference(ss) -> str:
+    """Garment-neutral name for the fabric that covers the head: the pallu for a
+    saree, otherwise the dupatta, otherwise a generic head covering. Never invents
+    a dupatta for a saree with ``dupatta_style=None``."""
+    if ss.saree_drape:
+        return "the saree pallu"
+    if ss.dupatta_style:
+        return "the dupatta"
+    return "the head covering"
+
+
+def _coverage_directive(spec: DesignSpec) -> list[_Piece]:
+    """High-priority, garment-neutral coverage directive rendered immediately
+    after the composition directive.
+
+    Renders the canonical coverage selections as explicit VISUAL requirements so
+    FLUX is far likelier to honour them than when they sit buried in mid-prompt
+    prose. It is conditional: it names only selected requirements, never forces
+    coverage a less-covered choice did not ask for, and includes the head-covering
+    veil clause only when the user actually requested a covered head."""
+    ss = spec.source_selections
+    prefs = ss.coverage_preferences or []
+    clauses = [clause for key, clause in _COVERAGE_CLAUSES.items() if key in prefs]
+    if _wants_head_covered(ss):
+        clauses.append(
+            f"{_head_cover_reference(ss)} pulled up and over the head like a veil, "
+            "completely covering the hair with no hair visible"
+        )
+    if not clauses:
+        return []
+    return [
+        _mandatory(
+            "Coverage and modesty requirements that must be clearly visible in the "
+            f"render: {'; '.join(clauses)}"
+        )
+    ]
+
+
+def _coverage_reinforcement(spec: DesignSpec) -> _Piece | None:
+    """A brief positive restatement of the critical coverage requirements placed
+    last, so FLUX re-reads them after the detailed garment prose. Deterministic,
+    positive, conditional; never a negative prompt."""
+    ss = spec.source_selections
+    prefs = ss.coverage_preferences or []
+    bits = [label for key, label in _COVERAGE_REINFORCE.items() if key in prefs]
+    if _wants_head_covered(ss):
+        bits.append("the head covered with no hair visible")
+    if not bits:
+        return None
+    return _mandatory("Coverage to keep clearly visible in the final image: " + ", ".join(bits))
+
+
 def _coverage(spec: DesignSpec) -> list[_Piece]:
     ss = spec.source_selections
     cd = spec.coverage_and_drape
@@ -383,21 +518,30 @@ def _cultural_and_styling(spec: DesignSpec) -> list[_Piece]:
     safeguards = _join_items(cc.safeguards)
     if safeguards:
         pieces.append(_narrative(f"Safeguards: {safeguards}"))
-    styling = _join_items(spec.styling_notes)
-    if styling:
-        pieces.append(_narrative(f"Styling cues: {styling}"))
+    # styling_notes are deliberately NOT rendered into the image prompt. They are
+    # advisory beauty/styling prose (jewellery at the neckline, maang tikka / head
+    # ornaments, hair) that pulls FLUX toward portraiture and can directly
+    # contradict the coverage requirements — the live 4.0.0 saree showed exactly
+    # that (open neckline + bare head with a choker and head ornament). They stay
+    # in the persisted DesignSpec brief; only the image prompt omits them.
     return pieces
 
 
-# Fixed conceptual ordering — stable and snapshot-tested.
+# Fixed conceptual ordering, documented as a priority hierarchy in ADR 0010 and
+# snapshot-tested. The leading composition directive, the coverage directive, the
+# trailing finishing directive and the closing coverage reinforcement are added
+# directly in build_image_prompt; these garment-detail builders render between
+# them in descending priority: garment type/silhouette, construction/drape,
+# coverage/modesty detail, colour and fabric, embellishment, dupatta/veil
+# treatment, then broad cultural context (styling notes are not rendered).
 _SECTION_BUILDERS = (
     _garment_and_ceremony,
     _silhouette_and_components,
     _drape_and_proportions,
+    _coverage,
     _colour,
     _fabrics,
     _embellishment,
-    _coverage,
     _dupatta_or_drape,
     _cultural_and_styling,
 )
@@ -452,12 +596,25 @@ def build_image_prompt(spec: DesignSpec) -> str:
     except Exception as exc:
         raise ImagePromptBuildError("design spec failed the safety scan") from exc
 
-    sections = [list(builder(spec)) for builder in _SECTION_BUILDERS]
-    # Unembellished designs use presentation wording that does not ask for
-    # embroidery detail, so the fixed wording never contradicts a "none" choice.
+    # Composition leads (highest priority, mandatory, rendered first) so it is
+    # always the first content and can never be displaced or truncated. The
+    # concrete coverage directive follows immediately (second), so the coverage
+    # requirements FLUX most often ignores appear high in the prompt rather than
+    # buried in mid-prompt prose (empty and skipped when nothing coverage-relevant
+    # is selected).
+    sections = [[_Piece(_COMPOSITION, mandatory=True)], _coverage_directive(spec)]
+    sections += [list(builder(spec)) for builder in _SECTION_BUILDERS]
+    # Unembellished designs use finishing wording that does not ask for embroidery
+    # detail, so the fixed wording never contradicts a "none" choice.
     unembellished = spec.source_selections.embellishment_styles == [_NONE_EMBELLISHMENT]
-    presentation = _PRESENTATION_UNEMBELLISHED if unembellished else _PRESENTATION
-    sections.append([_Piece(presentation, mandatory=True)])
+    finishing = _FINISHING_UNEMBELLISHED if unembellished else _FINISHING
+    sections.append([_Piece(finishing, mandatory=True)])
+    # A brief coverage reinforcement is the LAST thing FLUX reads, so the critical
+    # requirements are restated after the detailed garment prose (skipped when no
+    # coverage-critical selection exists).
+    reinforcement = _coverage_reinforcement(spec)
+    if reinforcement is not None:
+        sections.append([reinforcement])
 
     mandatory_len = sum(len(p.text) for section in sections for p in section if p.mandatory)
     natural_total = sum(len(p.text) for section in sections for p in section if not p.mandatory)

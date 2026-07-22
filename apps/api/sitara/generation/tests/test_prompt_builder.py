@@ -13,6 +13,7 @@ import pytest
 
 from sitara.generation.design_spec import DesignSpec
 from sitara.generation.prompt_builder import (
+    _COMPOSITION,
     IMAGE_PROMPT_MAX_CHARS,
     PROMPT_BUILDER_VERSION,
     ImagePromptBuildError,
@@ -176,9 +177,10 @@ class TestDeterminismAndBounds:
         prompt = build_image_prompt(spec)
         assert len(prompt) <= IMAGE_PROMPT_MAX_CHARS
         # Mandatory content survives even at maximum size.
+        assert prompt.startswith(_COMPOSITION)  # composition still leads
         assert "The colour palette, in order, is" in prompt
         assert "Coverage preferences:" in prompt
-        assert prompt.endswith("embroidery detail.")  # presentation intact
+        assert prompt.endswith("embroidery detail.")  # finishing intact
 
     @pytest.mark.parametrize(
         "shape",
@@ -271,6 +273,61 @@ class TestDeterminismAndBounds:
             assert filler not in prompt
 
 
+class TestCompositionComesFirst:
+    """The catalogue-composition directive leads every prompt and cannot drift
+    behind lower-priority garment detail (the core Phase image-composition fix)."""
+
+    @pytest.mark.parametrize("name", FIXTURES)
+    def test_composition_is_the_first_content(self, name):
+        prompt = build_image_prompt(_load_spec(name))
+        # First non-whitespace content is exactly the composition directive.
+        assert prompt.lstrip() == prompt  # no leading whitespace
+        assert prompt.startswith(_COMPOSITION)
+
+    @pytest.mark.parametrize("name", FIXTURES)
+    def test_composition_precedes_all_garment_detail(self, name):
+        prompt = build_image_prompt(_load_spec(name))
+        composition_end = len(_COMPOSITION)
+        # Representative garment-detail / finishing markers all appear only AFTER
+        # the composition directive, never before it.
+        for marker in ("The silhouette is", "Coverage preferences:", "non-branded"):
+            index = prompt.find(marker)
+            if index != -1:
+                assert index >= composition_end
+
+    def test_composition_survives_maximum_length_management(self):
+        # Under the worst-case near-maximum spec the composition directive is
+        # mandatory and rendered first, so it is retained verbatim and un-truncated.
+        spec = DesignSpec.model_validate(_max_spec_dict())
+        prompt = build_image_prompt(spec)
+        assert prompt.startswith(_COMPOSITION)
+
+    def test_required_framing_semantics_are_expressed(self):
+        prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
+        # Exactly one model.
+        assert "exactly one" in prompt and "model" in prompt
+        # Full-body framing: top of head and both feet.
+        assert "top of the head" in prompt
+        assert "both feet" in prompt
+        # Complete garment and trailing fabric visible.
+        assert "complete outfit" in prompt
+        assert "trailing fabric" in prompt
+        # Neutral studio backdrop.
+        assert "seamless plain neutral studio backdrop" in prompt
+        # Even studio lighting.
+        assert "soft, even" in prompt
+        # Garment-focused catalogue presentation.
+        assert "catalogue photograph" in prompt
+        assert "primary subject rather than the face" in prompt
+
+    def test_no_editorial_or_environmental_cues(self):
+        # Wording must not invite portrait/beauty/venue/environmental framing.
+        for name in FIXTURES:
+            lowered = build_image_prompt(_load_spec(name)).lower()
+            for cue in ("editorial", "beauty shot", "close-up", "cinematic", "bokeh"):
+                assert cue not in lowered
+
+
 class TestContentInclusionAndExclusion:
     def test_coverage_machine_selections_survive(self):
         prompt = build_image_prompt(_load_spec("reception_shalwar_kameez_full_coverage"))
@@ -305,15 +362,13 @@ class TestContentInclusionAndExclusion:
         for marker in ("inspiration_asset", "storage_key", "http", "uuid"):
             assert marker not in prompt.lower()
 
-    def test_fixed_positive_presentation_text_is_present(self):
+    def test_fixed_positive_finishing_text_is_present(self):
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
         for phrase in (
-            "full-length studio fashion photograph",
-            "head to hem",
-            "clean, uncluttered studio background",
             "non-branded",
             "natural anatomy",
-            "soft, even lighting",
+            "coherent, naturally posed hands",
+            "true to the real fabric colour and embroidery detail",
         ):
             assert phrase in prompt
 
@@ -372,7 +427,7 @@ class TestCanonicalSelectionAuthority:
         # Schema-valid but adversarial: styles=["none"] with a persisted HEAVY
         # density and heavy/embroidery narrative. "none" is authoritative, so the
         # density line is dropped, generated embellishment content is omitted, the
-        # presentation switches to the unembellished wording, and no "heavy",
+        # finishing switches to the unembellished wording, and no "heavy",
         # "density", "embroidery" or "embroidered" direction survives.
         data = _spec_dict("nikah_lehenga_head_drape")
         data["source_selections"]["embellishment_styles"] = ["none"]
@@ -394,13 +449,15 @@ class TestCanonicalSelectionAuthority:
         assert "SENTINELEMB" not in prompt
         for word in (*self._HEAVY, "density", "embroidery", "embroidered"):
             assert word not in lowered
-        # Canonical selection still present; unembellished presentation used.
+        # Canonical selection still present; unembellished finishing used.
         assert "in order, are none" in lowered
         assert "texture, drape and garment detail" in lowered
 
-    def test_non_none_retains_embroidery_presentation(self):
+    def test_non_none_retains_embroidery_finishing(self):
+        # The embroidery-aware finishing directive is present (it is no longer the
+        # very last line when a coverage reinforcement follows).
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
-        assert prompt.rstrip().endswith("embroidery detail.")
+        assert "true to the real fabric colour and embroidery detail." in prompt
 
     def test_minimal_density_strips_heavy_directions_from_narrative(self):
         data = _spec_dict("nikah_lehenga_head_drape")
@@ -430,6 +487,102 @@ class TestCanonicalSelectionAuthority:
         # The canonical ordered selection is untouched (not transformed to none).
         assert "in order, are zardozi, dabka, kora" in prompt
         assert "no surface embellishment" not in prompt
+
+
+class TestCoverageRequirements:
+    """Coverage selections are rendered as explicit visual requirements, placed
+    high (right after composition) and briefly reinforced last, garment-neutral,
+    and strictly conditional on the canonical selections."""
+
+    _DIRECTIVE = "Coverage and modesty requirements that must be clearly visible in the render"
+    _REINFORCE = "Coverage to keep clearly visible in the final image"
+
+    def test_directive_is_second_block_after_composition(self):
+        prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
+        assert prompt.startswith(_COMPOSITION)
+        paras = prompt.split("\n\n")
+        assert paras[1].startswith(self._DIRECTIVE)
+
+    def test_directive_precedes_all_garment_detail(self):
+        prompt = build_image_prompt(_load_spec("reception_shalwar_kameez_full_coverage"))
+        directive_at = prompt.find(self._DIRECTIVE)
+        assert directive_at != -1
+        assert directive_at >= len(_COMPOSITION)
+        assert directive_at < prompt.find("The silhouette is")
+
+    def test_high_neckline_rendered_as_closed_visual_requirement(self):
+        prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
+        assert (
+            "a fully closed high blouse neckline covering the collarbone and upper chest" in prompt
+        )
+        assert "not an open, scooped or sweetheart neckline" in prompt
+
+    def test_full_sleeves_rendered_as_visual_requirement(self):
+        prompt = build_image_prompt(_load_spec("mehndi_gharara_minimal"))
+        assert "full-length sleeves reaching the wrists, with both arms fully covered" in prompt
+
+    def test_head_covering_veil_for_dupatta_head_drape(self):
+        prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
+        assert (
+            "the dupatta pulled up and over the head like a veil, completely "
+            "covering the hair with no hair visible" in prompt
+        )
+
+    def test_head_covering_veil_for_saree_uses_pallu_not_dupatta(self):
+        # The live-failing shape: a saree with a seedha-pallu drape, no dupatta,
+        # and an explicit head-covering coverage preference must reference the
+        # PALLU and never invent a dupatta.
+        data = _spec_dict("pheras_saree_heavy_no_region")
+        data["source_selections"]["saree_drape"] = "seedha_pallu"
+        data["source_selections"]["dupatta_style"] = None
+        data["source_selections"]["coverage_preferences"] = [
+            "full_sleeves",
+            "high_neckline",
+            "head_drape_preferred",
+        ]
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "the saree pallu pulled up and over the head like a veil" in prompt
+        assert "the dupatta pulled up" not in prompt
+
+    def test_no_head_covering_when_not_requested(self):
+        prompt = build_image_prompt(_load_spec("pheras_saree_heavy_no_region"))
+        assert "like a veil" not in prompt
+        assert "no hair visible" not in prompt
+
+    def test_no_directive_or_reinforcement_when_nothing_coverage_relevant(self):
+        # three-quarter sleeves + shoulder drape: nothing coverage-increasing.
+        prompt = build_image_prompt(_load_spec("walima_anarkali_none"))
+        assert self._DIRECTIVE not in prompt
+        assert self._REINFORCE not in prompt
+
+    def test_less_covered_sleeves_never_forced_to_full_coverage(self):
+        for name in ("pheras_saree_heavy_no_region", "walima_anarkali_none"):
+            prompt = build_image_prompt(_load_spec(name))
+            assert "both arms fully covered" not in prompt
+
+    def test_reinforcement_is_last_when_present(self):
+        prompt = build_image_prompt(_load_spec("reception_shalwar_kameez_full_coverage"))
+        assert prompt.rstrip().endswith("the head covered with no hair visible.")
+
+    def test_styling_notes_are_not_rendered(self):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["styling_notes"] = [
+            "SENTINELSTYLE pair with a bold choker at the neckline and a maang tikka."
+        ]
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "SENTINELSTYLE" not in prompt
+        assert "Styling cues:" not in prompt
+
+    def test_colour_rationale_is_not_rendered(self):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["colour_story"]["rationale"] = "SENTINELRATIONALE ivory reads calm and bridal."
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "SENTINELRATIONALE" not in prompt
+
+    def test_composition_still_leads(self):
+        # Adding the coverage directive must not displace the composition directive.
+        for name in FIXTURES:
+            assert build_image_prompt(_load_spec(name)).startswith(_COMPOSITION)
 
 
 class TestSafetyIsEnforced:

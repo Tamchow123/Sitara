@@ -32,6 +32,7 @@ from sitara.generation.pipeline import (
     _attempt_lock_keys,
     run_generation_attempt,
 )
+from sitara.generation.prompt_builder import PROMPT_BUILDER_VERSION
 
 from .factory import make_complete_design
 
@@ -86,7 +87,7 @@ class TestHappyPath:
         assert result.design_version_id is not None
         version = DesignVersion.objects.get(pk=result.design_version_id)
         assert version.design_spec is not None
-        assert version.prompt_builder_version == "3.0.0"
+        assert version.prompt_builder_version == PROMPT_BUILDER_VERSION
         # Phase 11: success includes the canonical permanent ingest.
         assert version.has_permanent_image
         assert version.image_storage_key == (
