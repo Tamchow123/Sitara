@@ -65,7 +65,7 @@ def _any_caveat_mentions(caveats: list[str], phrases: tuple[str, ...]) -> bool:
 # context layout or the generation semantics materially change; a prompt-hash
 # test guards it. Defined here so the contract and the prompt version live
 # together.
-SPEC_TEMPLATE_VERSION = "2.0.0"
+SPEC_TEMPLATE_VERSION = "2.1.0"
 
 _MODEL_CONFIG = ConfigDict(
     extra="forbid",

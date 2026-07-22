@@ -398,6 +398,13 @@ Standing rules across all phases:
   checkpoint remains pending. Demo mode is untouched and stays zero-cost. Marked
   Phases 1–16 delivered; Phase 17 is next.
 
+## Phase (next) — Generated-image composition and framing
+- **Scope:** restructure the deterministic `build_image_prompt` so the composition/framing directive (full-length, entire garment head-to-hem, one model standing, plain neutral studio background, even lighting) LEADS the prompt instead of being buried at the end, so FLUX reliably produces the intended catalogue framing rather than a cropped editorial shot. Bump `PROMPT_BUILDER_VERSION`, regenerate + review the golden snapshot/manifest, validate with a few budgeted live generations against the Phase 2 eval references, and amend ADR 0010.
+- **Non-goals:** no negative/JSON prompt, no hard-coded model id, no model change without a scoped evaluation, no reference-image/image-to-image conditioning, no edits to the frozen `experiments/model-eval/outputs/` evidence. Persisted image prompts stay immutable; a builder change produces new `DesignVersion`s.
+- **Why now:** the first real live generation (2026-07-22) confirmed the paid pipeline works end-to-end but exposed that the output framing does not match the intended full-length plain-background catalogue style; diagnosed as prompt structure (aspect ratio and prompt-upsampling ruled out).
+- **Spec:** see [phase-image-composition.md](phase-image-composition.md).
+- **Commit:** `feat(generation): lead the image prompt with catalogue framing (PROMPT_BUILDER_VERSION bump)`
+
 ## Phase 17 — UI polish and accessibility
 - **Scope:** visual design pass (typography, spacing, colour system suited to bridal aesthetic), responsive behaviour, WCAG 2.1 AA pass on wizard/catalogue/results (focus management in the wizard, aria-live on progress states, alt text everywhere, contrast), empty/loading/error state polish, privacy + disclaimer pages.
 - **Non-goals:** no new features; no i18n beyond string-structure readiness.
