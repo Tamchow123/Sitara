@@ -52,6 +52,18 @@ def test_recorded_hash_is_a_real_sha256_digest():
     assert PROMPT_TEMPLATE_HASH == hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
+def test_system_prompt_requires_both_mandatory_construction_caveats():
+    # The DesignSpec validator rejects any spec whose construction_caveats lack a
+    # concept-only caveat OR a no-constructibility-guarantee caveat, so the prompt
+    # must explicitly elicit BOTH — otherwise real model output fails validation
+    # (only hard-coded fixtures would pass). Guards the prompt<->validator
+    # alignment that the first live run exposed.
+    prompt = prompting_module.SYSTEM_PROMPT.lower()
+    assert "construction_caveats" in prompt
+    assert "not a sewing pattern" in prompt or "concept visualisation only" in prompt
+    assert "not guaranteed to be constructible" in prompt
+
+
 def _context(untrusted=None, inspiration_cues=None):
     return GenerationContext(
         source_selections={"garment_type": "lehenga", "ceremony": "nikah"},
