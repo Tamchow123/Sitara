@@ -323,7 +323,11 @@ def _generate_valid_refined_spec(
                     cost_accounting.release(generation_attempt, stage, profile)
             raise
         if cost_on:
-            if result.input_tokens is not None or result.output_tokens is not None:
+            # Reconcile to reported usage ONLY when BOTH token counts are present:
+            # a partial report (one dimension missing) would reconcile the missing
+            # dimension as zero and refund that portion, undercounting spend. Any
+            # missing dimension retains the full conservative reservation instead.
+            if result.input_tokens is not None and result.output_tokens is not None:
                 cost_accounting.reconcile_actual(
                     generation_attempt,
                     stage,
