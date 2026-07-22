@@ -20,19 +20,29 @@ NOT rendered, and no provider metadata, token usage, database identifier,
 questionnaire label/schema, inspiration metadata or raw questionnaire free text
 can appear (the DesignSpec contract carries none of those into this builder).
 
+## Composition-first ordering
+
+The prompt LEADS with a fixed catalogue-composition directive (framing, studio
+backdrop, even lighting, garment as primary subject) so the highest-priority
+instruction is the first content the model reads and can never be displaced or
+truncated by lower-priority garment detail. Garment-detail sections then follow
+a documented priority order, and a short photographic-finishing directive closes
+the prompt. See ADR 0010.
+
 ## Bounded rendering
 
 The DesignSpec schema permits several eight-item narrative lists and eight
 fabric entries, so per-slot caps alone cannot guarantee the global bound.
-Rendering therefore reserves space for the MANDATORY content first — garment
-and ceremony, the canonical silhouette, the garment-integrity cue, the canonical
-colour/fabric/embellishment selections, all canonical coverage preferences, the
-canonical dupatta/saree drape and the fixed presentation wording — and lets
-generated narrative consume only the remaining budget, shared across sections in
-fixed order. When a section's narrative exceeds its budget, lower-priority
-generated details are deterministically shortened at a word boundary or omitted;
-canonical selections, coverage, garment-integrity and presentation content are
-never removed, and the fully assembled prompt is never sliced.
+Rendering therefore reserves space for the MANDATORY content first — the leading
+composition directive, garment and ceremony, the canonical silhouette, the
+garment-integrity cue, the canonical colour/fabric/embellishment selections, all
+canonical coverage preferences, the canonical dupatta/saree drape and the fixed
+finishing wording — and lets generated narrative consume only the remaining
+budget, shared across sections in fixed order. When a section's narrative exceeds
+its budget, lower-priority generated details are deterministically shortened at a
+word boundary or omitted; the composition directive, canonical selections,
+coverage, garment-integrity and finishing content are never removed, and the
+fully assembled prompt is never sliced.
 """
 
 import re
@@ -46,7 +56,7 @@ from .input_safety import scan_design_spec, scan_generated_text
 # regeneration command REFUSES to overwrite committed snapshots unless this
 # value changes (see prompt_snapshots.evaluate_regeneration); the persisted
 # provenance records this value.
-PROMPT_BUILDER_VERSION = "3.0.0"
+PROMPT_BUILDER_VERSION = "4.0.0"
 
 # Hard upper bound on the assembled prompt. Guaranteed by construction: the
 # mandatory content is reserved first and generated narrative is budgeted into
@@ -64,34 +74,59 @@ _SEPARATOR_RESERVE = 128
 # budgeting may then shorten it further. Critical machine selections and coverage
 # choices are rendered directly from short machine values and are never subject
 # to these caps or to budgeting.
-_SUMMARY_CAP = 700
+# ``concept_summary`` is a model-authored whole-design PROSE restatement that
+# overlaps every structured section below it, so it is the single most redundant
+# slot. Its cap is deliberately tightened (700 -> 400) to bound that redundancy
+# on verbose specs; it never affects a canonical machine selection, coverage,
+# garment-integrity or the composition directive. The reviewed fixtures are all
+# well under 400, so this changes no committed golden snapshot.
+_SUMMARY_CAP = 400
 _NARRATIVE_CAP = 300
 _LIST_ITEM_CAP = 200
 
-# Fixed positive-only presentation instructions, following the Phase 2
-# evaluated path. These express the safeguards positively (original/non-branded
-# design, clean composition, natural anatomy); there is deliberately NO negative
-# prompt and NO universal modesty/sleeve/neckline suffix — coverage comes only
-# from the DesignSpec so a generic suffix can never contradict validated
-# choices.
-_PRESENTATION = (
-    "Present the concept as a full-length studio fashion photograph with the "
-    "entire garment visible from head to hem, set against a clean, uncluttered "
-    "studio background. Render an original, non-branded textile and embroidery "
-    "design with natural anatomy and coherent, naturally posed hands, lit by "
-    "soft, even lighting that shows the true fabric colour and embroidery detail."
+# Fixed, garment-agnostic catalogue-composition directive — the FIRST and
+# highest-priority section of every prompt (see ADR 0010). It fixes the framing
+# (exactly one adult model, standing, centred, full head-to-foot view with the
+# complete garment and any trailing fabric inside the frame), a seamless plain
+# neutral studio backdrop, soft even studio lighting, and the garment (not the
+# face, jewellery or setting) as the primary subject. It is positive natural
+# language only — no negative prompt — and applies across sarees, lehengas,
+# shararas/ghararas, anarkalis and kurta-style outfits. Because it is mandatory
+# and rendered first, lower-priority garment detail can never displace or
+# truncate it.
+_COMPOSITION = (
+    "Full-length South Asian bridalwear catalogue photograph of exactly one "
+    "adult model standing upright and primarily facing the camera, centred in "
+    "the frame. Place the camera far enough back that the top of the head, both "
+    "feet, the complete outfit, the garment hem, the dupatta fall and any train "
+    "or trailing fabric stay fully inside the frame, with clear breathing room "
+    "around the whole subject. Use a seamless plain neutral studio backdrop and "
+    "soft, even, shadow-controlled studio lighting. Keep the garment's "
+    "construction, drape, colour and embellishment the primary subject rather "
+    "than the face, jewellery or surroundings."
 )
 
-# Presentation for an unembellished garment (embellishment_styles == ["none"]).
-# Same positive framing and safeguards, but it does NOT ask for embroidery
-# detail — it directs attention to the plain textile, colour, texture, drape and
-# garment construction instead, so it never contradicts the "none" selection.
-_PRESENTATION_UNEMBELLISHED = (
-    "Present the concept as a full-length studio fashion photograph with the "
-    "entire garment visible from head to hem, set against a clean, uncluttered "
-    "studio background. Render an original, non-branded textile design with "
-    "natural anatomy and coherent, naturally posed hands, lit by soft, even "
-    "lighting that shows the true fabric colour, texture, drape and garment detail."
+# Fixed positive-only photographic-finishing directive — the LAST, lowest-priority
+# section. It carries only the design-integrity safeguards (original/non-branded
+# textile and embroidery, natural anatomy, coherent hands, colour-faithful even
+# lighting); all framing/backdrop/lighting composition now lives in _COMPOSITION,
+# so this wording no longer duplicates it. There is deliberately NO negative
+# prompt and NO universal modesty/sleeve/neckline suffix — coverage comes only
+# from the DesignSpec so a generic suffix can never contradict validated choices.
+_FINISHING = (
+    "Render an original, non-branded textile and embroidery design with natural "
+    "anatomy and coherent, naturally posed hands, keeping the even lighting true "
+    "to the real fabric colour and embroidery detail."
+)
+
+# Finishing directive for an unembellished garment (embellishment_styles ==
+# ["none"]). Same safeguards, but it does NOT ask for embroidery detail — it
+# directs attention to the plain textile, colour, texture, drape and garment
+# construction instead, so it never contradicts the "none" selection.
+_FINISHING_UNEMBELLISHED = (
+    "Render an original, non-branded textile design with natural anatomy and "
+    "coherent, naturally posed hands, keeping the even lighting true to the real "
+    "fabric colour, texture, drape and garment detail."
 )
 
 # Very small, source-controlled garment-integrity cues for the categories with
@@ -389,15 +424,20 @@ def _cultural_and_styling(spec: DesignSpec) -> list[_Piece]:
     return pieces
 
 
-# Fixed conceptual ordering — stable and snapshot-tested.
+# Fixed conceptual ordering, documented as a priority hierarchy in ADR 0010 and
+# snapshot-tested. The leading composition directive and the trailing finishing
+# directive are added directly in build_image_prompt; these garment-detail
+# builders render between them in descending priority: garment type/silhouette,
+# construction/drape, coverage/modesty, colour and fabric, embellishment,
+# dupatta/veil treatment, then broad cultural and styling cues.
 _SECTION_BUILDERS = (
     _garment_and_ceremony,
     _silhouette_and_components,
     _drape_and_proportions,
+    _coverage,
     _colour,
     _fabrics,
     _embellishment,
-    _coverage,
     _dupatta_or_drape,
     _cultural_and_styling,
 )
@@ -452,12 +492,15 @@ def build_image_prompt(spec: DesignSpec) -> str:
     except Exception as exc:
         raise ImagePromptBuildError("design spec failed the safety scan") from exc
 
-    sections = [list(builder(spec)) for builder in _SECTION_BUILDERS]
-    # Unembellished designs use presentation wording that does not ask for
-    # embroidery detail, so the fixed wording never contradicts a "none" choice.
+    # Composition leads (highest priority, mandatory, rendered first) so it is
+    # always the first content and can never be displaced or truncated.
+    sections = [[_Piece(_COMPOSITION, mandatory=True)]]
+    sections += [list(builder(spec)) for builder in _SECTION_BUILDERS]
+    # Unembellished designs use finishing wording that does not ask for embroidery
+    # detail, so the fixed wording never contradicts a "none" choice.
     unembellished = spec.source_selections.embellishment_styles == [_NONE_EMBELLISHMENT]
-    presentation = _PRESENTATION_UNEMBELLISHED if unembellished else _PRESENTATION
-    sections.append([_Piece(presentation, mandatory=True)])
+    finishing = _FINISHING_UNEMBELLISHED if unembellished else _FINISHING
+    sections.append([_Piece(finishing, mandatory=True)])
 
     mandatory_len = sum(len(p.text) for section in sections for p in section if p.mandatory)
     natural_total = sum(len(p.text) for section in sections for p in section if not p.mandatory)

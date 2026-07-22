@@ -13,6 +13,7 @@ import pytest
 
 from sitara.generation.design_spec import DesignSpec
 from sitara.generation.prompt_builder import (
+    _COMPOSITION,
     IMAGE_PROMPT_MAX_CHARS,
     PROMPT_BUILDER_VERSION,
     ImagePromptBuildError,
@@ -176,9 +177,10 @@ class TestDeterminismAndBounds:
         prompt = build_image_prompt(spec)
         assert len(prompt) <= IMAGE_PROMPT_MAX_CHARS
         # Mandatory content survives even at maximum size.
+        assert prompt.startswith(_COMPOSITION)  # composition still leads
         assert "The colour palette, in order, is" in prompt
         assert "Coverage preferences:" in prompt
-        assert prompt.endswith("embroidery detail.")  # presentation intact
+        assert prompt.endswith("embroidery detail.")  # finishing intact
 
     @pytest.mark.parametrize(
         "shape",
@@ -271,6 +273,61 @@ class TestDeterminismAndBounds:
             assert filler not in prompt
 
 
+class TestCompositionComesFirst:
+    """The catalogue-composition directive leads every prompt and cannot drift
+    behind lower-priority garment detail (the core Phase image-composition fix)."""
+
+    @pytest.mark.parametrize("name", FIXTURES)
+    def test_composition_is_the_first_content(self, name):
+        prompt = build_image_prompt(_load_spec(name))
+        # First non-whitespace content is exactly the composition directive.
+        assert prompt.lstrip() == prompt  # no leading whitespace
+        assert prompt.startswith(_COMPOSITION)
+
+    @pytest.mark.parametrize("name", FIXTURES)
+    def test_composition_precedes_all_garment_detail(self, name):
+        prompt = build_image_prompt(_load_spec(name))
+        composition_end = len(_COMPOSITION)
+        # Representative garment-detail / finishing markers all appear only AFTER
+        # the composition directive, never before it.
+        for marker in ("The silhouette is", "Coverage preferences:", "non-branded"):
+            index = prompt.find(marker)
+            if index != -1:
+                assert index >= composition_end
+
+    def test_composition_survives_maximum_length_management(self):
+        # Under the worst-case near-maximum spec the composition directive is
+        # mandatory and rendered first, so it is retained verbatim and un-truncated.
+        spec = DesignSpec.model_validate(_max_spec_dict())
+        prompt = build_image_prompt(spec)
+        assert prompt.startswith(_COMPOSITION)
+
+    def test_required_framing_semantics_are_expressed(self):
+        prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
+        # Exactly one model.
+        assert "exactly one" in prompt and "model" in prompt
+        # Full-body framing: top of head and both feet.
+        assert "top of the head" in prompt
+        assert "both feet" in prompt
+        # Complete garment and trailing fabric visible.
+        assert "complete outfit" in prompt
+        assert "trailing fabric" in prompt
+        # Neutral studio backdrop.
+        assert "seamless plain neutral studio backdrop" in prompt
+        # Even studio lighting.
+        assert "soft, even" in prompt
+        # Garment-focused catalogue presentation.
+        assert "catalogue photograph" in prompt
+        assert "primary subject rather than the face" in prompt
+
+    def test_no_editorial_or_environmental_cues(self):
+        # Wording must not invite portrait/beauty/venue/environmental framing.
+        for name in FIXTURES:
+            lowered = build_image_prompt(_load_spec(name)).lower()
+            for cue in ("editorial", "beauty shot", "close-up", "cinematic", "bokeh"):
+                assert cue not in lowered
+
+
 class TestContentInclusionAndExclusion:
     def test_coverage_machine_selections_survive(self):
         prompt = build_image_prompt(_load_spec("reception_shalwar_kameez_full_coverage"))
@@ -305,15 +362,13 @@ class TestContentInclusionAndExclusion:
         for marker in ("inspiration_asset", "storage_key", "http", "uuid"):
             assert marker not in prompt.lower()
 
-    def test_fixed_positive_presentation_text_is_present(self):
+    def test_fixed_positive_finishing_text_is_present(self):
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
         for phrase in (
-            "full-length studio fashion photograph",
-            "head to hem",
-            "clean, uncluttered studio background",
             "non-branded",
             "natural anatomy",
-            "soft, even lighting",
+            "coherent, naturally posed hands",
+            "true to the real fabric colour and embroidery detail",
         ):
             assert phrase in prompt
 

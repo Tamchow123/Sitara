@@ -131,14 +131,16 @@ class TestHappyPath:
         assert v1.design_spec == spec_payload
         assert v1.has_permanent_image
 
-    def test_prompt_builder_version_unchanged_at_3_0_0(self):
+    def test_refined_version_uses_current_prompt_builder_version(self):
+        # Refinement introduces no second prompt-builder path: a refined version
+        # carries the same current PROMPT_BUILDER_VERSION as an initial version.
         design, v1, _initial = _generated_design()
         attempt = _enqueue_refinement(design, v1)
         refined_provider = mock.Mock()
         refined_provider.generate.return_value = _refined_result(v1.design_spec)
         result = _run(attempt, structured=refined_provider)
         version = DesignVersion.objects.get(pk=result.design_version_id)
-        assert version.prompt_builder_version == "3.0.0"
+        assert version.prompt_builder_version == PROMPT_BUILDER_VERSION
 
 
 class TestSeedReuse:
