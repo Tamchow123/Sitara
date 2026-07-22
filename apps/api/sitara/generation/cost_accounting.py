@@ -82,6 +82,20 @@ def reconcile_actual(
     if outcome is None or not outcome.transitioned:
         return
     fields = _fold_fields(outcome)
+    # The ledger clamps a measured actual that EXCEEDS the conservative reservation
+    # down to the reserved amount. A clamp means the request's real input exceeded
+    # the ANTHROPIC_MAX_INPUT_TOKENS bound the reservation assumed — a genuine
+    # reservation-bound breach that would undercount true spend against the daily
+    # ceiling. Surface it as a prominent incident and record the overage as
+    # unresolved spend instead of silently discarding it.
+    if actual > outcome.estimated_micro_usd:
+        overage = actual - outcome.estimated_micro_usd
+        logger.error(
+            "cost reservation exceeded attempt=%s stage=%s (measured actual over reserved)",
+            attempt.id,
+            stage,
+        )
+        fields["cost_overage_micro_usd"] = F("cost_overage_micro_usd") + overage
     if input_tokens:
         fields["accounted_input_tokens"] = Coalesce(F("accounted_input_tokens"), 0) + int(
             input_tokens
@@ -108,18 +122,14 @@ def reconcile_fixed(attempt, stage: str, profile, actual_micro_usd: int) -> None
         _update(attempt, **_fold_fields(outcome))
 
 
-def retain(attempt, stage: str, profile) -> bool:
+def retain(attempt, stage: str, profile) -> None:
     """Retain the full conservative reservation for an ambiguous acceptance /
     billing outcome (unresolved spend). Ledger failure is swallowed
-    conservatively — the reservation was already counted.
-
-    Returns whether the reservation reached a terminal ledger state: True when
-    the ledger answered (reconciled/retained/released/already/missing), False
-    when the ledger call was swallowed (unavailable/inconsistent) and the
-    reservation may still be ``reserved``. A demo attempt has nothing to settle
-    and returns True."""
+    conservatively — the reservation was already counted — but marks the attempt
+    unsettled (via ``_reconcile_safe``) so completion is not later falsely
+    claimed."""
     if not cost_enabled(attempt):
-        return True
+        return
 
     def op(rid):
         return cost_control.retain(rid, profile)
@@ -127,7 +137,6 @@ def retain(attempt, stage: str, profile) -> bool:
     outcome = _reconcile_safe(attempt, stage, profile, op)
     if outcome is not None and outcome.transitioned:
         _update(attempt, **_fold_fields(outcome))
-    return outcome is not None
 
 
 def _fold_fields(outcome) -> dict:
@@ -152,15 +161,26 @@ def release(attempt, stage: str, profile) -> None:
     # maximum reserved; estimated/unresolved simply remain zero for this call.
 
 
-def mark_complete(attempt, *, settled: bool = True) -> None:
-    """Record that this attempt's accounting is fully settled — every reservation
-    it touched reached a terminal ledger state. Unresolved spend may still be
-    positive (a conservative ambiguous/retained outcome). ``settled`` is False
-    when a terminal reconcile/retain was swallowed (a Redis outage or identity
-    mismatch): completion then stays False so the audit row does not falsely claim
-    a settled ledger while a reservation may still be ``reserved``."""
-    if cost_enabled(attempt) and settled:
-        _update(attempt, cost_accounting_complete=True)
+def mark_complete(attempt) -> None:
+    """Record whether this attempt's accounting is fully settled. Completion is
+    claimed ONLY when every reconcile/retain/release this attempt made reached a
+    terminal ledger state — i.e. none was swallowed by a ledger outage/identity
+    mismatch, which durably clears ``cost_accounting_settled``. This covers BOTH
+    the success and failure finalisation paths uniformly: a swallowed reconcile on
+    the ordinary success path, a swallowed release on a pre-spend failure, or a
+    swallowed terminal retain all leave completion False so the audit row never
+    falsely reports a settled ledger while a reservation may still be ``reserved``.
+    Unresolved spend may still be positive (a conservative ambiguous outcome)."""
+    if not cost_enabled(attempt):
+        return
+    from sitara.designs.models import GenerationAttempt
+
+    settled = (
+        GenerationAttempt.objects.filter(pk=attempt.pk)
+        .values_list("cost_accounting_settled", flat=True)
+        .first()
+    )
+    _update(attempt, cost_accounting_complete=bool(settled))
 
 
 def _reconcile_safe(attempt, stage, profile, op):
@@ -171,22 +191,26 @@ def _reconcile_safe(attempt, stage, profile, op):
         # A genuine reservation-identity mismatch is an application bug, not a
         # transient outage — log it distinctly and loudly so it is not mistaken
         # for routine Redis flakiness. Still conservative: the reconcile is a
-        # no-op and the reservation stays counted against the ceiling.
+        # no-op and the reservation stays counted against the ceiling. Mark the
+        # attempt unsettled so completion is not later falsely claimed.
         logger.error(
             "budget reservation identity mismatch attempt=%s stage=%s",
             attempt.id,
             stage,
         )
+        _update(attempt, cost_accounting_settled=False)
         return None
     except cost_control.BudgetLedgerUnavailable:
         # Conservative: leave the reservation counted against the ceiling. Log
         # only the operation name, attempt UUID and stage — never amounts or
-        # ledger internals.
+        # ledger internals. Mark the attempt unsettled: the reservation may still
+        # be ``reserved``, so completion must not later be falsely claimed.
         logger.warning(
             "budget reconcile unavailable attempt=%s stage=%s",
             attempt.id,
             stage,
         )
+        _update(attempt, cost_accounting_settled=False)
         return None
 
 

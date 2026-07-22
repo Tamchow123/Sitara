@@ -100,18 +100,17 @@ class TestTextBoundary:
         assert attempt.cost_accounting_complete is True
 
     def test_missing_usage_retains_conservative_reservation(self, priced, in_memory_budget_ledger):
-        # Zero the image price so only the text stage contributes.
+        # FixtureStructuredDesignProvider returns usage None -> the text stage
+        # retains its full conservative reservation. The image stage reconciles to
+        # its fixed max (a positive, valid price is now required for every stage).
         design = make_complete_design()
         attempt = _queued(design)
-        # FixtureStructuredDesignProvider returns usage None -> retain.
-        import django.test
-
-        with django.test.override_settings(REPLICATE_MAX_IMAGE_MICRO_USD=0):
-            _run(attempt)
+        _run(attempt)
         attempt.refresh_from_db()
         text_max = _anthropic_max(priced)
-        assert attempt.cost_estimated_micro_usd == text_max
-        assert attempt.cost_unresolved_micro_usd == text_max  # retained as unresolved
+        image_max = cost_control.replicate_call_max_micro_usd(priced)
+        assert attempt.cost_unresolved_micro_usd == text_max  # text retained
+        assert attempt.cost_estimated_micro_usd == text_max + image_max
 
     def test_partial_usage_retains_full_reservation_not_a_partial_reconcile(
         self, priced, in_memory_budget_ledger
@@ -119,20 +118,16 @@ class TestTextBoundary:
         # A usage report missing ONE dimension must NOT reconcile the missing side
         # to zero (which would refund that portion and undercount spend) — it
         # retains the full conservative reservation instead.
-        import django.test
-
         design = make_complete_design()
         attempt = _queued(design)
         ss = _source_selections(design)
         provider = fakes.SequenceProvider(
             [fakes.result_with_usage(ss, input_tokens=1000, output_tokens=None)]
         )
-        with django.test.override_settings(REPLICATE_MAX_IMAGE_MICRO_USD=0):
-            _run(attempt, structured=provider)
+        _run(attempt, structured=provider)
         attempt.refresh_from_db()
         text_max = _anthropic_max(priced)
-        assert attempt.cost_estimated_micro_usd == text_max
-        assert attempt.cost_unresolved_micro_usd == text_max  # retained, not partial
+        assert attempt.cost_unresolved_micro_usd == text_max  # text retained, not partial
         # A partial reconcile would have folded only the input portion (< text_max).
         assert cost_control.anthropic_actual_micro_usd(priced, 1000, 0) < text_max
 
@@ -187,28 +182,22 @@ class TestImageBoundary:
     def test_accepted_prediction_accounts_cost_even_if_polling_fails(
         self, priced, in_memory_budget_ledger
     ):
-        # Zero text price so the whole estimate is the image call.
-        import django.test
-
         design = make_complete_design()
         attempt = _queued(design)
         image = FakeImageProvider(poll_actions=[PREDICTION_FAILED])
-        with django.test.override_settings(
-            ANTHROPIC_INPUT_MICRO_USD_PER_MTOK=0, ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK=0
-        ):
-            _run(attempt, image=image)
+        _run(attempt, image=image)
         attempt.refresh_from_db()
         assert attempt.status == _Status.FAILED
         assert attempt.error_code == errors.IMAGE_PREDICTION_FAILED
-        # The accepted prediction's cost is retained despite the later poll failure.
-        assert attempt.cost_estimated_micro_usd == 40_000
-        assert in_memory_budget_ledger.total_for_today() == 40_000
+        text_max = _anthropic_max(priced)
+        # The accepted prediction's image cost is retained despite the later poll
+        # failure; the text stage (usage None) retained its reservation too.
+        assert attempt.cost_estimated_micro_usd == text_max + 40_000
+        assert in_memory_budget_ledger.total_for_today() == text_max + 40_000
 
     def test_pre_acceptance_image_failure_releases_then_retry_re_reserves(
         self, priced, in_memory_budget_ledger
     ):
-        import django.test
-
         design = make_complete_design()
         attempt = _queued(design)
         # Create fails pre-acceptance -> release + bounded retry. The retry
@@ -216,16 +205,14 @@ class TestImageBoundary:
         image = FakeImageProvider(
             create_error=ImageProviderError("create_pre_acceptance", ambiguous_acceptance=False)
         )
-        with django.test.override_settings(
-            ANTHROPIC_INPUT_MICRO_USD_PER_MTOK=0, ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK=0
-        ):
-            # GenerationRetry propagates out of run_generation_attempt.
-            from sitara.generation.pipeline import GenerationRetry
+        from sitara.generation.pipeline import GenerationRetry
 
-            with pytest.raises(GenerationRetry):
-                _run(attempt, image=image)
-        # The released reservation left the day total at zero (no dangling spend).
-        assert in_memory_budget_ledger.total_for_today() == 0
+        # GenerationRetry propagates out of run_generation_attempt.
+        with pytest.raises(GenerationRetry):
+            _run(attempt, image=image)
+        # The image reservation was RELEASED (pre-acceptance failure); only the
+        # text stage's retained reservation (usage None) remains counted.
+        assert in_memory_budget_ledger.total_for_today() == _anthropic_max(priced)
 
 
 class TestDemoBypass:
@@ -549,3 +536,78 @@ class TestTerminalRetainsUnresolvedSubmission:
         attempt.refresh_from_db()
         assert attempt.status == _Status.FAILED  # terminalisation still completed
         assert attempt.cost_accounting_complete is False  # not falsely settled
+
+
+class TestProviderBoundaryAndSettlement:
+    """P1/P2: the provider-boundary reservation fails closed under an invalid
+    config; an actual-over-reserved measurement is a recorded incident, not a
+    silent clamp; and completion is claimed only when every ledger op settled —
+    on the ordinary success path too, not just the terminal-retain path."""
+
+    def test_invalid_config_at_worker_time_fails_closed_before_provider(
+        self, priced, in_memory_budget_ledger, settings
+    ):
+        design = make_complete_design()
+        attempt = _queued(design)
+        settings.ANTHROPIC_INPUT_MICRO_USD_PER_MTOK = 0  # config invalidated after enqueue
+        provider = FixtureStructuredDesignProvider()
+        result = _run(attempt, structured=provider)
+        assert result.status == _Status.FAILED
+        assert result.error_code == errors.INTERNAL_GENERATION_ERROR
+        assert provider._calls == 0  # never reached the paid provider
+        assert in_memory_budget_ledger.total_for_today() == 0  # nothing reserved
+
+    def test_actual_over_reserved_records_overage_and_incident(
+        self, priced, in_memory_budget_ledger, caplog
+    ):
+        design = make_complete_design()
+        attempt = _queued(design)
+        cost_accounting.reserve(attempt, cost_control.STAGE_STRUCTURED_INITIAL, 100, priced)
+        with caplog.at_level(logging.ERROR, logger="sitara.generation.cost_accounting"):
+            cost_accounting.reconcile_actual(
+                attempt,
+                cost_control.STAGE_STRUCTURED_INITIAL,
+                priced,
+                input_tokens=1_000_000,
+                output_tokens=1_000_000,
+            )
+        attempt.refresh_from_db()
+        assert attempt.cost_estimated_micro_usd == 100  # clamped estimate
+        # The overage (measured actual beyond the reservation) is recorded as a
+        # distinct incident metric, not silently discarded.
+        assert attempt.cost_overage_micro_usd == 2_000_000 - 100
+        assert any("reservation exceeded" in rec.message for rec in caplog.records)
+
+    def test_completion_false_when_success_path_reconcile_is_swallowed(
+        self, priced, in_memory_budget_ledger, monkeypatch
+    ):
+        design = make_complete_design()
+        attempt = _queued(design)
+
+        def _outage(*args, **kwargs):
+            raise cost_control.BudgetLedgerUnavailable("ledger down")
+
+        # Both the text reconcile and the image reconcile_fixed route through
+        # cost_control.reconcile_actual; a swallowed outage on the SUCCESS path
+        # must leave completion False.
+        monkeypatch.setattr(cost_control, "reconcile_actual", _outage)
+        _run(
+            attempt,
+            structured=fakes.SequenceProvider([fakes.valid_result(_source_selections(design))]),
+        )
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.SUCCEEDED  # generation still succeeds
+        assert attempt.cost_accounting_settled is False
+        assert attempt.cost_accounting_complete is False  # not falsely settled
+
+    def test_completion_true_on_clean_success_path(self, priced, in_memory_budget_ledger):
+        design = make_complete_design()
+        attempt = _queued(design)
+        _run(
+            attempt,
+            structured=fakes.SequenceProvider([fakes.valid_result(_source_selections(design))]),
+        )
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.SUCCEEDED
+        assert attempt.cost_accounting_settled is True
+        assert attempt.cost_accounting_complete is True

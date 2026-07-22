@@ -668,10 +668,23 @@ class GenerationAttempt(models.Model):
     cost_reserved_micro_usd = models.BigIntegerField(default=0)
     cost_estimated_micro_usd = models.BigIntegerField(default=0)
     cost_unresolved_micro_usd = models.BigIntegerField(default=0)
+    # Measured provider spend that EXCEEDED the conservative reservation and was
+    # clamped by the ledger (the request's real input exceeded the assumed token
+    # bound). Recorded here as a prominent incident metric rather than silently
+    # discarded; sits OUTSIDE the estimated<=reserved / unresolved<=estimated
+    # subset constraints because it is, by definition, spend beyond the reservation.
+    cost_overage_micro_usd = models.BigIntegerField(default=0)
+    # False once ANY reconcile/retain/release for this attempt was swallowed by a
+    # ledger outage/identity-mismatch (the reservation may still be ``reserved`` in
+    # Redis). Terminal completion is only claimed when this is still True, so the
+    # audit row never falsely reports a settled ledger. Set only by the cost
+    # accounting bridge; True by default (an attempt with no reservations).
+    cost_accounting_settled = models.BooleanField(default=True)
     # True once every reservation this attempt made has reached its terminal
-    # accounting state (reconciled/retained/released); unresolved may still be
-    # positive (conservative ambiguous spend) — "complete" means no reservation
-    # is left dangling mid-flight, not that no spend is unresolved.
+    # accounting state (reconciled/retained/released) AND accounting settled at the
+    # ledger; unresolved may still be positive (conservative ambiguous spend) —
+    # "complete" means no reservation is left dangling mid-flight, not that no spend
+    # is unresolved.
     cost_accounting_complete = models.BooleanField(default=False)
     # Accumulated SAFE token counts from reported provider usage where available
     # (image generation exposes none). Nullable; present only for measured usage.
@@ -829,7 +842,8 @@ class GenerationAttempt(models.Model):
             models.CheckConstraint(
                 condition=Q(cost_reserved_micro_usd__gte=0)
                 & Q(cost_estimated_micro_usd__gte=0)
-                & Q(cost_unresolved_micro_usd__gte=0),
+                & Q(cost_unresolved_micro_usd__gte=0)
+                & Q(cost_overage_micro_usd__gte=0),
                 name="designs_attempt_cost_non_negative",
             ),
             # Estimated (accounted-as-spent) can never exceed the conservative

@@ -158,6 +158,8 @@ class GenerationAttemptAdmin(admin.ModelAdmin):
         "cost_reserved_micro_usd",
         "cost_estimated_micro_usd",
         "cost_unresolved_micro_usd",
+        "cost_overage_micro_usd",
+        "cost_accounting_settled",
         "cost_accounting_complete",
         "accounted_input_tokens",
         "accounted_output_tokens",

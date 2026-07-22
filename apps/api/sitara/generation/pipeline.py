@@ -1866,7 +1866,7 @@ def _finalise_success(attempt) -> None:
 
 def _retain_unresolved_submissions(
     attempt, *, image_unresolved: bool, text_unresolved: bool
-) -> bool:
+) -> None:
     """Record any still-in-flight provider submission as unresolved (assume-spent)
     audit cost when an attempt terminalises. A submission marker still set at
     finalisation means the provider MAY have accepted and billed the request but
@@ -1884,24 +1884,21 @@ def _retain_unresolved_submissions(
     both candidate stages of the relevant family are retained — only the
     genuinely-``reserved`` one transitions.
 
-    Returns whether every retain settled at the ledger. The reservation is
-    reconciled against the pricing-profile version FROZEN on the attempt at
-    reserve time (``cost_pricing_profile_version``), NOT the currently active
-    one: a profile rotation between reserve and this terminal retain would
-    otherwise derive a different reservation id and silently miss the reservation.
-    """
+    A swallowed retain (ledger outage) durably clears the attempt's
+    ``cost_accounting_settled`` flag via the accounting bridge, so completion is
+    not later falsely claimed. The reservation is reconciled against the
+    pricing-profile version FROZEN on the attempt at reserve time
+    (``cost_pricing_profile_version``), NOT the currently active one: a profile
+    rotation between reserve and this terminal retain would otherwise derive a
+    different reservation id and silently miss the reservation."""
     if not cost_accounting.cost_enabled(attempt) or not (image_unresolved or text_unresolved):
-        return True
+        return
     profile = cost_control.active_pricing_profile()
     frozen_version = attempt.cost_pricing_profile_version
     if frozen_version:
         profile = dataclasses.replace(profile, version=frozen_version)
-    settled = True
     if image_unresolved:
-        settled = (
-            cost_accounting.retain(attempt, cost_control.STAGE_IMAGE_SUBMISSION, profile)
-            and settled
-        )
+        cost_accounting.retain(attempt, cost_control.STAGE_IMAGE_SUBMISSION, profile)
     if text_unresolved:
         if attempt.source_design_version_id is not None:
             stages = (
@@ -1911,8 +1908,7 @@ def _retain_unresolved_submissions(
         else:
             stages = (cost_control.STAGE_STRUCTURED_INITIAL, cost_control.STAGE_STRUCTURED_RETRY)
         for stage in stages:
-            settled = cost_accounting.retain(attempt, stage, profile) and settled
-    return settled
+            cost_accounting.retain(attempt, stage, profile)
 
 
 def _finalise_failure(attempt, code: str, *, clear_text_marker: bool = False) -> None:
@@ -1953,14 +1949,13 @@ def _finalise_failure(attempt, code: str, *, clear_text_marker: bool = False) ->
         # LIVE_GENERATION_BUDGET_REDIS_TIMEOUT_SECONDS and its failure is swallowed
         # (the reservation stays conservatively counted), so a Redis outage only
         # briefly extends the row-lock hold and never blocks terminalisation.
-        settled = _retain_unresolved_submissions(
+        _retain_unresolved_submissions(
             locked, image_unresolved=image_unresolved, text_unresolved=text_unresolved
         )
-        # Only claim accounting complete when the terminal retain actually settled
-        # at the ledger; a swallowed outage/mismatch leaves the reservation
-        # possibly still ``reserved``, so completion stays False (visible in admin)
-        # rather than falsely reporting a settled ledger with no unresolved cost.
-        cost_accounting.mark_complete(locked, settled=settled)
+        # Claim accounting complete only when every reconcile/retain/release for
+        # this attempt settled at the ledger (mark_complete reads the durable
+        # cost_accounting_settled flag, cleared by any swallowed ledger op).
+        cost_accounting.mark_complete(locked)
 
 
 def fail_attempt(attempt_id, code: str) -> None:

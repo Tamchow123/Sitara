@@ -604,7 +604,19 @@ def reset_ledger() -> None:
 def reserve(reservation_id: str, amount_micro_usd: int, profile: PricingProfile) -> ReserveOutcome:
     """Obtain or replay a deterministic reservation. Raises ``BudgetExhausted``
     if the ceiling would be exceeded (no mutation) and ``BudgetLedgerUnavailable``
-    on any ledger failure — in both cases the provider MUST NOT be invoked."""
+    on any ledger failure — in both cases the provider MUST NOT be invoked.
+
+    This is the AUTHORITATIVE provider-boundary guard: public admission validity
+    (``generation_is_available()``) is only checked at enqueue time and a worker
+    deliberately uses internal provider gates, so a job queued under a valid cost
+    config could otherwise be processed after a deployment/config change left a
+    blank/rotated profile, a zero price or an invalid ceiling — reserving 0 and
+    then making the paid call. Re-validate the ceiling, the profile and a strictly
+    positive amount HERE, immediately before the reservation, and fail closed
+    (``BudgetLedgerUnavailable``) so no paid provider call can proceed under an
+    invalid or zero-value cost configuration."""
+    if not live_cost_config_is_valid() or not profile.is_valid or int(amount_micro_usd) <= 0:
+        raise BudgetLedgerUnavailable("live cost configuration is not valid at reservation time")
     return get_ledger().reserve(reservation_id, amount_micro_usd, profile)
 
 

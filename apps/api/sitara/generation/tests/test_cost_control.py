@@ -128,6 +128,56 @@ class TestConfigFailsClosed:
         assert cost_control.live_cost_config_is_valid() is False
 
 
+class TestProviderBoundaryReservationGuard:
+    """P1: the module-level reserve() is the authoritative provider boundary — it
+    re-validates the ceiling, profile and a strictly positive amount at reservation
+    time, so a job queued under a valid config cannot reach a paid provider after a
+    deployment/config change leaves an invalid or zero-value cost configuration."""
+
+    def _valid(self, settings):
+        settings.LIVE_GENERATION_DAILY_BUDGET_MICRO_USD = 1_000_000
+        settings.LIVE_GENERATION_PRICING_PROFILE = "p1"
+        settings.ANTHROPIC_INPUT_MICRO_USD_PER_MTOK = 3_000_000
+        settings.ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK = 15_000_000
+        settings.REPLICATE_MAX_IMAGE_MICRO_USD = 40_000
+
+    def test_reserve_ok_under_valid_config_and_positive_amount(self, settings):
+        self._valid(settings)
+        cost_control.set_ledger(InMemoryBudgetLedger())
+        outcome = cost_control.reserve("r1", 100, cost_control.active_pricing_profile())
+        assert outcome.newly_reserved is True
+
+    @pytest.mark.parametrize("field", ["input", "output", "image", "budget"])
+    def test_reserve_fails_closed_when_config_became_invalid(self, settings, field):
+        self._valid(settings)
+        cost_control.set_ledger(InMemoryBudgetLedger())
+        setattr(
+            settings,
+            {
+                "input": "ANTHROPIC_INPUT_MICRO_USD_PER_MTOK",
+                "output": "ANTHROPIC_OUTPUT_MICRO_USD_PER_MTOK",
+                "image": "REPLICATE_MAX_IMAGE_MICRO_USD",
+                "budget": "LIVE_GENERATION_DAILY_BUDGET_MICRO_USD",
+            }[field],
+            0,
+        )
+        with pytest.raises(cost_control.BudgetLedgerUnavailable):
+            cost_control.reserve("r1", 100, cost_control.active_pricing_profile())
+
+    def test_reserve_fails_closed_on_blank_profile(self, settings):
+        self._valid(settings)
+        settings.LIVE_GENERATION_PRICING_PROFILE = ""
+        cost_control.set_ledger(InMemoryBudgetLedger())
+        with pytest.raises(cost_control.BudgetLedgerUnavailable):
+            cost_control.reserve("r1", 100, cost_control.active_pricing_profile())
+
+    def test_reserve_fails_closed_on_nonpositive_amount(self, settings):
+        self._valid(settings)
+        cost_control.set_ledger(InMemoryBudgetLedger())
+        with pytest.raises(cost_control.BudgetLedgerUnavailable):
+            cost_control.reserve("r1", 0, cost_control.active_pricing_profile())
+
+
 # ---------------------------------------------------------------------------
 # Estimation arithmetic never under-reserves (spec test 1)
 # ---------------------------------------------------------------------------
