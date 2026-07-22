@@ -1864,11 +1864,54 @@ def _finalise_success(attempt) -> None:
         _mark_attempt_succeeded(locked)
 
 
+def _retain_unresolved_submissions(
+    attempt, *, image_unresolved: bool, text_unresolved: bool
+) -> None:
+    """Record any still-in-flight provider submission as unresolved (assume-spent)
+    audit cost when an attempt terminalises. A submission marker still set at
+    finalisation means the provider MAY have accepted and billed the request but
+    its outcome was never resolved — the crash-window redelivery guards, the
+    stuck-job reaper (``reconcile_if_stuck``) and an ambiguous-acceptance terminal
+    all reach here with the marker set. ``cost_accounting.retain`` transitions the
+    reservation from ``reserved`` and folds ``cost_estimated``/``cost_unresolved``
+    so the attempt's audit columns reflect the possible spend for incident
+    reconciliation (ADR 0017), instead of looking like a clean pre-spend release.
+
+    Idempotent and conservative: retaining a stage that the in-stage path already
+    reconciled/retained, or whose reservation expired or was made under a since-
+    changed pricing profile, is a no-op (the ledger returns ``already``/``missing``/
+    ``inconsistent`` and nothing is folded). The exact in-flight structured stage
+    (initial vs retry) is not recorded on the single marker, so both candidate
+    stages of the relevant family are retained — only the genuinely-``reserved``
+    one transitions."""
+    if not cost_accounting.cost_enabled(attempt) or not (image_unresolved or text_unresolved):
+        return
+    profile = cost_control.active_pricing_profile()
+    if image_unresolved:
+        cost_accounting.retain(attempt, cost_control.STAGE_IMAGE_SUBMISSION, profile)
+    if text_unresolved:
+        if attempt.source_design_version_id is not None:
+            stages = (
+                cost_control.STAGE_STRUCTURED_REFINEMENT_INITIAL,
+                cost_control.STAGE_STRUCTURED_REFINEMENT_RETRY,
+            )
+        else:
+            stages = (cost_control.STAGE_STRUCTURED_INITIAL, cost_control.STAGE_STRUCTURED_RETRY)
+        for stage in stages:
+            cost_accounting.retain(attempt, stage, profile)
+
+
 def _finalise_failure(attempt, code: str, *, clear_text_marker: bool = False) -> None:
     with transaction.atomic():
         locked = GenerationAttempt.objects.select_for_update().get(pk=attempt.pk)
         if locked.status in (_Status.SUCCEEDED, _Status.FAILED):
             return
+        # A submission marker still set at terminalisation is possible unresolved
+        # spend. Capture BEFORE optionally clearing the text marker below (a
+        # cleared text marker means the provider definitively answered and the
+        # in-stage path already reconciled that reservation to its actual).
+        image_unresolved = locked.image_submission_in_flight
+        text_unresolved = locked.text_submission_in_flight and not clear_text_marker
         locked.status = _Status.FAILED
         locked.error_code = code
         locked.completed_at = timezone.now()
@@ -1885,8 +1928,20 @@ def _finalise_failure(attempt, code: str, *, clear_text_marker: bool = False) ->
         Design.objects.filter(pk=locked.design_id).update(
             status=Design.Status.GENERATION_FAILED, updated_at=timezone.now()
         )
-        # No reservation is left dangling once the attempt is terminal; any
-        # retained (unresolved) reservation stays recorded as ambiguous spend.
+        # Record any still-in-flight submission as unresolved (assume-spent) audit
+        # cost, then mark no reservation left dangling. Retain is idempotent, so a
+        # reservation already reconciled/retained/released in-stage is untouched.
+        # DELIBERATELY inside the terminal transaction (unlike the enqueue-time
+        # ledger calls, which run outside any lock): folding the audit cost
+        # atomically with the FAILED transition avoids a split-brain window where
+        # a crash between two transactions could durably fail an attempt whose
+        # ambiguous spend is never recorded. The ledger call is bounded by
+        # LIVE_GENERATION_BUDGET_REDIS_TIMEOUT_SECONDS and its failure is swallowed
+        # (the reservation stays conservatively counted), so a Redis outage only
+        # briefly extends the row-lock hold and never blocks terminalisation.
+        _retain_unresolved_submissions(
+            locked, image_unresolved=image_unresolved, text_unresolved=text_unresolved
+        )
         cost_accounting.mark_complete(locked)
 
 

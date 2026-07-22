@@ -372,3 +372,107 @@ class TestInconsistentReservationLoggedDistinctly:
             "identity mismatch" in rec.message and rec.levelno == logging.ERROR
             for rec in caplog.records
         )
+
+
+class TestTerminalRetainsUnresolvedSubmission:
+    """FUNC-001: a submission marker still set when an attempt terminalises
+    (crash-window redelivery guard, stuck-job reaper, or ambiguous acceptance)
+    means the provider MAY have accepted and billed the request. ``_finalise_failure``
+    must retain the reservation so the attempt's audit columns record the
+    unresolved (assume-spent) cost, instead of looking like a clean pre-spend
+    release that hides possible spend."""
+
+    def test_stuck_reaper_retains_inflight_image_reservation(self, priced, in_memory_budget_ledger):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from sitara.generation import pipeline
+
+        design = make_complete_design()
+        attempt = _queued(design)
+        amount = cost_control.replicate_call_max_micro_usd(priced)
+        # A prior run reserved the image stage and set the marker, then stalled.
+        cost_accounting.reserve(attempt, cost_control.STAGE_IMAGE_SUBMISSION, amount, priced)
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            status=_Status.RUNNING_IMAGE, image_submission_in_flight=True
+        )
+        attempt.refresh_from_db()
+        assert attempt.cost_reserved_micro_usd == amount
+        assert attempt.cost_unresolved_micro_usd == 0  # not yet resolved
+        result = pipeline.reconcile_if_stuck(attempt.id, timezone.now() + timedelta(seconds=1))
+        assert result == "reconciled"
+        attempt.refresh_from_db()
+        assert attempt.error_code == errors.GENERATION_STUCK
+        # The in-flight image reservation is now recorded as unresolved spend.
+        assert attempt.cost_estimated_micro_usd == amount
+        assert attempt.cost_unresolved_micro_usd == amount
+        assert in_memory_budget_ledger.total_for_today() == amount  # still counted
+
+    def test_ambiguous_terminal_retains_inflight_text_reservation(
+        self, priced, in_memory_budget_ledger
+    ):
+        from sitara.generation import pipeline
+
+        design = make_complete_design()
+        attempt = _queued(design)
+        amount = _anthropic_max(priced)
+        cost_accounting.reserve(attempt, cost_control.STAGE_STRUCTURED_INITIAL, amount, priced)
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            status=_Status.RUNNING_TEXT, text_submission_in_flight=True
+        )
+        attempt.refresh_from_db()
+        pipeline._finalise_failure(attempt, errors.STRUCTURED_SUBMISSION_AMBIGUOUS)
+        attempt.refresh_from_db()
+        assert attempt.error_code == errors.STRUCTURED_SUBMISSION_AMBIGUOUS
+        assert attempt.cost_estimated_micro_usd == amount
+        assert attempt.cost_unresolved_micro_usd == amount
+
+    def test_terminal_retain_is_idempotent_on_redelivery(self, priced, in_memory_budget_ledger):
+        from sitara.generation import pipeline
+
+        design = make_complete_design()
+        attempt = _queued(design)
+        amount = _anthropic_max(priced)
+        cost_accounting.reserve(attempt, cost_control.STAGE_STRUCTURED_INITIAL, amount, priced)
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            status=_Status.RUNNING_TEXT, text_submission_in_flight=True
+        )
+        attempt.refresh_from_db()
+        pipeline._finalise_failure(attempt, errors.STRUCTURED_SUBMISSION_AMBIGUOUS)
+        # A second finalisation (e.g. redelivery) is a no-op — already terminal,
+        # so the unresolved audit total is folded exactly once, never doubled.
+        again = GenerationAttempt.objects.get(pk=attempt.pk)
+        pipeline._finalise_failure(again, errors.STRUCTURED_SUBMISSION_AMBIGUOUS)
+        again.refresh_from_db()
+        assert again.cost_unresolved_micro_usd == amount
+
+    def test_clean_pre_spend_terminal_does_not_retain(self, priced, in_memory_budget_ledger):
+        # No submission marker set: a genuine pre-spend failure. Nothing is
+        # retained, so the audit columns stay zero (distinguishable from spend).
+        from sitara.generation import pipeline
+
+        design = make_complete_design()
+        attempt = _queued(design)
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(status=_Status.RUNNING_TEXT)
+        attempt.refresh_from_db()
+        pipeline._finalise_failure(attempt, errors.DESIGN_INCOMPLETE)
+        attempt.refresh_from_db()
+        assert attempt.cost_estimated_micro_usd == 0
+        assert attempt.cost_unresolved_micro_usd == 0
+
+    def test_demo_attempt_never_retains(self, priced, in_memory_budget_ledger):
+        # A demo attempt cannot spend; even with a marker set, terminalisation
+        # never touches the ledger or the cost columns.
+        from sitara.generation import pipeline
+
+        design = make_complete_design()
+        attempt = _queued(design)
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            status=_Status.RUNNING_IMAGE, image_submission_in_flight=True, is_demo=True
+        )
+        attempt.refresh_from_db()
+        pipeline._finalise_failure(attempt, errors.IMAGE_SUBMISSION_AMBIGUOUS)
+        attempt.refresh_from_db()
+        assert attempt.cost_unresolved_micro_usd == 0
+        assert in_memory_budget_ledger.total_for_today() == 0
