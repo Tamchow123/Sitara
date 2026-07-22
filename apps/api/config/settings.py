@@ -252,6 +252,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "config.middleware.ContentSecurityPolicyMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -858,16 +859,66 @@ SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
+# Referrer policy and cross-origin opener policy applied to every response by
+# Django's SecurityMiddleware. "same-origin" never leaks a full URL (e.g. a
+# signed-image path) cross-origin; COOP isolates our browsing context.
+SECURE_REFERRER_POLICY = "same-origin"
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
+
+# Bounded request body / field counts (defence in depth for the JSON API — the
+# per-endpoint bounds still apply). Strict positive integers.
+DATA_UPLOAD_MAX_MEMORY_SIZE = env_positive_int("DATA_UPLOAD_MAX_MEMORY_SIZE", 5 * 1024 * 1024)
+DATA_UPLOAD_MAX_NUMBER_FIELDS = env_positive_int("DATA_UPLOAD_MAX_NUMBER_FIELDS", 1000)
 
 if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", default=IS_PRODUCTION)
-    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "3600" if IS_PRODUCTION else "0"))
+    SECURE_HSTS_SECONDS = int(
+        os.getenv("SECURE_HSTS_SECONDS", "31536000" if IS_PRODUCTION else "0")
+    )
+    # HSTS for subdomains is justified for a single-origin deployment; preload is
+    # NEVER enabled casually (it is effectively irreversible for the domain).
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool(
+        "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=IS_PRODUCTION
+    )
+    SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", default=False)
 
-# Behind a TLS-terminating proxy in production, enable via environment.
+# Behind a TLS-terminating proxy in production, enable via environment. Trusting
+# X-Forwarded-Proto is opt-in only — no proxy header is trusted by default.
 if env_bool("USE_X_FORWARDED_PROTO", default=False):
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Django's deploy check emits security.W021 recommending HSTS *preload*. We
+# deliberately do NOT enable preload by default — it is effectively irreversible
+# for a domain and is an operator opt-in (SECURE_HSTS_PRELOAD env), never a
+# casual default (spec Part D / ADR 0017). Silencing ONLY this one advisory
+# keeps `manage.py check --deploy --fail-level WARNING` green while every other
+# security warning still fails the deploy check.
+SILENCED_SYSTEM_CHECKS = ["security.W021"]
+
+# ---------------------------------------------------------------------------
+# Content Security Policy (Phase 16, Part D). Applied by
+# config.middleware.ContentSecurityPolicyMiddleware. The JSON API loads no
+# resources, so it gets the most restrictive policy; the Django admin (only when
+# mounted) gets a policy compatible with its own inline styles/scripts.
+# ---------------------------------------------------------------------------
+API_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+ADMIN_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; "
+    "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; "
+    "object-src 'none'"
+)
+
+# ---------------------------------------------------------------------------
+# Django admin enablement (Phase 16, Part D). The admin is a staff-only
+# operational surface, never a public application surface. In production it is
+# DISABLED by default (the route is not mounted at all — see config/urls.py);
+# enabling it is a deliberate operator choice and NEVER bypasses Django's
+# staff/superuser checks. In development it is enabled for convenience.
+# ---------------------------------------------------------------------------
+ADMIN_ENABLED = env_bool("DJANGO_ADMIN_ENABLED", default=not IS_PRODUCTION)
 
 # ---------------------------------------------------------------------------
 # I18n / misc

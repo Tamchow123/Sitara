@@ -574,6 +574,120 @@ class TestDesignImageStorageSettings:
             assert result.returncode == 0, result.stderr
 
 
+class TestProductionSecurityHardening:
+    """Phase 16, Part D: production security headers/flags are set fail-safe."""
+
+    _PROBE = (
+        "import config.settings as s; print("
+        "getattr(s,'SECURE_SSL_REDIRECT',False), getattr(s,'SECURE_HSTS_SECONDS',0), "
+        "getattr(s,'SECURE_HSTS_INCLUDE_SUBDOMAINS',False), "
+        "getattr(s,'SECURE_HSTS_PRELOAD',False), "
+        "repr(s.SECURE_REFERRER_POLICY), repr(s.SECURE_CROSS_ORIGIN_OPENER_POLICY), "
+        "repr(s.X_FRAME_OPTIONS), s.SECURE_CONTENT_TYPE_NOSNIFF, s.ADMIN_ENABLED)"
+    )
+
+    def _probe(self, env):
+        minimal = {"PATH": os.environ.get("PATH", "")}
+        return subprocess.run(
+            [sys.executable, "-c", self._PROBE],
+            cwd=API_ROOT,
+            env={**minimal, **env},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    def test_production_enables_https_hsts_frame_and_nosniff(self):
+        result = self._probe(VALID_PRODUCTION_ENV)
+        assert result.returncode == 0, result.stderr
+        out = result.stdout
+        assert "True" in out.split()[0]  # SECURE_SSL_REDIRECT
+        assert "31536000" in out  # a full year of HSTS
+        assert "'DENY'" in out  # X_FRAME_OPTIONS
+        assert "'same-origin'" in out  # referrer + COOP
+        # HSTS preload is never enabled casually; admin disabled in production.
+        parts = out.split()
+        assert parts[3] == "False"  # SECURE_HSTS_PRELOAD
+        assert parts[-1] == "False"  # ADMIN_ENABLED
+
+    def test_development_admin_enabled_and_no_forced_ssl_redirect(self):
+        result = self._probe({})
+        assert result.returncode == 0, result.stderr
+        parts = result.stdout.split()
+        assert parts[0] == "False"  # no SSL redirect in dev
+        assert parts[-1] == "True"  # ADMIN_ENABLED in dev
+
+    def test_no_wildcard_cors_in_production(self):
+        probe = (
+            "import config.settings as s; "
+            "print('*' in s.CORS_ALLOWED_ORIGINS, getattr(s,'CORS_ALLOW_ALL_ORIGINS',False))"
+        )
+        minimal = {"PATH": os.environ.get("PATH", "")}
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            cwd=API_ROOT,
+            env={**minimal, **VALID_PRODUCTION_ENV},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "False False"
+
+    def test_deploy_check_passes_with_no_security_warnings(self):
+        # `manage.py check --deploy --fail-level WARNING` treats every security
+        # warning as a failure; under a complete production-like environment it
+        # must exit cleanly.
+        minimal = {"PATH": os.environ.get("PATH", "")}
+        result = subprocess.run(
+            [sys.executable, "manage.py", "check", "--deploy", "--fail-level", "WARNING"],
+            cwd=API_ROOT,
+            env={**minimal, **VALID_PRODUCTION_ENV},
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert (
+            result.returncode == 0
+        ), f"deploy check emitted warnings:\n{result.stdout}\n{result.stderr}"
+
+
+class TestAdminEnablement:
+    """Phase 16, Part D: the admin route is not mounted at all when disabled."""
+
+    _URLS_PROBE = (
+        "import os, django; os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings'); "
+        "django.setup(); from config import urls; "
+        "print(any(str(p.pattern).startswith('admin/') for p in urls.urlpatterns))"
+    )
+
+    def _probe(self, env):
+        minimal = {"PATH": os.environ.get("PATH", "")}
+        return subprocess.run(
+            [sys.executable, "-c", self._URLS_PROBE],
+            cwd=API_ROOT,
+            env={**minimal, **env},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    def test_admin_route_absent_when_disabled(self):
+        result = self._probe({"DJANGO_ADMIN_ENABLED": "false"})
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "False"  # no admin/ pattern
+
+    def test_admin_route_present_when_enabled(self):
+        result = self._probe({"DJANGO_ADMIN_ENABLED": "true"})
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "True"
+
+    def test_production_defaults_admin_off(self):
+        result = self._probe(VALID_PRODUCTION_ENV)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "False"
+
+
 class TestSignedUrlEndpointSettings:
     """Phase 11 Part B: strict S3_SIGNED_URL_ENDPOINT_URL validation."""
 
