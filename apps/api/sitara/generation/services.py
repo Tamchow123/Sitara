@@ -304,9 +304,13 @@ def _generate_valid_spec(provider, context: GenerationContext, design_id, genera
                     cost_accounting.release(generation_attempt, stage, profile)
             raise
         # The provider answered — the call is billable. Reconcile to reported
-        # usage when present, otherwise retain the conservative reservation.
+        # usage ONLY when BOTH token counts are present: a partial usage report
+        # (one dimension missing) would reconcile the missing dimension as zero
+        # and refund that portion of the conservative reservation, undercounting
+        # spend. Any missing dimension therefore retains the full conservative
+        # reservation instead. (A genuine reported 0 is not None and reconciles.)
         if cost_on:
-            if result.input_tokens is not None or result.output_tokens is not None:
+            if result.input_tokens is not None and result.output_tokens is not None:
                 cost_accounting.reconcile_actual(
                     generation_attempt,
                     stage,

@@ -113,6 +113,29 @@ class TestTextBoundary:
         assert attempt.cost_estimated_micro_usd == text_max
         assert attempt.cost_unresolved_micro_usd == text_max  # retained as unresolved
 
+    def test_partial_usage_retains_full_reservation_not_a_partial_reconcile(
+        self, priced, in_memory_budget_ledger
+    ):
+        # A usage report missing ONE dimension must NOT reconcile the missing side
+        # to zero (which would refund that portion and undercount spend) — it
+        # retains the full conservative reservation instead.
+        import django.test
+
+        design = make_complete_design()
+        attempt = _queued(design)
+        ss = _source_selections(design)
+        provider = fakes.SequenceProvider(
+            [fakes.result_with_usage(ss, input_tokens=1000, output_tokens=None)]
+        )
+        with django.test.override_settings(REPLICATE_MAX_IMAGE_MICRO_USD=0):
+            _run(attempt, structured=provider)
+        attempt.refresh_from_db()
+        text_max = _anthropic_max(priced)
+        assert attempt.cost_estimated_micro_usd == text_max
+        assert attempt.cost_unresolved_micro_usd == text_max  # retained, not partial
+        # A partial reconcile would have folded only the input portion (< text_max).
+        assert cost_control.anthropic_actual_micro_usd(priced, 1000, 0) < text_max
+
     def test_ambiguous_provider_error_retains_full_reservation(
         self, priced, in_memory_budget_ledger
     ):
@@ -476,3 +499,53 @@ class TestTerminalRetainsUnresolvedSubmission:
         attempt.refresh_from_db()
         assert attempt.cost_unresolved_micro_usd == 0
         assert in_memory_budget_ledger.total_for_today() == 0
+
+    def test_terminal_retain_uses_frozen_profile_version_after_rotation(
+        self, priced, in_memory_budget_ledger, settings
+    ):
+        # A reservation made under one profile version must still be found at
+        # terminalisation after the operator ROTATES the active pricing profile —
+        # the terminal retain uses the version frozen on the attempt, not the
+        # currently active one, so the reservation is never silently missed.
+        from sitara.generation import pipeline
+
+        design = make_complete_design()
+        attempt = _queued(design)
+        amount = cost_control.replicate_call_max_micro_usd(priced)
+        cost_accounting.reserve(attempt, cost_control.STAGE_IMAGE_SUBMISSION, amount, priced)
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            status=_Status.RUNNING_IMAGE, image_submission_in_flight=True
+        )
+        settings.LIVE_GENERATION_PRICING_PROFILE = "rotated-v2"  # profile rotated
+        attempt.refresh_from_db()
+        assert attempt.cost_pricing_profile_version == priced.version  # frozen at reserve
+        pipeline._finalise_failure(attempt, errors.IMAGE_SUBMISSION_AMBIGUOUS)
+        attempt.refresh_from_db()
+        assert attempt.cost_unresolved_micro_usd == amount  # found via frozen version
+        assert attempt.cost_accounting_complete is True
+
+    def test_completion_stays_false_when_terminal_retain_is_swallowed(
+        self, priced, in_memory_budget_ledger, monkeypatch
+    ):
+        # A Redis outage during the terminal retain must not block terminalisation,
+        # but the attempt must NOT be falsely marked accounting-complete while a
+        # reservation may still be 'reserved'.
+        from sitara.generation import pipeline
+
+        design = make_complete_design()
+        attempt = _queued(design)
+        amount = cost_control.replicate_call_max_micro_usd(priced)
+        cost_accounting.reserve(attempt, cost_control.STAGE_IMAGE_SUBMISSION, amount, priced)
+        GenerationAttempt.objects.filter(pk=attempt.pk).update(
+            status=_Status.RUNNING_IMAGE, image_submission_in_flight=True
+        )
+        attempt.refresh_from_db()
+
+        def _outage(*args, **kwargs):
+            raise cost_control.BudgetLedgerUnavailable("ledger down")
+
+        monkeypatch.setattr(cost_control, "retain", _outage)
+        pipeline._finalise_failure(attempt, errors.IMAGE_SUBMISSION_AMBIGUOUS)
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.FAILED  # terminalisation still completed
+        assert attempt.cost_accounting_complete is False  # not falsely settled

@@ -108,12 +108,18 @@ def reconcile_fixed(attempt, stage: str, profile, actual_micro_usd: int) -> None
         _update(attempt, **_fold_fields(outcome))
 
 
-def retain(attempt, stage: str, profile) -> None:
+def retain(attempt, stage: str, profile) -> bool:
     """Retain the full conservative reservation for an ambiguous acceptance /
     billing outcome (unresolved spend). Ledger failure is swallowed
-    conservatively — the reservation was already counted."""
+    conservatively — the reservation was already counted.
+
+    Returns whether the reservation reached a terminal ledger state: True when
+    the ledger answered (reconciled/retained/released/already/missing), False
+    when the ledger call was swallowed (unavailable/inconsistent) and the
+    reservation may still be ``reserved``. A demo attempt has nothing to settle
+    and returns True."""
     if not cost_enabled(attempt):
-        return
+        return True
 
     def op(rid):
         return cost_control.retain(rid, profile)
@@ -121,6 +127,7 @@ def retain(attempt, stage: str, profile) -> None:
     outcome = _reconcile_safe(attempt, stage, profile, op)
     if outcome is not None and outcome.transitioned:
         _update(attempt, **_fold_fields(outcome))
+    return outcome is not None
 
 
 def _fold_fields(outcome) -> dict:
@@ -145,10 +152,14 @@ def release(attempt, stage: str, profile) -> None:
     # maximum reserved; estimated/unresolved simply remain zero for this call.
 
 
-def mark_complete(attempt) -> None:
-    """Record that no reservation for this attempt is left dangling mid-flight.
-    Unresolved spend may still be positive (conservative ambiguous outcome)."""
-    if cost_enabled(attempt):
+def mark_complete(attempt, *, settled: bool = True) -> None:
+    """Record that this attempt's accounting is fully settled — every reservation
+    it touched reached a terminal ledger state. Unresolved spend may still be
+    positive (a conservative ambiguous/retained outcome). ``settled`` is False
+    when a terminal reconcile/retain was swallowed (a Redis outage or identity
+    mismatch): completion then stays False so the audit row does not falsely claim
+    a settled ledger while a reservation may still be ``reserved``."""
+    if cost_enabled(attempt) and settled:
         _update(attempt, cost_accounting_complete=True)
 
 
