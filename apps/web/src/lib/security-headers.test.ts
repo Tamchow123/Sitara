@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildContentSecurityPolicy, buildSecurityHeaders } from "./security-headers";
+import {
+  buildContentSecurityPolicy,
+  buildSecurityHeaders,
+  sanitizeImageOrigins,
+} from "./security-headers";
 
 describe("production Content-Security-Policy", () => {
   const prod = buildContentSecurityPolicy({ isProd: true, imageOrigins: "https://media.example.com" });
@@ -42,6 +46,58 @@ describe("development Content-Security-Policy", () => {
 
   it("still never uses a wildcard source", () => {
     expect(dev).not.toContain("*");
+  });
+});
+
+describe("sanitizeImageOrigins", () => {
+  it("accepts exact http(s) origins and normalises them", () => {
+    expect(sanitizeImageOrigins("https://a.example https://b.example:8443", false)).toEqual([
+      "https://a.example",
+      "https://b.example:8443",
+    ]);
+    // Trailing slash / default port noise normalises to the bare origin.
+    expect(sanitizeImageOrigins("https://a.example/", false)).toEqual(["https://a.example"]);
+  });
+
+  it("drops wildcards, scheme-wide sources and CSP-delimiter injections", () => {
+    expect(sanitizeImageOrigins("*", true)).toEqual([]);
+    expect(sanitizeImageOrigins("https:", true)).toEqual([]);
+    expect(sanitizeImageOrigins("https://*.example.com", true)).toEqual([]);
+    // A semicolon/comma inside an entry can never smuggle a directive into the CSP.
+    expect(sanitizeImageOrigins("https://ok.example;connect-src=evil", true)).toEqual([]);
+    expect(sanitizeImageOrigins("https://ok.example,https://evil.com", true)).toEqual([]);
+  });
+
+  it("rejects userinfo, paths, queries and fragments", () => {
+    expect(sanitizeImageOrigins("https://user:pass@a.example", true)).toEqual([]);
+    expect(sanitizeImageOrigins("https://a.example/path", true)).toEqual([]);
+    expect(sanitizeImageOrigins("https://a.example?q=1", true)).toEqual([]);
+    expect(sanitizeImageOrigins("https://a.example#f", true)).toEqual([]);
+  });
+
+  it("requires https in production but allows http in development", () => {
+    expect(sanitizeImageOrigins("http://localhost:9000", true)).toEqual([]);
+    expect(sanitizeImageOrigins("http://localhost:9000", false)).toEqual(["http://localhost:9000"]);
+  });
+
+  it("keeps a valid origin even when a sibling entry is rejected", () => {
+    expect(sanitizeImageOrigins("https://ok.example https://bad.example/x *", true)).toEqual([
+      "https://ok.example",
+    ]);
+  });
+});
+
+describe("CSP never admits an injected directive via image origins", () => {
+  it("keeps a valid image origin but drops a semicolon directive-injection attempt", () => {
+    const csp = buildContentSecurityPolicy({
+      isProd: true,
+      imageOrigins: "https://ok.example ;connect-src=https://evil.example",
+    });
+    // Exactly one connect-src, still locked to 'self' — nothing broke out of img-src.
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp.match(/connect-src/g)?.length).toBe(1);
+    expect(csp).not.toContain("evil.example");
+    expect(csp).toContain("img-src 'self' data: blob: https://ok.example");
   });
 });
 

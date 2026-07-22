@@ -18,15 +18,40 @@ export type SecurityHeaderInput = {
 
 export type Header = { key: string; value: string };
 
+// Parse the operator-configured image-origin allowlist into EXACT, safe origins.
+// The raw string is never concatenated verbatim into the CSP: a wildcard,
+// scheme-wide source, or an injected `;`/`,` could otherwise widen img-src or
+// smuggle in an entire extra directive. Each whitespace-separated entry must be a
+// bare http(s) origin (scheme://host[:port]) with no wildcard, userinfo, path,
+// query or fragment; anything else is dropped (fail closed to a stricter policy).
+// In production only https origins are accepted. The emitted value is the parsed
+// `URL.origin`, so nothing beyond a normalised origin can ever reach the header.
+export function sanitizeImageOrigins(raw: string, isProd: boolean): string[] {
+  const origins: string[] = [];
+  for (const entry of raw.split(/\s+/).filter(Boolean)) {
+    if (/[*;,'"]/.test(entry)) continue; // no wildcard, CSP delimiters or quotes
+    let url: URL;
+    try {
+      url = new URL(entry);
+    } catch {
+      continue;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+    if (isProd && url.protocol !== "https:") continue;
+    if (url.username || url.password) continue; // no userinfo
+    if ((url.pathname && url.pathname !== "/") || url.search || url.hash) continue;
+    if (!origins.includes(url.origin)) origins.push(url.origin);
+  }
+  return origins;
+}
+
 export function buildContentSecurityPolicy({ isProd, imageOrigins }: SecurityHeaderInput): string {
-  const trimmedImageOrigins = (imageOrigins ?? "").trim();
   const scriptSrc = isProd
     ? "'self' 'unsafe-inline'"
     : "'self' 'unsafe-inline' 'unsafe-eval'";
   // Same-origin API in production; dev also needs ws: (HMR) and the API host.
   const connectSrc = isProd ? "'self'" : "'self' ws: wss:";
-  const imgSrc = ["'self'", "data:", "blob:"];
-  if (trimmedImageOrigins) imgSrc.push(trimmedImageOrigins);
+  const imgSrc = ["'self'", "data:", "blob:", ...sanitizeImageOrigins(imageOrigins ?? "", isProd)];
 
   return [
     "default-src 'self'",
