@@ -139,11 +139,19 @@ def _purge_one_design(design_id, permanent, staging) -> str:
                 permanent_keys.append(version.image_storage_key)
             if version.thumbnail_storage_key:
                 permanent_keys.append(version.thumbnail_storage_key)
-        staging_keys = [
-            attempt.staged_image_storage_key
-            for attempt in GenerationAttempt.objects.filter(design=locked)
-            if attempt.staged_image_storage_key
-        ]
+        staging_keys: set[str] = set()
+        for attempt in GenerationAttempt.objects.filter(design=locked):
+            if attempt.staged_image_storage_key:
+                staging_keys.add(attempt.staged_image_storage_key)
+            else:
+                # Crash-window recovery: a worker may have uploaded
+                # generation-staging/<attempt>/raw.<ext> before committing the
+                # staged_image_storage_key column, so a blank column does NOT mean
+                # no object exists. Delete every bounded deterministic candidate
+                # for that attempt by its known layout (delete tolerates missing),
+                # so a crash-window object is never orphaned past retention.
+                for extension in pipeline._STAGED_EXTENSIONS:
+                    staging_keys.add(pipeline._staged_key(attempt.id, extension))
 
         # Objects FIRST (a later retry tolerates already-missing objects).
         for key in permanent_keys:

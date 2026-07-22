@@ -93,6 +93,32 @@ class TestRetentionPurge:
         assert not permanent.exists(version.thumbnail_storage_key)
         assert not default_storage.exists(staged_key)  # staging cleanup boundary
 
+    def test_purge_deletes_crash_window_staging_object_without_a_recorded_key(
+        self, inmemory_storage
+    ):
+        # A worker uploaded generation-staging/<attempt>/raw.webp then crashed
+        # before committing staged_image_storage_key: the column is blank but the
+        # object exists. Purge must still delete it (by its deterministic key) so
+        # it is never orphaned past retention.
+        design = _design()
+        attempt = GenerationAttempt.objects.create(
+            design=design,
+            status=_Status.FAILED,
+            error_code=errors.INTERNAL_GENERATION_ERROR,
+            completed_at=timezone.now(),
+        )
+        orphan_key = f"generation-staging/{attempt.id}/raw.webp"
+        default_storage.save(orphan_key, ContentFile(b"crash-window-bytes"))
+        _age_design(design, days=40)
+        assert attempt.staged_image_storage_key == ""
+        assert default_storage.exists(orphan_key)
+
+        result = maintenance.purge_expired_designs()
+
+        assert result["purged"] == 1
+        assert not Design.objects.filter(pk=design.pk).exists()
+        assert not default_storage.exists(orphan_key)  # crash-window object removed
+
     def test_purge_tolerates_already_missing_objects(self, inmemory_storage):
         design, version, _attempt, staged_key = _old_generated_design()
         # Simulate a prior partial run: objects already gone, rows still present.
