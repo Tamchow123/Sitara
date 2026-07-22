@@ -186,6 +186,14 @@ const GENERATION_ERROR_MESSAGES = {
       "We've reached today's limit for generating new concepts. Your design is saved — please try again later.",
     editable: false,
   },
+  // Since Phase 16: a generation that stopped making progress was tidied up by
+  // background maintenance. Honest, non-technical, and safe to try again.
+  generation_stuck: {
+    heading: "Generation didn't finish",
+    message:
+      "This concept took too long and was stopped. Please try generating it again.",
+    editable: false,
+  },
 } satisfies Record<GenerationErrorCode, FriendlyGenerationError>;
 
 // Runtime defence: an error code the frontend does not recognise (a future

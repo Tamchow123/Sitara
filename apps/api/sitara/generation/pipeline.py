@@ -1900,6 +1900,58 @@ def fail_attempt(attempt_id, code: str) -> None:
         _finalise_failure(attempt, code)
 
 
+def reconcile_if_stuck(attempt_id, cutoff) -> str:
+    """Reconcile ONE possibly-stuck attempt (Phase 16, Part C stuck-job reaper).
+
+    Uses the SAME non-blocking attempt advisory lock the pipeline execution
+    holds, so an attempt a live worker is actively running is never touched
+    (returns "skipped"). Under the lock it re-reads the attempt: only one still
+    in a non-terminal state AND still idle since ``cutoff`` (its ``updated_at``
+    did not advance after the caller's query) is marked failed with the stable
+    ``generation_stuck`` code — via the shared ``_finalise_failure``, which
+    preserves every submission marker, prediction id, staged/permanent output
+    and the (unresolved) cost reservation, moves the Design to
+    ``generation_failed`` and NEVER enqueues replacement paid work.
+
+    Returns "reconciled", "skipped" (lock held by an active worker) or
+    "progressed" (no longer stuck / already terminal / gone)."""
+    if not isinstance(attempt_id, uuid.UUID):
+        attempt_id = uuid.UUID(str(attempt_id))
+    with _attempt_advisory_lock(attempt_id) as acquired:
+        if not acquired:
+            return "skipped"
+        fresh = GenerationAttempt.objects.filter(pk=attempt_id).first()
+        if fresh is None or fresh.status not in GenerationAttempt.IN_PROGRESS_STATUSES:
+            return "progressed"
+        if fresh.updated_at > cutoff:
+            # Progressed since the batch query — a live worker is advancing it.
+            return "progressed"
+        _finalise_failure(fresh, errors.GENERATION_STUCK)
+        # Release the global daily count slot ONLY when durable state proves no
+        # provider call could have occurred (no submission marker, no accepted
+        # prediction id, no staged output) — otherwise the reservation is kept,
+        # conservative, because the attempt may already have entered provider
+        # processing. The cost reservation itself is always retained: it is made
+        # inside the pipeline only after a marker is set, so a provably-pre-
+        # provider attempt has none to release.
+        if not fresh.is_demo and _provably_no_provider_call(fresh):
+            _release_live_count(fresh.design_id, fresh.idempotency_key)
+        return "reconciled"
+
+
+def _provably_no_provider_call(attempt) -> bool:
+    """True only when durable attempt state proves no provider request was ever
+    made: no text/image submission-in-flight marker, no accepted prediction id
+    and no staged output. Each provider call persists its marker BEFORE the
+    request, so their combined absence is conclusive."""
+    return (
+        not attempt.text_submission_in_flight
+        and not attempt.image_submission_in_flight
+        and not attempt.image_prediction_id
+        and not attempt.staged_image_storage_key
+    )
+
+
 def _generate_seed() -> int:
     """A cryptographically-generated non-negative 32-bit seed (zero allowed)."""
     return secrets.randbelow(2**32)

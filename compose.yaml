@@ -189,6 +189,20 @@ services:
       redis:
         condition: service_healthy
 
+  celery-beat:
+    build: apps/api
+    # Phase 16: schedule the periodic maintenance tasks (stuck-job reconciler,
+    # expired-design purge). A static settings-based schedule — no separate
+    # scheduler database. Runs as its own process so a single Beat instance owns
+    # scheduling while the worker above executes the tasks.
+    command: ["celery", "-A", "config", "beat", "--loglevel=info"]
+    environment: *api-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
   web:
     build: apps/web
     ports:

@@ -300,6 +300,9 @@ CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 # queue explicitly, so routing is correct even if this table is missed.
 CELERY_TASK_ROUTES = {
     "sitara.generation.tasks.generate_design_attempt": {"queue": "generation"},
+    # Phase 16 maintenance tasks share the generation worker/queue.
+    "sitara.generation.tasks.purge_expired_designs": {"queue": "generation"},
+    "sitara.generation.tasks.reconcile_stuck_generations": {"queue": "generation"},
 }
 # Deterministic, bounded task behaviour: acknowledge late (redeliver on worker
 # loss) and never let a result linger unboundedly. Per-task time limits and the
@@ -748,6 +751,24 @@ LIVE_GENERATION_BUDGET_REDIS_URL = os.getenv(
 LIVE_GENERATION_BUDGET_REDIS_TIMEOUT_SECONDS = env_positive_int(
     "LIVE_GENERATION_BUDGET_REDIS_TIMEOUT_SECONDS", 5
 )
+
+# ---------------------------------------------------------------------------
+# Retention and stuck-job maintenance (Phase 16, Part C). Celery Beat runs two
+# bounded, idempotent periodic tasks. All strict positive integers.
+# ---------------------------------------------------------------------------
+# Designs older than this are purged (rows + permanent AND staging objects). The
+# design purge is also the cleanup boundary for retained crash-recovery staging
+# objects (ADR 0017): a design's staging objects live at most this long.
+DESIGN_RETENTION_DAYS = env_positive_int("DESIGN_RETENTION_DAYS", 30)
+# An attempt in a non-terminal state (queued/running_text/running_image) with no
+# progress for this long is treated as stuck and reconciled to failed.
+GENERATION_STUCK_AFTER_SECONDS = env_positive_int("GENERATION_STUCK_AFTER_SECONDS", 600)
+# Bounded batch sizes so one maintenance run never monopolises the worker.
+DESIGN_PURGE_BATCH_SIZE = env_positive_int("DESIGN_PURGE_BATCH_SIZE", 50)
+GENERATION_STUCK_BATCH_SIZE = env_positive_int("GENERATION_STUCK_BATCH_SIZE", 50)
+# How often (seconds) Celery Beat runs each maintenance task.
+DESIGN_PURGE_INTERVAL_SECONDS = env_positive_int("DESIGN_PURGE_INTERVAL_SECONDS", 3600)
+GENERATION_STUCK_INTERVAL_SECONDS = env_positive_int("GENERATION_STUCK_INTERVAL_SECONDS", 120)
 
 # ---------------------------------------------------------------------------
 # Deterministic zero-cost demo pipeline (Phase 15). The active demo manifest

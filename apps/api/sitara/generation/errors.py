@@ -106,6 +106,14 @@ INGEST_STAGE_ERROR_CODES = frozenset({IMAGE_INGEST_FAILED, IMAGE_INGEST_UNVERIFI
 # (Phase 16 Part B) — the same stable code across both transport positions.
 LIVE_GENERATION_BUDGET_EXHAUSTED = "live_generation_budget_exhausted"
 
+# The stuck-generation reconciler (Phase 16, Part C) marks an attempt that has
+# been non-terminal with no progress past GENERATION_STUCK_AFTER_SECONDS as
+# failed with this stable code. It is deliberately NOT in _SPEND_RESOLVED_CODES:
+# a stuck attempt's provider spend is unresolved, so it preserves every
+# submission marker / prediction id / cost reservation and keeps the enqueue
+# guard blocking regeneration whenever spend may have occurred.
+GENERATION_STUCK = "generation_stuck"
+
 # Catch-all for anything unclassified — an unexpected exception becomes this,
 # never a raw message.
 INTERNAL_GENERATION_ERROR = "internal_generation_error"
@@ -140,6 +148,7 @@ GENERATION_ERROR_CODES = frozenset(
         REFINEMENT_LIMIT_REACHED,
         REFINEMENT_SOURCE_UNAVAILABLE,
         LIVE_GENERATION_BUDGET_EXHAUSTED,
+        GENERATION_STUCK,
         INTERNAL_GENERATION_ERROR,
     }
 )
