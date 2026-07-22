@@ -427,7 +427,7 @@ class TestCanonicalSelectionAuthority:
         # Schema-valid but adversarial: styles=["none"] with a persisted HEAVY
         # density and heavy/embroidery narrative. "none" is authoritative, so the
         # density line is dropped, generated embellishment content is omitted, the
-        # presentation switches to the unembellished wording, and no "heavy",
+        # finishing switches to the unembellished wording, and no "heavy",
         # "density", "embroidery" or "embroidered" direction survives.
         data = _spec_dict("nikah_lehenga_head_drape")
         data["source_selections"]["embellishment_styles"] = ["none"]
@@ -449,11 +449,11 @@ class TestCanonicalSelectionAuthority:
         assert "SENTINELEMB" not in prompt
         for word in (*self._HEAVY, "density", "embroidery", "embroidered"):
             assert word not in lowered
-        # Canonical selection still present; unembellished presentation used.
+        # Canonical selection still present; unembellished finishing used.
         assert "in order, are none" in lowered
         assert "texture, drape and garment detail" in lowered
 
-    def test_non_none_retains_embroidery_presentation(self):
+    def test_non_none_retains_embroidery_finishing(self):
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
         assert prompt.rstrip().endswith("embroidery detail.")
 
