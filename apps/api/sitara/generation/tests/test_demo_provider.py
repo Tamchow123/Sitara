@@ -35,7 +35,7 @@ class TestDemoStructuredDesignProvider:
         provider = DemoStructuredDesignProvider(context=context)
         result = provider.generate(_a_request(context.source_selections))
         assert result.provider == "demo"
-        assert result.model == DEMO_SPEC_MODEL == "demo-spec-1.0.0"
+        assert result.model == DEMO_SPEC_MODEL == "demo-spec-2.0.0"
 
     def test_usage_metadata_is_honest(self):
         context = a_context()

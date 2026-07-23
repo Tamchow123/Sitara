@@ -413,7 +413,7 @@ class TestDemoMode:
             design_spec_schema_version=1,
             design_spec_template_version="demo-1.0.0",
             design_spec_provider="demo",
-            design_spec_model="demo-spec-1.0.0",
+            design_spec_model="demo-spec-2.0.0",
             design_spec_generated_at=timezone.now(),
             image_prompt="A deterministic placeholder prompt.",
             prompt_builder_version="3.0.0",

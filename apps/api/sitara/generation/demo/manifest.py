@@ -25,8 +25,10 @@ from pydantic import (
 )
 
 # Versions the persisted JSON STRUCTURE of a demo manifest. Bump only with a
-# new schema file and a migration/reviewed-manifest update.
-DEMO_MANIFEST_SCHEMA_VERSION = 1
+# new schema file and a migration/reviewed-manifest update. Version 2 (Phase
+# 16B) adds the per-asset ``necklines`` tagging field and expands the controlled
+# colour/fabric/ceremony vocabulary (satin, Anand Karaj, the grouped colours).
+DEMO_MANIFEST_SCHEMA_VERSION = 2
 
 _MODEL_CONFIG = ConfigDict(
     extra="forbid",
@@ -39,7 +41,9 @@ _MODEL_CONFIG = ConfigDict(
 # tagging vocabulary — the questionnaire schema itself remains the sole
 # authority over what a *user* may answer.
 GARMENT_TYPES = frozenset({"lehenga", "saree", "gharara", "sharara", "anarkali", "shalwar_kameez"})
-CEREMONIES = frozenset({"nikah", "mehndi", "baraat", "walima", "pheras", "reception"})
+CEREMONIES = frozenset(
+    {"nikah", "mehndi", "baraat", "walima", "pheras", "anand_karaj", "reception"}
+)
 SILHOUETTES = frozenset(
     {
         "flared_lehenga",
@@ -61,21 +65,40 @@ COLOURS = frozenset(
         "white",
         "red",
         "maroon",
+        "ruby",
+        "burgundy",
         "blush",
         "pink",
         "peach",
+        "coral",
+        "rose",
+        "dusty_rose",
         "orange",
         "yellow",
+        "gold",
+        "silver",
+        "bronze",
+        "copper",
         "green",
         "emerald",
+        "sage",
+        "mint",
+        "olive",
+        "forest_green",
         "teal",
         "blue",
         "navy",
+        "turquoise",
+        "powder_blue",
+        "royal_blue",
         "purple",
-        "gold",
-        "silver",
+        "lavender",
+        "lilac",
+        "plum",
+        "mauve",
         "champagne",
         "beige",
+        "taupe",
         "brown",
         "black",
         "multicolour",
@@ -85,6 +108,7 @@ FABRICS = frozenset(
     {
         "silk",
         "raw_silk",
+        "satin",
         "velvet",
         "organza",
         "chiffon",
@@ -153,6 +177,20 @@ REGIONAL_STYLES = frozenset(
         "hyderabadi",
     }
 )
+# The dedicated canonical neckline vocabulary (Phase 16B / questionnaire v3).
+NECKLINES = frozenset(
+    {
+        "classic_crew",
+        "curved_scoop",
+        "v_neck",
+        "deep_v_neck",
+        "boat_neck",
+        "square_neck",
+        "sweetheart_neck",
+        "high_neck",
+        "band_collar",
+    }
+)
 
 # Garment/silhouette compatibility, mirroring the questionnaire v1
 # ``restrict_options`` rules — used only to reject internally contradictory
@@ -213,6 +251,7 @@ class DemoAsset(BaseModel):
     embellishment_styles: Annotated[list[MachineValue], Field(max_length=8)]
     embellishment_densities: Annotated[list[MachineValue], Field(max_length=8)]
     coverage_preferences: Annotated[list[MachineValue], Field(max_length=8)]
+    necklines: Annotated[list[MachineValue], Field(max_length=8)]
     dupatta_styles: Annotated[list[MachineValue], Field(max_length=8)]
     saree_drapes: Annotated[list[MachineValue], Field(max_length=8)]
     regional_styles: Annotated[list[MachineValue], Field(max_length=8)]
@@ -261,6 +300,7 @@ class DemoAsset(BaseModel):
             self.embellishment_densities, EMBELLISHMENT_DENSITIES, "embellishment_densities"
         )
         _reject_unknown(self.coverage_preferences, COVERAGE_PREFERENCES, "coverage_preferences")
+        _reject_unknown(self.necklines, NECKLINES, "necklines")
         _reject_unknown(self.dupatta_styles, DUPATTA_STYLES, "dupatta_styles")
         _reject_unknown(self.saree_drapes, SAREE_DRAPES, "saree_drapes")
         _reject_unknown(self.regional_styles, REGIONAL_STYLES, "regional_styles")
@@ -305,7 +345,7 @@ class DemoManifest(BaseModel):
 
     model_config = _MODEL_CONFIG
 
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     pack_id: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9-]{1,63}$")]
     assets: Annotated[list[DemoAsset], Field(min_length=1, max_length=200)]
 
@@ -313,7 +353,7 @@ class DemoManifest(BaseModel):
     @classmethod
     def _reject_boolean_schema_version(cls, value: object) -> object:
         if isinstance(value, bool):
-            raise ValueError("schema_version must be the integer 1, not a boolean")
+            raise ValueError("schema_version must be the integer 2, not a boolean")
         return value
 
     @model_validator(mode="after")
@@ -389,6 +429,15 @@ def validate_manifest_coverage(manifest: DemoManifest) -> None:
         raise ManifestCoverageError("fewer than 5 distinct colours are represented across the pack")
     if len(covered_fabrics) < 3:
         raise ManifestCoverageError("fewer than 3 distinct fabrics are represented across the pack")
+
+    # Necklines (Phase 16B) are DELIBERATELY not given a pack-wide coverage
+    # guarantee: the neckline is an OPTIONAL, soft-scored dimension (a user may
+    # express no neckline preference, and the selector only adds a small score
+    # bonus for a match — never a hard filter). Requiring every neckline to be
+    # represented would over-constrain a curated pack without protecting a
+    # correctness or cultural guarantee. The fail-closed guarantees that matter
+    # (garment, Anand Karaj ceremony, covered head, full midriff) are enforced
+    # as hard filters in the selector instead.
 
 
 def assert_production_content_ready(manifest: DemoManifest) -> None:

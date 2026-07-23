@@ -68,7 +68,7 @@ class TestFullDemoPipeline:
         version = DesignVersion.objects.get(pk=result.design_version_id)
         assert version.is_demo is True
         assert version.design_spec_provider == "demo"
-        assert version.design_spec_model == "demo-spec-1.0.0"
+        assert version.design_spec_model == "demo-spec-2.0.0"
         assert version.has_permanent_image
         # The final image lives under the normal design_images key, never the
         # private demo-source namespace.

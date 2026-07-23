@@ -314,7 +314,7 @@ class TestSafety:
 
 class TestTemplateVersion:
     def test_template_version_is_pinned(self):
-        assert DEMO_SPEC_TEMPLATE_VERSION == "1.0.0"
+        assert DEMO_SPEC_TEMPLATE_VERSION == "2.0.0"
 
 
 class TestUnknownGarmentIsRejected:
