@@ -29,6 +29,20 @@ class QuestionOptionSchemaSerializer(serializers.Serializer):
     value = serializers.CharField(help_text="Stable machine identifier persisted in answers.")
     label = serializers.CharField()
     description = serializers.CharField(required=False)
+    visual_key = serializers.CharField(
+        required=False,
+        help_text=(
+            "Optional lower-case machine key mapping to a frontend-owned "
+            "explanatory visual. Never a URL, path or asset reference."
+        ),
+    )
+    group = serializers.CharField(
+        required=False,
+        help_text=(
+            "Optional lower-case machine group for compact grouped rendering "
+            "(e.g. colour groups). Presentation only; never influences generation."
+        ),
+    )
 
 
 class QuestionConstraintsSchemaSerializer(serializers.Serializer):

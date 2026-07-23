@@ -38,13 +38,14 @@ _ASSET_SPECS = (
         "asset_id": "asset-one",
         "colour": (150, 20, 30),
         "garment_types": ["lehenga", "saree"],
-        "ceremonies": ["baraat", "nikah"],
+        "ceremonies": ["baraat", "nikah", "anand_karaj"],
         "silhouettes": ["classic_saree_drape"],
         "colours": ["red", "gold", "maroon"],
         "fabrics": ["silk", "velvet"],
         "embellishment_styles": ["zardozi"],
         "embellishment_densities": ["minimal"],
         "coverage_preferences": ["full_sleeves"],
+        "necklines": ["high_neck"],
         "dupatta_styles": [],
         "saree_drapes": ["nivi_drape"],
     },
@@ -128,6 +129,7 @@ def _write_file_based_pack(tmp_path, *, provenance="verified_project_owned"):
                 "embellishment_styles": spec["embellishment_styles"],
                 "embellishment_densities": spec["embellishment_densities"],
                 "coverage_preferences": spec["coverage_preferences"],
+                "necklines": spec.get("necklines", []),
                 "dupatta_styles": spec["dupatta_styles"],
                 "saree_drapes": spec["saree_drapes"],
                 "regional_styles": [],
@@ -135,7 +137,7 @@ def _write_file_based_pack(tmp_path, *, provenance="verified_project_owned"):
             }
         )
 
-    manifest_dict = {"schema_version": 1, "pack_id": "test-file-pack", "assets": assets}
+    manifest_dict = {"schema_version": 2, "pack_id": "test-file-pack", "assets": assets}
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(json.dumps(manifest_dict), encoding="utf-8")
     return manifest_path, source_dir, manifest_dict

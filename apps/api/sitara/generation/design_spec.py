@@ -26,8 +26,11 @@ from pydantic import (
 
 from .input_safety import contains_phrase
 
-# Versions the persisted JSON STRUCTURE of a DesignSpec. Bump only with a new
-# schema file (schemas/design_spec_vN.json) and a migration strategy.
+# Versions the persisted JSON STRUCTURE of a DesignSpec. This is the DEFAULT
+# (version 1) structure; Phase 16B adds version 2 (a dedicated canonical
+# neckline). New schema versions ship as an additional model + committed schema
+# file (schemas/design_spec_vN.json) with a migration strategy — never a
+# rewrite of an already-persisted historical version.
 DESIGN_SPEC_SCHEMA_VERSION = 1
 
 # The canonical "no broad regional direction" machine value. When the user
@@ -64,8 +67,9 @@ def _any_caveat_mentions(caveats: list[str], phrases: tuple[str, ...]) -> bool:
 # prompt + context builder). It must change whenever the system prompt, the
 # context layout or the generation semantics materially change; a prompt-hash
 # test guards it. Defined here so the contract and the prompt version live
-# together.
-SPEC_TEMPLATE_VERSION = "2.1.0"
+# together. Bumped to 2.2.0 for Phase 16B (Anand Karaj ceremony guidance, the
+# dedicated canonical neckline and satin-vs-silk distinction).
+SPEC_TEMPLATE_VERSION = "2.2.0"
 
 _MODEL_CONFIG = ConfigDict(
     extra="forbid",
@@ -229,6 +233,81 @@ class DesignSpec(BaseModel):
         return self
 
 
-def design_spec_json_schema() -> dict:
-    """The DesignSpec JSON Schema (also written to the committed file)."""
-    return DesignSpec.model_json_schema()
+# --- Version 2 (Phase 16B): a dedicated canonical neckline -----------------
+
+
+class SourceSelectionsV2(SourceSelections):
+    """Version-2 source selections: adds the dedicated canonical neckline.
+
+    ``neckline_style`` is now the single authoritative neckline decision (the
+    old ``high_neckline`` coverage value is retired from the questionnaire).
+    ``None`` means the user expressed no neckline preference. Every other field
+    is inherited unchanged; ``extra="forbid"`` still rejects any unknown key."""
+
+    neckline_style: MachineValue | None
+
+
+class DesignSpecV2(DesignSpec):
+    """Version-2 DesignSpec: identical narrative structure to version 1 with a
+    dedicated canonical neckline in ``source_selections``.
+
+    Overriding ``schema_version`` and ``source_selections`` keeps their
+    original field positions (Pydantic preserves the base declaration order for
+    overridden fields), and the two inherited validators — the boolean
+    schema-version guard and the semantic-invariant model validator — continue
+    to apply."""
+
+    schema_version: Literal[2]
+    source_selections: SourceSelectionsV2
+
+
+# Explicit alias so call sites can name the version-1 model unambiguously.
+DesignSpecV1 = DesignSpec
+
+# The registry of every supported persisted DesignSpec structure. Deliberately
+# a small, explicit mapping for KNOWN versions — never a generic schema
+# framework (ADR 0009 / Phase 16B).
+_DESIGN_SPEC_MODELS: dict[int, type[DesignSpec]] = {1: DesignSpecV1, 2: DesignSpecV2}
+SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS = frozenset(_DESIGN_SPEC_MODELS)
+
+
+class UnsupportedDesignSpecVersion(Exception):
+    """The requested or persisted DesignSpec schema version is not supported.
+
+    Generic, safe message — never echoes the offending payload."""
+
+
+def design_spec_model_for_version(version: object) -> type[DesignSpec]:
+    """The DesignSpec model class for a schema version.
+
+    Total over arbitrary input: a boolean, a non-integer or an unknown integer
+    raises :class:`UnsupportedDesignSpecVersion`, never a ``KeyError`` — so the
+    dispatch is safe on untrusted persisted data."""
+    # bool is an int subclass; a stored ``true`` is a mistake, not version 1.
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise UnsupportedDesignSpecVersion("design spec schema version is not supported")
+    model = _DESIGN_SPEC_MODELS.get(version)
+    if model is None:
+        raise UnsupportedDesignSpecVersion("design spec schema version is not supported")
+    return model
+
+
+def validate_design_spec(payload: object) -> DesignSpec:
+    """Validate a persisted/parsed DesignSpec, dispatching on its
+    ``schema_version``.
+
+    Total over arbitrary input: a non-object payload or an unknown/malformed
+    ``schema_version`` raises :class:`UnsupportedDesignSpecVersion`; a
+    structurally invalid body raises Pydantic ``ValidationError``. Returns the
+    validated version-specific model instance (a :class:`DesignSpec` subclass
+    for version 2)."""
+    if not isinstance(payload, dict):
+        raise UnsupportedDesignSpecVersion("design spec payload is not an object")
+    model = design_spec_model_for_version(payload.get("schema_version"))
+    return model.model_validate(payload)
+
+
+def design_spec_json_schema(version: int = 1) -> dict:
+    """The DesignSpec JSON Schema for a supported version (also written to the
+    committed ``schemas/design_spec_vN.json`` file)."""
+    return design_spec_model_for_version(version).model_json_schema()

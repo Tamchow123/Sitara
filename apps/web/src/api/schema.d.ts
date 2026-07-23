@@ -837,6 +837,10 @@ export interface components {
             value: string;
             label: string;
             description?: string;
+            /** @description Optional lower-case machine key mapping to a frontend-owned explanatory visual. Never a URL, path or asset reference. */
+            visual_key?: string;
+            /** @description Optional lower-case machine group for compact grouped rendering (e.g. colour groups). Presentation only; never influences generation. */
+            group?: string;
         };
         QuestionSchema: {
             /** @description Stable machine identifier. */

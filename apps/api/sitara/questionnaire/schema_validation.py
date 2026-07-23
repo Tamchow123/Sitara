@@ -45,7 +45,7 @@ _STEP_KEYS = frozenset({"id", "title", "description", "questions"})
 _QUESTION_KEYS = frozenset(
     {"id", "type", "label", "help_text", "required", "options", "constraints"}
 )
-_OPTION_KEYS = frozenset({"value", "label", "description"})
+_OPTION_KEYS = frozenset({"value", "label", "description", "visual_key", "group"})
 _RULE_KEYS = frozenset({"id", "when", "then"})
 _WHEN_KEYS = frozenset({"question_id", "operator", "values"})
 _THEN_KEYS = frozenset({"action", "question_id", "values"})
@@ -163,6 +163,16 @@ def _validate_options(question: dict, path: str) -> list[str]:
                 f"{option_path}.description",
                 max_length=MAX_OPTION_DESCRIPTION_LENGTH,
             )
+        # Optional presentation metadata (Phase 16B): both are bounded lower-case
+        # machine identifiers only — never URLs, file paths, colours, HTML, CSS
+        # or Markdown. ``visual_key`` maps to a frontend-owned explanatory visual;
+        # ``group`` buckets options for compact grouped rendering (e.g. colours).
+        # The machine-id pattern rejects slashes, dots, uppercase and angle
+        # brackets, so an option cannot smuggle presentation payloads.
+        if "visual_key" in option:
+            _require_machine_id(option["visual_key"], f"{option_path}.visual_key")
+        if "group" in option:
+            _require_machine_id(option["group"], f"{option_path}.group")
         if value in values:
             _fail(f"{option_path}.value", f"duplicate option value '{value}'")
         values.append(value)

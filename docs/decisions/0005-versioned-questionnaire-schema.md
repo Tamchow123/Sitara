@@ -1,6 +1,9 @@
 # ADR 0005 — Versioned questionnaire schema (Phase 5A)
 
 - **Status:** Accepted (2026-07-17, after the Phase 5A test suite passed)
+- **Amended by ADR 0018 (Phase 16B, 2026-07-23):** questionnaire **v3** added as a
+  new draft (v1 active/fingerprint-locked and v2 untouched); the strict option
+  shape gains optional bounded `visual_key`/`group` machine-id metadata.
 - **Deciders:** Sitara project
 - **Related:** ADR 0002 (application foundation), ADR 0004 (private design
   ownership)

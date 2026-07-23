@@ -13,7 +13,7 @@ import json
 from enum import Enum
 from pathlib import Path
 
-from .design_spec import DesignSpec
+from .design_spec import DesignSpec, validate_design_spec
 from .prompt_builder import PROMPT_BUILDER_VERSION, build_image_prompt
 
 _HERE = Path(__file__).resolve().parent
@@ -44,8 +44,9 @@ def fixture_names() -> list[str]:
 
 
 def load_fixture_spec(name: str) -> DesignSpec:
+    # Version-dispatched so both v1 and v2 golden fixtures load correctly.
     with (FIXTURE_DIR / f"{name}.json").open(encoding="utf-8") as handle:
-        return DesignSpec.model_validate(json.load(handle))
+        return validate_design_spec(json.load(handle))
 
 
 def build_all_prompts() -> dict[str, str]:

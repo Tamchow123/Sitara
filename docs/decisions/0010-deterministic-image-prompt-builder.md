@@ -4,10 +4,16 @@
 - **Date:** 2026-07-18 (amended 2026-07-22 for Phase image-composition:
   composition-first ordering and catalogue framing, `PROMPT_BUILDER_VERSION`
   `4.0.0`; further amended 2026-07-22 for the coverage-first follow-up after live
-  evidence, `PROMPT_BUILDER_VERSION` `5.0.0`)
+  evidence, `PROMPT_BUILDER_VERSION` `5.0.0`; further amended 2026-07-23 for
+  Phase 16B — the dedicated canonical neckline (DesignSpec v2) is rendered early
+  beside coverage and restated at the close, and the model-authored neckline
+  narrative is suppressed when a canonical neckline is chosen, `PROMPT_BUILDER_VERSION`
+  `6.0.0`, with v1 golden snapshots byte-identical and two new v2 fixtures; see
+  ADR 0018)
 - **Deciders:** Sitara maintainers
 - **Phase:** Phase 9 (see ../phases/PHASES.md); amended by Phase
-  image-composition (see ../phases/phase-image-composition.md)
+  image-composition (see ../phases/phase-image-composition.md) and Phase 16B
+  (see 0018-questionnaire-feedback-and-visual-choice-ux.md)
 - **Related:** ADR 0001 (image model), ADR 0009 (structured DesignSpec
   generation), ADR 0004 (private design ownership)
 

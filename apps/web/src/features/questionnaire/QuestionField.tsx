@@ -1,14 +1,20 @@
 "use client";
 
 // One accessible question control, rendered entirely from the schema. Choice
-// groups use a semantic <fieldset>/<legend> with real radio/checkbox inputs;
-// text uses a labelled <textarea>. Help text and errors are associated with
-// the control via aria-describedby. Only currently-allowed options are shown,
-// so active restrictions (e.g. garment-specific silhouettes) are reflected
-// immediately. No option label or limit is hard-coded here.
+// groups use a semantic <fieldset>/<legend> with real radio/checkbox inputs,
+// now composed from focused presentation components (ChoiceOptionGrid,
+// ColourSwatchGrid, NoPreferenceControl) rather than one growing conditional.
+// Text uses a labelled <textarea>. Help text and errors are associated via
+// aria-describedby. Only currently-allowed options are shown, so active
+// restrictions are reflected immediately. No option label or limit is
+// hard-coded here.
 
 import { useId } from "react";
 
+import { ChoiceOptionGrid } from "./ChoiceOptionGrid";
+import { ColourSwatchGrid } from "./ColourSwatchGrid";
+import { NoPreferenceControl } from "./NoPreferenceControl";
+import { colourSwatch } from "./visuals/manifest";
 import type { AnswerValue, Question } from "./types";
 
 type Props = {
@@ -65,30 +71,36 @@ export function QuestionField({ question, value, error, allowed, onChange, onBlu
 
   if (question.type === "single_choice") {
     const current = typeof value === "string" ? value : "";
+    const optional = !question.required;
     return (
-      <fieldset className="field" aria-describedby={describedBy} aria-invalid={error ? true : undefined}>
+      <fieldset
+        className="field"
+        aria-describedby={describedBy}
+        aria-invalid={error ? true : undefined}
+      >
         <legend className="field-label">{question.label}</legend>
         {help}
-        <div className="option-list" role="radiogroup" aria-label={question.label}>
-          {options.map((option) => (
-            <label key={option.value} className="option">
-              <input
-                type="radio"
-                name={question.id}
-                value={option.value}
-                checked={current === option.value}
-                onChange={() => onChange(option.value)}
-                onBlur={onBlur}
-              />
-              <span className="option-body">
-                <span className="option-title">{option.label}</span>
-                {option.description ? (
-                  <span className="option-description">{option.description}</span>
-                ) : null}
-              </span>
-            </label>
-          ))}
-        </div>
+        <ChoiceOptionGrid
+          options={options}
+          name={question.id}
+          type="radio"
+          selected={current ? [current] : []}
+          onToggle={(optionValue, checked) => {
+            if (checked) onChange(optionValue);
+          }}
+          onBlur={onBlur}
+        />
+        {optional ? (
+          // No preference is absence, not a persisted option: clearing to ""
+          // is dropped by the wizard's stale-answer clean-up, so the answer key
+          // simply disappears. Never rendered for a required question.
+          <NoPreferenceControl
+            name={question.id}
+            active={current === ""}
+            onSelect={() => onChange("")}
+            onBlur={onBlur}
+          />
+        ) : null}
         {errorMessage}
       </fieldset>
     );
@@ -101,15 +113,39 @@ export function QuestionField({ question, value, error, allowed, onChange, onBlu
   const max = constraints.max_items;
   const atMax = typeof max === "number" && selected.length >= max;
 
+  // A colour multi_choice (its options map to project-owned colour swatches)
+  // uses the compact grouped swatch selector; every other multi_choice uses the
+  // accessible card grid. Detection is schema-driven, never a hard-coded id.
+  const isColour = options.some((option) => colourSwatch(option.visual_key));
+  if (isColour) {
+    return (
+      <fieldset
+        className="field"
+        aria-describedby={describedBy}
+        aria-invalid={error ? true : undefined}
+      >
+        <legend className="field-label">{question.label}</legend>
+        {help}
+        <ColourSwatchGrid
+          options={options}
+          name={question.id}
+          selected={selected}
+          max={typeof max === "number" ? max : undefined}
+          exclusiveValues={constraints.exclusive_values ?? []}
+          onChange={(next) => onChange(next)}
+          onBlur={onBlur}
+        />
+        {errorMessage}
+      </fieldset>
+    );
+  }
+
   const toggle = (optionValue: string, checked: boolean): void => {
     let next: string[];
     if (checked) {
       if (exclusive.has(optionValue)) {
-        // An exclusive value clears everything else.
         next = [optionValue];
       } else {
-        // Selecting a normal value removes any exclusive value, and preserves
-        // selection order by appending.
         next = [...selected.filter((entry) => !exclusive.has(entry)), optionValue];
       }
     } else {
@@ -118,37 +154,33 @@ export function QuestionField({ question, value, error, allowed, onChange, onBlu
     onChange(next);
   };
 
+  // Prevent selecting past the maximum (server also rejects it), but never
+  // disable an already-checked box.
+  const disabledValues = new Set(
+    atMax
+      ? options
+          .map((option) => option.value)
+          .filter((v) => !selected.includes(v) && !exclusive.has(v))
+      : [],
+  );
+
   return (
-    <fieldset className="field" aria-describedby={describedBy} aria-invalid={error ? true : undefined}>
+    <fieldset
+      className="field"
+      aria-describedby={describedBy}
+      aria-invalid={error ? true : undefined}
+    >
       <legend className="field-label">{question.label}</legend>
       {help}
-      <div className="option-list">
-        {options.map((option) => {
-          const checked = selected.includes(option.value);
-          // Prevent selecting past the maximum (server also rejects it), but
-          // never disable an already-checked box.
-          const disabled = !checked && atMax && !exclusive.has(option.value);
-          return (
-            <label key={option.value} className={`option${disabled ? " option-disabled" : ""}`}>
-              <input
-                type="checkbox"
-                name={question.id}
-                value={option.value}
-                checked={checked}
-                disabled={disabled}
-                onChange={(event) => toggle(option.value, event.target.checked)}
-                onBlur={onBlur}
-              />
-              <span className="option-body">
-                <span className="option-title">{option.label}</span>
-                {option.description ? (
-                  <span className="option-description">{option.description}</span>
-                ) : null}
-              </span>
-            </label>
-          );
-        })}
-      </div>
+      <ChoiceOptionGrid
+        options={options}
+        name={question.id}
+        type="checkbox"
+        selected={selected}
+        disabledValues={disabledValues}
+        onToggle={toggle}
+        onBlur={onBlur}
+      />
       {errorMessage}
     </fieldset>
   );

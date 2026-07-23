@@ -22,7 +22,11 @@ from sitara.generation.design_spec import NO_REGIONAL_DIRECTION
 
 from . import phrases
 
-DEMO_SPEC_TEMPLATE_VERSION = "1.0.0"
+# 2.0.0 (Phase 16B): produces DesignSpec v2 (dedicated canonical neckline) when
+# the context targets it, renders the neckline from neckline_style, and corrects
+# the head-covering and midriff narrative to derive from canonical machine
+# values rather than substring-matching rendered phrase text.
+DEMO_SPEC_TEMPLATE_VERSION = "2.0.0"
 
 
 class DemoGarmentUnsupported(Exception):
@@ -120,6 +124,7 @@ def build_demo_design_spec(context) -> dict:
     embellishment_styles = selections.get("embellishment_styles") or []
     embellishment_density = selections.get("embellishment_density")
     coverage_preferences = selections.get("coverage_preferences") or []
+    neckline_style = selections.get("neckline_style")
     dupatta_style = selections.get("dupatta_style")
     saree_drape = selections.get("saree_drape")
 
@@ -247,18 +252,33 @@ def build_demo_design_spec(context) -> dict:
         if sleeves_coverage
         else "Sleeve length is left to styling preference."
     )
-    neckline_phrase = (
-        phrases.COVERAGE_PHRASES["high_neckline"]
-        if "high_neckline" in coverage_preferences
-        else "a neckline that suits the silhouette"
-    )
-    back_midriff_phrase = (
-        ", ".join(c for c in coverage_phrases if "back" in c or "midriff" in c)
-        or "styled to the wearer's comfort"
+    # Neckline: the dedicated canonical neckline (DesignSpec v2) is
+    # authoritative; a v1 design falls back to the old high_neckline coverage
+    # value, then to a neutral default.
+    if neckline_style and neckline_style in phrases.NECKLINE_PHRASES:
+        neckline_phrase = phrases.NECKLINE_PHRASES[neckline_style]
+    elif "high_neckline" in coverage_preferences:
+        neckline_phrase = phrases.COVERAGE_PHRASES["high_neckline"]
+    else:
+        neckline_phrase = "a neckline that suits the silhouette"
+    # Back and midriff derived from canonical machine values (full_midriff means
+    # no exposed waist), not by substring-matching rendered phrase text.
+    covered_parts = []
+    if "full_back" in coverage_preferences:
+        covered_parts.append("given full back coverage")
+    if "full_midriff" in coverage_preferences:
+        covered_parts.append("given full midriff coverage, with no bare skin at the waist")
+    back_midriff_phrase = ", ".join(covered_parts) or "styled to the wearer's comfort"
+    # Head covering: covered when the coverage preference asks for it OR the
+    # dupatta is worn over the head (a single head drape or a double dupatta with
+    # a head layer) — consistent with the deterministic prompt builder.
+    wants_head_covered = "head_drape_preferred" in coverage_preferences or dupatta_style in (
+        "head_drape",
+        "double_dupatta",
     )
     head_covering_phrase = (
-        phrases.COVERAGE_PHRASES["head_drape_preferred"]
-        if "head_drape_preferred" in coverage_preferences
+        "kept covered, with the drape drawn up and over it so the hair is not visible"
+        if wants_head_covered
         else "left uncovered unless the drape naturally covers it"
     )
 
@@ -306,8 +326,13 @@ def build_demo_design_spec(context) -> dict:
         image_alt_text = image_alt_text + " Generated as a deterministic demo concept."
     image_alt_text = image_alt_text[:300]
 
+    # The demo engine produces exactly the DesignSpec structure the context
+    # targets (v1, or v2 when the questionnaire declares a dedicated neckline).
+    # ``source_selections`` already carries neckline_style for a v2 context.
+    schema_version = getattr(context, "design_spec_schema_version", 1)
+
     return {
-        "schema_version": 1,
+        "schema_version": schema_version,
         "source_selections": dict(selections),
         "title": title,
         "concept_summary": concept_summary,

@@ -82,6 +82,7 @@ CEREMONY_PHRASES: dict[str, str] = {
     "baraat": "a baraat",
     "walima": "a walima",
     "pheras": "the pheras",
+    "anand_karaj": "an Anand Karaj",
     "reception": "a reception",
 }
 
@@ -115,21 +116,40 @@ COLOUR_PHRASES: dict[str, str] = {
     "white": "white",
     "red": "red",
     "maroon": "deep maroon",
+    "ruby": "ruby",
+    "burgundy": "burgundy",
     "blush": "soft blush",
     "pink": "pink",
     "peach": "peach",
+    "coral": "coral",
+    "rose": "rose",
+    "dusty_rose": "dusty rose",
     "orange": "warm orange",
     "yellow": "sunlit yellow",
+    "gold": "gold",
+    "silver": "silver",
+    "bronze": "bronze",
+    "copper": "copper",
     "green": "green",
     "emerald": "emerald",
+    "sage": "sage",
+    "mint": "mint",
+    "olive": "olive",
+    "forest_green": "forest green",
     "teal": "teal",
     "blue": "blue",
     "navy": "navy",
+    "turquoise": "turquoise",
+    "powder_blue": "powder blue",
+    "royal_blue": "royal blue",
     "purple": "purple",
-    "gold": "gold",
-    "silver": "silver",
+    "lavender": "lavender",
+    "lilac": "lilac",
+    "plum": "plum",
+    "mauve": "mauve",
     "champagne": "champagne",
     "beige": "beige",
+    "taupe": "taupe",
     "brown": "brown",
     "black": "black",
     "multicolour": "a considered multicolour mix",
@@ -138,6 +158,7 @@ COLOUR_PHRASES: dict[str, str] = {
 FABRIC_PHRASES: dict[str, str] = {
     "silk": "silk",
     "raw_silk": "raw silk",
+    "satin": "satin",
     "velvet": "velvet",
     "organza": "organza",
     "chiffon": "chiffon",
@@ -181,6 +202,21 @@ COVERAGE_PHRASES: dict[str, str] = {
     "full_back": "given full back coverage",
     "full_midriff": "given full midriff coverage",
     "head_drape_preferred": "styled with the head covered",
+}
+
+# The dedicated canonical neckline (Phase 16B / DesignSpec v2). Keyed by the
+# neckline_style machine value; supplies the deterministic neckline narrative
+# the demo engine renders into coverage_and_drape.neckline.
+NECKLINE_PHRASES: dict[str, str] = {
+    "classic_crew": "a classic crew neckline sitting at the base of the neck",
+    "curved_scoop": "a softly curved scoop neckline dipping just below the collarbone",
+    "v_neck": "a moderate V-shaped neckline",
+    "deep_v_neck": "a deep V-shaped neckline plunging below the collarbone",
+    "boat_neck": "a wide boat neckline running straight across from shoulder to shoulder",
+    "square_neck": "a clean square neckline cut across the chest",
+    "sweetheart_neck": "a sweetheart neckline curved like the top of a heart",
+    "high_neck": "a fully closed high neckline covering the collarbone and upper chest",
+    "band_collar": "an upright band or mandarin collar standing at the neck",
 }
 
 DUPATTA_PHRASES: dict[str, str] = {

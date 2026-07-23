@@ -44,6 +44,7 @@ def _asset_dict(asset_id: str, **overrides) -> dict:
         "embellishment_styles": ["zardozi"],
         "embellishment_densities": ["heavy"],
         "coverage_preferences": ["full_sleeves"],
+        "necklines": [],
         "dupatta_styles": ["head_drape"],
         "saree_drapes": [],
         "regional_styles": [],
@@ -56,7 +57,7 @@ def _asset_dict(asset_id: str, **overrides) -> dict:
 def _two_lehenga_manifest() -> DemoManifest:
     return DemoManifest.model_validate(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "pack_id": "test-selector-pack",
             "assets": [
                 _asset_dict(
@@ -113,7 +114,7 @@ class TestHardFiltering:
     def test_no_compatible_asset_raises_controlled_error(self):
         manifest = DemoManifest.model_validate(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "pack_id": "test-empty-garment-pack",
                 "assets": [_asset_dict("lehenga-only", garment_types=["lehenga"])],
             }
@@ -227,7 +228,7 @@ class TestTieBreaking:
         if reversed_order:
             assets = list(reversed(assets))
         return DemoManifest.model_validate(
-            {"schema_version": 1, "pack_id": "test-tie-pack", "assets": assets}
+            {"schema_version": 2, "pack_id": "test-tie-pack", "assets": assets}
         )
 
     def _expected_tie_break_winner(self, spec, manifest, manifest_hash: str) -> str:

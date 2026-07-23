@@ -11,7 +11,7 @@ from sitara.ai_gateway.structured_design import (
     StructuredDesignProviderError,
     StructuredDesignRequest,
 )
-from sitara.generation.design_spec import DesignSpec
+from sitara.generation.design_spec import DesignSpec, DesignSpecV2, validate_design_spec
 
 from .utils import a_valid_spec_dict
 
@@ -35,14 +35,22 @@ def _client(messages):
     return SimpleNamespace(beta=SimpleNamespace(messages=messages))
 
 
-def _request():
+def _request(schema_version: int = 1):
     return StructuredDesignRequest(
         system_prompt="SYSTEM",
         user_message="USER",
         source_selections={"garment_type": "lehenga"},
         max_output_tokens=4096,
         attempt=1,
+        schema_version=schema_version,
     )
+
+
+def _v2_spec():
+    data = a_valid_spec_dict()
+    data["schema_version"] = 2
+    data["source_selections"]["neckline_style"] = "high_neck"
+    return validate_design_spec(data)
 
 
 def _message(parsed, stop_reason, input_tokens=100, output_tokens=200):
@@ -76,6 +84,26 @@ class TestSuccess:
         provider.generate(_request())
         assert messages.kwargs["model"] == settings.ANTHROPIC_MODEL
         assert messages.kwargs["max_tokens"] == 4096
+
+    def test_v2_request_uses_the_v2_output_format(self):
+        spec = _v2_spec()
+        messages = _FakeMessages(result=_message(spec, "end_turn"))
+        provider = AnthropicStructuredDesignProvider(client=_client(messages))
+        result = provider.generate(_request(schema_version=2))
+        # The provider selects the target structure version's model class.
+        assert messages.kwargs["output_format"] is DesignSpecV2
+        assert result.payload["schema_version"] == 2
+
+    def test_unsupported_schema_version_fails_closed_without_a_request(self):
+        # An out-of-registry version must fail closed as a definitively
+        # spend-free provider error, and no request may be sent.
+        messages = _FakeMessages(result=_message(None, "end_turn"))
+        provider = AnthropicStructuredDesignProvider(client=_client(messages))
+        with pytest.raises(StructuredDesignProviderError) as excinfo:
+            provider.generate(_request(schema_version=99))
+        assert excinfo.value.category == "unsupported_schema_version"
+        assert excinfo.value.ambiguous_acceptance is False
+        assert messages.calls == 0
 
 
 class TestUnusableOutputs:

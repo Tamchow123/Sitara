@@ -1,6 +1,11 @@
 # 0009 — Structured DesignSpec generation
 
 - **Status:** accepted
+- **Amended by ADR 0018 (Phase 16B, 2026-07-23):** **DesignSpec schema version 2**
+  adds `source_selections.neckline_style` via a small explicit version registry
+  with total, fail-safe dispatch; version 1 stays fully read/validated and its
+  committed JSON Schema byte-identical, never rewritten. `SPEC_TEMPLATE_VERSION`
+  2.1.0 → 2.2.0.
 - **Date:** 2026-07-18
 - **Deciders:** Sitara maintainers
 - **Phase:** Phase 8 (see ../phases/PHASES.md)
