@@ -1,0 +1,63 @@
+{
+  "schema_version": 2,
+  "source_selections": {
+    "garment_type": "saree",
+    "ceremony": "walima",
+    "regional_style": "no_specific_direction",
+    "silhouette": "classic_saree_drape",
+    "colour_palette": ["dusty_rose", "champagne"],
+    "fabrics": ["satin"],
+    "embellishment_styles": ["sequins", "pearls"],
+    "embellishment_density": "minimal",
+    "coverage_preferences": ["three_quarter_sleeves"],
+    "neckline_style": "sweetheart_neck",
+    "dupatta_style": null,
+    "saree_drape": "nivi_drape"
+  },
+  "title": "Dusty rose and champagne draped saree for a walima",
+  "concept_summary": "A soft walima concept built around a classically draped dusty rose saree over a fitted blouse with a sweetheart neckline. Champagne sequins and pearls keep the surface light and luminous rather than heavily worked.",
+  "garment_breakdown": {
+    "overall_form": "A fitted blouse with a sweetheart neckline under a classically draped saree with a front pallu.",
+    "garment_components": ["Fitted sweetheart blouse", "Draped saree with pleats", "Nivi-style pallu"],
+    "silhouette": "The look is created by the drape itself over a fitted blouse, with pleats at the front.",
+    "drape_or_layering": "Front pleats tucked at the waist with the pallu carried over the left shoulder.",
+    "key_proportions": "A fitted blouse and a fluid drape keep the proportions soft and elongated."
+  },
+  "colour_story": {
+    "palette_summary": "A dusty rose base warmed by champagne, kept gentle and low-contrast.",
+    "placement": "Dusty rose leads across the drape, with champagne as the accent through the pallu and border.",
+    "rationale": "Dusty rose reads romantic for a walima, while champagne adds a soft metallic lift."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Satin",
+      "placement": "Whole saree and blouse",
+      "finish_and_movement": "A smooth, lustrous-faced weave that drapes fluidly and catches light cleanly."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["Sequin scatter", "Pearl accents"],
+    "density": "A light scatter concentrated along the pallu and border rather than all over.",
+    "placement": ["Pallu", "Border", "Blouse edges"],
+    "motifs": ["Small scattered stars", "Fine pearl clusters"],
+    "restraint_notes": "Open ground is left between accents so the surface stays airy."
+  },
+  "coverage_and_drape": {
+    "sleeves": "Three-quarter fitted sleeves as requested.",
+    "neckline": "An open scooped neckline that dips at the front.",
+    "back_and_midriff": "A fitted blouse with a natural saree midriff, styled to sit comfortably.",
+    "head_covering": "No head covering is requested; the hair is styled uncovered.",
+    "dupatta_or_saree_drape": "A classic nivi drape with the pallu over the left shoulder."
+  },
+  "cultural_context": {
+    "regional_direction": null,
+    "interpretation_notes": ["No broad regional direction was requested; the styling stays widely applicable."],
+    "safeguards": ["No specific family, sect or regional tradition is presented as universal or definitive."]
+  },
+  "styling_notes": ["Keep jewellery delicate to match the light embellishment.", "A soft updo suits the open neckline."],
+  "construction_caveats": [
+    "This is a concept visualisation, not a sewing pattern, and includes no measurements.",
+    "It does not guarantee that the garment can be constructed exactly as shown."
+  ],
+  "image_alt_text": "A model in a classically draped dusty rose satin saree with a sweetheart-neck blouse and light champagne embellishment for a walima."
+}

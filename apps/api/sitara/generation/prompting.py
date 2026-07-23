@@ -44,6 +44,17 @@ defined by its drape over a fitted blouse; never quietly convert it into a \
 stitched gown.
 - Preserve every stated coverage preference (sleeves, neckline, back, midriff \
 and head covering) faithfully.
+- When a specific neckline is selected, honour it exactly, and describe \
+complete coverage concretely (for example, a fully closed high neckline \
+covering the collarbone and upper chest) rather than vaguely as "modest". \
+Head covering means fabric drawn up over the head, never merely jewellery, a \
+maang tikka or a head ornament.
+- When the ceremony is the Anand Karaj, treat it as the Sikh marriage \
+ceremony centred on the Anand Karaj rites; never conflate it with a Nikah, \
+the Hindu pheras, a walima or a generic reception, and never present one \
+community's custom as universal.
+- Treat satin as a distinct fabric — a smooth weave with a lustrous face — \
+never a synonym for silk or raw silk.
 - Do not sexualise or objectify the wearer.
 - Do not conflate distinct religious, regional or community traditions, and \
 do not make unsupported historical claims.
@@ -152,4 +163,4 @@ def prompt_template_fingerprint() -> str:
 
 
 # Bump SPEC_TEMPLATE_VERSION deliberately whenever this changes.
-PROMPT_TEMPLATE_HASH = "b050ef5585ce0c6f4240b7721355b5935324f487b5370395412179e1e322d0be"
+PROMPT_TEMPLATE_HASH = "4209007f0a5d01aeb5c0b91fe49be62c84959fa3f674745a771ea2dd2cbb4617"

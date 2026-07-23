@@ -34,7 +34,7 @@ from sitara.questionnaire.answer_validation import normalise_text
 from sitara.questionnaire.models import QuestionnaireVersion
 from sitara.questionnaire.rules import build_selected, questions_by_id, visible_questions
 
-from .design_spec import SourceSelections
+from .design_spec import SourceSelections, SourceSelectionsV2
 from .input_safety import scan_user_text
 from .inspiration_context import (
     InspirationAssetIneligible,
@@ -63,6 +63,22 @@ _LIST_SELECTION_FIELDS = (
     "coverage_preferences",
 )
 
+# The dedicated canonical neckline (Phase 16B). It exists only in questionnaire
+# versions that declare a ``neckline_style`` question; when present the design
+# targets DesignSpec schema version 2 (which carries the field), otherwise the
+# design targets version 1 exactly as before. This is the single, explicit
+# capability check that chooses the DesignSpec version — never a generic
+# framework (ADR 0009 / Phase 16B).
+_NECKLINE_FIELD = "neckline_style"
+
+
+def _questionnaire_declares_neckline(schema: dict) -> bool:
+    return _NECKLINE_FIELD in questions_by_id(schema)
+
+
+def _target_design_spec_version(schema: dict) -> int:
+    return 2 if _questionnaire_declares_neckline(schema) else 1
+
 
 class DesignNotReady(Exception):
     """A pre-spend gate failed; no provider is selected and nothing is spent.
@@ -85,6 +101,11 @@ class GenerationContext:
     untrusted_texts: list[dict]
     inspiration_context: InspirationContextSnapshot
     inspiration_cues: list[dict]
+    # The DesignSpec structure this questionnaire targets: 1 (default) or 2
+    # (Phase 16B, when the questionnaire declares a dedicated neckline). The
+    # provider stages, demo engine and persistence read this to produce and
+    # store the correct version.
+    design_spec_schema_version: int = 1
 
 
 def _option_labels(schema: dict) -> dict[str, dict[str, str]]:
@@ -136,14 +157,20 @@ def build_generation_context(design) -> GenerationContext:
     visibility = visible_questions(schema, build_selected(schema, answers))
     option_labels = _option_labels(schema)
 
-    source_selections = _build_source_selections(answers, visibility)
+    target_version = _target_design_spec_version(schema)
+    include_neckline = target_version == 2
+    source_selections = _build_source_selections(
+        answers, visibility, include_neckline=include_neckline
+    )
     # The DesignSpec contract must be satisfiable by this questionnaire BEFORE
     # any provider is selected or any client is constructed. A schema that does
     # not supply the required source fields (or supplies an unusable shape) is a
     # controlled DesignNotReady, never a Pydantic traceback — and neither the
-    # Pydantic input nor questionnaire contents are surfaced.
+    # Pydantic input nor questionnaire contents are surfaced. The version-2
+    # contract additionally requires the dedicated neckline field.
+    selections_model = SourceSelectionsV2 if include_neckline else SourceSelections
     try:
-        SourceSelections.model_validate(source_selections)
+        selections_model.model_validate(source_selections)
     except ValidationError:
         raise DesignNotReady(
             "unsupported_questionnaire_contract",
@@ -220,16 +247,25 @@ def build_generation_context(design) -> GenerationContext:
         untrusted_texts=untrusted_texts,
         inspiration_context=inspiration_context,
         inspiration_cues=provider_inspiration_cues(inspiration_context),
+        design_spec_schema_version=target_version,
     )
 
 
-def _build_source_selections(answers: dict, visibility: dict) -> dict:
+def _build_source_selections(answers: dict, visibility: dict, *, include_neckline: bool) -> dict:
     """The canonical machine-value echo — only currently-visible answers, with
-    optional questions null/empty as appropriate."""
+    optional questions null/empty as appropriate.
+
+    ``include_neckline`` adds the dedicated ``neckline_style`` scalar (Phase
+    16B / DesignSpec v2); it is null when unanswered, hidden or not a string."""
     selections: dict = {}
     for field in _SCALAR_SELECTION_FIELDS:
         value = answers.get(field)
         selections[field] = value if (visibility.get(field) and isinstance(value, str)) else None
+    if include_neckline:
+        value = answers.get(_NECKLINE_FIELD)
+        selections[_NECKLINE_FIELD] = (
+            value if (visibility.get(_NECKLINE_FIELD) and isinstance(value, str)) else None
+        )
     for field in _LIST_SELECTION_FIELDS:
         value = answers.get(field)
         if visibility.get(field) and isinstance(value, list):

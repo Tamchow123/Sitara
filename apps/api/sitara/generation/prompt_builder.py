@@ -55,14 +55,21 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from .design_spec import DESIGN_SPEC_SCHEMA_VERSION, DesignSpec
+from .design_spec import DesignSpec, validate_design_spec
 from .input_safety import scan_design_spec, scan_generated_text
 
 # Bump ONLY with a deliberate snapshot review and manifest update. The snapshot
 # regeneration command REFUSES to overwrite committed snapshots unless this
 # value changes (see prompt_snapshots.evaluate_regeneration); the persisted
 # provenance records this value.
-PROMPT_BUILDER_VERSION = "5.0.0"
+#
+# 6.0.0 (Phase 16B): the canonical prompt inputs changed — a dedicated
+# ``neckline_style`` (DesignSpec v2) is now rendered as an explicit, mandatory
+# visual requirement in the leading coverage directive and the closing
+# reinforcement, and the generated neckline narrative is suppressed when a
+# canonical neckline is chosen so it can never contradict it. Version-1 specs
+# render exactly as before.
+PROMPT_BUILDER_VERSION = "6.0.0"
 
 # Hard upper bound on the assembled prompt. Guaranteed by construction: the
 # mandatory content is reserved first and generated narrative is budgeted into
@@ -406,6 +413,58 @@ _COVERAGE_REINFORCE = {
     "full_midriff": "a covered midriff",
     "full_back": "a covered back",
 }
+# Concrete, garment-neutral VISUAL clauses for the dedicated canonical neckline
+# (DesignSpec v2 / Phase 16B). Keyed only on the canonical `neckline_style`
+# machine value — a small, source-controlled set like the coverage clauses, NOT
+# a broad rules engine. When a neckline is chosen it is rendered as an explicit,
+# mandatory visual requirement beside the other coverage requirements (and
+# briefly restated at the close), and the generated neckline narrative is
+# suppressed so it can never contradict the canonical choice. A v1 spec, or a v2
+# spec with no neckline preference, renders exactly as before.
+_NECKLINE_CLAUSES = {
+    "classic_crew": "a classic crew neckline sitting at the base of the neck",
+    "curved_scoop": "a softly curved scoop neckline dipping just below the collarbone",
+    "v_neck": "a moderate V-shaped neckline",
+    "deep_v_neck": "a deep V-shaped neckline plunging below the collarbone",
+    "boat_neck": "a wide boat neckline running straight across from shoulder to shoulder",
+    "square_neck": "a clean square neckline cut across the chest",
+    "sweetheart_neck": "a sweetheart neckline curved like the top of a heart",
+    "high_neck": (
+        "a fully closed high neckline covering the collarbone and upper chest, "
+        "not an open, scooped or sweetheart neckline"
+    ),
+    "band_collar": "an upright band or mandarin collar standing at the neck",
+}
+# Short labels for the brief end-of-prompt reinforcement (same keys).
+_NECKLINE_REINFORCE = {
+    "classic_crew": "a crew neckline",
+    "curved_scoop": "a scoop neckline",
+    "v_neck": "a V neckline",
+    "deep_v_neck": "a deep V neckline",
+    "boat_neck": "a boat neckline",
+    "square_neck": "a square neckline",
+    "sweetheart_neck": "a sweetheart neckline",
+    "high_neck": "a closed high neckline",
+    "band_collar": "a band collar",
+}
+
+
+def _canonical_neckline(ss) -> str | None:
+    """The canonical neckline clause for a v2 spec with a neckline preference,
+    or ``None`` for a v1 spec / no preference. Uses ``getattr`` because a
+    version-1 SourceSelections has no ``neckline_style`` attribute."""
+    value = getattr(ss, "neckline_style", None)
+    return _NECKLINE_CLAUSES.get(value) if value else None
+
+
+def _canonical_neckline_reinforce(ss) -> str | None:
+    """The short reinforcement label for a v2 spec's canonical neckline, or
+    ``None`` for a v1 spec / no preference. Uses ``getattr`` because a
+    version-1 SourceSelections has no ``neckline_style`` attribute."""
+    value = getattr(ss, "neckline_style", None)
+    return _NECKLINE_REINFORCE.get(value) if value else None
+
+
 # The user's explicit head-covering coverage preference, and the dupatta styling
 # that also means "worn over the head". Either signals that the hair must be
 # covered.
@@ -442,7 +501,14 @@ def _coverage_directive(spec: DesignSpec) -> list[_Piece]:
     veil clause only when the user actually requested a covered head."""
     ss = spec.source_selections
     prefs = ss.coverage_preferences or []
-    clauses = [clause for key, clause in _COVERAGE_CLAUSES.items() if key in prefs]
+    # The canonical neckline is rendered FIRST so it sits at the very front of
+    # the high-priority coverage directive, beside the other coverage
+    # requirements FLUX most often ignores.
+    clauses = []
+    neckline = _canonical_neckline(ss)
+    if neckline:
+        clauses.append(neckline)
+    clauses += [clause for key, clause in _COVERAGE_CLAUSES.items() if key in prefs]
     if _wants_head_covered(ss):
         clauses.append(
             f"{_head_cover_reference(ss)} pulled up and over the head like a veil, "
@@ -464,7 +530,11 @@ def _coverage_reinforcement(spec: DesignSpec) -> _Piece | None:
     positive, conditional; never a negative prompt."""
     ss = spec.source_selections
     prefs = ss.coverage_preferences or []
-    bits = [label for key, label in _COVERAGE_REINFORCE.items() if key in prefs]
+    bits = []
+    neckline = _canonical_neckline_reinforce(ss)
+    if neckline:
+        bits.append(neckline)
+    bits += [label for key, label in _COVERAGE_REINFORCE.items() if key in prefs]
     if _wants_head_covered(ss):
         bits.append("the head covered with no hair visible")
     if not bits:
@@ -481,7 +551,12 @@ def _coverage(spec: DesignSpec) -> list[_Piece]:
             _mandatory(f"Coverage preferences: {_readable_list(ss.coverage_preferences)}")
         )
     pieces.append(_narrative(f"Sleeves: {_slot(cd.sleeves, _NARRATIVE_CAP)}"))
-    pieces.append(_narrative(f"Neckline: {_slot(cd.neckline, _NARRATIVE_CAP)}"))
+    # When a canonical neckline was chosen it is already rendered as a mandatory
+    # visual requirement in the leading coverage directive; the model-authored
+    # neckline narrative is suppressed here so it can never contradict it. A v1
+    # spec (or a v2 spec with no neckline preference) still renders the narrative.
+    if _canonical_neckline(ss) is None:
+        pieces.append(_narrative(f"Neckline: {_slot(cd.neckline, _NARRATIVE_CAP)}"))
     pieces.append(_narrative(f"Back and midriff: {_slot(cd.back_and_midriff, _NARRATIVE_CAP)}"))
     pieces.append(_narrative(f"Head covering: {_slot(cd.head_covering, _NARRATIVE_CAP)}"))
     return pieces
@@ -585,7 +660,10 @@ def build_image_prompt(spec: DesignSpec) -> str:
     and never echoes the prompt or spec text."""
     if not isinstance(spec, DesignSpec):
         try:
-            spec = DesignSpec.model_validate(spec)
+            # Version-dispatched: a raw dict is validated as v1 or v2 by its
+            # own schema_version (a DesignSpecV2 instance already passes the
+            # isinstance check above, since it subclasses DesignSpec).
+            spec = validate_design_spec(spec)
         except Exception as exc:  # controlled: never surface the payload
             raise ImagePromptBuildError("design spec failed validation") from exc
 
@@ -645,8 +723,3 @@ def build_image_prompt(spec: DesignSpec) -> str:
         # Unreachable given the budget above; never slice a completed prompt.
         raise ImagePromptBuildError("assembled image prompt exceeded the maximum length")
     return prompt
-
-
-# Re-exported so the persistence service can require the supported schema
-# version without importing two modules.
-SUPPORTED_DESIGN_SPEC_SCHEMA_VERSION = DESIGN_SPEC_SCHEMA_VERSION

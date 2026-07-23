@@ -21,14 +21,17 @@ class StructuredDesignRequest:
     service (the user message wraps untrusted free text in a delimited
     section). ``source_selections`` is the canonical machine-value echo the
     output must reproduce exactly — passed so offline fixture providers can
-    build a matching result without a network call. ``attempt`` is 1 for the
-    initial request and 2 for the single allowed retry."""
+    build a matching result without a network call. ``schema_version`` is the
+    target DesignSpec structure version (1 or 2, Phase 16B) so the provider
+    parses/produces the correct model. ``attempt`` is 1 for the initial request
+    and 2 for the single allowed retry."""
 
     system_prompt: str
     user_message: str
     source_selections: dict
     max_output_tokens: int
     attempt: int
+    schema_version: int = 1
 
 
 @dataclass(frozen=True)

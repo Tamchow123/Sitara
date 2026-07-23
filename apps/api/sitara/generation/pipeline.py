@@ -82,7 +82,7 @@ from .demo.provider import (
     DemoStructuredDesignProvider,
 )
 from .demo.selector import DemoAssetSelection, DemoAssetUnavailable, select_demo_asset
-from .design_spec import DesignSpec
+from .design_spec import UnsupportedDesignSpecVersion, validate_design_spec
 from .image_download import MAX_REDIRECTS
 from .prompt_builder import ImagePromptBuildError
 from .prompt_service import ImagePromptImmutable, build_and_store_image_prompt
@@ -1372,8 +1372,8 @@ def _select_demo_asset_for_attempt(attempt, version) -> tuple[DemoAssetSelection
         )
 
     try:
-        spec = DesignSpec.model_validate(version.design_spec)
-    except ValidationError as exc:
+        spec = validate_design_spec(version.design_spec)
+    except (ValidationError, UnsupportedDesignSpecVersion) as exc:
         raise _TerminalGenerationError(errors.DEMO_ASSETS_UNAVAILABLE) from exc
     try:
         selection = select_demo_asset(spec, version.image_prompt, manifest)

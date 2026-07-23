@@ -36,7 +36,12 @@ from sitara.designs.services import (
 
 from . import cost_accounting, cost_control
 from .context import DesignNotReady, GenerationContext, build_generation_context
-from .design_spec import DESIGN_SPEC_SCHEMA_VERSION, SPEC_TEMPLATE_VERSION, DesignSpec
+from .design_spec import (
+    SPEC_TEMPLATE_VERSION,
+    DesignSpec,
+    UnsupportedDesignSpecVersion,
+    validate_design_spec,
+)
 from .input_safety import GeneratedContentRejected, RejectionCategory, contains_phrase, iter_strings
 from .inspiration_context import (
     InspirationAssetIneligible,
@@ -234,8 +239,13 @@ def _assert_no_inspiration_leakage(
 
 def _validate_output(payload: dict, context: GenerationContext) -> DesignSpec:
     """Fresh Django-side revalidation + business checks. Raises on any failure
-    (all treated as retryable by the caller)."""
-    spec = DesignSpec.model_validate(payload)
+    (all treated as retryable by the caller). Validation dispatches on the
+    persisted ``schema_version`` and the produced version must match the target
+    the context selected — a model that returned the wrong structure version is
+    rejected."""
+    spec = validate_design_spec(payload)
+    if spec.schema_version != context.design_spec_schema_version:
+        raise SourceSelectionMismatch("generated schema version did not match the target")
     scan_design_spec_or_raise(spec)
     _assert_source_selections_match(spec, context.source_selections)
     _assert_no_inspiration_leakage(spec, context.inspiration_context)
@@ -276,6 +286,7 @@ def _generate_valid_spec(provider, context: GenerationContext, design_id, genera
             source_selections=context.source_selections,
             max_output_tokens=settings.DESIGN_SPEC_MAX_OUTPUT_TOKENS,
             attempt=attempt,
+            schema_version=context.design_spec_schema_version,
         )
         stage = _INITIAL_STRUCTURED_STAGES[attempt]
         # Reserve BEFORE the submission marker (spec Part A §6 ordering); a
@@ -331,6 +342,7 @@ def _generate_valid_spec(provider, context: GenerationContext, design_id, genera
                 spec = _validate_output(result.payload, context)
             except (
                 ValidationError,
+                UnsupportedDesignSpecVersion,
                 GeneratedContentRejected,
                 SourceSelectionMismatch,
             ) as exc:
@@ -419,7 +431,9 @@ def _finalise_atomic(
             )
         version = create_next_design_version_locked(locked)
         version.design_spec = spec.model_dump(mode="json")
-        version.design_spec_schema_version = DESIGN_SPEC_SCHEMA_VERSION
+        # Persist the ACTUAL structure version produced (1 or 2), never a
+        # module default — a v2 spec must record schema version 2.
+        version.design_spec_schema_version = spec.schema_version
         version.design_spec_template_version = SPEC_TEMPLATE_VERSION
         version.design_spec_provider = usage.provider
         version.design_spec_model = usage.model

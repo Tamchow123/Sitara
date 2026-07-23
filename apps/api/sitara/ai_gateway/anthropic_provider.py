@@ -18,7 +18,10 @@ from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from pydantic import ValidationError
 
-from sitara.generation.design_spec import DesignSpec
+from sitara.generation.design_spec import (
+    UnsupportedDesignSpecVersion,
+    design_spec_model_for_version,
+)
 
 from .structured_design import (
     StructuredDesignProviderError,
@@ -87,13 +90,24 @@ class AnthropicStructuredDesignProvider:
 
     def generate(self, request: StructuredDesignRequest) -> StructuredDesignResult:
         client = self._client()
+        # The target DesignSpec structure (version 1 or 2) is chosen by the
+        # generation service from the questionnaire's capabilities; an
+        # unsupported version fails closed as a definitively spend-free provider
+        # error (no request is ever sent) so the caller releases its reservation
+        # through the normal path rather than seeing an uncaught exception.
+        try:
+            output_format = design_spec_model_for_version(request.schema_version)
+        except UnsupportedDesignSpecVersion:
+            raise StructuredDesignProviderError(
+                "unsupported_schema_version", ambiguous_acceptance=False
+            ) from None
         try:
             message = client.beta.messages.parse(
                 model=settings.ANTHROPIC_MODEL,
                 max_tokens=request.max_output_tokens,
                 system=request.system_prompt,
                 messages=[{"role": "user", "content": request.user_message}],
-                output_format=DesignSpec,
+                output_format=output_format,
                 timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
             )
         except ValidationError:
