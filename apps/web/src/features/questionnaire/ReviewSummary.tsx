@@ -21,7 +21,7 @@ import { visibleQuestions } from "./rules";
 import { resolveDesignLifecycleTarget } from "@/lib/design-lifecycle";
 import { generationSubmitErrorMessage } from "@/features/generation/submit-errors";
 import type { PublicConfig } from "@/lib/api";
-import type { Answers, DesignDraft, QuestionnaireSchema } from "./types";
+import type { Answers, DesignDraft, Question, QuestionnaireSchema } from "./types";
 
 type Props = { designId: string };
 
@@ -271,10 +271,21 @@ export function ReviewSummary({ designId }: Props) {
       )}
 
       {schema.steps.map((step) => {
-        const answered = step.questions.filter(
-          (question) => visibility[question.id] && answerLabels(question, answers[question.id]).length > 0,
-        );
-        if (answered.length === 0) return null;
+        // A visible answered question shows its labels; a visible OPTIONAL
+        // single_choice with no answer shows "No preference" explicitly rather
+        // than being silently omitted (Phase 16B). Everything else is skipped.
+        const rows = step.questions
+          .filter((question) => visibility[question.id])
+          .map((question: Question) => {
+            const labels = answerLabels(question, answers[question.id]);
+            if (labels.length > 0) return { question, text: labels.join(", ") };
+            if (question.type === "single_choice" && !question.required) {
+              return { question, text: "No preference" };
+            }
+            return null;
+          })
+          .filter((row): row is { question: Question; text: string } => row !== null);
+        if (rows.length === 0) return null;
         return (
           <section key={step.id} aria-labelledby={`review-${step.id}`}>
             <div className="review-section-head">
@@ -282,10 +293,10 @@ export function ReviewSummary({ designId }: Props) {
               <Link href={editHref}>Edit</Link>
             </div>
             <dl>
-              {answered.map((question) => (
+              {rows.map(({ question, text }) => (
                 <div key={question.id} className="review-row">
                   <dt>{question.label}</dt>
-                  <dd>{answerLabels(question, answers[question.id]).join(", ")}</dd>
+                  <dd>{text}</dd>
                 </div>
               ))}
             </dl>

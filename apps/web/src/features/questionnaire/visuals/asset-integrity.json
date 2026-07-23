@@ -1,0 +1,65 @@
+{
+  "neckline_band_collar": {
+    "path": "/questionnaire-visuals/necklines/band_collar.svg",
+    "width": 120,
+    "height": 150,
+    "sha256": "7d02d79b1559ef93471c4c82ffc5305c94374e1983ccb8834d9c1ee1961339ae",
+    "alt": "Schematic of an upright band or mandarin collar."
+  },
+  "neckline_boat_neck": {
+    "path": "/questionnaire-visuals/necklines/boat_neck.svg",
+    "width": 120,
+    "height": 150,
+    "sha256": "30e41d4fbe157c8473b16305bc4b266c8aa6610e3aae565c25cecbdf757688d3",
+    "alt": "Schematic of a wide boat neckline across the shoulders."
+  },
+  "neckline_classic_crew": {
+    "path": "/questionnaire-visuals/necklines/classic_crew.svg",
+    "width": 120,
+    "height": 150,
+    "sha256": "09eaa3cc7fb81b7ee63dd8d48fd3367fa7afb7e87a959167ab7222e57fa60d52",
+    "alt": "Schematic of a classic crew neckline at the base of the neck."
+  },
+  "neckline_curved_scoop": {
+    "path": "/questionnaire-visuals/necklines/curved_scoop.svg",
+    "width": 120,
+    "height": 150,
+    "sha256": "eee5f8d5bc9a79fb48228aa8ecca1fb13dfbb8d95dc20ff29fb82e55cecca68a",
+    "alt": "Schematic of a curved scoop neckline dipping below the collarbone."
+  },
+  "neckline_deep_v_neck": {
+    "path": "/questionnaire-visuals/necklines/deep_v_neck.svg",
+    "width": 120,
+    "height": 150,
+    "sha256": "b580884e7eb17607bc1e12179521bf010db3af3f3e1da4faa5954968713e8d3c",
+    "alt": "Schematic of a deep V-shaped neckline plunging below the collarbone."
+  },
+  "neckline_high_neck": {
+    "path": "/questionnaire-visuals/necklines/high_neck.svg",
+    "width": 120,
+    "height": 150,
+    "sha256": "80b5e3c719395a1ef3dde778bc55cde2f175b0d8dc3cf41a78cea4263ad6ac76",
+    "alt": "Schematic of a high neckline rising on the neck."
+  },
+  "neckline_square_neck": {
+    "path": "/questionnaire-visuals/necklines/square_neck.svg",
+    "width": 120,
+    "height": 150,
+    "sha256": "ab851c684f2572f49811641d095094a08f2b3110d09ec00635cac941784c93af",
+    "alt": "Schematic of a square neckline cut across the chest."
+  },
+  "neckline_sweetheart_neck": {
+    "path": "/questionnaire-visuals/necklines/sweetheart_neck.svg",
+    "width": 120,
+    "height": 150,
+    "sha256": "5c865f80396ed5322cbb353b0ee5854c6a9060dae8a2eb828f6f36fa081ef4ff",
+    "alt": "Schematic of a sweetheart neckline shaped like the top of a heart."
+  },
+  "neckline_v_neck": {
+    "path": "/questionnaire-visuals/necklines/v_neck.svg",
+    "width": 120,
+    "height": 150,
+    "sha256": "3bf68996b8b118024b3750450a011893d1c0d3718338308452c1886cc040e797",
+    "alt": "Schematic of a moderate V-shaped neckline."
+  }
+}
