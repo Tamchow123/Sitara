@@ -1,6 +1,12 @@
 # 0016 — Deterministic zero-cost demo mode
 
 - **Status:** accepted
+- **Amended by ADR 0018 (Phase 16B, 2026-07-23):** demo manifest schema → v2
+  (`+necklines`, expanded vocabulary), selector → 2.0.0 (neckline scoring plus
+  fail-closed Anand-Karaj/covered-head/full-midriff hard constraints), spec
+  engine → 2.0.0 (produces DesignSpec v2). The pack-wide validator requires every
+  ceremony; production Anand Karaj support is an operator-gated fail-closed
+  requirement.
 - **Date:** 2026-07-21
 - **Deciders:** Sitara maintainers
 - **Phase:** Phase 15 (see ../phases/PHASES.md)

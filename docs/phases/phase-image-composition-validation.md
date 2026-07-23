@@ -158,3 +158,28 @@ framing across the matrix? List any remaining prompt-wording follow-ups.
   section 6 table as placeholders for operator-supplied evidence.
 - The Phase 2 images under `experiments/model-eval/outputs/` remain read-only
   visual references and must not be modified.
+
+## Phase 16B — additional operator-run live cases (not yet performed)
+
+When a budgeted live checkpoint is next authorised, extend the matrix above with
+these Phase 16B (`PROMPT_BUILDER_VERSION` `6.0.0`, DesignSpec v2, ADR 0018)
+**synthetic, non-user** cases. These remain operator-only; Claude Code performs
+none of them.
+
+- **Dedicated neckline adherence.** One synthetic v2 spec per neckline
+  (`classic_crew`, `curved_scoop`, `v_neck`, `deep_v_neck`, `boat_neck`,
+  `square_neck`, `sweetheart_neck`, `high_neck`, `band_collar`): confirm the
+  rendered neckline matches the canonical `neckline_style`, and that a covered
+  selection (`high_neck` / `band_collar`) never renders an open neckline.
+- **Neckline-vs-narrative safety.** A spec whose `coverage_and_drape.neckline`
+  narrative deliberately disagrees with the canonical neckline: confirm the image
+  follows the canonical neckline (the narrative is suppressed in the prompt).
+- **Anand Karaj cultural check.** A synthetic Anand Karaj + satin + covered-head
+  spec: confirm respectful Sikh-ceremony framing with no conflation with other
+  rites, and that satin reads distinctly from silk. Requires prior human cultural
+  review of any approved production asset.
+- **Full coverage.** A `full_midriff` + `full_back` + `full_sleeves` +
+  covered-head spec: confirm all four render as covered.
+
+Record observations the same way as sections 5–6; attach only rights-permitted,
+non-user evidence.
