@@ -266,6 +266,24 @@ class TestConsistencyRules:
         )
         assert result["neckline_style"] == neckline
 
+    @pytest.mark.parametrize("neckline", ["deep_v_neck", "sweetheart_neck", "v_neck"])
+    def test_covered_head_does_not_restrict_the_neckline(self, neckline):
+        # Head covering and neckline are INDEPENDENT decisions (a covered head
+        # with a sweetheart or V choli is a canonical bridal look). The two
+        # enforced consistency rules are head-covering -> dupatta and
+        # full_midriff -> neckline; there is deliberately no head-covering ->
+        # neckline restriction, so any neckline coexists with a covered head.
+        result = validate_questionnaire_answers(
+            _v3_schema(),
+            _base_answers(
+                coverage_preferences=["head_drape_preferred"],
+                dupatta_style="head_drape",
+                neckline_style=neckline,
+            ),
+            require_complete=False,
+        )
+        assert result["neckline_style"] == neckline
+
 
 class TestHistoricalCoverageAnswers:
     """Historical v1/v2 answers using the old ``high_neckline`` coverage value

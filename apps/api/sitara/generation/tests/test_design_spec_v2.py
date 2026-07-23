@@ -120,6 +120,21 @@ class TestCanonicalNecklinePrompt:
         assert "satin" in prompt.lower()
         assert "ruby" in prompt.lower()
 
+    def test_a_covered_neckline_never_yields_open_neckline_wording(self):
+        # A covered canonical neckline (high_neck) must render as closed and
+        # must suppress a contradicting model-authored open-neckline narrative,
+        # so a high/covered selection can never yield open-neckline prompt
+        # wording (phase requirement).
+        payload = _v2_spec_dict()  # neckline_style == "high_neck"
+        payload["coverage_and_drape"]["neckline"] = (
+            "An open, plunging neckline dipping low toward the waist."
+        )
+        prompt = build_image_prompt(validate_design_spec(payload))
+        assert "fully closed high neckline" in prompt
+        assert "plunging" not in prompt.lower()
+        # The model-authored narrative "Neckline:" line is dropped entirely.
+        assert "Neckline:" not in prompt
+
     def test_v1_spec_still_renders_without_a_canonical_neckline_clause(self):
         # A v1 spec keeps its generated neckline narrative (unchanged behaviour).
         prompt = build_image_prompt(validate_design_spec(_v1_spec_dict()))
