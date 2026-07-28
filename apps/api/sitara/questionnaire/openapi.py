@@ -49,8 +49,9 @@ class QuestionConstraintsSchemaSerializer(serializers.Serializer):
     """Bounded per-question-type constraint mapping (all keys optional).
 
     ``min_items``/``max_items``/``exclusive_values`` apply to ``multi_choice``;
-    ``min_length``/``max_length`` apply to ``text``. Choice questions may omit
-    constraints entirely.
+    ``min_length``/``max_length`` apply to ``text``; ``max_items`` alone applies
+    to ``colour_list``; ``allow_custom`` applies to ``colour_choice``.
+    ``single_choice`` takes no constraints.
     """
 
     min_items = serializers.IntegerField(required=False)
@@ -58,6 +59,14 @@ class QuestionConstraintsSchemaSerializer(serializers.Serializer):
     exclusive_values = serializers.ListField(child=serializers.CharField(), required=False)
     min_length = serializers.IntegerField(required=False)
     max_length = serializers.IntegerField(required=False)
+    allow_custom = serializers.BooleanField(
+        required=False,
+        help_text=(
+            "colour_choice only. When true the answer may also be a six-digit "
+            "lower-case hex colour drawn from the design's colour_list answer, "
+            "in addition to the declared swatches."
+        ),
+    )
 
 
 class QuestionSchemaSerializer(serializers.Serializer):
@@ -67,7 +76,12 @@ class QuestionSchemaSerializer(serializers.Serializer):
     help_text = serializers.CharField(required=False)
     required = serializers.BooleanField()
     options = QuestionOptionSchemaSerializer(
-        many=True, required=False, help_text="Present for choice questions."
+        many=True,
+        required=False,
+        help_text=(
+            "Present for single_choice, multi_choice and colour_choice. Absent "
+            "for text and colour_list, whose values are user-supplied."
+        ),
     )
     constraints = QuestionConstraintsSchemaSerializer(required=False)
 

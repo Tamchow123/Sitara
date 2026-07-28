@@ -2408,7 +2408,7 @@
             },
             "QuestionConstraintsSchema": {
                 "type": "object",
-                "description": "Bounded per-question-type constraint mapping (all keys optional).\n\n``min_items``/``max_items``/``exclusive_values`` apply to ``multi_choice``;\n``min_length``/``max_length`` apply to ``text``. Choice questions may omit\nconstraints entirely.",
+                "description": "Bounded per-question-type constraint mapping (all keys optional).\n\n``min_items``/``max_items``/``exclusive_values`` apply to ``multi_choice``;\n``min_length``/``max_length`` apply to ``text``; ``max_items`` alone applies\nto ``colour_list``; ``allow_custom`` applies to ``colour_choice``.\n``single_choice`` takes no constraints.",
                 "properties": {
                     "min_items": {
                         "type": "integer"
@@ -2427,6 +2427,10 @@
                     },
                     "max_length": {
                         "type": "integer"
+                    },
+                    "allow_custom": {
+                        "type": "boolean",
+                        "description": "colour_choice only. When true the answer may also be a six-digit lower-case hex colour drawn from the design's colour_list answer, in addition to the declared swatches."
                     }
                 }
             },
@@ -2481,7 +2485,7 @@
                         "items": {
                             "$ref": "#/components/schemas/QuestionOptionSchema"
                         },
-                        "description": "Present for choice questions."
+                        "description": "Present for single_choice, multi_choice and colour_choice. Absent for text and colour_list, whose values are user-supplied."
                     },
                     "constraints": {
                         "$ref": "#/components/schemas/QuestionConstraintsSchema"
@@ -2789,12 +2793,14 @@
             },
             "TypeEnum": {
                 "enum": [
+                    "colour_choice",
+                    "colour_list",
                     "multi_choice",
                     "single_choice",
                     "text"
                 ],
                 "type": "string",
-                "description": "* `multi_choice` - multi_choice\n* `single_choice` - single_choice\n* `text` - text"
+                "description": "* `colour_choice` - colour_choice\n* `colour_list` - colour_list\n* `multi_choice` - multi_choice\n* `single_choice` - single_choice\n* `text` - text"
             },
             "ValidationErrorEnvelope": {
                 "type": "object",

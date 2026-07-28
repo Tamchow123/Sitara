@@ -822,8 +822,9 @@ export interface components {
          * @description Bounded per-question-type constraint mapping (all keys optional).
          *
          *     ``min_items``/``max_items``/``exclusive_values`` apply to ``multi_choice``;
-         *     ``min_length``/``max_length`` apply to ``text``. Choice questions may omit
-         *     constraints entirely.
+         *     ``min_length``/``max_length`` apply to ``text``; ``max_items`` alone applies
+         *     to ``colour_list``; ``allow_custom`` applies to ``colour_choice``.
+         *     ``single_choice`` takes no constraints.
          */
         QuestionConstraintsSchema: {
             min_items?: number;
@@ -831,6 +832,8 @@ export interface components {
             exclusive_values?: string[];
             min_length?: number;
             max_length?: number;
+            /** @description colour_choice only. When true the answer may also be a six-digit lower-case hex colour drawn from the design's colour_list answer, in addition to the declared swatches. */
+            allow_custom?: boolean;
         };
         QuestionOptionSchema: {
             /** @description Stable machine identifier persisted in answers. */
@@ -849,7 +852,7 @@ export interface components {
             label: string;
             help_text?: string;
             required: boolean;
-            /** @description Present for choice questions. */
+            /** @description Present for single_choice, multi_choice and colour_choice. Absent for text and colour_list, whose values are user-supplied. */
             options?: components["schemas"]["QuestionOptionSchema"][];
             constraints?: components["schemas"]["QuestionConstraintsSchema"];
         };
@@ -967,12 +970,14 @@ export interface components {
             questions: components["schemas"]["QuestionSchema"][];
         };
         /**
-         * @description * `multi_choice` - multi_choice
+         * @description * `colour_choice` - colour_choice
+         *     * `colour_list` - colour_list
+         *     * `multi_choice` - multi_choice
          *     * `single_choice` - single_choice
          *     * `text` - text
          * @enum {string}
          */
-        TypeEnum: "multi_choice" | "single_choice" | "text";
+        TypeEnum: "colour_choice" | "colour_list" | "multi_choice" | "single_choice" | "text";
         /** @description The error body for 400 validation failures (adds ``fields``). */
         ValidationErrorEnvelope: {
             error: components["schemas"]["FieldValidationErrorDetail"];
