@@ -43,7 +43,7 @@ const colourQuestion: Question = {
 const allOf = (q: Question) => new Set((q.options ?? []).map((o) => o.value));
 
 describe("QuestionField single_choice with visuals and no-preference", () => {
-  it("renders real radio inputs and an explanatory illustration when available", () => {
+  it("renders real radio inputs and an explanatory photograph when available", () => {
     const { container } = render(
       <QuestionField
         question={necklineQuestion}
@@ -53,8 +53,10 @@ describe("QuestionField single_choice with visuals and no-preference", () => {
       />,
     );
     expect(screen.getByRole("radio", { name: /V-neck/ })).toBeInstanceOf(HTMLInputElement);
-    // The v_neck option has a manifest illustration -> a decorative <img>.
-    const image = container.querySelector('img[src*="v_neck.svg"]');
+    // The v_neck option has a manifest photograph -> a decorative <img>.
+    const image = container.querySelector(
+      'img[src="/questionnaire-visuals/necklines/neckline_v_neck.webp"]',
+    );
     expect(image).not.toBeNull();
     expect(image).toHaveAttribute("alt", "");
     expect(image).toHaveAttribute("loading", "lazy");

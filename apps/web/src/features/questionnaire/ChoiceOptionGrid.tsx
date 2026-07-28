@@ -7,7 +7,7 @@
 // text-list fallback with the same semantics.
 
 import { ChoiceOptionCard } from "./ChoiceOptionCard";
-import { illustration } from "./visuals/manifest";
+import { optionVisual } from "./visuals/manifest";
 import type { QuestionOption } from "./types";
 
 type Props = {
@@ -33,7 +33,7 @@ export function ChoiceOptionGrid({
   onToggle,
   onBlur,
 }: Props) {
-  const hasVisuals = options.some((option) => illustration(option.visual_key));
+  const hasVisuals = options.some((option) => optionVisual(option.visual_key));
   const className = hasVisuals ? "choice-grid choice-grid-visual" : "choice-grid";
   return (
     <div className={className}>

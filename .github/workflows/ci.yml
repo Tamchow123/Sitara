@@ -71,9 +71,16 @@ jobs:
             requirements.in
           git diff --exit-code -- requirements.txt
       - name: Ruff lint
-        run: ruff check .
+        # The questionnaire-visuals build script lives in the web package but is
+        # Python, and is outside every other toolchain here, so it is linted
+        # against this project's ruff config rather than going unchecked.
+        run: |
+          ruff check .
+          ruff check --config pyproject.toml ../web/scripts
       - name: Ruff format check
-        run: ruff format --check .
+        run: |
+          ruff format --check .
+          ruff format --check --config pyproject.toml ../web/scripts
       - name: Django system check
         run: python manage.py check
       - name: Migration consistency
@@ -86,6 +93,18 @@ jobs:
             --validate \
             --fail-on-warn
           git diff --exit-code -- openapi/schema.json
+      - name: Questionnaire visuals freshness (generated-asset drift check)
+        # Rebuilt here rather than in the frontend job because Pillow arrives
+        # pinned and hash-verified with the backend lock above, which is what
+        # makes the rebuild reproducible. `git add` first so a NEW or DELETED
+        # asset is caught too, not only a modified one.
+        working-directory: .
+        run: |
+          python apps/web/scripts/build-questionnaire-images.py
+          git add -A -- apps/web/public/questionnaire-visuals \
+            apps/web/src/features/questionnaire/visuals/asset-integrity.json
+          git diff --cached --exit-code -- apps/web/public/questionnaire-visuals \
+            apps/web/src/features/questionnaire/visuals/asset-integrity.json
       - name: Tests
         run: pytest
 

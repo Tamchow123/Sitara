@@ -3,13 +3,13 @@
 // One choice option rendered as an accessible card wrapping a REAL radio or
 // checkbox input (never a div pretending to be one). Selected state is conveyed
 // by the native input plus a border/check indicator — never colour alone. An
-// approved project-owned illustration is shown when the option's visual_key maps
+// approved project-owned photograph is shown when the option's visual_key maps
 // to one; otherwise the card falls back to text. Hidden/restricted options are
 // never rendered by the parent, so their images are never fetched.
 
 import { useState } from "react";
 
-import { illustration } from "./visuals/manifest";
+import { optionVisual } from "./visuals/manifest";
 import { ExpandableOptionDescription } from "./ExpandableOptionDescription";
 import type { QuestionOption } from "./types";
 
@@ -24,10 +24,10 @@ type Props = {
 };
 
 export function ChoiceOptionCard({ option, name, type, checked, disabled, onChange, onBlur }: Props) {
-  // If the illustration fails to load at runtime, degrade to the same text-only
+  // If the photograph fails to load at runtime, degrade to the same text-only
   // presentation used when an option has no visual at all.
   const [imageFailed, setImageFailed] = useState(false);
-  const visual = imageFailed ? null : illustration(option.visual_key);
+  const visual = imageFailed ? null : optionVisual(option.visual_key);
   const className = [
     "choice-card",
     checked ? "choice-card-selected" : "",
