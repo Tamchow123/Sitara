@@ -234,3 +234,19 @@ Binding rules, in addition to every rule above:
 - Retry limits (then `BLOCKED`): 3 implementation attempts/task, 4 council cycles/commit, 5 full-phase cycles, 3 CI cycles, 3 attempts/finding.
 
 `/resume-phase` recovers an interrupted run from `.claude/review/runtime/active-phase.json` — not part of the normal workflow. While a phase is active, the user-level Stop hook prevents ending the turn early, and the PreToolUse git-guard hook blocks protected-branch writes, force-pushes, history rewrites, hard resets, destructive cleans, PR merges, and unapproved commits. Both hooks are inert when no phase is active; the `run-phase` skill is the workflow engine, the hooks are deterministic safety nets.
+
+# Compact instructions
+
+When compacting, preserve:
+
+- The current phase requirements and acceptance criteria
+- Architectural and implementation decisions
+- Every modified or newly created file
+- Completed and remaining work
+- Test commands, failures and final results
+- Unresolved defects and reviewer findings
+- Important user corrections and constraints
+- The precise next action
+
+Discard repetitive command output, superseded plans, failed exploratory approaches,
+and information that can be recovered directly from the repository.
