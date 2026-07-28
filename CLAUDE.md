@@ -45,8 +45,18 @@ apps/web/       Next.js App Router frontend with strict TypeScript
 infra/minio/    Local private-bucket initialisation
 experiments/    Phase 2 model-evaluation implementation and evidence
 docs/           Proposal, roadmap, ADRs and project documentation
+design/         Vendored UX handoff bundles (reference only, never imported)
+images/         Source photography for questionnaire visuals (build input)
 compose.yaml    Local PostgreSQL, Redis, MinIO, API, web and Celery stack
 ```
+
+`design/sitara-handoff/` holds the supplied bridalwear-flow UX handoff: its README, the
+`.dc.html` visual references and the "Organic" design-system stylesheet that
+`apps/web/src/app/globals.css` transcribes its tokens from. It is **reference material only** —
+never imported, bundled or served, and not held to repository code standards. The bundle's
+prototype runtimes (`support.js`, `image-slot.js`) are deliberately excluded and must not be
+ported. `images/` holds the project's own AI-generated source photography; it is a **build input**
+converted into `apps/web/public/questionnaire-visuals/`, never served directly at full size.
 
 Django apps under `apps/api/sitara/`: `accounts`, `designs`, `questionnaire`, `catalogue`, `health`, `ai_gateway` (fail-closed live-provider gateway: gating policy, Anthropic/Replicate wrappers, `resolve_generation_mode()`), `generation` (pipeline orchestration, DesignSpec generation, prompt builder/service, Celery tasks; `generation/demo/` is the deterministic zero-cost demo engine — manifest, selector, local structured/image adapters — reached only through the same asynchronous pipeline, never a mock behind `ai_gateway`). `apps/api/sitara/media/` is a support package (image processing, ingest, signed delivery) for permanent design images — not a Django app.
 

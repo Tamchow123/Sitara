@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="_ds/organic-ccb06f12-17fe-45b2-9248-ebf010085646/styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+  <script src="_ds/organic-ccb06f12-17fe-45b2-9248-ebf010085646/_ds_bundle.js"></script>
+  <script src="image-slot.js"></script>
+  <style>
+    html, body { margin: 0; background: var(--color-bg); }
+    a { color: var(--color-accent-700); } a:hover { color: var(--color-accent-800); }
+    @keyframes sitaraUp { from { transform: translateY(18px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .hist-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
+    @media (min-width: 700px) { .hist-grid { grid-template-columns: repeat(3, 1fr); } }
+  </style>
+</helmet>
+<div style="min-height:100vh;font-family:var(--font-body);color:var(--color-text);font-size:16px">
+  <header style="max-width:1020px;margin:0 auto;padding:var(--space-4) var(--space-4) 0;display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+    <a href="Sitara Home.dc.html" aria-label="Sitara home" style="display:inline-flex;align-items:center;gap:var(--space-2);text-decoration:none;color:var(--color-text);border-radius:999px;padding:4px 14px 4px 4px;transition:background .15s" style-hover="background:var(--color-accent-100)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">
+      <span style="width:36px;height:36px;border-radius:999px;background:var(--color-accent);color:var(--color-bg);display:grid;place-items:center;flex:none">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 L14.4 9.6 L22 12 L14.4 14.4 L12 22 L9.6 14.4 L2 12 L9.6 9.6 Z"></path></svg>
+      </span>
+      <span style="font-family:'Cormorant Garamond',serif;font-weight:600;letter-spacing:.04em;font-size:27px">Sitara</span>
+    </a>
+    <span style="flex:1"></span>
+    <a href="Sitara Concept.dc.html" class="btn btn-ghost" style="text-decoration:none;font-size:13.5px">Back to concept</a>
+    <sc-if value="{{ canRefine }}" hint-placeholder-val="{{ true }}">
+      <a href="Sitara Amendments.dc.html" class="btn btn-primary" style="text-decoration:none;font-size:14px">Refine again</a>
+    </sc-if>
+  </header>
+  <main style="max-width:1020px;margin:0 auto;padding:var(--space-6) var(--space-4) var(--space-8);animation:sitaraUp .35s both">
+    <p style="margin:0 0 var(--space-1);font-size:13px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--color-accent-700)">Design history</p>
+    <h1 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:clamp(32px,4.5vw,46px);line-height:1.1;margin:0 0 var(--space-2);text-wrap:pretty">Every version of your vision</h1>
+    <p style="margin:0 0 var(--space-6);font-size:15.5px;color:var(--color-neutral-800);max-width:56ch">{{ subCopy }}</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:var(--space-6);align-items:start">
+      <div style="display:flex;flex-direction:column;gap:var(--space-3);max-width:460px">
+        <div style="display:flex;align-items:center;gap:var(--space-2)">
+          <span class="tag tag-accent">Current</span>
+          <span style="font-size:14px;font-weight:700">{{ currentLabel }}</span>
+        </div>
+        <div class="washed" style="aspect-ratio:3/4;border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-md)">
+          <image-slot id="{{ currentSlot }}" src="{{ currentSrc }}" shape="rounded" radius="16" placeholder="{{ currentPh }}"></image-slot>
+        </div>
+        <p style="margin:0;font-size:13px;color:var(--color-neutral-700)">{{ currentCaption }}</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <h2 style="margin:0;font-size:13px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--color-accent-700)">Previous designs</h2>
+        <sc-if value="{{ hasPrevious }}" hint-placeholder-val="{{ true }}">
+          <div class="hist-grid">
+            <sc-for list="{{ previous }}" as="v" hint-placeholder-count="2">
+              <div style="display:flex;flex-direction:column;gap:var(--space-2)">
+                <div class="washed" style="aspect-ratio:3/4;border-radius:var(--radius-md);overflow:hidden">
+                  <image-slot id="{{ v.slot }}" src="{{ v.src }}" shape="rounded" radius="12" placeholder="{{ v.ph }}"></image-slot>
+                </div>
+                <div style="display:flex;align-items:center;gap:var(--space-2)">
+                  <span style="flex:1;font-size:13.5px;font-weight:700">{{ v.label }}</span>
+                  <span style="font-size:12px;color:var(--color-neutral-700)">{{ v.meta }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noPrevious }}" hint-placeholder-val="{{ false }}">
+          <p style="margin:0;font-size:14.5px;line-height:1.6;color:var(--color-neutral-700);background:var(--color-neutral-100);border-radius:var(--radius-md);padding:var(--space-4)">No previous versions yet — each time you refine the concept, the earlier design is kept here so you can always look back.</p>
+        </sc-if>
+        <p style="margin:var(--space-2) 0 0;font-size:13.5px;font-weight:600;color:var(--color-accent-2-800)">{{ remainingNote }}</p>
+        <button class="btn btn-ghost" onClick="{{ demoAdd }}" style="align-self:flex-start;font-size:12.5px">Simulate a refinement — demo only</button>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  count() { return (typeof localStorage !== 'undefined') ? Math.min(3, parseInt(localStorage.getItem('sitara-refine-count') || '0', 10)) : 0; }
+  renderVals() {
+    const used = this.count();
+    const remaining = 3 - used;
+    const name = (i) => i === 0 ? 'Original concept' : 'Refinement ' + i;
+    const GENIMG = ['uploads/images/03-garments/sitara__garments__lehenga__v1.jpg','uploads/images/03-garments/sitara__garments__lehenga__v4.jpg','uploads/images/03-garments/sitara__garments__lehenga__v3.jpg','uploads/images/03-garments/sitara__garments__lehenga__v2.jpg'];
+    const previous = [];
+    for (let i = used - 1; i >= 0; i--) previous.push({ slot: 'gen-v' + i, label: name(i), meta: 'Version ' + (i + 1), ph: name(i) + ' render', src: GENIMG[i % GENIMG.length] });
+    return {
+      currentSlot: 'gen-v' + used, currentSrc: GENIMG[used % GENIMG.length], currentLabel: name(used), currentPh: name(used) + ' render \u2014 drop image here',
+      currentCaption: used === 0 ? 'Your first generated concept.' : 'Generated from your latest refinement request.',
+      previous, hasPrevious: previous.length > 0, noPrevious: previous.length === 0,
+      subCopy: used === 0 ? 'Your concept as it stands \u2014 refined versions will gather here as you request changes.' : 'Your current design alongside every earlier version, newest first.',
+      remainingNote: remaining === 0 ? 'All 3 refinements used.' : remaining + ' of 3 refinements left.',
+      canRefine: remaining > 0,
+      demoAdd: () => { if (typeof localStorage !== 'undefined' && this.count() < 3) { localStorage.setItem('sitara-refine-count', String(this.count() + 1)); this.forceUpdate(); } }
+    };
+  }
+}
+</script>
+</body>
+</html>

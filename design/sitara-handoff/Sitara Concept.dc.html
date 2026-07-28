@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="_ds/organic-ccb06f12-17fe-45b2-9248-ebf010085646/styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+  <script src="_ds/organic-ccb06f12-17fe-45b2-9248-ebf010085646/_ds_bundle.js"></script>
+  <script src="image-slot.js"></script>
+  <style>
+    html, body { margin: 0; background: var(--color-bg); }
+    a { color: var(--color-accent-700); } a:hover { color: var(--color-accent-800); }
+    @keyframes sitaraUp { from { transform: translateY(18px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .concept-cols { display: grid; grid-template-columns: 1fr; gap: var(--space-6); }
+    @media (min-width: 860px) { .concept-cols { grid-template-columns: minmax(320px, 42%) 1fr; align-items: start; } .concept-sticky { position: sticky; top: var(--space-4); } }
+  </style>
+</helmet>
+<div style="min-height:100vh;font-family:var(--font-body);color:var(--color-text);font-size:16px">
+  <header style="max-width:1100px;margin:0 auto;padding:var(--space-4) var(--space-4) 0">
+    <a href="Sitara Home.dc.html" aria-label="Sitara home" style="display:inline-flex;align-items:center;gap:var(--space-2);text-decoration:none;color:var(--color-text);border-radius:999px;padding:4px 14px 4px 4px;transition:background .15s" style-hover="background:var(--color-accent-100)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">
+      <span style="width:36px;height:36px;border-radius:999px;background:var(--color-accent);color:var(--color-bg);display:grid;place-items:center;flex:none">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 L14.4 9.6 L22 12 L14.4 14.4 L12 22 L9.6 14.4 L2 12 L9.6 9.6 Z"></path></svg>
+      </span>
+      <span style="font-family:'Cormorant Garamond',serif;font-weight:600;letter-spacing:.04em;font-size:27px">Sitara</span>
+    </a>
+  </header>
+  <main style="max-width:1100px;margin:0 auto;padding:var(--space-6) var(--space-4) var(--space-8)">
+    <div style="display:flex;align-items:flex-end;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-6);animation:sitaraUp .35s both">
+      <div style="flex:1;min-width:280px">
+        <p style="margin:0 0 var(--space-1);font-size:13px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--color-accent-700)">Your concept</p>
+        <h1 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:clamp(32px,4.5vw,48px);line-height:1.08;margin:0;text-wrap:pretty;max-width:22ch">Maroon &amp; champagne full-flared lehenga for Walima</h1>
+      </div>
+      <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;align-items:center">
+        <a href="Sitara History.dc.html" class="btn btn-ghost" style="text-decoration:none;font-size:14px">Design history</a>
+        <a href="Sitara Questionnaire.dc.html" class="btn btn-secondary" style="text-decoration:none;font-size:15px;padding:12px 26px">Edit answers</a>
+        <a href="Sitara Amendments.dc.html" class="btn btn-primary" style="text-decoration:none;font-size:15px;padding:12px 28px">Refine this concept</a>
+      </div>
+    </div>
+    <div class="concept-cols">
+      <div class="concept-sticky" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="washed" style="aspect-ratio:3/4;border-radius:var(--radius-lg);overflow:hidden">
+          <image-slot id="concept-render" src="uploads/images/03-garments/sitara__garments__lehenga__v2.jpg" shape="rounded" radius="16" placeholder="AI concept render — drop image here"></image-slot>
+        </div>
+        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+          <button class="btn btn-secondary" onClick="{{ noop }}" style="font-size:13.5px">Download image</button>
+          <button class="btn btn-secondary" onClick="{{ copyBrief }}" style="font-size:13.5px">{{ copyLabel }}</button>
+        </div>
+        <p style="margin:0;font-size:13px;line-height:1.55;color:var(--color-neutral-700);background:var(--color-neutral-100);border-radius:var(--radius-md);padding:var(--space-3) var(--space-4)"><strong>An AI-assisted visual concept</strong>, not a photograph of a finished garment. Colours, materials and fine details may differ when interpreted by your tailor.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <p style="margin:0 0 var(--space-1);font-size:16.5px;line-height:1.65;color:var(--color-neutral-900);font-style:italic;font-family:'Cormorant Garamond',serif;font-size:20px">A full-flared lehenga in deep maroon with soft champagne — airy mirror work scattered with restraint, full coverage preserved throughout, and a matching net dupatta draped over the head.</p>
+        <div style="display:flex;align-items:baseline;gap:var(--space-3)">
+          <h2 style="flex:1;margin:0;font-size:13px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--color-accent-700)">Design specification</h2>
+          <button onClick="{{ expandAll }}" style="border:none;background:none;cursor:pointer;font-family:var(--font-body);font-size:13.5px;font-weight:600;color:var(--color-accent-700);padding:4px 0" style-hover="color:var(--color-accent-800)">{{ expandLabel }}</button>
+        </div>
+        <sc-for list="{{ sections }}" as="s" hint-placeholder-count="6">
+          <div style="background:{{ s.cardBg }};border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);overflow:hidden;transition:box-shadow .2s" style-hover="box-shadow:var(--shadow-md)">
+            <button onClick="{{ s.toggle }}" aria-expanded="{{ s.open }}" style="width:100%;display:flex;align-items:center;gap:var(--space-4);padding:var(--space-4) var(--space-4);background:none;border:none;cursor:pointer;font-family:var(--font-body);text-align:left" style-focus="outline:2px solid var(--color-accent);outline-offset:-2px">
+              <span style="width:44px;height:44px;border-radius:999px;background:{{ s.iconBg }};color:{{ s.iconFg }};display:grid;place-items:center;flex:none;transition:background .2s">{{ s.icon }}</span>
+              <span style="flex:1;display:flex;flex-direction:column;gap:3px;min-width:0">
+                <span style="font-family:'Cormorant Garamond',serif;font-weight:600;font-size:21px;line-height:1.15;color:var(--color-text)">{{ s.title }}</span>
+                <sc-if value="{{ s.closed }}" hint-placeholder-val="{{ true }}">
+                  <span style="font-size:13.5px;color:var(--color-neutral-700);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.summary }}</span>
+                </sc-if>
+              </span>
+              <span style="width:28px;height:28px;border-radius:999px;background:var(--color-neutral-100);color:var(--color-accent-700);display:grid;place-items:center;flex:none;transform:{{ s.chev }};transition:transform .2s">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9 L12 15 L18 9"></path></svg>
+              </span>
+            </button>
+            <sc-if value="{{ s.open }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:0 var(--space-4) var(--space-4);display:flex;flex-direction:column;gap:var(--space-3)">
+                <div style="height:1px;background:var(--color-neutral-200);margin-bottom:var(--space-1)"></div>
+                <sc-for list="{{ s.rows }}" as="r" hint-placeholder-count="3">
+                  <div style="display:grid;grid-template-columns:118px 1fr;gap:var(--space-3);align-items:start">
+                    <span style="font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--color-accent-2-800);padding-top:3px">{{ r.k }}</span>
+                    <span style="font-size:14.5px;line-height:1.65;color:var(--color-neutral-900)">{{ r.v }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:var(--space-4);background:var(--color-accent-100);border-radius:var(--radius-lg);padding:var(--space-4);margin-top:var(--space-3);flex-wrap:wrap">
+          <p style="flex:1;margin:0;font-size:14.5px;line-height:1.55;color:var(--color-accent-900);min-width:220px">Not quite right yet? Ask for as many changes as you like — colour, cloth, coverage or drape.</p>
+          <a href="Sitara Amendments.dc.html" class="btn btn-primary" style="text-decoration:none;font-size:15px;padding:12px 28px">Refine this concept</a>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { open: {}, copied: false, all: false };
+  icon(paths) {
+    return React.createElement('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.4, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+      paths.map((d, i) => React.createElement('path', { key: i, d })));
+  }
+  data() {
+    const I = this.icon.bind(this);
+    return [
+      { id: 'garment', title: 'Garment breakdown', summary: 'Fitted choli, full-flared skirt, head-draped dupatta',
+        icon: I(['M6 3 L9 5 Q12 7 15 5 L18 3 L21 8 L18 10 L18 21 L6 21 L6 10 L3 8 Z']), rows: [
+        ['Overall form', 'A stitched, two-piece ensemble: a fitted, fully covered choli-style top and a separate full-flared skirt, worn with a head-draped dupatta.'],
+        ['Components', 'Long-sleeved choli with high neckline and full back; full-flared skirt with fully lined net outer layer; head-drape dupatta in matching net.'],
+        ['Silhouette', 'Full flare falling from the natural waist into wide, voluminous godets, paired with a close-fitting, fully covered upper.'],
+        ['Proportions', 'Fitted bodice ending at the natural waist; the flare widens progressively toward a generous hemline; sleeves reach the wrist.']
+      ]},
+      { id: 'colour', title: 'Colour story', summary: 'Deep maroon led, champagne in supporting flashes',
+        icon: I(['M12 3 C16 8 19 11 19 15 A7 7 0 0 1 5 15 C5 11 8 8 12 3 Z']), rows: [
+        ['Palette', 'Deep maroon dominant across skirt and blouse, offset by champagne in secondary panels, mirror-work backing and dupatta edges.'],
+        ['Placement', 'Maroon leads on the main body; champagne appears in supporting flashes \u2014 the dupatta border, an inner panel peek, the reverse of pleats.'],
+        ['Rationale', 'Maroon carries the richness suited to a Walima; champagne softens the palette and echoes the sheen of the mirror work without adding weight.']
+      ]},
+      { id: 'fabric', title: 'Fabrics & texture', summary: 'Lined net \u2014 sheer reads as texture, never transparency',
+        icon: I(['M12 3 L21 8 L12 13 L3 8 Z', 'M3 13 L12 18 L21 13']), rows: [
+        ['Net', 'Outer layer of skirt, sleeves and dupatta \u2014 fully lined with an opaque underlayer so the sheer reads as texture, not transparency. The finish is soft and airy rather than stiff.']
+      ]},
+      { id: 'embellishment', title: 'Embellishment plan', summary: 'Sparse mirror work, evenly scattered \u2014 quiet shine',
+        icon: I(['M12 4 L13.8 9.2 L19 11 L13.8 12.8 L12 18 L10.2 12.8 L5 11 L10.2 9.2 Z', 'M19 17 L19.7 19 L21.7 19.7 L19.7 20.4 L19 22.4 L18.3 20.4 L16.3 19.7 L18.3 19 Z']), rows: [
+        ['Techniques', 'Mirror work only.'],
+        ['Density', 'Minimal and airy \u2014 applied sparingly so the garment keeps an uncluttered, light appearance.'],
+        ['Placement', 'Scattered along the dupatta border, light clusters at the sleeve cuffs, sparse accents along the skirt hemline.'],
+        ['Motifs', 'Small geometric mirror clusters and delicate scattered dot-like arrangements, kept evenly spaced rather than dense.']
+      ]},
+      { id: 'coverage', title: 'Coverage & drape', summary: 'Full sleeves, high neck, fully covered, head-draped',
+        icon: I(['M12 3 L20 6 L20 12 C20 17 16.5 20 12 21.5 C7.5 20 4 17 4 12 L4 6 Z']), rows: [
+        ['Sleeves', 'Full-length to the wrist, constructed from lined net so they remain fully opaque.'],
+        ['Neckline', 'High neckline covering the collarbone, finished cleanly at the base of the throat.'],
+        ['Back & midriff', 'Full back coverage with no open-back cutouts; the midriff is fully covered to the skirt waistband with no exposed skin.'],
+        ['Head', 'The dupatta drapes over the head, framing the face and resting gently along the shoulders and back.']
+      ]},
+      { id: 'context', title: 'Cultural context', summary: 'A respectful, non-prescriptive reading of Walima',
+        icon: I(['M12 3 A9 9 0 1 0 12 21 A9 9 0 1 0 12 3 Z', 'M3 12 L21 12', 'M12 3 C8 8 8 16 12 21 C16 16 16 8 12 3']), rows: [
+        ['Occasion', 'Walima is treated here as a Muslim wedding reception occasion; no single regional or community style is presented as the definitive way to mark it.'],
+        ['Form', 'No specific regional silhouette was selected, so the proportions follow the general full-flared form rather than any one region\u2019s construction.'],
+        ['Coverage', 'Coverage choices are honoured as personal preferences, not assumptions tied to any one community\u2019s customs.']
+      ]},
+      { id: 'styling', title: 'Styling notes', summary: 'Minimal jewellery, matte lining, structured underskirt',
+        icon: I(['M12 4 L14 9 L19.5 9.5 L15.5 13 L16.8 18.5 L12 15.5 L7.2 18.5 L8.5 13 L4.5 9.5 L10 9 Z']), rows: [
+        ['Jewellery', 'Keep it minimal so the mirror work reads as the primary accent.'],
+        ['Lining', 'A matte or satin-finish underlining beneath the net keeps opacity soft rather than glossy.'],
+        ['Structure', 'A structured underskirt will help the full flare hold its shape through movement.']
+      ]},
+      { id: 'caveats', title: 'Construction caveats', summary: 'A concept, not a sewing pattern \u2014 tailor to assess',
+        icon: I(['M12 3 L22 20 L2 20 Z', 'M12 10 L12 14.5', 'M12 17 L12 17.2']), rows: [
+        ['Scope', 'A concept visualisation, not a sewing pattern \u2014 a pattern maker would need to adapt proportions, seams and support structures.'],
+        ['Feasibility', 'Because net is sheer, an opaque lining throughout is essential to the coverage described; yardage and layering should be assessed by a tailor.']
+      ]}
+    ];
+  }
+  renderVals() {
+    const st = this.state;
+    const sections = this.data().map(sec => {
+      const open = st.all || !!st.open[sec.id];
+      return {
+        title: sec.title, summary: sec.summary, icon: sec.icon,
+        open, closed: !open, chev: open ? 'rotate(180deg)' : 'rotate(0deg)',
+        cardBg: open ? 'var(--color-bg)' : 'var(--color-neutral-100)',
+        iconBg: open ? 'var(--color-accent)' : 'var(--color-accent-100)',
+        iconFg: open ? '#fff' : 'var(--color-accent-700)',
+        rows: sec.rows.map(r => ({ k: r[0], v: r[1] })),
+        toggle: () => this.setState(s => { const o = Object.assign({}, s.open); o[sec.id] = !open; return { open: o, all: false }; })
+      };
+    });
+    return {
+      sections,
+      expandAll: () => this.setState(s => ({ all: !s.all, open: {} })),
+      expandLabel: st.all ? 'Collapse all' : 'Expand all',
+      copyBrief: () => {
+        const text = this.data().map(s => s.title.toUpperCase() + '\n' + s.rows.map(r => r[0] + ': ' + r[1]).join('\n')).join('\n\n');
+        if (navigator.clipboard) navigator.clipboard.writeText(text);
+        this.setState({ copied: true }); setTimeout(() => this.setState({ copied: false }), 1800);
+      },
+      copyLabel: st.copied ? 'Copied \u2713' : 'Copy brief',
+      noop: () => {}
+    };
+  }
+}
+</script>
+</body>
+</html>
