@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 
 import { fetchActiveQuestionnaire, fetchCatalogue, fetchDesign } from "./api";
 import { InspirationPicker } from "./InspirationPicker";
+import { ProgressNav } from "./ProgressNav";
 import { QuestionField } from "./QuestionField";
 import { allowedOptions, questionsById, visibleQuestions } from "./rules";
 import { clearStaleAnswers, resumeStepIndex } from "./answer-utils";
@@ -23,7 +24,12 @@ import { createStepResolver } from "./validation";
 import { useDraftSaver } from "./use-draft-saver";
 import { useLatest } from "./use-latest";
 import { resolveDesignLifecycleTarget } from "@/lib/design-lifecycle";
+import type { ProgressCategory } from "./ProgressNav";
 import type { Answers, AnswerValue, PublicAsset, QuestionnaireSchema, Step } from "./types";
+
+// Synthetic category id for the inspiration screen, which has no schema step.
+// Double-underscored so it can never collide with a schema step id.
+const INSPIRATION_CATEGORY_ID = "__inspiration__";
 
 const MAX_INSPIRATIONS = 3;
 
@@ -48,6 +54,10 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
   const [catalogue, setCatalogue] = useState<CatalogueState>({ status: "idle", assets: [] });
   const [catalogueAttempt, setCatalogueAttempt] = useState(0);
   const [stepIndex, setStepIndex] = useState(0);
+  // The furthest screen reached so far. Progress-nav jumps are limited to it,
+  // so a pill can never carry the user past a step whose required answers have
+  // not been validated — forward movement still goes through Continue.
+  const [maxReached, setMaxReached] = useState(0);
   const [errorTick, setErrorTick] = useState(0);
 
   const answersRef = useRef<Answers>({});
@@ -131,9 +141,14 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
           adopt(design.id);
           setAnswersSynced(loadedAnswers);
           setSelection(design.selected_inspirations.map((entry) => entry.id));
-          setStepIndex(
-            Math.min(resumeStepIndex(loadedSchema, loadedAnswers), loadedSchema.steps.length),
+          const resumedIndex = Math.min(
+            resumeStepIndex(loadedSchema, loadedAnswers),
+            loadedSchema.steps.length,
           );
+          setStepIndex(resumedIndex);
+          // A resumed design has already answered its way to this screen, so
+          // everything up to it is navigable again.
+          setMaxReached(resumedIndex);
           setLoad("ready");
         } else {
           const active = await fetchActiveQuestionnaire();
@@ -220,13 +235,51 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
   );
 
   // -- Navigation (always flushes pending saves first) -----------------------
-  const goBack = useCallback(async () => {
-    form.clearErrors();
-    // Flush pending work before leaving; even if it fails the local values stay
-    // visible and Retry is offered, so Back still returns to the prior step.
-    await flush();
-    setStepIndex((index) => Math.max(0, index - 1));
-  }, [flush, form]);
+  // Every navigation awaits a save flush before it moves, so two of them
+  // overlapping would let promise-resolution order — not click order — decide
+  // where the user lands. One at a time: the ref rejects a second start even
+  // within a single tick, and `navigating` disables every navigation control
+  // (Back, Continue and all progress-nav pills) while one is in flight.
+  const navigationInFlight = useRef(false);
+  const [navigating, setNavigating] = useState(false);
+
+  const runNavigation = useCallback(async (move: () => Promise<unknown>) => {
+    if (navigationInFlight.current) return;
+    navigationInFlight.current = true;
+    setNavigating(true);
+    try {
+      await move();
+    } finally {
+      navigationInFlight.current = false;
+      setNavigating(false);
+    }
+  }, []);
+
+  const goBack = useCallback(
+    () =>
+      runNavigation(async () => {
+        form.clearErrors();
+        // Flush pending work before leaving; even if it fails the local values
+        // stay visible and Retry is offered, so Back still returns to the
+        // prior step.
+        await flush();
+        setStepIndex((index) => Math.max(0, index - 1));
+      }),
+    [flush, form, runNavigation],
+  );
+
+  // Progress-nav jump. Clamped to an already-reached screen here as well as
+  // being offered only for unlocked categories, so the guarantee does not
+  // depend on the navigation component alone.
+  const goToStep = useCallback(
+    (step: number) =>
+      runNavigation(async () => {
+        form.clearErrors();
+        await flush();
+        setStepIndex(Math.min(Math.max(step, 0), maxReached));
+      }),
+    [flush, form, maxReached, runNavigation],
+  );
 
   const goForward = useMemo(
     () =>
@@ -242,11 +295,13 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
             if (saver.designId) router.push(`/design/${saver.designId}/review`);
             return;
           }
-          setStepIndex((index) => index + 1);
+          const nextIndex = stepIndexRef.current + 1;
+          setStepIndex(nextIndex);
+          setMaxReached((reached) => Math.max(reached, nextIndex));
         },
         () => setErrorTick((tick) => tick + 1),
       ),
-    [form, flush, onInspirationStep, saver.designId, router],
+    [form, flush, onInspirationStep, saver.designId, router, stepIndexRef],
   );
 
   // -- Render ---------------------------------------------------------------
@@ -276,7 +331,19 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
     );
   }
 
-  const totalSteps = schema.steps.length + 1; // + inspiration step
+  // One progress category per schema step, plus the inspiration screen. A
+  // category is complete once the user has moved past it and locked until it
+  // has been reached at least once.
+  const categories: ProgressCategory[] = [
+    ...schema.steps.map((step) => ({ id: step.id, label: step.title })),
+    { id: INSPIRATION_CATEGORY_ID, label: "Inspiration" },
+  ].map((entry, position) => ({
+    ...entry,
+    step: position,
+    complete: position < maxReached,
+    locked: position > maxReached,
+  }));
+
   const visibility = visibleQuestions(schema, answers);
   const allowed = allowedOptions(schema, answers);
   const index = questionsById(schema);
@@ -312,9 +379,12 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
 
   return (
     <main className="wizard">
-      <p className="wizard-progress">
-        Step {stepIndex + 1} of {totalSteps}
-      </p>
+      <ProgressNav
+        categories={categories}
+        activeIndex={stepIndex}
+        busy={navigating}
+        onNavigate={(step) => void goToStep(step)}
+      />
 
       {errorKeys.length > 0 && (
         <div
@@ -402,10 +472,18 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
       {saveStatus}
 
       <div className="wizard-nav">
-        <button type="button" onClick={() => void goBack()} disabled={stepIndex === 0}>
+        <button
+          type="button"
+          onClick={() => void goBack()}
+          disabled={stepIndex === 0 || navigating}
+        >
           Back
         </button>
-        <button type="button" onClick={(event) => void goForward(event)}>
+        <button
+          type="button"
+          onClick={(event) => void runNavigation(() => goForward(event))}
+          disabled={navigating}
+        >
           {onInspirationStep ? "Review" : "Continue"}
         </button>
       </div>

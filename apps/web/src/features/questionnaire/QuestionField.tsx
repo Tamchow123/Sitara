@@ -172,6 +172,14 @@ export function QuestionField({ question, value, error, allowed, onChange, onBlu
     >
       <legend className="field-label">{question.label}</legend>
       {help}
+      {typeof max === "number" ? (
+        // A live limit note, so a keyboard or screen-reader user learns they
+        // have reached the maximum from the announcement rather than from
+        // silently disabled cards.
+        <p className="field-limit" role="status">
+          {selected.length} of {max} chosen
+        </p>
+      ) : null}
       <ChoiceOptionGrid
         options={options}
         name={question.id}

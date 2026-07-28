@@ -130,3 +130,21 @@
   --muted: var(--color-neutral-700);
   --line: var(--color-neutral-300);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Zero the duration tokens as well as the declarations themselves, so a
+     rule (or an inline style) that references var(--motion-*) collapses to
+     an instant change rather than relying on the blanket override below.
+     The blanket rule is !important, so it still wins over every later
+     partial even though this is the first sheet imported. */
+  :root {
+    --motion-fast: 0ms;
+    --motion-drawer: 0ms;
+    --motion-screen: 0ms;
+  }
+  * {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}

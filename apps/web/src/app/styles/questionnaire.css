@@ -1,10 +1,104 @@
 /* ------------------------------------------------------------------ */
 /* Questionnaire wizard                                               */
 /* ------------------------------------------------------------------ */
-.wizard-progress {
-  color: var(--muted);
-  font-size: 0.95rem;
-  margin: 0 0 1rem;
+/* Progress navigation. ONE list of step buttons serves both presentations:
+   below 700px it is a disclosure behind "All steps" and the step bar leads;
+   from 700px the bar is hidden and the same list becomes the pill row.
+   Nothing is duplicated in the DOM, so assistive technology sees each step
+   exactly once at every width. */
+.progress-nav {
+  margin: 0 0 1.5rem;
+}
+.progress-bar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.progress-bar-label {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-accent-700);
+}
+.progress-bar {
+  flex: 1 1 8rem;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-200);
+  overflow: hidden;
+}
+.progress-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  transition: width var(--motion-fast) ease-out;
+}
+.progress-toggle {
+  font: inherit;
+  font-size: 0.85rem;
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-800);
+  padding: 0.25rem 0.8rem;
+  cursor: pointer;
+}
+.progress-steps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+}
+.progress-steps[data-open="false"] {
+  display: none;
+}
+.progress-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-neutral-800);
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+}
+.progress-pill:hover:not([disabled]) {
+  background: var(--color-accent-100);
+}
+.progress-pill-active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+  font-weight: 700;
+}
+.progress-pill[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.progress-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-200);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.progress-pill-active .progress-pill-badge {
+  background: var(--color-accent-700);
+  color: var(--color-bg);
 }
 
 .step-description {
@@ -39,6 +133,13 @@
   margin: 0.5rem 0 0;
 }
 
+/* Live "n of m chosen" note for a bounded multi-choice question. */
+.field-limit {
+  margin: 0 0 var(--space-2);
+  font-size: 13px;
+  color: var(--color-accent-2-700);
+}
+
 .field-textarea {
   width: 100%;
   min-height: 6rem;
@@ -47,11 +148,6 @@
   border: 1px solid var(--line);
   border-radius: 6px;
   resize: vertical;
-}
-
-.option-description {
-  color: var(--muted);
-  font-size: 0.92rem;
 }
 
 /* Accessible utility: visually hidden but available to assistive tech. */
@@ -67,77 +163,118 @@
   border: 0;
 }
 
-/* Phase 16B: accessible choice cards (with optional explanatory visuals),
-   the no-preference control, expandable descriptions and the compact grouped
-   colour swatch selector. */
+/* Phase 16B: the handoff's option cards (with optional explanatory visuals and
+   an "i" trigger for the info drawer), the no-preference control and the
+   compact grouped colour swatch selector. */
 .choice-grid {
   display: grid;
-  gap: 0.5rem;
+  gap: var(--space-3);
   grid-template-columns: 1fr;
 }
+/* Photograph-led questions use the handoff's card grid: two columns on a
+   phone, three from 700px. */
 .choice-grid-visual {
-  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  grid-template-columns: repeat(2, 1fr);
+}
+.choice-card-wrap {
+  position: relative;
+  display: flex;
 }
 .choice-card {
   display: flex;
-  gap: 0.6rem;
+  flex: 1;
+  gap: var(--space-2);
   align-items: flex-start;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 0.6rem 0.75rem;
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
   cursor: pointer;
-  background: var(--paper);
+  background: var(--color-neutral-100);
+  transition:
+    transform var(--motion-fast) ease-out,
+    box-shadow var(--motion-fast) ease-out;
 }
 .choice-grid-visual .choice-card {
   flex-direction: column;
 }
 .choice-card:hover {
-  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
-/* Selection is conveyed by the native input's shape AND a ring (not colour
-   alone). */
+/* Selection is conveyed by the native input, a heavier border AND a tick
+   glyph — never by the accent tint alone. */
 .choice-card-selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-100);
+}
+/* The native control is visually hidden inside the card, so the focus ring has
+   to be drawn by the card itself. */
+.choice-card:focus-within {
+  outline: 2px solid var(--color-accent-700);
+  outline-offset: 2px;
 }
 .choice-card-disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
-.choice-card input {
-  margin-top: 0.2rem;
-  width: 1.15rem;
-  height: 1.15rem;
-  flex: none;
-}
 .choice-card-visual {
   display: block;
   width: 100%;
   height: auto;
-  max-width: 7rem;
-  border-radius: 4px;
-  background: var(--paper);
+  /* Set per question by ChoiceOptionGrid from the manifest's own intrinsic
+     dimensions, so every card in one question frames identically. */
+  aspect-ratio: var(--choice-card-aspect, 3 / 4);
+  object-fit: cover;
+  border-radius: calc(var(--radius-md) - 6px);
+  background: var(--color-neutral-200);
 }
 .choice-card-body {
   display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
 }
 .choice-card-title {
-  font-weight: bold;
+  font-weight: 600;
+  font-size: 15px;
 }
-.option-disclosure {
-  display: block;
+.choice-card-tick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-700);
+  color: var(--color-bg);
+  font-size: 0.8rem;
+  line-height: 1;
 }
-.option-disclosure-toggle {
-  background: none;
+.choice-card-info {
+  position: absolute;
+  top: calc(var(--space-2) + 4px);
+  right: calc(var(--space-2) + 4px);
+  width: 26px;
+  height: 26px;
   border: none;
-  padding: 0;
-  color: var(--accent);
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-800);
   font: inherit;
-  font-size: 0.9rem;
-  text-decoration: underline;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1;
   cursor: pointer;
+}
+.choice-card-info:hover:not([disabled]) {
+  background: var(--color-accent-700);
+  color: var(--color-bg);
+}
+.choice-card-info[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .no-preference {
   display: flex;
@@ -265,6 +402,79 @@
 .swatch input:focus-visible + .swatch-chip {
   outline: 3px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Option info drawer                                                 */
+/* ------------------------------------------------------------------ */
+/* Both scrim declarations are the same ink at the same alpha: an engine
+   without color-mix() keeps the rgba() line, one with it takes the second.
+   Without the fallback the scrim would resolve to `transparent` and the
+   modal would read as part of the page. Same pattern as tokens.css. */
+.info-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(32, 30, 29, 0.45);
+  background: color-mix(in srgb, var(--color-text) 45%, transparent);
+}
+.info-drawer {
+  width: min(46rem, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-5) var(--space-6);
+  background: var(--color-bg);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-lg);
+  animation: sitara-drawer-up var(--motion-drawer) ease-out;
+}
+.info-drawer-handle {
+  display: block;
+  width: 44px;
+  height: 4px;
+  margin: 0 auto var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-300);
+}
+/* Overrides the global uppercase/muted h2 treatment: inside the drawer this
+   is a title, not a section eyebrow. */
+.info-drawer-title {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 24px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--color-text);
+}
+.info-drawer-body {
+  margin: 0 0 var(--space-5);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--color-neutral-800);
+}
+.info-drawer-close {
+  font: inherit;
+  padding: 0.5rem 1.2rem;
+  border: 1px solid var(--color-accent-700);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-700);
+  color: var(--color-bg);
+  cursor: pointer;
+}
+
+@keyframes sitara-drawer-up {
+  from {
+    transform: translateY(18px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .save-status {
@@ -426,5 +636,29 @@
   }
   .wizard-nav {
     flex-direction: column-reverse;
+  }
+}
+
+/* The handoff's single questionnaire breakpoint (700px): the card grid gains
+   its third column and the progress nav swaps from the step bar to the pill
+   row. Repeating the [data-open] selector keeps this rule at the same
+   specificity as the collapsed-list rule above, so source order decides. */
+@media (min-width: 43.75rem) {
+  .choice-grid-visual {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .progress-bar-row {
+    display: none;
+  }
+  .progress-steps,
+  .progress-steps[data-open="false"] {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: 0;
+  }
+  .progress-pill {
+    width: auto;
   }
 }

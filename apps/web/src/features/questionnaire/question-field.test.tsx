@@ -117,7 +117,36 @@ describe("QuestionField single_choice with visuals and no-preference", () => {
     expect(screen.queryByRole("radio", { name: /No preference/ })).toBeNull();
   });
 
-  it("expands a description through a real button with correct ARIA", () => {
+  it("explains an option in the info drawer without changing the answer", () => {
+    const onChange = vi.fn();
+    render(
+      <QuestionField
+        question={necklineQuestion}
+        value={undefined}
+        allowed={allOf(necklineQuestion)}
+        onChange={onChange}
+      />,
+    );
+    // The trigger is a sibling of the card's <label>, never a descendant: a
+    // button inside a label also activates that label's control, which would
+    // silently answer the question on an info request.
+    const trigger = screen.getByRole("button", { name: /More about V-neck/ });
+    expect(trigger.closest("label")).toBeNull();
+
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAccessibleName("V-neck");
+    expect(within(dialog).getByText(/A V-shaped neckline of moderate depth/)).toBeVisible();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("radio", { name: /V-neck/ })).not.toBeChecked();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("returns focus to the info trigger even when the click never focused it", () => {
     render(
       <QuestionField
         question={necklineQuestion}
@@ -126,11 +155,43 @@ describe("QuestionField single_choice with visuals and no-preference", () => {
         onChange={vi.fn()}
       />,
     );
-    const toggle = screen.getByRole("button", { name: /Details for V-neck/ });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText(/A V-shaped neckline of moderate depth/)).toBeVisible();
+    // Deliberately NOT focused first: Safari does not focus a <button> on a
+    // bare mouse press, so the drawer must not depend on the browser having
+    // done it. The trigger focuses itself before opening.
+    const trigger = screen.getByRole("button", { name: /More about V-neck/ });
+    expect(document.activeElement).not.toBe(trigger);
+    fireEvent.click(trigger);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("offers no info trigger for an option with no description", () => {
+    render(
+      <QuestionField
+        question={necklineQuestion}
+        value={undefined}
+        allowed={allOf(necklineQuestion)}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /More about High neck/ })).toBeNull();
+  });
+
+  it("frames every card in the question with one aspect from the manifest", () => {
+    const { container } = render(
+      <QuestionField
+        question={necklineQuestion}
+        value={undefined}
+        allowed={allOf(necklineQuestion)}
+        onChange={vi.fn()}
+      />,
+    );
+    // The neckline visuals are square, so the whole grid frames 720/720 — a
+    // per-question value, never a per-card one.
+    const grid = container.querySelector(".choice-grid-visual");
+    expect(grid).toHaveStyle({ "--choice-card-aspect": "720 / 720" });
   });
 
   it("has no axe violations", async () => {
@@ -143,6 +204,59 @@ describe("QuestionField single_choice with visuals and no-preference", () => {
       />,
     );
     expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+  });
+});
+
+describe("QuestionField bounded multi_choice", () => {
+  const fabricQuestion: Question = {
+    id: "fabrics",
+    type: "multi_choice",
+    label: "What should it be made of?",
+    required: false,
+    options: [
+      { value: "silk", label: "Silk", visual_key: "fabric_silk", group: "fabrics" },
+      { value: "velvet", label: "Velvet", visual_key: "fabric_velvet", group: "fabrics" },
+      { value: "organza", label: "Organza", visual_key: "fabric_organza", group: "fabrics" },
+    ],
+    constraints: { max_items: 2 },
+  };
+
+  it("announces the limit and the running count through a live region", () => {
+    const { rerender } = render(
+      <QuestionField
+        question={fabricQuestion}
+        value={[]}
+        allowed={allOf(fabricQuestion)}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 2 chosen");
+
+    rerender(
+      <QuestionField
+        question={fabricQuestion}
+        value={["silk", "velvet"]}
+        allowed={allOf(fabricQuestion)}
+        onChange={vi.fn()}
+      />,
+    );
+    // At the limit the note is the announcement; the untaken option is also
+    // disabled, and an already-taken one never is.
+    expect(screen.getByRole("status")).toHaveTextContent("2 of 2 chosen");
+    expect(screen.getByRole("checkbox", { name: /Organza/ })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: /Silk/ })).not.toBeDisabled();
+  });
+
+  it("shows no limit note when the question is unbounded", () => {
+    render(
+      <QuestionField
+        question={{ ...fabricQuestion, constraints: undefined }}
+        value={[]}
+        allowed={allOf(fabricQuestion)}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });
 

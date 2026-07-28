@@ -220,6 +220,53 @@ describe("QuestionnaireWizard", () => {
     });
   });
 
+  it("jumps back through the progress nav but never past the furthest step reached", async () => {
+    render(<QuestionnaireWizard />);
+    fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
+    await screen.findByText("Saved");
+
+    // Unreached categories are shown but locked, so the nav can never carry the
+    // user past a step whose required answers have not been validated.
+    expect(screen.getByRole("button", { name: /Detail step/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Inspiration/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByRole("heading", { name: "Detail step" })).toBeInTheDocument();
+
+    // The step just left is navigable again, and returning keeps the answer.
+    fireEvent.click(screen.getByRole("button", { name: /Garment step/ }));
+    expect(await screen.findByRole("heading", { name: "Garment step" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Lehenga" })).toBeChecked();
+    expect(screen.getByRole("button", { name: /Inspiration/ })).toBeDisabled();
+  });
+
+  it("locks every navigation control while a step change is in flight", async () => {
+    // Two navigations that each await a save flush would otherwise be resolved
+    // in promise order rather than click order, landing the user on a step
+    // they did not ask for. Only one may be outstanding at a time.
+    let resolveCreate: (value: unknown) => void = () => {};
+    mocks.createDesignDraft.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    render(<QuestionnaireWizard />);
+    fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled());
+    // The pill for the step being left is inert too, so it cannot start a
+    // second flush-then-navigate behind the first.
+    expect(screen.getByRole("button", { name: /Garment step/ })).toBeDisabled();
+
+    resolveCreate({ ok: true, data: detail() });
+    expect(await screen.findByRole("heading", { name: "Detail step" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Continue" })).not.toBeDisabled(),
+    );
+    expect(screen.getByRole("button", { name: /Garment step/ })).not.toBeDisabled();
+  });
+
   it("never persists answers to browser storage", async () => {
     render(<QuestionnaireWizard />);
     fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
