@@ -1,4 +1,4 @@
-// Guards the contrast contract documented at the top of globals.css.
+// Guards the contrast contract documented at the top of styles/tokens.css.
 //
 // The Organic ramp is transcribed from the design handoff rather than
 // imported, so nothing stops a future retune from quietly dropping a text
@@ -10,11 +10,22 @@
 // we deliberately use --color-accent-700 for that instead, and the
 // "decorative only" assertions below record why the lighter steps exist.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const CSS = readFileSync(path.join(__dirname, "globals.css"), "utf8");
+// globals.css is only an import manifest; the rules live in styles/*.css.
+// Read the manifest plus every partial so these guards keep applying no matter
+// which partial a token or rule is moved into — and so a NEW partial is covered
+// the moment it is added, rather than silently escaping the contrast contract.
+const STYLES_DIR = path.join(__dirname, "styles");
+const CSS = [
+  readFileSync(path.join(__dirname, "globals.css"), "utf8"),
+  ...readdirSync(STYLES_DIR)
+    .filter((name) => name.endsWith(".css"))
+    .sort()
+    .map((name) => readFileSync(path.join(STYLES_DIR, name), "utf8")),
+].join("\n");
 
 /**
  * Locate the vendored handoff stylesheet that globals.css transcribes from.
