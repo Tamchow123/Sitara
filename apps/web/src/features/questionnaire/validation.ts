@@ -47,7 +47,50 @@ const MSG = {
   tooShort: (n: number) => `Please use at least ${n} characters.`,
   tooLong: (n: number) => `Please use at most ${n} characters.`,
   required: "This question is required.",
+  wrongColour: "This answer must be a single colour.",
+  wrongColourList: "This answer must be a list of colours.",
+  badHex: "A colour must be a six-digit hex value like #c67139.",
+  duplicateColour: "The same colour was added more than once.",
+  customNotAllowed: "This question does not accept your own colours.",
+  unknownCustomColour: "That colour is no longer in your colours.",
 };
+
+// A six-digit hex colour, upper or lower case on input; always stored lower
+// case. Mirrors the backend's colour_list/colour_choice rule exactly. Exported
+// so answer cleanup applies the SAME definition of "this answer is a custom
+// colour" rather than a second, drifting copy.
+export const HEX_COLOUR_INPUT = /^#[0-9a-fA-F]{6}$/;
+
+function normaliseColourList(value: unknown): { value?: string[]; message?: string } {
+  if (!Array.isArray(value)) return { message: MSG.wrongColourList };
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string" || !HEX_COLOUR_INPUT.test(item)) return { message: MSG.badHex };
+    const lowered = item.toLowerCase();
+    if (seen.has(lowered)) return { message: MSG.duplicateColour };
+    seen.add(lowered);
+    ordered.push(lowered);
+  }
+  return { value: ordered };
+}
+
+// The design's own colours, resolved from the single `colour_list` question
+// BEFORE the per-question pass — a colour_choice answer's legitimacy depends on
+// it, and object iteration order gives no guarantee of reaching it first. A
+// malformed palette yields an empty set, so a custom colour_choice referencing
+// it fails too rather than being silently accepted.
+export function customColourPalette(
+  schema: QuestionnaireSchema,
+  answers: Record<string, unknown>,
+): Set<string> {
+  for (const [questionId, question] of Object.entries(questionsById(schema))) {
+    if (question.type !== "colour_list") continue;
+    const result = normaliseColourList(answers[questionId]);
+    return new Set(result.value ?? []);
+  }
+  return new Set();
+}
 
 export function normaliseText(value: string): string {
   // CRLF/CR → LF, trim OUTER whitespace, preserve internal whitespace.
@@ -60,8 +103,28 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 type Structural = { value?: AnswerValue; selected?: Set<string>; message?: string };
 
-function structuralValue(question: Question, value: unknown): Structural {
+function structuralValue(
+  question: Question,
+  value: unknown,
+  customPalette: Set<string>,
+): Structural {
   const declared = new Set(declaredOptionValues(question));
+  if (question.type === "colour_choice") {
+    // A declared swatch or, when the question allows it, one of the design's
+    // own colours. Never contributes a `selected` set: colours take no part in
+    // rule evaluation, so a custom hex can never reach a condition.
+    if (typeof value !== "string") return { message: MSG.wrongColour };
+    if (declared.has(value)) return { value };
+    if (!HEX_COLOUR_INPUT.test(value)) return { message: MSG.unknownOption };
+    if (!question.constraints?.allow_custom) return { message: MSG.customNotAllowed };
+    const lowered = value.toLowerCase();
+    if (!customPalette.has(lowered)) return { message: MSG.unknownCustomColour };
+    return { value: lowered };
+  }
+  if (question.type === "colour_list") {
+    const result = normaliseColourList(value);
+    return result.message ? { message: result.message } : { value: result.value };
+  }
   if (question.type === "single_choice") {
     if (typeof value !== "string") return { message: MSG.wrongSingle };
     if (!declared.has(value)) return { message: MSG.unknownOption };
@@ -86,7 +149,9 @@ function structuralValue(question: Question, value: unknown): Structural {
 }
 
 function isAnswered(question: Question, value: AnswerValue | undefined): boolean {
-  if (question.type === "multi_choice") return Array.isArray(value) && value.length > 0;
+  if (question.type === "multi_choice" || question.type === "colour_list") {
+    return Array.isArray(value) && value.length > 0;
+  }
   if (question.type === "text") return typeof value === "string" && value !== "";
   return typeof value === "string" && value !== "";
 }
@@ -140,13 +205,14 @@ export function validateAnswers(
 
   const errors: FieldErrors = {};
   const structural: Answers = {};
+  const palette = customColourPalette(schema, answers);
   for (const [key, value] of Object.entries(answers)) {
     const question = index[key];
     if (!question) {
       errors[key] = [MSG.unknownQuestion];
       continue;
     }
-    const result = structuralValue(question, value);
+    const result = structuralValue(question, value, palette);
     if (result.message) {
       errors[key] = [result.message];
       continue;
@@ -184,6 +250,14 @@ export function validateAnswers(
       const message = checkMulti(value as string[], question, requireComplete);
       if (message) {
         errors[key] = [message];
+        continue;
+      }
+    } else if (question.type === "colour_list") {
+      // The palette's own bound. Colours are not options, so none of the
+      // option-based checks above apply to it.
+      const maxItems = question.constraints?.max_items;
+      if (isNum(maxItems) && (value as string[]).length > maxItems) {
+        errors[key] = [MSG.tooMany(maxItems)];
         continue;
       }
     } else if (question.type === "text") {
@@ -224,9 +298,49 @@ function isNum(value: unknown): value is number {
 // empty). Option membership and restrictions stay schema-derived.
 function questionZod(
   question: Question,
-  ctx: { required: boolean; allowed: Set<string> },
+  ctx: { required: boolean; allowed: Set<string>; customPalette: Set<string> },
 ): z.ZodTypeAny {
   const c = question.constraints ?? {};
+
+  if (question.type === "colour_choice") {
+    return z.string().superRefine((value, refine) => {
+      if (!value) {
+        if (ctx.required) {
+          refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.required });
+        }
+        return;
+      }
+      if (ctx.allowed.has(value)) return;
+      if (!HEX_COLOUR_INPUT.test(value)) {
+        refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.unknownOption });
+        return;
+      }
+      if (!c.allow_custom) {
+        refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.customNotAllowed });
+        return;
+      }
+      if (!ctx.customPalette.has(value.toLowerCase())) {
+        refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.unknownCustomColour });
+      }
+    });
+  }
+
+  if (question.type === "colour_list") {
+    return z.array(z.string()).superRefine((values, refine) => {
+      const result = normaliseColourList(values ?? []);
+      if (result.message) {
+        refine.addIssue({ code: z.ZodIssueCode.custom, message: result.message });
+        return;
+      }
+      const list = result.value ?? [];
+      if (isNum(c.max_items) && list.length > c.max_items) {
+        refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.tooMany(c.max_items) });
+      }
+      if (list.length === 0 && ctx.required) {
+        refine.addIssue({ code: z.ZodIssueCode.custom, message: MSG.required });
+      }
+    });
+  }
 
   if (question.type === "text") {
     return z.string().superRefine((raw, refine) => {
@@ -301,6 +415,7 @@ export function buildStepZodSchema(
   const visibility = visibleQuestions(schema, answers);
   const required = requiredQuestions(schema, answers, visibility);
   const allowed = allowedOptions(schema, answers);
+  const customPalette = customColourPalette(schema, answers);
   const shape: Record<string, z.ZodTypeAny> = {};
   for (const question of step.questions) {
     if (!visibility[question.id]) continue;
@@ -308,6 +423,7 @@ export function buildStepZodSchema(
     const base = questionZod(question, {
       required: isRequired,
       allowed: allowed[question.id] ?? new Set<string>(),
+      customPalette,
     });
     // Optional questions may be absent entirely; required ones may not.
     shape[question.id] = isRequired ? base : base.optional();

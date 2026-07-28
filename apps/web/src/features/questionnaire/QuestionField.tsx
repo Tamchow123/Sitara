@@ -24,9 +24,25 @@ type Props = {
   allowed: Set<string>;
   onChange: (value: AnswerValue) => void;
   onBlur?: () => void;
+  // The design's own colour palette — the sibling `colour_list` answer, shared
+  // by every colour question, plus the bound and the setter for adding to it.
+  // Supplied by the wizard, which owns cross-question answers.
+  customColours?: string[];
+  customColourMax?: number;
+  onAddCustomColour?: (hex: string) => void;
 };
 
-export function QuestionField({ question, value, error, allowed, onChange, onBlur }: Props) {
+export function QuestionField({
+  question,
+  value,
+  error,
+  allowed,
+  onChange,
+  onBlur,
+  customColours,
+  customColourMax,
+  onAddCustomColour,
+}: Props) {
   const helpId = useId();
   const errorId = useId();
   const describedBy =
@@ -67,7 +83,52 @@ export function QuestionField({ question, value, error, allowed, onChange, onBlu
     );
   }
 
+  // The design's own palette has no field of its own: it is edited through the
+  // "Any colour" picker inside each colour question and rendered there as
+  // selectable swatches, exactly as the handoff describes.
+  if (question.type === "colour_list") return null;
+
   const options = (question.options ?? []).filter((option) => allowed.has(option.value));
+  const palette = customColours ?? [];
+
+  if (question.type === "colour_choice") {
+    // A colour answer is a declared swatch value OR one of the design's own
+    // hex colours; both are plain strings, so the single-select grid handles
+    // them identically and the backend re-checks membership.
+    const current = typeof value === "string" ? value : "";
+    return (
+      <fieldset
+        className="field"
+        aria-describedby={describedBy}
+        aria-invalid={error ? true : undefined}
+      >
+        <legend className="field-label">{question.label}</legend>
+        {help}
+        <ColourSwatchGrid
+          options={options}
+          name={question.id}
+          mode="single"
+          selected={current ? [current] : []}
+          customColours={palette}
+          customMax={customColourMax}
+          onAddCustomColour={
+            question.constraints?.allow_custom ? onAddCustomColour : undefined
+          }
+          onChange={(next) => onChange(next[0] ?? "")}
+          onBlur={onBlur}
+        />
+        {!question.required ? (
+          <NoPreferenceControl
+            name={question.id}
+            active={current === ""}
+            onSelect={() => onChange("")}
+            onBlur={onBlur}
+          />
+        ) : null}
+        {errorMessage}
+      </fieldset>
+    );
+  }
 
   if (question.type === "single_choice") {
     const current = typeof value === "string" ? value : "";
@@ -129,9 +190,11 @@ export function QuestionField({ question, value, error, allowed, onChange, onBlu
         <ColourSwatchGrid
           options={options}
           name={question.id}
+          mode="multi"
           selected={selected}
           max={typeof max === "number" ? max : undefined}
           exclusiveValues={constraints.exclusive_values ?? []}
+          customColours={palette}
           onChange={(next) => onChange(next)}
           onBlur={onBlur}
         />

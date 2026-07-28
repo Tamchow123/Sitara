@@ -27,17 +27,40 @@ const necklineQuestion: Question = {
   ],
 };
 
+// A bounded multi-colour question. Schema v4 has no such question of its own —
+// its colours are single-choice — but the grid still serves both modes, so the
+// multi semantics stay covered.
 const colourQuestion: Question = {
   id: "colour_palette",
   type: "multi_choice",
   label: "Colours",
   required: true,
   options: [
-    { value: "ruby", label: "Ruby", visual_key: "colour_ruby", group: "reds" },
-    { value: "gold", label: "Gold", visual_key: "colour_gold", group: "yellows_metallics" },
+    { value: "scarlet", label: "Scarlet", visual_key: "colour_scarlet", group: "reds_maroons" },
+    { value: "marigold", label: "Marigold", visual_key: "colour_marigold", group: "golds_ivories" },
     { value: "emerald", label: "Emerald", visual_key: "colour_emerald", group: "greens" },
   ],
   constraints: { min_items: 1, max_items: 2 },
+};
+
+// The v4 dupatta colour: single choice, "Match the fabric" first, custom
+// colours allowed.
+const dupattaColourQuestion: Question = {
+  id: "dupatta_colour",
+  type: "colour_choice",
+  label: "The dupatta",
+  required: false,
+  options: [
+    {
+      value: "match_fabric",
+      label: "Match the fabric",
+      visual_key: "colour_match_fabric",
+      group: "match",
+    },
+    { value: "scarlet", label: "Scarlet", visual_key: "colour_scarlet", group: "reds_maroons" },
+    { value: "pearl", label: "Pearl", visual_key: "colour_pearl", group: "silvers_pastels" },
+  ],
+  constraints: { allow_custom: true },
 };
 
 const allOf = (q: Question) => new Set((q.options ?? []).map((o) => o.value));
@@ -270,8 +293,8 @@ describe("QuestionField colour swatch selector", () => {
         onChange={vi.fn()}
       />,
     );
-    expect(screen.getByRole("checkbox", { name: /Ruby/ })).toBeInstanceOf(HTMLInputElement);
-    expect(screen.getByText("Reds & warm")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /Scarlet/ })).toBeInstanceOf(HTMLInputElement);
+    expect(screen.getByText("Reds & maroons")).toBeInTheDocument();
     expect(screen.getByText(/0 of 2 selected/)).toBeInTheDocument();
   });
 
@@ -280,29 +303,29 @@ describe("QuestionField colour swatch selector", () => {
     const { rerender } = render(
       <QuestionField
         question={colourQuestion}
-        value={["ruby"]}
+        value={["scarlet"]}
         allowed={allOf(colourQuestion)}
         onChange={onChange}
       />,
     );
-    fireEvent.click(screen.getByRole("checkbox", { name: /Gold/ }));
-    expect(onChange).toHaveBeenCalledWith(["ruby", "gold"]);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Marigold/ }));
+    expect(onChange).toHaveBeenCalledWith(["scarlet", "marigold"]);
 
     rerender(
       <QuestionField
         question={colourQuestion}
-        value={["ruby", "gold"]}
+        value={["scarlet", "marigold"]}
         allowed={allOf(colourQuestion)}
         onChange={onChange}
       />,
     );
     // At the maximum, an unselected swatch is disabled; selected ones are not.
     expect(screen.getByRole("checkbox", { name: /Emerald/ })).toBeDisabled();
-    expect(screen.getByRole("checkbox", { name: /Ruby/ })).not.toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: /Scarlet/ })).not.toBeDisabled();
     // Ordered summary is pinned above the grid.
     const summary = screen.getByRole("list", { name: /Selected colours/ });
-    expect(within(summary).getByText(/1\. Ruby/)).toBeInTheDocument();
-    expect(within(summary).getByText(/2\. Gold/)).toBeInTheDocument();
+    expect(within(summary).getByText(/1\. Scarlet/)).toBeInTheDocument();
+    expect(within(summary).getByText(/2\. Marigold/)).toBeInTheDocument();
   });
 
   it("deselects without reordering the remaining colours", () => {
@@ -310,59 +333,192 @@ describe("QuestionField colour swatch selector", () => {
     render(
       <QuestionField
         question={colourQuestion}
-        value={["ruby", "gold"]}
+        value={["scarlet", "marigold"]}
         allowed={allOf(colourQuestion)}
         onChange={onChange}
       />,
     );
-    fireEvent.click(screen.getByRole("checkbox", { name: /Ruby/ }));
-    expect(onChange).toHaveBeenCalledWith(["gold"]);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Scarlet/ }));
+    expect(onChange).toHaveBeenCalledWith(["marigold"]);
   });
 
   it("applies exclusive_values with the same semantics as other multi_choice", () => {
     const exclusiveColour: Question = {
       ...colourQuestion,
-      constraints: { min_items: 1, max_items: 4, exclusive_values: ["multicolour"] },
+      constraints: { min_items: 1, max_items: 4, exclusive_values: ["pearl"] },
       options: [
         ...(colourQuestion.options ?? []),
-        { value: "multicolour", label: "Multicolour", visual_key: "colour_multicolour", group: "neutrals" },
+        { value: "pearl", label: "Pearl", visual_key: "colour_pearl", group: "silvers_pastels" },
       ],
     };
     const onChange = vi.fn();
     const { rerender } = render(
       <QuestionField
         question={exclusiveColour}
-        value={["ruby", "gold"]}
+        value={["scarlet", "marigold"]}
         allowed={allOf(exclusiveColour)}
         onChange={onChange}
       />,
     );
     // Selecting the exclusive colour clears everything else.
-    fireEvent.click(screen.getByRole("checkbox", { name: /Multicolour/ }));
-    expect(onChange).toHaveBeenCalledWith(["multicolour"]);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Pearl/ }));
+    expect(onChange).toHaveBeenCalledWith(["pearl"]);
 
     rerender(
       <QuestionField
         question={exclusiveColour}
-        value={["multicolour"]}
+        value={["pearl"]}
         allowed={allOf(exclusiveColour)}
         onChange={onChange}
       />,
     );
     // Selecting a normal colour removes the exclusive one.
-    fireEvent.click(screen.getByRole("checkbox", { name: /Ruby/ }));
-    expect(onChange).toHaveBeenLastCalledWith(["ruby"]);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Scarlet/ }));
+    expect(onChange).toHaveBeenLastCalledWith(["scarlet"]);
   });
 
   it("has no axe violations", async () => {
     const { container } = render(
       <QuestionField
         question={colourQuestion}
-        value={["ruby"]}
+        value={["scarlet"]}
         allowed={allOf(colourQuestion)}
         onChange={vi.fn()}
       />,
     );
     expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+  });
+});
+
+describe("QuestionField colour_choice (schema v4)", () => {
+  const renderDupatta = (props: Record<string, unknown> = {}) =>
+    render(
+      <QuestionField
+        question={dupattaColourQuestion}
+        value={undefined}
+        allowed={allOf(dupattaColourQuestion)}
+        onChange={vi.fn()}
+        customColours={[]}
+        customColourMax={8}
+        {...props}
+      />,
+    );
+
+  it("renders one radio group of grouped swatches, matching first", () => {
+    renderDupatta();
+    expect(screen.getByRole("radio", { name: /Match the fabric/ })).toBeInstanceOf(
+      HTMLInputElement,
+    );
+    expect(screen.getByText("Matching")).toBeInTheDocument();
+    expect(screen.getByText("Reds & maroons")).toBeInTheDocument();
+    // Single choice: no running count, because there is no limit to run to.
+    expect(screen.queryByText(/selected$/)).toBeNull();
+  });
+
+  it("stores a chosen swatch as its option value", () => {
+    const onChange = vi.fn();
+    renderDupatta({ onChange });
+    fireEvent.click(screen.getByRole("radio", { name: /Scarlet/ }));
+    expect(onChange).toHaveBeenCalledWith("scarlet");
+  });
+
+  it("clears to absence through No preference", () => {
+    const onChange = vi.fn();
+    renderDupatta({ value: "scarlet", onChange });
+    fireEvent.click(screen.getByRole("radio", { name: /No preference/ }));
+    expect(onChange).toHaveBeenLastCalledWith("");
+  });
+
+  it("offers the design's own colours as swatches and stores the hex itself", () => {
+    const onChange = vi.fn();
+    renderDupatta({ customColours: ["#7f2b4a"], onChange });
+    expect(screen.getByText("Your colours")).toBeInTheDocument();
+    const custom = screen.getByRole("radio", { name: "#7f2b4a" });
+    fireEvent.click(custom);
+    // The backend accepts a colour_choice hex only when it is in the sibling
+    // colour_list answer, so the stored value is the hex verbatim.
+    expect(onChange).toHaveBeenCalledWith("#7f2b4a");
+  });
+
+  it("offers the colour picker only when the question allows custom colours", () => {
+    renderDupatta({ onAddCustomColour: vi.fn() });
+    expect(screen.getByRole("button", { name: /Any colour/ })).toBeInTheDocument();
+
+    render(
+      <QuestionField
+        question={{ ...dupattaColourQuestion, id: "fixed", constraints: {} }}
+        value={undefined}
+        allowed={allOf(dupattaColourQuestion)}
+        onChange={vi.fn()}
+        customColours={[]}
+        onAddCustomColour={vi.fn()}
+      />,
+    );
+    // Two fields are mounted; the second one must not have added a picker.
+    expect(screen.getAllByRole("button", { name: /Any colour/ })).toHaveLength(1);
+  });
+
+  it("renders nothing for the palette question itself", () => {
+    const { container } = render(
+      <QuestionField
+        question={{
+          id: "custom_colours",
+          type: "colour_list",
+          label: "Your own colours",
+          required: false,
+          constraints: { max_items: 8 },
+        }}
+        value={["#7f2b4a"]}
+        allowed={new Set()}
+        onChange={vi.fn()}
+      />,
+    );
+    // The palette has no field of its own — it is edited through each colour
+    // question's picker.
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("has no axe violations", async () => {
+    const { container } = renderDupatta({
+      value: "scarlet",
+      customColours: ["#7f2b4a"],
+      onAddCustomColour: vi.fn(),
+    });
+    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+  });
+});
+
+describe("QuestionField colour custom-palette boundaries", () => {
+  it("offers no picker when the question forbids custom colours, even if a handler is passed", () => {
+    render(
+      <QuestionField
+        question={{ ...dupattaColourQuestion, constraints: { allow_custom: false } }}
+        value={undefined}
+        allowed={allOf(dupattaColourQuestion)}
+        onChange={vi.fn()}
+        customColours={[]}
+        customColourMax={8}
+        onAddCustomColour={vi.fn()}
+      />,
+    );
+    // The schema's allow_custom is the gate — not whether a caller happened to
+    // supply a handler.
+    expect(screen.queryByRole("button", { name: /Any colour/ })).toBeNull();
+  });
+
+  it("never offers the design's own colours on a multi-select colour question", () => {
+    render(
+      <QuestionField
+        question={colourQuestion}
+        value={[]}
+        allowed={allOf(colourQuestion)}
+        onChange={vi.fn()}
+        customColours={["#7f2b4a"]}
+      />,
+    );
+    // A multi_choice answer is checked against its DECLARED options, so a raw
+    // hex there is always rejected by the backend; the swatch must not exist.
+    expect(screen.queryByText("Your colours")).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "#7f2b4a" })).toBeNull();
   });
 });

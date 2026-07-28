@@ -305,10 +305,6 @@
   flex-direction: column;
   gap: 0.75rem;
 }
-.swatch-count {
-  font-weight: bold;
-  margin: 0;
-}
 .swatch-summary {
   list-style: none;
   margin: 0;
@@ -352,7 +348,7 @@
 .swatch-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(5rem, 1fr));
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 .swatch {
   display: flex;
@@ -362,34 +358,54 @@
   cursor: pointer;
   text-align: center;
 }
+/* 38px circles, a 19px rank badge and the 56px colour input below are the
+   handoff's own component dimensions, quoted deliberately rather than derived
+   from the spacing scale — they size specific controls, not layout rhythm, and
+   the token layer has no size ramp for them. The inset ring keeps a pale swatch
+   legible against the cream ground; the tick and (in multi questions) the
+   order badge mean a chosen swatch never reads by colour alone. */
 .swatch-chip {
   position: relative;
-  width: 2.4rem;
-  height: 2.4rem;
-  border-radius: 6px;
-  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1.5px rgba(32, 30, 29, 0.22);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-text) 22%, transparent);
+  transition: transform var(--motion-fast) ease-out;
+}
+.swatch:hover .swatch-chip {
+  transform: scale(1.09);
 }
 .swatch-chip-small {
   width: 1.1rem;
   height: 1.1rem;
-  border-radius: 3px;
 }
-/* Selected swatches get a ring AND an order badge — never colour alone. */
 .swatch-selected .swatch-chip {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent);
+  box-shadow:
+    0 0 0 3px var(--color-bg),
+    0 0 0 6px var(--color-accent);
+}
+.swatch-tick {
+  color: var(--color-bg);
+  font-size: 0.9rem;
+  line-height: 1;
+  /* Legible on both dark and light swatches without knowing which it is. */
+  text-shadow: 0 0 3px rgba(32, 30, 29, 0.85);
 }
 .swatch-order {
   position: absolute;
-  top: -0.4rem;
-  right: -0.4rem;
-  min-width: 1.1rem;
-  height: 1.1rem;
-  border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 0.75rem;
-  line-height: 1.1rem;
+  top: -0.35rem;
+  right: -0.35rem;
+  min-width: 19px;
+  height: 19px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-700);
+  color: var(--color-bg);
+  font-size: 0.7rem;
+  line-height: 19px;
   text-align: center;
 }
 .swatch-label {
@@ -400,8 +416,117 @@
   cursor: not-allowed;
 }
 .swatch input:focus-visible + .swatch-chip {
-  outline: 3px solid var(--accent);
-  outline-offset: 2px;
+  outline: 3px solid var(--color-accent-700);
+  outline-offset: 4px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Custom colour picker                                               */
+/* ------------------------------------------------------------------ */
+.custom-colour {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+.custom-colour-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.3rem 0.9rem;
+  border: 2px dashed var(--color-neutral-300);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-neutral-800);
+  cursor: pointer;
+}
+.custom-colour-pill:hover:not([disabled]) {
+  border-color: var(--color-accent);
+}
+.custom-colour-pill[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+/* The one place literal colours are correct: this dot means "any colour", so
+   its sweep is decorative content, not a themeable surface. The stops are the
+   handoff palette's own anchors and are deliberately NOT wired to
+   colour-swatches.json — that file is answer data the schema contract pins,
+   and a spinner of five hues must not become a reason to keep a colour the
+   questionnaire has dropped. */
+.custom-colour-dot {
+  width: 19px;
+  height: 19px;
+  border-radius: var(--radius-pill);
+  background: conic-gradient(from 0deg, #c22b33, #e8a13a, #1d6b4f, #2b3d8f, #46203f, #c22b33);
+}
+.custom-colour-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-100);
+  animation: sitara-fade-in var(--motion-fast) ease-out;
+}
+.custom-colour-input {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.9rem;
+}
+.custom-colour-input input {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+.custom-colour-hex {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.95rem;
+}
+.custom-colour-guidance {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-neutral-700);
+  max-width: 42ch;
+}
+.custom-colour-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.custom-colour-add,
+.custom-colour-cancel {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.35rem 1rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+.custom-colour-add {
+  border: 1px solid var(--color-accent-700);
+  background: var(--color-accent-700);
+  color: var(--color-bg);
+}
+.custom-colour-cancel {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--color-accent-700);
+  text-decoration: underline;
+}
+
+@keyframes sitara-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* ------------------------------------------------------------------ */

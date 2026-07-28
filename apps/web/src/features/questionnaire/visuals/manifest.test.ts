@@ -104,49 +104,42 @@ describe("questionnaire visual manifest", () => {
   });
 
   describe("colour swatches", () => {
-    it("covers the expanded v3 colour vocabulary", () => {
-      const expected = [
-        "colour_ivory",
-        "colour_ruby",
-        "colour_burgundy",
-        "colour_coral",
-        "colour_dusty_rose",
-        "colour_forest_green",
-        "colour_powder_blue",
-        "colour_royal_blue",
-        "colour_lilac",
-        "colour_mauve",
-        "colour_taupe",
-        "colour_multicolour",
-      ];
-      for (const key of expected) {
+    it("covers the schema v4 colour vocabulary", () => {
+      // Which keys exist is asserted BIDIRECTIONALLY against the fixture on the
+      // API side (apps/api/sitara/questionnaire/tests/test_visual_keys.py),
+      // which owns the schema. This end asserts the shape of what we ship and
+      // pins the total, so a silent drop cannot pass unnoticed here either.
+      expect(Object.keys(COLOUR_MANIFEST).length).toBe(29);
+      for (const key of ["colour_scarlet", "colour_rani_pink", "colour_match_fabric"]) {
         expect(COLOUR_MANIFEST[key]).toBeDefined();
       }
-      expect(Object.keys(COLOUR_MANIFEST).length).toBeGreaterThanOrEqual(41);
     });
 
-    it("assigns each colour a valid hex (or the multicolour flag) and a known group", () => {
+    it("assigns each colour a valid hex (or no colour at all) and a known group", () => {
       const groups = new Set([
-        "neutrals",
-        "reds",
-        "pinks",
-        "yellows_metallics",
+        "match",
+        "reds_maroons",
+        "pinks_roses",
+        "golds_ivories",
         "greens",
-        "blues_teals",
-        "purples",
+        "blues",
+        "purples_wines",
+        "silvers_pastels",
       ]);
       for (const entry of Object.values(COLOUR_MANIFEST)) {
         expect(groups.has(entry.group)).toBe(true);
-        if (entry.multicolour) {
-          expect(entry.hex).toBeNull();
+        if (entry.hex === null) {
+          // Exactly one entry is not a colour: schema v4's "Match the fabric".
+          expect(entry.visualKey).toBe("colour_match_fabric");
         } else {
-          expect(entry.hex).toMatch(/^#[0-9a-f]{6}$/i);
+          expect(entry.hex).toMatch(/^#[0-9a-f]{6}$/);
         }
       }
     });
 
-    it("labels every colour group", () => {
-      for (const group of ["neutrals", "reds", "pinks", "purples"]) {
+    it("labels every colour group it declares", () => {
+      const declared = new Set(Object.values(COLOUR_MANIFEST).map((entry) => entry.group));
+      for (const group of declared) {
         expect(colourGroupLabel(group)).not.toBe(group);
       }
     });

@@ -10,28 +10,33 @@
 // missing or unapproved visual falls back to plain text.
 
 import assetIntegrity from "./asset-integrity.json";
+import colourSwatches from "./colour-swatches.json";
 
 export type RightsStatus = "project_owned" | "development_placeholder";
 
 // A colour group's display heading, keyed by the schema's bounded `group`
-// machine id. Grouping is presentation only.
+// machine id. Grouping is presentation only. These are the schema v4 groups;
+// apps/api/sitara/questionnaire/tests/test_visual_keys.py asserts that the
+// swatch data and the fixture agree in both directions, so a group renamed on
+// one side cannot silently lose its heading on the other.
 export const COLOUR_GROUP_LABELS: Record<string, string> = {
-  neutrals: "Neutrals",
-  reds: "Reds & warm",
-  pinks: "Pinks",
-  yellows_metallics: "Yellows & metallics",
+  match: "Matching",
+  reds_maroons: "Reds & maroons",
+  pinks_roses: "Pinks & roses",
+  golds_ivories: "Golds & ivories",
   greens: "Greens",
-  blues_teals: "Blues & teals",
-  purples: "Purples",
+  blues: "Blues",
+  purples_wines: "Purples & wines",
+  silvers_pastels: "Silvers & pastels",
 };
 
 export type ColourSwatch = {
   visualKey: string;
   group: string;
-  // A CSS colour string, or null for the special multicolour swatch (rendered
-  // as a gradient by the component). Project-owned; never a canonical answer.
+  // A CSS colour string, or null for an option that is not a colour at all
+  // (schema v4's "Match the fabric"), which the component renders as a
+  // deliberately non-solid chip. Project-owned; never a canonical answer.
   hex: string | null;
-  multicolour?: true;
   rightsStatus: RightsStatus;
   sourceNote: string;
 };
@@ -50,65 +55,24 @@ export type OptionVisual = {
 
 const SWATCH_SOURCE = "Project-authored colour value; Sitara Phase 16B.";
 
-// Keyed by the option `visual_key` (colour_<value>). Hex values are chosen for
-// reasonable distinguishability and are paired with a text label in the UI so
-// selection never relies on colour alone.
-const COLOUR_SWATCHES: Record<string, { hex: string | null; group: string; multicolour?: true }> = {
-  colour_ivory: { hex: "#f4ece1", group: "neutrals" },
-  colour_white: { hex: "#ffffff", group: "neutrals" },
-  colour_beige: { hex: "#e8dcc8", group: "neutrals" },
-  colour_champagne: { hex: "#f0e2c8", group: "neutrals" },
-  colour_taupe: { hex: "#b8a894", group: "neutrals" },
-  colour_brown: { hex: "#6b4a2b", group: "neutrals" },
-  colour_black: { hex: "#1c1c1c", group: "neutrals" },
-  colour_multicolour: { hex: null, group: "neutrals", multicolour: true },
-  colour_red: { hex: "#c62828", group: "reds" },
-  colour_maroon: { hex: "#7a1f2b", group: "reds" },
-  colour_ruby: { hex: "#9b1c31", group: "reds" },
-  colour_burgundy: { hex: "#6d1f2e", group: "reds" },
-  colour_orange: { hex: "#e8703a", group: "reds" },
-  colour_blush: { hex: "#f3d5d0", group: "pinks" },
-  colour_pink: { hex: "#e79bb4", group: "pinks" },
-  colour_peach: { hex: "#f2b699", group: "pinks" },
-  colour_coral: { hex: "#f28066", group: "pinks" },
-  colour_rose: { hex: "#d76a80", group: "pinks" },
-  colour_dusty_rose: { hex: "#c99098", group: "pinks" },
-  colour_yellow: { hex: "#f2d13a", group: "yellows_metallics" },
-  colour_gold: { hex: "#c9a227", group: "yellows_metallics" },
-  colour_silver: { hex: "#c9cdd2", group: "yellows_metallics" },
-  colour_bronze: { hex: "#a5713b", group: "yellows_metallics" },
-  colour_copper: { hex: "#b3663a", group: "yellows_metallics" },
-  colour_green: { hex: "#3f8a4e", group: "greens" },
-  colour_emerald: { hex: "#1f7a5a", group: "greens" },
-  colour_sage: { hex: "#a3b18a", group: "greens" },
-  colour_mint: { hex: "#b7e4c7", group: "greens" },
-  colour_olive: { hex: "#7a7a2e", group: "greens" },
-  colour_forest_green: { hex: "#26533b", group: "greens" },
-  colour_teal: { hex: "#2a8a8a", group: "blues_teals" },
-  colour_blue: { hex: "#2f5fb3", group: "blues_teals" },
-  colour_navy: { hex: "#1f2a52", group: "blues_teals" },
-  colour_turquoise: { hex: "#3fb9c4", group: "blues_teals" },
-  colour_powder_blue: { hex: "#bcd6ec", group: "blues_teals" },
-  colour_royal_blue: { hex: "#2540b0", group: "blues_teals" },
-  colour_purple: { hex: "#6a3d9a", group: "purples" },
-  colour_lavender: { hex: "#cdb4db", group: "purples" },
-  colour_lilac: { hex: "#c9a9d6", group: "purples" },
-  colour_plum: { hex: "#6d3b5e", group: "purples" },
-  colour_mauve: { hex: "#b78aa0", group: "purples" },
-};
-
+// Keyed by the option `visual_key` (colour_<value>). The hex values are the
+// design handoff's own palette, transcribed once into colour-swatches.json so
+// the API-side contract test can read them without parsing TypeScript. Every
+// swatch is paired with a text label in the UI, so a choice never relies on
+// colour alone.
 const COLOUR_MANIFEST: Record<string, ColourSwatch> = Object.fromEntries(
-  Object.entries(COLOUR_SWATCHES).map(([visualKey, entry]) => [
-    visualKey,
-    {
+  Object.entries(colourSwatches as Record<string, { hex: string | null; group: string }>).map(
+    ([visualKey, entry]) => [
       visualKey,
-      group: entry.group,
-      hex: entry.hex,
-      ...(entry.multicolour ? { multicolour: true as const } : {}),
-      rightsStatus: "project_owned" as const,
-      sourceNote: SWATCH_SOURCE,
-    },
-  ]),
+      {
+        visualKey,
+        group: entry.group,
+        hex: entry.hex,
+        rightsStatus: "project_owned" as const,
+        sourceNote: SWATCH_SOURCE,
+      },
+    ],
+  ),
 );
 
 type IntegrityEntry = {

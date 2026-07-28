@@ -9,13 +9,15 @@ listing one entry per shipped visual — reading it here keeps the coupling
 pointed at a stable generated file rather than making the web package
 hand-parse this app's Django fixture envelope.
 
-Only non-colour visual keys are covered. Colour swatches are rendered from
-project-authored hex values in the frontend manifest rather than from image
-files, so they never appear in the integrity manifest.
+Colour swatches are rendered from project-authored hex values rather than from
+image files, so they never appear in the integrity manifest; they have their own
+small flat file, ``colour-swatches.json``, and their own bidirectional contract
+below.
 """
 
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -32,11 +34,13 @@ _WEB_PACKAGE = next(
     (parent / "apps" / "web" for parent in _HERE.parents if (parent / "apps" / "web").is_dir()),
     None,
 )
-_INTEGRITY_PATH = (
+_VISUALS_DIR = (
     None
     if _WEB_PACKAGE is None
-    else _WEB_PACKAGE / "src" / "features" / "questionnaire" / "visuals" / "asset-integrity.json"
+    else _WEB_PACKAGE / "src" / "features" / "questionnaire" / "visuals"
 )
+_INTEGRITY_PATH = None if _VISUALS_DIR is None else _VISUALS_DIR / "asset-integrity.json"
+_COLOUR_PATH = None if _VISUALS_DIR is None else _VISUALS_DIR / "colour-swatches.json"
 
 
 def _schema(path: Path) -> dict:
@@ -50,6 +54,17 @@ def _non_colour_visual_keys(schema: dict) -> set[str]:
         for question in step["questions"]
         for option in question.get("options", [])
         if option.get("visual_key") and not option["visual_key"].startswith("colour_")
+    }
+
+
+def _colour_options(schema: dict) -> dict[str, str]:
+    """Every colour option's ``visual_key`` mapped to its declared ``group``."""
+    return {
+        option["visual_key"]: option.get("group", "")
+        for step in schema["steps"]
+        for question in step["questions"]
+        for option in question.get("options", [])
+        if option.get("visual_key", "").startswith("colour_")
     }
 
 
@@ -112,3 +127,38 @@ class TestQuestionnaireVisualKeys:
                 assert "knee" in entry["alt"].lower(), key
             if "sharara" in key:
                 assert "waist" in entry["alt"].lower(), key
+
+    @pytest.fixture(scope="class")
+    def colours(self) -> dict:
+        assert _COLOUR_PATH is not None and _COLOUR_PATH.is_file(), (
+            f"apps/web is present but {_COLOUR_PATH} is missing; the colour "
+            "swatches the questionnaire renders are unverified"
+        )
+        return json.loads(_COLOUR_PATH.read_text(encoding="utf-8"))
+
+    def test_v4_colour_keys_match_the_shipped_swatches(self, colours: dict) -> None:
+        """Bidirectional: no colour option without a swatch, no orphan swatch.
+
+        A gap means a colour option renders with no fill at all; an orphan means
+        a colour is being carried that the schema no longer offers.
+        """
+        assert set(_colour_options(_schema(_V4_PATH))) == set(colours)
+
+    def test_every_colour_option_keeps_its_declared_group(self, colours: dict) -> None:
+        """The group drives the rendered section heading, so the two must agree.
+
+        Disagreement would file a colour under the wrong heading in the UI while
+        both sides individually looked correct.
+        """
+        for visual_key, group in _colour_options(_schema(_V4_PATH)).items():
+            assert colours[visual_key]["group"] == group, visual_key
+
+    def test_swatches_are_six_digit_lower_case_hex_or_the_one_non_colour(
+        self, colours: dict
+    ) -> None:
+        for visual_key, entry in colours.items():
+            if entry["hex"] is None:
+                # Exactly one option is not a colour: v4's "Match the fabric".
+                assert visual_key == "colour_match_fabric"
+                continue
+            assert re.fullmatch(r"#[0-9a-f]{6}", entry["hex"]), visual_key

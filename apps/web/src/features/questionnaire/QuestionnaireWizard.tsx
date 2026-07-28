@@ -105,6 +105,19 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
 
   const onInspirationStep = schema !== null && stepIndex === schema.steps.length;
 
+  // The design's own colour palette lives in the schema's single `colour_list`
+  // question. Found BY TYPE, never by id: it is shared by every colour question
+  // and edited through their pickers, so the wizard (which owns cross-question
+  // answers) is the only place that can supply it.
+  const colourListQuestion = useMemo(() => {
+    for (const step of schema?.steps ?? []) {
+      for (const question of step.questions) {
+        if (question.type === "colour_list") return question;
+      }
+    }
+    return null;
+  }, [schema]);
+
   // -- Load / resume --------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
@@ -348,6 +361,12 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
   const allowed = allowedOptions(schema, answers);
   const index = questionsById(schema);
 
+  const paletteValue = colourListQuestion ? answers[colourListQuestion.id] : undefined;
+  const customColours = Array.isArray(paletteValue) ? paletteValue : [];
+  const addCustomColour = colourListQuestion
+    ? (hex: string) => onAnswerChange(colourListQuestion.id, [...customColours, hex])
+    : undefined;
+
   const rhfErrors = form.formState.errors;
   const serverErrors = saver.fieldErrors;
   const errorKeys = Array.from(
@@ -452,6 +471,9 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
                         value={field.value}
                         error={errorMessageFor(question.id)}
                         allowed={allowed[question.id] ?? new Set<string>()}
+                        customColours={customColours}
+                        customColourMax={colourListQuestion?.constraints?.max_items ?? undefined}
+                        onAddCustomColour={addCustomColour}
                         onChange={(value) => {
                           field.onChange(value);
                           onAnswerChange(question.id, value);
