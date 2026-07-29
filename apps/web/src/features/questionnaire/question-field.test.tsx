@@ -65,6 +65,54 @@ const dupattaColourQuestion: Question = {
 
 const allOf = (q: Question) => new Set((q.options ?? []).map((o) => o.value));
 
+describe("QuestionField labelHidden", () => {
+  // One-question-per-screen makes the screen's <h1> the question itself. The
+  // field then printed the same sentence again as its legend, directly under
+  // the heading. The legend cannot simply be dropped — a fieldset without one
+  // has no accessible name — so it is hidden visually and only visually.
+  it("hides the legend visually while keeping the group named", () => {
+    render(
+      <QuestionField
+        question={necklineQuestion}
+        value={undefined}
+        allowed={allOf(necklineQuestion)}
+        onChange={vi.fn()}
+        labelHidden
+      />,
+    );
+    const group = screen.getByRole("group", { name: "Which neckline?" });
+    const legend = group.querySelector("legend");
+    expect(legend).toHaveTextContent("Which neckline?");
+    expect(legend?.className).toContain("visually-hidden");
+  });
+
+  it("shows the legend normally by default", () => {
+    render(
+      <QuestionField
+        question={necklineQuestion}
+        value={undefined}
+        allowed={allOf(necklineQuestion)}
+        onChange={vi.fn()}
+      />,
+    );
+    const legend = screen.getByRole("group", { name: "Which neckline?" }).querySelector("legend");
+    expect(legend?.className).not.toContain("visually-hidden");
+  });
+
+  it("keeps a hidden-label field free of accessibility violations", async () => {
+    const { container } = render(
+      <QuestionField
+        question={necklineQuestion}
+        value={undefined}
+        allowed={allOf(necklineQuestion)}
+        onChange={vi.fn()}
+        labelHidden
+      />,
+    );
+    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+  });
+});
+
 describe("QuestionField single_choice with visuals and no-preference", () => {
   it("renders real radio inputs and an explanatory photograph when available", () => {
     const { container } = render(

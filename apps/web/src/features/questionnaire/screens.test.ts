@@ -117,6 +117,18 @@ describe("buildScreenPlan", () => {
       "Which garment?",
     ]);
     expect(screens[0].questions).toHaveLength(1);
+    // The heading IS the question, so the field must not print the label
+    // again beneath it.
+    expect(screens[0].titleIsQuestionLabel).toBe(true);
+  });
+
+  it("does not claim the heading is the question label on a grouped screen", () => {
+    // A grouped screen is titled by the STEP, so each field still needs its
+    // own visible label — suppressing them would leave the questions unnamed.
+    const { screens } = plan({ garment_type: "lehenga" });
+    const colours = screens.find((s) => s.categoryId === "colours");
+    expect(colours?.titleIsQuestionLabel).toBe(false);
+    expect(screens.at(-1)?.titleIsQuestionLabel).toBe(false); // inspiration
   });
 
   it("collapses a step's colour questions into one screen titled by the step", () => {

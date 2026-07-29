@@ -46,6 +46,10 @@ export type Screen = {
   // label so the h1 IS the question; a grouped colour screen uses the step
   // title, because no one question speaks for the group.
   title: string;
+  // True when `title` IS the sole question's label, so the field must not
+  // print that label a SECOND time under the heading. The control still needs
+  // its accessible name, so the label is hidden visually, never removed.
+  titleIsQuestionLabel: boolean;
   description?: string;
   // Empty for the inspiration screen, which renders its own picker.
   questions: Question[];
@@ -93,6 +97,7 @@ export function buildScreenPlan(
         categoryId: step.id,
         categoryIndex,
         title: grouped ? step.title : questions[0].label,
+        titleIsQuestionLabel: !grouped,
         description: grouped ? (step.description ?? undefined) : undefined,
         questions,
         positionInCategory: position + 1,
@@ -112,6 +117,7 @@ export function buildScreenPlan(
     categoryId: INSPIRATION_CATEGORY_ID,
     categoryIndex: categories.length - 1,
     title: "Which looks inspire you?",
+    titleIsQuestionLabel: false,
     questions: [],
     positionInCategory: 1,
     screensInCategory: 1,

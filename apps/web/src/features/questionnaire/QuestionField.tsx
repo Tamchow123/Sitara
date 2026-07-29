@@ -30,6 +30,11 @@ type Props = {
   customColours?: string[];
   customColourMax?: number;
   onAddCustomColour?: (hex: string) => void;
+  // The wizard already prints this question's label as the screen's <h1>.
+  // The label is then hidden VISUALLY only — a fieldset without a legend, or
+  // a textarea without a label, loses its accessible name, and a screen
+  // reader would announce an unnamed group.
+  labelHidden?: boolean;
 };
 
 export function QuestionField({
@@ -42,9 +47,11 @@ export function QuestionField({
   customColours,
   customColourMax,
   onAddCustomColour,
+  labelHidden = false,
 }: Props) {
   const helpId = useId();
   const errorId = useId();
+  const labelClass = labelHidden ? "field-label visually-hidden" : "field-label";
   const describedBy =
     [question.help_text ? helpId : null, error ? errorId : null].filter(Boolean).join(" ") ||
     undefined;
@@ -64,7 +71,7 @@ export function QuestionField({
     const max = question.constraints?.max_length;
     return (
       <div className="field">
-        <label className="field-label" htmlFor={errorId + "-input"}>
+        <label className={labelClass} htmlFor={errorId + "-input"}>
           {question.label}
         </label>
         {help}
@@ -102,7 +109,7 @@ export function QuestionField({
         aria-describedby={describedBy}
         aria-invalid={error ? true : undefined}
       >
-        <legend className="field-label">{question.label}</legend>
+        <legend className={labelClass}>{question.label}</legend>
         {help}
         <ColourSwatchGrid
           options={options}
@@ -139,7 +146,7 @@ export function QuestionField({
         aria-describedby={describedBy}
         aria-invalid={error ? true : undefined}
       >
-        <legend className="field-label">{question.label}</legend>
+        <legend className={labelClass}>{question.label}</legend>
         {help}
         <ChoiceOptionGrid
           options={options}
@@ -185,7 +192,7 @@ export function QuestionField({
         aria-describedby={describedBy}
         aria-invalid={error ? true : undefined}
       >
-        <legend className="field-label">{question.label}</legend>
+        <legend className={labelClass}>{question.label}</legend>
         {help}
         <ColourSwatchGrid
           options={options}
@@ -233,7 +240,7 @@ export function QuestionField({
       aria-describedby={describedBy}
       aria-invalid={error ? true : undefined}
     >
-      <legend className="field-label">{question.label}</legend>
+      <legend className={labelClass}>{question.label}</legend>
       {help}
       {typeof max === "number" ? (
         // A live limit note, so a keyboard or screen-reader user learns they

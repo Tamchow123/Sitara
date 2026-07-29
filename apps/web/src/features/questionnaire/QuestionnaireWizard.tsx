@@ -576,6 +576,7 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
                       value={field.value}
                       error={errorMessageFor(question.id)}
                       allowed={allowed[question.id] ?? new Set<string>()}
+                      labelHidden={screen.titleIsQuestionLabel}
                       customColours={customColours}
                       customColourMax={colourListQuestion?.constraints?.max_items ?? undefined}
                       onAddCustomColour={addCustomColour}

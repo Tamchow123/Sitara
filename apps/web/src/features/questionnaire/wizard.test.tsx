@@ -151,6 +151,26 @@ describe("QuestionnaireWizard", () => {
     expect(screen.getByRole("radio", { name: "Saree" })).toBeInTheDocument();
   });
 
+  it("prints a single-question screen's label once, without leaving the group unnamed", async () => {
+    // The screen heading IS the question. Printing the fieldset legend as well
+    // put the same sentence on screen twice, immediately under itself. The
+    // legend still has to EXIST — remove it and the radio group loses its
+    // accessible name — so it is hidden visually only.
+    render(<QuestionnaireWizard />);
+    const heading = await screen.findByRole("heading", { name: "Garment" });
+    expect(heading).toBeInTheDocument();
+
+    // Exactly one VISIBLE occurrence of the label...
+    const visible = screen
+      .getAllByText("Garment", { ignore: "script, style" })
+      .filter((node) => !node.className.includes("visually-hidden"));
+    expect(visible).toHaveLength(1);
+    expect(visible[0]).toBe(heading);
+
+    // ...and the group is still named for assistive technology.
+    expect(screen.getByRole("group", { name: "Garment" })).toBeInTheDocument();
+  });
+
   it("creates the design on the first successful save (partial autosave)", async () => {
     render(<QuestionnaireWizard />);
     fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
