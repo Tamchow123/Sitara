@@ -2,6 +2,15 @@
   box-sizing: border-box;
 }
 
+html {
+  /* Reserve the vertical scrollbar's gutter. Without it the root box reports
+     the full viewport width while its client width excludes the scrollbar,
+     leaving a scrollable ~15px sliver that no element accounts for — and the
+     page also shifts sideways whenever the scrollbar appears or disappears
+     between screens. */
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   font-family: var(--font-body);

@@ -237,6 +237,13 @@ services:
       # Server-only: the Next.js rewrite proxies /api/* here. The browser
       # never sees this host — it talks to the web origin only.
       API_INTERNAL_BASE_URL: http://api:8000
+      # A bind-mounted host directory emits no inotify events inside a Linux
+      # container on Windows or macOS, so the dev server's watcher never fires
+      # and an edit is only picked up if that route happens to compile again.
+      # That failure is silent and looks exactly like "my change did nothing".
+      # Polling costs a little CPU and is the price of a watcher that works.
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
     # src/ and public/ are bind-mounted because this service runs `next dev`.
     # Without them the dev server watches files BAKED INTO THE IMAGE at build
     # time, so every edit needs a full `docker compose build web` and — worse —

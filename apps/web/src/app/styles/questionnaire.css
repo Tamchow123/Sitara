@@ -106,11 +106,47 @@
   margin: 0 0 1.25rem;
 }
 
+/* The handoff's questionnaire column is 1020px; base.css's `main` rule gives
+   every page 46rem (736px), and `.wizard` had no rule of its own at all, so
+   the card grids were laid out in 72% of the width they were designed for.
+   A class beats the element selector, and this file is imported after base. */
+.wizard,
+.review {
+  max-width: 63.75rem;
+  padding-inline: var(--space-4);
+}
+
+/* A 1020px column would otherwise run prose to ~120 characters a line. Only
+   the running text is capped — never the card grids or the review rows. */
+.wizard .step-description,
+.wizard .field-help,
+.wizard-hint {
+  max-width: 62ch;
+}
+
+/* The wizard body is the cream ground. base.css paints every bare <section>
+   in --color-neutral-100, which is the OPTION CARD's own colour — so a card
+   sat on a panel of itself at 1.00:1 and only its photograph read as a card.
+   The handoff puts the kicker, heading and fields straight onto --color-bg.
+   Scoped to the wizard rather than rescoping the global rule, which the home,
+   auth, account and design-brief pages all rely on. */
+.wizard > section {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: none;
+}
+
+/* The handoff's fieldset is `border: none; padding: 0` — the box drawn here
+   was never in the design, and once the panel above is gone it becomes the
+   loudest edge on the screen. `min-inline-size: auto` is the declaration a
+   <fieldset> needs to stop being pinned to its content's min-content width;
+   without it a card grid inside cannot shrink below its widest option. */
 .field {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 1rem 1.1rem;
-  margin: 0 0 1.25rem;
+  border: none;
+  padding: 0;
+  margin: 0 0 var(--space-8);
+  min-inline-size: auto;
 }
 
 .field-label {
@@ -166,10 +202,14 @@
 /* Phase 16B: the handoff's option cards (with optional explanatory visuals and
    an "i" trigger for the info drawer), the no-preference control and the
    compact grouped colour swatch selector. */
+/* Text-only questions used to stack one card per row at every width — the
+   multi-column rules below are scoped to `.choice-grid-visual`, which only
+   applies when an option resolves a photograph. That left the very first
+   screen (seven ceremonies) as a single tall column of rows. */
 .choice-grid {
   display: grid;
   gap: var(--space-3);
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 11rem), 1fr));
 }
 /* Photograph-led questions use the handoff's card grid: two columns on a
    phone, three from 700px. */
