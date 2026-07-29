@@ -32,12 +32,10 @@ or cost-control invariant.
 
 > **Superseded in part by ADR 0019 (2026-07-29).** The bytes of the references a
 > user actually selected — their own uploads and the curated presets they picked
-> — **will be** sent to the IMAGE provider, as short-TTL signed URLs minted
-> inside the generation job, once ADR 0019's implementing slice lands. *Not yet
-> implemented at the time of writing: `ImageGenerationRequest` still raises
-> `ReferenceImagesNotEnabled` unconditionally, so no reference byte can be sent
-> under any configuration; CLAUDE.md §13 is the authoritative current-status
-> source.* That is a deliberate, recorded override of the paragraph
+> — **are** sent to the IMAGE provider, as short-TTL signed URLs minted inside
+> the generation job by `generation/reference_images.py`. Read that module and
+> `sitara/ai_gateway/image_generation.py` as the authority on what actually
+> crosses the boundary. That is a deliberate, recorded override of the paragraph
 > below, taken with the BFL perpetual-training-licence, unresolved
 > Replicate-routing and unpublished-retention-window exposure in view. Nothing
 > below changes for **Anthropic**, which still receives metadata only, and the
@@ -53,7 +51,10 @@ Phase 5B already collects and freezes. `ReferenceImagesNotEnabled` (Phase 10)
 remains a fail-closed guard with no implementation to enable: generation
 always constructs an empty `reference_image_urls` tuple, and a non-empty
 tuple is rejected at `ImageGenerationRequest` construction — before any
-provider client exists — regardless of live-gate state.
+provider client exists — regardless of live-gate state. *(As decided in Phase
+13. ADR 0019 replaced that exception with `ReferenceImagesRejected`, a bounds
+check rather than a blanket refusal; `ReferenceImagesNotEnabled` no longer
+exists in the codebase.)*
 
 ### A versioned, hashed snapshot is the single source of truth
 

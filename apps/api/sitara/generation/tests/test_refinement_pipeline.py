@@ -336,7 +336,12 @@ class TestFailurePreservesVersionOne:
 
 
 class TestNoImageToImageInput:
-    def test_image_request_never_carries_reference_urls_or_source_bytes(self):
+    """Refinement is always a FRESH text-to-image generation. ADR 0019 lets the
+    user's chosen INSPIRATIONS reach the image provider; it changes nothing
+    about the design's own previously generated image, which must never be sent
+    back as an input under any name."""
+
+    def test_a_refinement_with_no_inspiration_sends_no_reference_at_all(self):
         design, v1, _initial = _generated_design()
         attempt = _enqueue_refinement(design, v1)
         refined_provider = mock.Mock()
@@ -349,3 +354,36 @@ class TestNoImageToImageInput:
         request = image_provider.last_request
         assert request.reference_image_urls == ()
         assert v1.image_storage_key not in request.prompt
+
+    def test_the_source_versions_own_image_is_never_sent_as_a_reference(
+        self, settings, inmemory_storage
+    ):
+        # The dangerous confusion ADR 0019 could invite: signing the design's
+        # OWN generated image alongside the inspirations would silently turn
+        # refinement into image-to-image editing, which CLAUDE.md §7 forbids.
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        settings.S3_SIGNED_URL_ENDPOINT_URL = "https://storage.example.test"
+        storage = InMemoryStorage()
+        design, v1, _initial = _generated_design(storage=storage)
+        asset = make_eligible_asset()
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+
+        attempt = _enqueue_refinement(design, v1)
+        refined_provider = mock.Mock()
+        refined_provider.generate.return_value = _refined_result(v1.design_spec)
+        image_provider = FakeImageProvider()
+
+        result = _run(attempt, structured=refined_provider, image=image_provider, storage=storage)
+
+        assert result.status == _Status.SUCCEEDED
+        urls = image_provider.last_request.reference_image_urls
+        # Exactly the inspiration — one reference, not two.
+        assert len(urls) == 1
+        assert asset.image_storage_key in urls[0]
+        v1.refresh_from_db()
+        assert v1.image_storage_key
+        for url in urls:
+            assert v1.image_storage_key not in url
+            assert v1.thumbnail_storage_key not in url

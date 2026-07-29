@@ -6,10 +6,7 @@
 - **Phase:** Phase 2 (see ../PHASES.md)
 
 > **Superseded for the default tier by ADR 0019 (Phase 16B, 2026-07-29):** the
-> default image model **becomes** `black-forest-labs/flux-2-max` once the
-> Phase 16B reference-image slice lands. *Not yet implemented at the time of
-> writing — `settings.py` still ships `flux-1.1-pro` for both tiers; CLAUDE.md
-> §3 is the authoritative current-status source.* It is chosen for a
+> default image model is now `black-forest-labs/flux-2-max`. It is chosen for a
 > capability `flux-1.1-pro` lacks — reference-image input — and NOT on any
 > quality comparison. No new blind evaluation was run and the Phase 2 evidence
 > below is untouched and still authoritative for what it measured. The per-image

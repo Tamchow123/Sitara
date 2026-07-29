@@ -214,6 +214,85 @@ class TestImageBoundary:
         # text stage's retained reservation (usage None) remains counted.
         assert in_memory_budget_ledger.total_for_today() == _anthropic_max(priced)
 
+    def test_a_reference_signing_failure_reserves_nothing_for_the_image_stage(
+        self, priced, in_memory_budget_ledger, inmemory_storage, monkeypatch
+    ):
+        """ADR 0019 signing runs BEFORE the image reservation and before the
+        in-flight marker. If it ran after either, a signing failure would leak a
+        reservation against the daily ceiling and strand the attempt as spend
+        that may already have happened."""
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        design = make_complete_design()
+        DesignInspiration.objects.create(
+            design=design, inspiration_asset=make_eligible_asset(), position=1
+        )
+        attempt = _queued(design)
+        # Fail the REAL signing backend, not the whole function: this runs the
+        # actual reference_image_urls body — the row queries, the eligibility
+        # re-check and the signing loop — so the test would still catch a
+        # regression that swallowed the error inside that module.
+        monkeypatch.setattr(
+            "sitara.generation.reference_images.S3DesignImageSigner",
+            _FailingSigner,
+        )
+        image = FakeImageProvider()
+
+        _run(attempt, image=image)
+
+        attempt.refresh_from_db()
+        assert attempt.status == _Status.FAILED
+        assert image.create_calls == 0
+        # Only the text stage's retained reservation — the image stage never
+        # reserved, so nothing leaked against the daily ceiling.
+        assert in_memory_budget_ledger.total_for_today() == _anthropic_max(priced)
+        assert attempt.image_submission_in_flight is False
+
+    def test_a_worker_interruption_during_signing_is_a_bounded_retry(
+        self, priced, in_memory_budget_ledger, inmemory_storage, monkeypatch
+    ):
+        """A Celery soft time limit is an operational event, not a domain
+        failure. Every other interruptible call in the pipeline re-raises it so
+        the attempt resumes; the reference-signing call must do the same rather
+        than terminalise a design because a worker was preempted mid-deploy."""
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+        from sitara.generation.pipeline import GenerationRetry
+
+        design = make_complete_design()
+        DesignInspiration.objects.create(
+            design=design, inspiration_asset=make_eligible_asset(), position=1
+        )
+        attempt = _queued(design)
+
+        def _interrupted(*args, **kwargs):
+            raise SoftTimeLimitExceeded()
+
+        monkeypatch.setattr("sitara.generation.pipeline.reference_image_urls", _interrupted)
+
+        # A bounded retry, NOT a terminal failure: the top-level handler owns it.
+        with pytest.raises(GenerationRetry):
+            _run(attempt, image=FakeImageProvider())
+
+        attempt.refresh_from_db()
+        assert attempt.status != _Status.FAILED
+        # Still nothing reserved for the image stage — signing precedes it.
+        assert in_memory_budget_ledger.total_for_today() == _anthropic_max(priced)
+        assert attempt.image_submission_in_flight is False
+
+
+class _FailingSigner:
+    """Stands in for S3DesignImageSigner when the signing backend is down."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def sign_get(self, *args, **kwargs):
+        raise RuntimeError("signing backend unavailable")
+
 
 class TestDemoBypass:
     def test_demo_attempt_creates_no_budget_keys_and_zero_cost(

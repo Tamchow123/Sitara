@@ -92,7 +92,8 @@ state file — those bytes will be sent to the image provider once
 `ReferenceImagesNotEnabled` is lifted onto `flux-2-max`. That provider-facing half
 is a separate slice; this section records the scope change and the storage-side
 design that lands first, so code and decision record do not contradict each other
-in the interval.
+in the interval. *(That slice has since landed — see
+[ADR 0019](0019-reference-image-conditioning-and-flux-2-max.md).)*
 
 **Why it is in 16B rather than a new phase.** The upload shares one budget with
 curated selections (`MAX_INSPIRATION_IMAGES`), one wizard step, and one
@@ -141,6 +142,17 @@ the Celery job, never persisted, logged or returned; that the frozen
 strictly zero-cost with no reference upload path. Until that record exists,
 `ReferenceImagesNotEnabled` stays in force — nothing in this slice sends an
 uploaded byte anywhere.
+
+> **Superseded 2026-07-29 — that record now exists: [ADR 0019](0019-reference-image-conditioning-and-flux-2-max.md).**
+> It says everything the paragraph above required, and the override is
+> implemented. `ReferenceImagesNotEnabled` no longer exists anywhere in the
+> codebase: `ImageGenerationRequest` now raises `ReferenceImagesRejected`, a
+> bounds check (count ceiling, https only, length ceiling), not a blanket
+> refusal. The bytes of the references a user selected — uploads and curated
+> presets alike — are sent to the image provider as short-TTL signed URLs minted
+> inside the Celery job by `generation/reference_images.py`. Demo mode still
+> signs nothing. Read that ADR and those two modules, not this paragraph, for
+> what actually happens today.
 
 ### DesignSpec schema version 2, with historical v1 support
 

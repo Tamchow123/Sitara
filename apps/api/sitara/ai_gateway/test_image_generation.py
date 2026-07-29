@@ -9,10 +9,11 @@ import httpx
 import pytest
 
 from sitara.ai_gateway.image_generation import (
+    MAX_REFERENCE_IMAGES,
     ImageGenerationRequest,
     ImagePrediction,
     ImageProviderError,
-    ReferenceImagesNotEnabled,
+    ReferenceImagesRejected,
 )
 from sitara.ai_gateway.policy import (
     PaidGenerationDisabled,
@@ -363,45 +364,130 @@ class TestReplicateContract:
         assert result.prediction_id == "p"
 
 
-class TestReferenceImagesRejected:
-    """Reference-image conditioning stays disabled (Phase 13 §17): no
-    implementation exists to enable, so this remains fail-closed regardless
-    of any gate state."""
+class TestReferenceImageBounds:
+    """Reference-image conditioning is enabled (ADR 0019), but the request
+    boundary still bounds what may cross it. A malformed or over-long
+    reference is REJECTED here — never silently dropped, never forwarded."""
 
-    def test_non_empty_reference_collection_is_rejected_at_construction(self):
-        with pytest.raises(ReferenceImagesNotEnabled):
-            _request(reference_image_urls=("https://replicate.delivery/x",))
+    _URL = "https://storage.example.test/design-images/abc?X-Amz-Signature=deadbeef"
 
-    def test_default_request_always_carries_an_empty_tuple(self):
+    def test_default_request_carries_an_empty_tuple(self):
+        # Absence, not a sentinel: a caller that never sets references sends
+        # none, so the demo path and the no-selection path stay byte-free.
         assert _request().reference_image_urls == ()
 
-    def test_rejected_even_when_every_live_gate_is_open(self, settings):
-        _open_gates(settings)
-        with pytest.raises(ReferenceImagesNotEnabled):
-            _request(reference_image_urls=("https://replicate.delivery/catalogue-image.webp",))
+    def test_a_bounded_collection_of_signed_urls_is_accepted(self):
+        request = _request(reference_image_urls=(self._URL, self._URL + "2"))
+        assert request.reference_image_urls == (self._URL, self._URL + "2")
+
+    def test_more_references_than_the_ceiling_are_rejected(self):
+        too_many = tuple(f"{self._URL}{index}" for index in range(MAX_REFERENCE_IMAGES + 1))
+        with pytest.raises(ReferenceImagesRejected):
+            _request(reference_image_urls=too_many)
+
+    def test_exactly_the_ceiling_is_accepted(self):
+        at_limit = tuple(f"{self._URL}{index}" for index in range(MAX_REFERENCE_IMAGES))
+        assert len(_request(reference_image_urls=at_limit).reference_image_urls) == (
+            MAX_REFERENCE_IMAGES
+        )
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://storage.example.test/design-images/abc",  # plaintext
+            "file:///etc/passwd",  # local scheme
+            "s3://bucket/key",  # storage scheme
+            "//storage.example.test/abc",  # scheme-relative
+            "",  # empty
+            " https://storage.example.test/abc",  # leading whitespace defeats a naive check
+        ],
+    )
+    def test_a_non_https_reference_is_rejected(self, url):
+        # A signed URL is a bearer credential; it must never be handed to a
+        # provider over plaintext, and a non-http scheme could point at
+        # something local rather than at storage.
+        with pytest.raises(ReferenceImagesRejected):
+            _request(reference_image_urls=(url,))
+
+    def test_a_non_string_reference_is_rejected(self):
+        with pytest.raises(ReferenceImagesRejected):
+            _request(reference_image_urls=(None,))
+
+    def test_an_unbounded_reference_url_is_rejected(self):
+        with pytest.raises(ReferenceImagesRejected):
+            _request(reference_image_urls=("https://storage.example.test/" + "a" * 5000,))
+
+    def test_one_bad_reference_rejects_the_whole_request(self):
+        # Never partial: dropping the bad one and sending the rest would
+        # generate from a silently different set of references than the user
+        # chose.
+        with pytest.raises(ReferenceImagesRejected):
+            _request(reference_image_urls=(self._URL, "http://insecure.example.test/x"))
+
+    def test_the_rejection_never_echoes_the_url(self):
+        # A presigned URL is a credential — it must not reach an exception
+        # message that a log or error handler could capture.
+        secret = "https://storage.example.test/x?X-Amz-Signature=SUPERSECRETSIGNATURE"
+        with pytest.raises(ReferenceImagesRejected) as exc:
+            _request(reference_image_urls=(secret, "http://insecure.example.test/x"))
+        assert "SUPERSECRETSIGNATURE" not in str(exc.value)
+        assert "insecure.example.test" not in str(exc.value)
 
     def test_zero_provider_clients_instantiated_on_rejection(self, monkeypatch):
         def _fail_if_constructed(*args, **kwargs):
             raise AssertionError("no provider client may be constructed before the reject")
 
         monkeypatch.setattr(ReplicateImageProvider, "__init__", _fail_if_constructed)
-        with pytest.raises(ReferenceImagesNotEnabled):
-            _request(reference_image_urls=("https://replicate.delivery/x",))
+        with pytest.raises(ReferenceImagesRejected):
+            _request(reference_image_urls=("http://insecure.example.test/x",))
 
-    def test_create_prediction_payload_has_no_reference_field(self, settings):
-        # A request that reached create_prediction already carries an empty
-        # tuple (construction rejects any other value) — confirm the
-        # Replicate payload builder never reads a reference-image key even
-        # structurally, so a future field addition to the request dataclass
-        # could not silently start forwarding one.
+
+class TestReferenceImagePayload:
+    _URL = "https://storage.example.test/design-images/abc?X-Amz-Signature=deadbeef"
+
+    def _create(self, settings, request):
         _open_gates(settings)
         preds = _FakePredictions(create_result=_FakePrediction(id="p", status="starting"))
-        client = _FakeClient(preds)
-        provider = ReplicateImageProvider(client=client)
-        provider.create_prediction(_request())
-        model_input = preds.create_calls[0]["input"]
-        assert "reference_image_urls" not in model_input
-        assert not any("reference" in str(key).lower() for key in model_input)
+        ReplicateImageProvider(client=_FakeClient(preds)).create_prediction(request)
+        return preds.create_calls[0]["input"]
+
+    def test_no_reference_key_is_sent_when_the_user_selected_none(self, settings):
+        # Absent, not an empty list: an empty `input_images` is a different
+        # input shape and a submission error is charged-or-ambiguous territory.
+        model_input = self._create(settings, _request())
+        assert "input_images" not in model_input
+
+    def test_selected_references_are_forwarded_as_input_images(self, settings):
+        model_input = self._create(
+            settings, _request(reference_image_urls=(self._URL, self._URL + "2"))
+        )
+        assert model_input["input_images"] == [self._URL, self._URL + "2"]
+
+    def test_prompt_upsampling_is_omitted_when_unset(self, settings):
+        # flux-2-max does not accept the parameter; an unknown input key is a
+        # submission error, so None means OMIT rather than send False.
+        model_input = self._create(settings, _request(prompt_upsampling=None))
+        assert "prompt_upsampling" not in model_input
+
+    def test_prompt_upsampling_is_sent_when_explicitly_set(self, settings):
+        model_input = self._create(settings, _request(prompt_upsampling=False))
+        assert model_input["prompt_upsampling"] is False
+
+    def test_the_payload_keys_are_exactly_the_reviewed_allowlist(self, settings):
+        # Pin the whole payload shape, not just the reference key: a future
+        # field added to the request dataclass must not start crossing to the
+        # provider without a test changing here.
+        model_input = self._create(settings, _request(reference_image_urls=(self._URL,)))
+        assert set(model_input) == {
+            "prompt",
+            "seed",
+            "aspect_ratio",
+            "output_format",
+            "output_quality",
+            "safety_tolerance",
+            "prompt_upsampling",
+            "input_images",
+        }
 
 
 class TestWorkerInterruption:

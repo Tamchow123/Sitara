@@ -2,8 +2,8 @@
 
 Committed defaults keep the application safe by construction:
 
-    DEFAULT_IMAGE_MODEL = black-forest-labs/flux-1.1-pro   (Phase 2 decision)
-    FAST_IMAGE_MODEL    = black-forest-labs/flux-1.1-pro
+    DEFAULT_IMAGE_MODEL = black-forest-labs/flux-2-max     (ADR 0019)
+    FAST_IMAGE_MODEL    = black-forest-labs/flux-1.1-pro   (ADR 0001)
     DEMO_MODE           = true    (no Anthropic / Replicate calls)
     ALLOW_PAID_AI_CALLS = false   (a present token never enables paid calls)
 
@@ -606,7 +606,12 @@ ALLOW_PAID_AI_CALLS = env_bool("ALLOW_PAID_AI_CALLS", default=False)
 # Stripped at assignment so validation, persistence and provider submission
 # all use ONE canonical value (a padded env value can never diverge from the
 # value that was validated).
-DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro").strip()
+# ADR 0019: the DEFAULT tier must accept reference images (``input_images``) —
+# a design carrying inspiration references fails at submission otherwise. The
+# fast tier does not need them and stays on the ADR 0001 model. Changing either
+# MUST bump LIVE_GENERATION_PRICING_PROFILE: the per-image price differs, and a
+# stale profile would under-reserve every call.
+DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "black-forest-labs/flux-2-max").strip()
 FAST_IMAGE_MODEL = os.getenv("FAST_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro").strip()
 
 # Tokens may be present in the environment; their presence NEVER enables

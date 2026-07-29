@@ -35,6 +35,11 @@ must never be sent to the provider:
 Reference-image conditioning remains disabled. The existing
 `ReferenceImagesNotEnabled` boundary must remain fail-closed.
 
+*(Superseded 2026-07-29 for Phase 16B: ADR 0019 deliberately lifted that
+boundary and `ReferenceImagesNotEnabled` no longer exists — the metadata-only
+rule below still governs **Anthropic**. This file is Phase 13's frozen task
+spec; read ADR 0019 and `generation/reference_images.py` for current behaviour.)*
+
 This is an MVP implementation limitation, not evidence that metadata influence
 is superior to direct reference conditioning. Phase 2 recorded no conclusion
 because the inspiration comparison was not run. Do not make a quality claim
