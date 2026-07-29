@@ -82,6 +82,66 @@ or unknown visual falls back to plain text. This is a deliberately different,
 narrower category from inspiration images (ADR 0006/0014) and does not touch the
 private storage, rights-verification or provider-facing paths.
 
+### Authorised scope change: user-uploaded inspiration images
+
+**Added 2026-07-29.** The original 16B scope (and the "Deferred" list below) ruled
+out user-supplied imagery entirely. The maintainer's design handoff explicitly
+reopened it: a user must be able to attach up to three of **their own** reference
+photographs to a design, and — per the same handoff decision recorded in the phase
+state file — those bytes will be sent to the image provider once
+`ReferenceImagesNotEnabled` is lifted onto `flux-2-max`. That provider-facing half
+is a separate slice; this section records the scope change and the storage-side
+design that lands first, so code and decision record do not contradict each other
+in the interval.
+
+**Why it is in 16B rather than a new phase.** The upload shares one budget with
+curated selections (`MAX_INSPIRATION_IMAGES`), one wizard step, and one
+result-page acknowledgement surface. Splitting the two halves of a single
+three-slot reference control across phases would leave a half-wired UI in `main`.
+
+**What is introduced.** `DesignInspirationUpload` — a private, per-design row
+(`position` 1..3, server-generated `storage_key`, decoded dimensions,
+`image_sha256` for per-design deduplication, `rights_acknowledged_at`) with
+database constraints for unique position, unique image and position bounds. The
+service writes the sanitised object first and the row second, deletes the object
+before the row, re-checks the shared cap under `select_for_update()` on the owning
+design, and reuses freed positions rather than incrementing monotonically.
+Uploaded bytes are decoded by Pillow only, gated on declared size, header pixels
+and a wire-level `Content-Length` pre-check, stripped of EXIF/GPS/XMP/ICC, and
+re-encoded as one clean WebP; the original is never stored. Endpoints are
+anonymous-session-owned, CSRF-protected, throttled per session and per hashed IP,
+and return the same indistinguishable 404 for foreign and nonexistent designs. No
+storage key, hash or byte size is ever serialised into a response.
+
+**Relationship to ADR 0006 — deliberately NOT the staff rights model.** A user
+upload is *private user content*, not catalogue content. It therefore has no
+`RightsRecord`, no verifier identity, no expiry, no approval workflow, no
+`publicly_eligible()` participation and no public-display, commercial-use or
+derivative-generation flags; it is never listed, never shown to another session,
+and can never be promoted into the catalogue. The rights position is a single
+per-upload user affirmation (`rights_acknowledged_at`, refused if absent) — a
+weaker, honestly-scoped claim that must never be presented, in code or in UI, as
+verified rights. The sanitisation pipeline is duplicated rather than imported from
+`catalogue/image_processing.py` for exactly that reason (shared primitives stay in
+`sitara.image_sanitize`); ADR 0006's staff-only, rights-verified model is
+untouched, and none of its prohibitions (user uploads *into the catalogue*, remote
+URL imports, scraping, automatic rights verification, public ACLs) are relaxed.
+
+**What ADR 0014 must say once these bytes reach a provider.** ADR 0014's current
+absolute — no inspiration image bytes, URLs or storage keys ever reach an AI
+provider, `ReferenceImagesNotEnabled` fail-closed — will be *deliberately
+overridden*, not quietly reinterpreted. The amending record must state: that the
+override is a maintainer decision taken with the provider terms in view (BFL takes
+a perpetual, irrevocable licence over Inputs to train and improve its
+technologies; coverage of Replicate-routed traffic is unresolved; Replicate
+publishes no input retention window); that it covers both user uploads and curated
+catalogue presets; that signed reference URLs are short-TTL and minted only inside
+the Celery job, never persisted, logged or returned; that the frozen
+`InspirationContextSnapshot` audit trail is unchanged; and that demo mode remains
+strictly zero-cost with no reference upload path. Until that record exists,
+`ReferenceImagesNotEnabled` stays in force — nothing in this slice sends an
+uploaded byte anywhere.
+
 ### DesignSpec schema version 2, with historical v1 support
 
 A dedicated neckline changes `source_selections`, so v1 is never mutated in
@@ -308,9 +368,18 @@ Before activating questionnaire v3 in production demo mode:
 Stylist annotation tools (Phase 19) and optional height/body representation
 (Phase 20) remain deferred; Phase 20 will reuse this phase's frontend visual
 manifest. This phase adds no annotations, body representation, user-uploaded
-visuals, remote image URLs, CMS, unrestricted colours, extra Sikh events,
-internationalisation, sharing, image-to-image refinement, a new FLUX model,
-reference-image conditioning, or extra refinements.
+*questionnaire option visuals*, remote image URLs, CMS, unrestricted colours,
+extra Sikh events, internationalisation, sharing, image-to-image refinement, or
+extra refinements.
+
+**Superseded 2026-07-29 by the authorised scope change above:** user-uploaded
+*inspiration images* are now in scope (private per-design references, sanitised
+and rights-affirmed), and with them the switch to `flux-2-max` and the lifting of
+`ReferenceImagesNotEnabled` for reference-image conditioning. Those three items
+were listed as non-goals when this ADR was accepted; they are now deliberate,
+maintainer-authorised scope, recorded here and in `../phases/phases-16b.md` so no
+reader takes the original list as still binding. Everything else in the list
+stands.
 
 ## Alternatives considered
 

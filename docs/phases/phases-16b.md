@@ -659,6 +659,22 @@ In `DEMO_MODE=true`, with no provider keys configured:
 
 ## Non-goals
 
+> **Addendum, 2026-07-29 — authorised scope change.** Three items below were
+> deliberately reopened by the maintainer's design handoff after this spec was
+> written, and are now in scope: **user-uploaded inspiration images** (private,
+> per-design, sanitised, rights-affirmed, sharing the existing three-reference
+> budget with curated presets), **a new FLUX model** (`flux-2-max`), and
+> **reference-image conditioning** (lifting `ReferenceImagesNotEnabled` so
+> user uploads *and* curated presets are sent to the image provider). The
+> rationale, the model/lifecycle/rights-acknowledgement design, its deliberate
+> distance from ADR 0006's staff rights model, and the ADR 0014 override that
+> provider-facing work requires are recorded in
+> `../decisions/0018-questionnaire-feedback-and-visual-choice-ux.md`. Note that
+> "user-uploaded questionnaire visuals" below still means *option-card artwork
+> for questionnaire choices* and remains a non-goal — that is a different thing
+> from a user's own inspiration photograph. Every other entry below stands
+> unchanged.
+
 Do not implement:
 
 - stylist annotation tools;
@@ -671,8 +687,8 @@ Do not implement:
 - internationalisation;
 - sharing or public galleries;
 - image-to-image refinement;
-- a new FLUX model;
-- reference-image conditioning;
+- ~~a new FLUX model~~ (superseded — see the addendum above);
+- ~~reference-image conditioning~~ (superseded — see the addendum above);
 - extra refinements;
 - a sewing pattern, measurement or fit system;
 - paid provider calls during implementation.

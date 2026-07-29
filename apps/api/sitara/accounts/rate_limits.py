@@ -1,12 +1,19 @@
-"""Fixed-window authentication rate limiting on Django's Redis cache.
+"""The project's fixed-window rate-limit primitive on Django's Redis cache.
 
-- Identifiers (IP addresses, canonical emails) are HMAC-SHA256 hashed with
-  the Django secret before entering cache keys: no raw email or IP is ever
-  stored in Redis.
+Written for authentication (Phase 3B) and since reused wherever an endpoint
+needs the same guarantees — it is the ONE implementation of this counter, and a
+caller that needs a different key namespace passes ``prefix`` rather than
+writing a second copy.
+
+- Identifiers (IP addresses, canonical emails, session keys) are HMAC-SHA256
+  hashed with the Django secret before entering cache keys: no raw email, IP or
+  session key is ever stored in Redis.
 - Only REMOTE_ADDR is trusted in Phase 3B; X-Forwarded-For handling is a
   deliberate later decision.
 - If the cache is unavailable the caller must FAIL CLOSED (HTTP 503) rather
-  than authenticate without protection — RateLimitUnavailable signals that.
+  than proceed unprotected — RateLimitUnavailable signals that, and is
+  deliberately distinct from an ordinary over-limit result so an infrastructure
+  fault is never reported to the caller as their own abuse.
 """
 
 import hashlib
@@ -31,14 +38,24 @@ def hash_identifier(value: str) -> str:
     ).hexdigest()[:40]
 
 
-def build_key(scope: str, identifier: str) -> str:
-    return f"{KEY_PREFIX}:{scope}:{hash_identifier(identifier)}"
+def build_key(scope: str, identifier: str, *, prefix: str = KEY_PREFIX) -> str:
+    """``prefix`` keeps unrelated throttles in separate key namespaces; it
+    defaults to the auth prefix so existing keys are unchanged."""
+    return f"{prefix}:{scope}:{hash_identifier(identifier)}"
 
 
-def check_and_count(scope: str, identifier: str, limit: int, window_seconds: int) -> int | None:
+def check_and_count(
+    scope: str,
+    identifier: str,
+    limit: int,
+    window_seconds: int,
+    *,
+    prefix: str = KEY_PREFIX,
+) -> int | None:
     """Record one attempt. Returns None when allowed, or a Retry-After value
-    in seconds when the limit is exceeded."""
-    key = build_key(scope, identifier)
+    in seconds when the limit is exceeded. Raises RateLimitUnavailable — never
+    a limit result — when the cache itself cannot be reached."""
+    key = build_key(scope, identifier, prefix=prefix)
     try:
         cache.add(key, 0, timeout=window_seconds)
         current = cache.incr(key)
@@ -50,10 +67,10 @@ def check_and_count(scope: str, identifier: str, limit: int, window_seconds: int
     return None
 
 
-def clear(scope: str, identifier: str) -> None:
+def clear(scope: str, identifier: str, *, prefix: str = KEY_PREFIX) -> None:
     """Best-effort reset (e.g. successful login clears the email counter)."""
     try:
-        cache.delete(build_key(scope, identifier))
+        cache.delete(build_key(scope, identifier, prefix=prefix))
     except Exception:  # noqa: BLE001 - clearing is best-effort only
         pass
 

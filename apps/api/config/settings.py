@@ -806,17 +806,47 @@ else:
     DEMO_STAGE_DELAY_MS = int(_stripped_demo_stage_delay_ms)
 
 # ---------------------------------------------------------------------------
-# Inspiration catalogue (Phase 5B) — staff-only image ingestion bounds.
+# Inspiration catalogue (Phase 5B) — STAFF-ONLY image ingestion bounds.
 # Strict positive integers; invalid values refuse startup in EVERY
 # environment. Uploads above INSPIRATION_MAX_UPLOAD_BYTES are rejected
 # before decoding; images above INSPIRATION_MAX_IMAGE_PIXELS are rejected
 # before full decode (decompression-bomb guard).
+#
+# These govern the staff catalogue path ONLY. The public user-upload endpoint
+# has its own bounds below, deliberately separate so tightening one trust
+# boundary never silently changes the other.
 # ---------------------------------------------------------------------------
 
 INSPIRATION_MAX_UPLOAD_BYTES = env_positive_int("INSPIRATION_MAX_UPLOAD_BYTES", 15_000_000)
 INSPIRATION_MAX_IMAGE_PIXELS = env_positive_int("INSPIRATION_MAX_IMAGE_PIXELS", 40_000_000)
 INSPIRATION_OUTPUT_MAX_EDGE = env_positive_int("INSPIRATION_OUTPUT_MAX_EDGE", 2048)
 INSPIRATION_THUMBNAIL_EDGE = env_positive_int("INSPIRATION_THUMBNAIL_EDGE", 512)
+
+# ---------------------------------------------------------------------------
+# User inspiration uploads (Phase 16B) — bounds for the PUBLIC, anonymous
+# multipart endpoint. Deliberately its OWN settings rather than reusing the
+# staff catalogue bounds above: the two paths have different trust levels, and
+# an operator tightening the public endpoint after an abuse incident must not
+# also shrink what staff may catalogue.
+#
+# The pixel bound gates a decompression bomb before its pixels are allocated;
+# the byte bound is enforced twice — once at the wire level from Content-Length
+# before the multipart parser reads the body, and again on the bytes actually
+# read. A reverse proxy body-size limit in front of the API remains
+# recommended defence in depth, not a substitute.
+#
+# The throttle is session- and IP-scoped over the shared Redis cache, with
+# hashed identifiers, exactly like the auth and live-generation throttles. A
+# cache outage fails CLOSED.
+# ---------------------------------------------------------------------------
+
+USER_UPLOAD_MAX_BYTES = env_positive_int("USER_UPLOAD_MAX_BYTES", 15_000_000)
+USER_UPLOAD_MAX_IMAGE_PIXELS = env_positive_int("USER_UPLOAD_MAX_IMAGE_PIXELS", 40_000_000)
+USER_UPLOAD_OUTPUT_MAX_EDGE = env_positive_int("USER_UPLOAD_OUTPUT_MAX_EDGE", 2048)
+USER_UPLOAD_SESSION_LIMIT = env_positive_int("USER_UPLOAD_SESSION_LIMIT", 30)
+USER_UPLOAD_SESSION_WINDOW_SECONDS = env_positive_int("USER_UPLOAD_SESSION_WINDOW_SECONDS", 3600)
+USER_UPLOAD_IP_LIMIT = env_positive_int("USER_UPLOAD_IP_LIMIT", 60)
+USER_UPLOAD_IP_WINDOW_SECONDS = env_positive_int("USER_UPLOAD_IP_WINDOW_SECONDS", 3600)
 
 # ---------------------------------------------------------------------------
 # Authentication (Phase 3B) — Django sessions only. No JWT, no token

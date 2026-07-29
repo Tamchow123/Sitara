@@ -192,6 +192,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/designs/{design_id}/inspiration-uploads/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload an inspiration image
+         * @description Sanitises one uploaded image (JPEG, PNG or single-frame WebP) into a clean WebP: EXIF orientation applied, then all EXIF/GPS/XMP/ICC metadata stripped. The original bytes are never stored. The user must affirm they hold the rights to the image. Uploads and curated selections share one limit. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        post: operations["designs_inspiration_upload_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an uploaded inspiration image
+         * @description Deletes the private object and then the row. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        delete: operations["designs_inspiration_upload_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/image/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An uploaded inspiration image
+         * @description Streams the sanitised WebP for one of the design's own uploads. No storage keys or storage URLs are exposed. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        get: operations["designs_inspiration_upload_image"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/designs/{design_id}/refine/": {
         parameters: {
             query?: never;
@@ -496,6 +556,7 @@ export interface components {
             /** @description Answers keyed by stable question id. */
             answers: unknown;
             selected_inspirations: components["schemas"]["SelectedInspiration"][];
+            inspiration_uploads: components["schemas"]["InspirationUpload"][];
             latest_job: components["schemas"]["GenerationJob"] | null;
             /** Format: date-time */
             created_at: string;
@@ -749,6 +810,47 @@ export interface components {
         };
         InspirationCatalogueResponse: {
             assets: components["schemas"]["PublicInspirationAsset"][];
+        };
+        /**
+         * @description One image the user uploaded as inspiration for their own design.
+         *
+         *     Only the sanitised WebP derivative exists server-side; its bytes are served
+         *     exclusively by the ownership-checked image endpoint. No storage key, image
+         *     hash, byte size, filename or client-declared content type is ever
+         *     exposed.
+         */
+        InspirationUpload: {
+            /** Format: uuid */
+            id: string;
+            position: number;
+            width: number;
+            height: number;
+            /**
+             * Format: date-time
+             * @description When the user affirmed they hold the rights to this image.
+             */
+            rights_acknowledged_at: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        InspirationUploadResponse: {
+            upload: components["schemas"]["InspirationUpload"];
+        };
+        /**
+         * @description The multipart upload body.
+         *
+         *     The client's filename and declared content type are deliberately IGNORED —
+         *     the decoded image is the only thing trusted (see
+         *     ``designs.upload_processing``).
+         */
+        InspirationUploadWriteRequest: {
+            /**
+             * Format: binary
+             * @description The image file. JPEG, PNG or single-frame WebP.
+             */
+            image: string;
+            /** @description Must be true: the user affirms they hold the rights to this image. */
+            rights_acknowledged: boolean;
         };
         LiveResponse: {
             /** @description Always "ok" when the process answers. */
@@ -1443,6 +1545,186 @@ export interface operations {
                 };
             };
             /** @description generation_unavailable / queue_unavailable / live_generation_disabled / live_generation_budget_exhausted. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_inspiration_upload_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["InspirationUploadWriteRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InspirationUploadResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorEnvelope"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The design's inspiration limit is already reached. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request body is too large. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many uploads for now. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The image could not be stored, or uploads are briefly unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_inspiration_upload_delete: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The image could not be removed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_inspiration_upload_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                design_id: string;
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sanitised WebP image bytes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The image is temporarily unreadable. */
             503: {
                 headers: {
                     [name: string]: unknown;

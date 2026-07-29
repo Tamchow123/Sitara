@@ -64,6 +64,41 @@ class SelectedInspirationSerializer(serializers.Serializer):
     asset = SelectedInspirationAssetSerializer(allow_null=True)
 
 
+class InspirationUploadSerializer(serializers.Serializer):
+    """One image the user uploaded as inspiration for their own design.
+
+    Only the sanitised WebP derivative exists server-side; its bytes are served
+    exclusively by the ownership-checked image endpoint. No storage key, image
+    hash, byte size, filename or client-declared content type is ever
+    exposed."""
+
+    id = serializers.UUIDField()
+    position = serializers.IntegerField()
+    width = serializers.IntegerField()
+    height = serializers.IntegerField()
+    rights_acknowledged_at = serializers.DateTimeField(
+        help_text="When the user affirmed they hold the rights to this image."
+    )
+    created_at = serializers.DateTimeField()
+
+
+class InspirationUploadResponseSerializer(serializers.Serializer):
+    upload = InspirationUploadSerializer()
+
+
+class InspirationUploadWriteSerializer(serializers.Serializer):
+    """The multipart upload body.
+
+    The client's filename and declared content type are deliberately IGNORED —
+    the decoded image is the only thing trusted (see
+    ``designs.upload_processing``)."""
+
+    image = serializers.FileField(help_text="The image file. JPEG, PNG or single-frame WebP.")
+    rights_acknowledged = serializers.BooleanField(
+        help_text="Must be true: the user affirms they hold the rights to this image."
+    )
+
+
 class DesignValidationSuccessSerializer(serializers.Serializer):
     valid = serializers.BooleanField()
 
@@ -109,6 +144,9 @@ class DesignDetailResponseSerializer(serializers.Serializer):
     questionnaire = DesignQuestionnaireSerializer(allow_null=True)
     answers = serializers.JSONField(help_text="Answers keyed by stable question id.")
     selected_inspirations = SelectedInspirationSerializer(many=True)
+    # Since Phase 16B: the user's OWN uploaded inspirations. They share the
+    # MAX_INSPIRATION_IMAGES budget with the curated selections above.
+    inspiration_uploads = InspirationUploadSerializer(many=True)
     # Since Phase 12: one sanitised public snapshot of the design's most
     # recent generation attempt, or null if it has never attempted
     # generation. Supports durable resume navigation. Still no private

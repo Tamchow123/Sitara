@@ -93,6 +93,32 @@ class TestRetentionPurge:
         assert not permanent.exists(version.thumbnail_storage_key)
         assert not default_storage.exists(staged_key)  # staging cleanup boundary
 
+    def test_purge_deletes_the_users_own_uploaded_inspiration_objects(self, inmemory_storage):
+        # REL-003: the upload rows are CASCADE'd by the Design delete, so if the
+        # purge did not enumerate their keys first, the private objects would be
+        # orphaned in the bucket with nothing left naming them.
+        from sitara.designs.models import DesignInspirationUpload
+
+        design, _version, _attempt, _staged = _old_generated_design()
+        upload_key = f"design-uploads/{design.pk}/{uuid.uuid4().hex}/image.webp"
+        default_storage.save(upload_key, ContentFile(b"sanitised-webp"))
+        DesignInspirationUpload.objects.create(
+            design=design,
+            position=1,
+            storage_key=upload_key,
+            image_width=40,
+            image_height=60,
+            image_size_bytes=14,
+            image_sha256="d" * 64,
+            rights_acknowledged_at=timezone.now(),
+        )
+
+        result = maintenance.purge_expired_designs()
+
+        assert result["purged"] == 1
+        assert not DesignInspirationUpload.objects.exists()
+        assert not default_storage.exists(upload_key)
+
     def test_purge_deletes_crash_window_staging_object_without_a_recorded_key(
         self, inmemory_storage
     ):

@@ -127,6 +127,28 @@ def _selected_inspirations_payload(design: Design) -> list[dict]:
     return payload
 
 
+def inspiration_upload_payload(upload) -> dict:
+    """One of the design's OWN uploaded inspirations.
+
+    Deliberately minimal: an id, its position, its displayed dimensions and when
+    the rights affirmation was recorded. The storage key, the image hash, the
+    byte size and every other private detail stay server-side; the bytes are
+    reachable only through the ownership-checked image endpoint."""
+    return {
+        "id": str(upload.id),
+        "position": upload.position,
+        "width": upload.image_width,
+        "height": upload.image_height,
+        "rights_acknowledged_at": _DATETIME.to_representation(upload.rights_acknowledged_at),
+        "created_at": _DATETIME.to_representation(upload.created_at),
+    }
+
+
+def _inspiration_uploads_payload(design: Design) -> list[dict]:
+    """Every upload on this design, ordered by position."""
+    return [inspiration_upload_payload(upload) for upload in design.inspiration_uploads.all()]
+
+
 def _latest_job_payload(design: Design) -> dict | None:
     """The design's latest generation attempt as the one public job shape, or
     None when it has never attempted generation. Supports durable resume
@@ -147,6 +169,7 @@ def design_detail_payload(design: Design) -> dict:
         "questionnaire": _questionnaire_payload(design),
         "answers": design.answers,
         "selected_inspirations": _selected_inspirations_payload(design),
+        "inspiration_uploads": _inspiration_uploads_payload(design),
         "latest_job": _latest_job_payload(design),
         "created_at": _DATETIME.to_representation(design.created_at),
         "updated_at": _DATETIME.to_representation(design.updated_at),

@@ -169,6 +169,70 @@ class DesignInspiration(models.Model):
         return f"inspiration {self.inspiration_asset_id} at position {self.position}"
 
 
+class DesignInspirationUpload(models.Model):
+    """One image the user uploaded as inspiration for their OWN design.
+
+    Scoped to the owning ``Design`` and therefore to whoever owns that design —
+    the anonymous browser workspace or the account that claimed it. An upload is
+    never global, never shared between designs and never entered into the
+    staff-managed catalogue: it is private user content that happens to be an
+    image, and the catalogue's rights model (staff bytes, verified rights,
+    public eligibility) does not apply to it and must not be inferred for it.
+
+    Only the SANITISED WebP derivative is kept. The original upload is never
+    stored, and the model deliberately carries no filename, no client-declared
+    content type and no other client-supplied identity data — the storage key is
+    server-generated (see ``designs.upload_service``).
+
+    ``rights_acknowledged_at`` records that the user affirmed they hold the
+    rights to the image at upload time; it is the audit trail for that
+    affirmation, and an upload cannot exist without it.
+
+    ``position`` is this design's own 1-based upload ordering. Curated
+    catalogue selections keep their own independent ``DesignInspiration``
+    positions; the CAP is what the two share — the combined count is bounded by
+    ``settings.MAX_INSPIRATION_IMAGES``, enforced in ``upload_service`` under a
+    row lock, with the per-table bound below as a final backstop."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    design = models.ForeignKey(Design, on_delete=models.CASCADE, related_name="inspiration_uploads")
+    position = models.PositiveIntegerField()
+    # Server-generated private object key. Never exposed by any API.
+    storage_key = models.CharField(max_length=512)
+    image_width = models.PositiveIntegerField()
+    image_height = models.PositiveIntegerField()
+    image_size_bytes = models.PositiveIntegerField()
+    # Of the SANITISED derivative, for de-duplication within one design and for
+    # private audit. Never exposed by any API.
+    image_sha256 = models.CharField(max_length=64)
+    rights_acknowledged_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["position"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["design", "position"],
+                name="designs_upload_unique_position_per_design",
+            ),
+            models.UniqueConstraint(
+                fields=["design", "image_sha256"],
+                name="designs_upload_unique_image_per_design",
+            ),
+            models.CheckConstraint(
+                condition=Q(position__gte=1) & Q(position__lte=MAX_INSPIRATION_POSITION),
+                name="designs_upload_position_bounds",
+            ),
+            models.CheckConstraint(
+                condition=~Q(storage_key=""),
+                name="designs_upload_storage_key_present",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"upload {self.pk} at position {self.position}"
+
+
 class DesignVersion(models.Model):
     """One generated concept iteration (initial concept + one refinement).
 

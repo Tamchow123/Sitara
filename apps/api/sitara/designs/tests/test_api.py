@@ -28,6 +28,7 @@ PUBLIC_DESIGN_KEYS = {
     "questionnaire",
     "answers",
     "selected_inspirations",
+    "inspiration_uploads",
     "latest_job",
     "created_at",
     "updated_at",

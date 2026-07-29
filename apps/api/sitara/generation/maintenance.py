@@ -12,9 +12,12 @@ Two bounded, idempotent maintenance operations run periodically by Celery Beat:
   Genuinely in-progress designs are skipped. This is also the single cleanup
   boundary for the crash-recovery staging objects Phase 10/11 deliberately
   retained (ADR 0017): a design's staging object lives at most the retention
-  window. Catalogue assets, rights records, the shared demo source pack and
-  every unrelated object prefix are never touched — only per-design
-  ``design-images/`` and ``generation-staging/`` keys are deleted.
+  window, as does a user's own uploaded inspiration image (``design-uploads/``,
+  Phase 16B) — enumerated explicitly, because the Design cascade would otherwise
+  drop the only rows naming those objects. Catalogue assets, rights records, the
+  shared demo source pack and every unrelated object prefix are never touched —
+  only per-design ``design-images/``, ``generation-staging/`` and
+  ``design-uploads/`` keys are deleted.
 
 * ``reconcile_stuck_generations`` — mark attempts idle in a non-terminal state
   past ``GENERATION_STUCK_AFTER_SECONDS`` as failed, skipping any a live worker
@@ -152,11 +155,23 @@ def _purge_one_design(design_id, permanent, staging) -> str:
                 # so a crash-window object is never orphaned past retention.
                 for extension in pipeline._STAGED_EXTENSIONS:
                     staging_keys.add(pipeline._staged_key(attempt.id, extension))
+        # The user's OWN uploaded inspiration images (Phase 16B). Their rows are
+        # CASCADE'd by locked.delete() below, so without enumerating them here
+        # their private objects would be orphaned in the bucket the first time a
+        # design with uploads aged out — with no row left pointing at them. They
+        # live in the default (staging) storage, like every other user-supplied
+        # object; only the permanent generated images use the design_images
+        # alias.
+        upload_keys = [
+            key for key in locked.inspiration_uploads.values_list("storage_key", flat=True) if key
+        ]
 
         # Objects FIRST (a later retry tolerates already-missing objects).
         for key in permanent_keys:
             _delete_object(permanent, key)
         for key in staging_keys:
+            _delete_object(staging, key)
+        for key in upload_keys:
             _delete_object(staging, key)
 
         # Then the DB rows via the normal Design cascade (versions, attempts,
