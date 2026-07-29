@@ -26,10 +26,15 @@ The prompt LEADS with a fixed catalogue-composition directive (framing, studio
 backdrop, even lighting, garment as primary subject) so the highest-priority
 instruction is the first content the model reads and can never be displaced or
 truncated by lower-priority garment detail. A concrete, garment-neutral coverage
-directive follows immediately (rendering the canonical high-neckline / sleeve /
+directive follows immediately (rendering the canonical neckline / sleeve /
 midriff / back / head-covering selections as explicit visual requirements), so
 the coverage the provider most often ignores appears high in the prompt; the
-critical coverage requirements are briefly restated last. Garment-detail sections
+critical coverage requirements are briefly restated last. A DesignSpec v3 answers
+each of those areas with its own dedicated question, so every answer — including
+a deliberately less-covered one — is rendered there and its generated narrative
+is suppressed; v1/v2's coverage multi-select keeps its original
+coverage-increasing-values-only treatment, because there an absent value meant
+nothing had been asked for. Garment-detail sections
 render in a documented priority order between them, and a short
 photographic-finishing directive precedes the closing coverage reinforcement.
 Advisory styling notes and non-visual colour rationale are NOT rendered (they
@@ -55,21 +60,31 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from .design_spec import DesignSpec, validate_design_spec
+from .design_spec import COLOUR_MATCH_FABRIC, DesignSpec, validate_design_spec
 from .input_safety import scan_design_spec, scan_generated_text
+from .selection_semantics import (
+    COLOUR_ROLE_LABELS,
+    colour_role_values,
+    coverage_area_values,
+    explicit_head_covering_decision,
+    head_covering_answer,
+    legacy_coverage_values,
+    ordered_colour_values,
+)
 
 # Bump ONLY with a deliberate snapshot review and manifest update. The snapshot
 # regeneration command REFUSES to overwrite committed snapshots unless this
 # value changes (see prompt_snapshots.evaluate_regeneration); the persisted
 # provenance records this value.
 #
-# 6.0.0 (Phase 16B): the canonical prompt inputs changed — a dedicated
-# ``neckline_style`` (DesignSpec v2) is now rendered as an explicit, mandatory
-# visual requirement in the leading coverage directive and the closing
-# reinforcement, and the generated neckline narrative is suppressed when a
-# canonical neckline is chosen so it can never contradict it. Version-1 specs
-# render exactly as before.
-PROMPT_BUILDER_VERSION = "6.0.0"
+# 7.0.0 (Phase 16B): DesignSpec v3 is rendered — colour is named per garment
+# role (main fabric / embroidery / dupatta, including a bride-supplied hex and
+# the "same as the fabric" relationship) instead of as one palette clause, and
+# each answered body area (sleeves, back, midriff, head covering) becomes an
+# explicit visual requirement whose generated narrative is suppressed so it can
+# never be contradicted. Version-1 and version-2 specs render exactly as before,
+# byte for byte.
+PROMPT_BUILDER_VERSION = "7.0.0"
 
 # Hard upper bound on the assembled prompt. Guaranteed by construction: the
 # mandatory content is reserved first and generated narrative is budgeted into
@@ -310,12 +325,46 @@ def _drape_and_proportions(spec: DesignSpec) -> list[_Piece]:
     ]
 
 
+def _readable_colour(value: str) -> str:
+    """A colour selection as prompt wording: a bride-supplied hex is named as a
+    literal colour code, a canonical option value as readable words."""
+    if value.startswith("#"):
+        return f"the exact colour code {value}"
+    return _readable(value)
+
+
+def _colour_roles_clause(ss) -> str | None:
+    """The version-3 per-role colour requirement, or ``None`` for version 1/2.
+
+    ``match_fabric`` is rendered as the relationship it is, never as a colour."""
+    roles = colour_role_values(ss)
+    if not roles:
+        return None
+    parts = []
+    for field, value in roles:
+        where = COLOUR_ROLE_LABELS[field]
+        if value == COLOUR_MATCH_FABRIC:
+            parts.append(f"{where} in the same colour as the main fabric")
+        else:
+            parts.append(f"{where} in {_readable_colour(value)}")
+    return "The chosen colours are " + ", ".join(parts)
+
+
 def _colour(spec: DesignSpec) -> list[_Piece]:
     cs = spec.colour_story
+    ss = spec.source_selections
     pieces = []
-    colours = _readable_list(spec.source_selections.colour_palette)
-    if colours:
-        pieces.append(_mandatory(f"The colour palette, in order, is {colours}"))
+    # Version 3 names a colour per garment role; versions 1 and 2 have one
+    # ordered palette. The bride's saved custom_colours palette is deliberately
+    # NOT rendered — it is the set a colour question may be answered FROM, not a
+    # selection, and listing unused colours would invent requirements.
+    roles_clause = _colour_roles_clause(ss)
+    if roles_clause:
+        pieces.append(_mandatory(roles_clause))
+    else:
+        colours = _readable_list(list(ordered_colour_values(ss)))
+        if colours:
+            pieces.append(_mandatory(f"The colour palette, in order, is {colours}"))
     pieces.append(_narrative(_slot(cs.palette_summary, _NARRATIVE_CAP)))
     pieces.append(_narrative(_slot(cs.placement, _NARRATIVE_CAP)))
     # colour_story.rationale (WHY the palette was chosen) is deliberately NOT
@@ -465,17 +514,91 @@ def _canonical_neckline_reinforce(ss) -> str | None:
     return _NECKLINE_REINFORCE.get(value) if value else None
 
 
+# Concrete, garment-neutral VISUAL clauses for the version-3 per-body-area
+# coverage selections (questionnaire v4). Unlike the version-1/2
+# ``coverage_preferences`` multi-select — where an absent value simply meant
+# "not requested", so only coverage-INCREASING values could safely be rendered —
+# each version-3 area is a single explicit answer. Rendering a less-covered
+# answer therefore contradicts nothing; it states what the user actually chose.
+# Head covering is handled separately because its wording depends on which
+# garment carries the fabric. Insertion order is the render order.
+_SLEEVE_CLAUSES = {
+    "sleeveless": "a sleeveless bodice leaving the shoulders and arms bare",
+    "cap_sleeve": "short cap sleeves covering only the top of the shoulder",
+    "elbow_sleeve": "elbow-length sleeves",
+    "three_quarter_sleeve": "three-quarter-length sleeves ending between the elbow and the wrist",
+    "full_sleeve": "full-length sleeves reaching the wrists, with both arms fully covered",
+}
+_BACK_CLAUSES = {
+    "open_back": "an open back",
+    "deep_cut_back": "a deeply cut open back",
+    "modest_back": "a covered back that is not left open",
+}
+_MIDRIFF_CLAUSES = {
+    "bare_midriff": "a bare midriff at the waist",
+    "semi_sheer_midriff": "a midriff veiled in sheer fabric rather than left bare",
+    "covered_midriff": "the midriff kept covered, with no bare skin at the waist",
+}
+# Head coverings that hide the hair. ``uncovered`` is deliberately absent: it is
+# a real answer, but "leave the head uncovered" is FLUX's default behaviour and
+# stating it adds nothing to the visual requirement list.
+_HEAD_COVERING_CLAUSES = {
+    "veil_style": (
+        "a veil worn over the head and completely covering the hair, with no hair visible"
+    ),
+    "hijab": "a hijab completely covering the hair and neck, with no hair visible",
+}
+# Areas whose answer is restated in the brief closing reinforcement — the
+# coverage FLUX most often drops between the top of the prompt and the render.
+# Less-covered answers are not restated: they need no defending.
+_SLEEVE_REINFORCE = {"full_sleeve": "full-length sleeves"}
+_BACK_REINFORCE = {"modest_back": "a covered back"}
+_MIDRIFF_REINFORCE = {
+    "semi_sheer_midriff": "a sheer-veiled rather than bare midriff",
+    "covered_midriff": "a covered midriff",
+}
+_AREA_CLAUSES = {
+    "sleeves": _SLEEVE_CLAUSES,
+    "back_coverage": _BACK_CLAUSES,
+    "midriff": _MIDRIFF_CLAUSES,
+}
+_AREA_REINFORCE = {
+    "sleeves": _SLEEVE_REINFORCE,
+    "back_coverage": _BACK_REINFORCE,
+    "midriff": _MIDRIFF_REINFORCE,
+}
+
 # The user's explicit head-covering coverage preference, and the dupatta styling
 # that also means "worn over the head". Either signals that the hair must be
 # covered.
-_HEAD_COVER_PREF = "head_drape_preferred"
 _HEAD_DRAPE_DUPATTA = "head_drape"
 
 
 def _wants_head_covered(ss) -> bool:
+    """True when the hair must not be visible.
+
+    The user's own decision wins whenever they made one (see
+    :func:`explicit_head_covering_decision`); otherwise a dupatta worn over the
+    head implies a covered head, exactly as before."""
+    decision = explicit_head_covering_decision(ss)
+    if decision is not None:
+        return decision
+    return ss.dupatta_style == _HEAD_DRAPE_DUPATTA
+
+
+def _head_covering_clause(ss) -> str | None:
+    """The head-covering visual requirement, or ``None`` when the head is not
+    required to be covered. A version-3 answer naming a specific covering (a
+    veil, a hijab) renders that covering; everything else renders the
+    garment-aware drape wording."""
+    if not _wants_head_covered(ss):
+        return None
+    specific = _HEAD_COVERING_CLAUSES.get(head_covering_answer(ss))
+    if specific:
+        return specific
     return (
-        _HEAD_COVER_PREF in (ss.coverage_preferences or [])
-        or ss.dupatta_style == _HEAD_DRAPE_DUPATTA
+        f"{_head_cover_reference(ss)} pulled up and over the head like a veil, "
+        "completely covering the hair with no hair visible"
     )
 
 
@@ -500,7 +623,7 @@ def _coverage_directive(spec: DesignSpec) -> list[_Piece]:
     coverage a less-covered choice did not ask for, and includes the head-covering
     veil clause only when the user actually requested a covered head."""
     ss = spec.source_selections
-    prefs = ss.coverage_preferences or []
+    prefs = legacy_coverage_values(ss)
     # The canonical neckline is rendered FIRST so it sits at the very front of
     # the high-priority coverage directive, beside the other coverage
     # requirements FLUX most often ignores.
@@ -509,18 +632,27 @@ def _coverage_directive(spec: DesignSpec) -> list[_Piece]:
     if neckline:
         clauses.append(neckline)
     clauses += [clause for key, clause in _COVERAGE_CLAUSES.items() if key in prefs]
-    if _wants_head_covered(ss):
-        clauses.append(
-            f"{_head_cover_reference(ss)} pulled up and over the head like a veil, "
-            "completely covering the hair with no hair visible"
-        )
+    for field, value in coverage_area_values(ss):
+        clause = _AREA_CLAUSES.get(field, {}).get(value)
+        if clause:
+            clauses.append(clause)
+    head_clause = _head_covering_clause(ss)
+    if head_clause:
+        clauses.append(head_clause)
     if not clauses:
         return []
+    # A version-1/2 spec can only ever list coverage-INCREASING values here, so
+    # its heading names modesty. A version-3 spec lists whatever each body-area
+    # question was actually answered with — including deliberately less-covered
+    # answers — so calling those "modesty requirements" would misdescribe the
+    # user's own choice.
+    heading = (
+        "Coverage and modesty requirements"
+        if not coverage_area_values(ss)
+        else "Coverage requirements"
+    )
     return [
-        _mandatory(
-            "Coverage and modesty requirements that must be clearly visible in the "
-            f"render: {'; '.join(clauses)}"
-        )
+        _mandatory(f"{heading} that must be clearly visible in the render: {'; '.join(clauses)}")
     ]
 
 
@@ -529,12 +661,16 @@ def _coverage_reinforcement(spec: DesignSpec) -> _Piece | None:
     last, so FLUX re-reads them after the detailed garment prose. Deterministic,
     positive, conditional; never a negative prompt."""
     ss = spec.source_selections
-    prefs = ss.coverage_preferences or []
+    prefs = legacy_coverage_values(ss)
     bits = []
     neckline = _canonical_neckline_reinforce(ss)
     if neckline:
         bits.append(neckline)
     bits += [label for key, label in _COVERAGE_REINFORCE.items() if key in prefs]
+    for field, value in coverage_area_values(ss):
+        label = _AREA_REINFORCE.get(field, {}).get(value)
+        if label:
+            bits.append(label)
     if _wants_head_covered(ss):
         bits.append("the head covered with no hair visible")
     if not bits:
@@ -545,20 +681,29 @@ def _coverage_reinforcement(spec: DesignSpec) -> _Piece | None:
 def _coverage(spec: DesignSpec) -> list[_Piece]:
     ss = spec.source_selections
     cd = spec.coverage_and_drape
+    prefs = legacy_coverage_values(ss)
+    # Every body area answered canonically (version 3) is already a mandatory
+    # visual requirement in the leading coverage directive, so its model-authored
+    # narrative is suppressed here for exactly the reason the neckline narrative
+    # is: generated prose must never be able to contradict a validated choice.
+    answered_areas = {field for field, _value in coverage_area_values(ss)}
     pieces = []
-    if ss.coverage_preferences:
-        pieces.append(
-            _mandatory(f"Coverage preferences: {_readable_list(ss.coverage_preferences)}")
-        )
-    pieces.append(_narrative(f"Sleeves: {_slot(cd.sleeves, _NARRATIVE_CAP)}"))
+    if prefs:
+        pieces.append(_mandatory(f"Coverage preferences: {_readable_list(list(prefs))}"))
+    if "sleeves" not in answered_areas:
+        pieces.append(_narrative(f"Sleeves: {_slot(cd.sleeves, _NARRATIVE_CAP)}"))
     # When a canonical neckline was chosen it is already rendered as a mandatory
     # visual requirement in the leading coverage directive; the model-authored
     # neckline narrative is suppressed here so it can never contradict it. A v1
     # spec (or a v2 spec with no neckline preference) still renders the narrative.
     if _canonical_neckline(ss) is None:
         pieces.append(_narrative(f"Neckline: {_slot(cd.neckline, _NARRATIVE_CAP)}"))
-    pieces.append(_narrative(f"Back and midriff: {_slot(cd.back_and_midriff, _NARRATIVE_CAP)}"))
-    pieces.append(_narrative(f"Head covering: {_slot(cd.head_covering, _NARRATIVE_CAP)}"))
+    # One narrative slot covers both the back and the midriff, so it is
+    # suppressed only when BOTH have canonical answers.
+    if not {"back_coverage", "midriff"} <= answered_areas:
+        pieces.append(_narrative(f"Back and midriff: {_slot(cd.back_and_midriff, _NARRATIVE_CAP)}"))
+    if "head_covering" not in answered_areas:
+        pieces.append(_narrative(f"Head covering: {_slot(cd.head_covering, _NARRATIVE_CAP)}"))
     return pieces
 
 

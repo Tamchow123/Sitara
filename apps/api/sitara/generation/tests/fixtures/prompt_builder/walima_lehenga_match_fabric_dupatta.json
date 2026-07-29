@@ -1,0 +1,74 @@
+{
+  "schema_version": 3,
+  "source_selections": {
+    "garment_type": "lehenga",
+    "ceremony": "walima",
+    "regional_style": "hyderabadi",
+    "silhouette": "panelled_kali_lehenga",
+    "fabric_colour": "aubergine",
+    "embroidery_colour": "silver_grey",
+    "dupatta_colour": "match_fabric",
+    "custom_colours": ["#2f1b3a", "#d8c9a3"],
+    "fabrics": ["velvet", "net"],
+    "embellishment_styles": ["zardozi", "crystals", "pearls"],
+    "embellishment_density": "balanced",
+    "neckline_style": "sweetheart_neck",
+    "sleeves": null,
+    "back_coverage": "modest_back",
+    "midriff": "semi_sheer_midriff",
+    "head_covering": "dupatta_over_head",
+    "dupatta_style": "trail_dupatta",
+    "saree_drape": null
+  },
+  "title": "Aubergine kali lehenga for a walima",
+  "concept_summary": "A poised walima concept in an aubergine panelled kali lehenga whose vertical panels swing as they flare. Silver-grey zardozi and crystal work catch the light along the panel seams, and a matching aubergine dupatta is drawn over the head before trailing behind in a long sweep.",
+  "garment_breakdown": {
+    "overall_form": "A fitted choli over a kali-panelled lehenga skirt with a long trailing dupatta.",
+    "garment_components": ["Fitted choli", "Panelled kali lehenga skirt", "Trailing dupatta"],
+    "silhouette": "Vertical tapering panels that hold close at the waist and swing wide at the hem.",
+    "drape_or_layering": "The dupatta is taken over the head and then allowed to trail well behind the hem.",
+    "key_proportions": "A close bodice and defined waist read against the swing of the panelled skirt."
+  },
+  "colour_story": {
+    "palette_summary": "A deep aubergine ground worked in cool silver grey.",
+    "placement": "Aubergine carries the choli, skirt and dupatta alike, with silver grey drawn along the panel seams.",
+    "rationale": "A single deep tone keeps the panelled skirt reading as one sweep rather than many pieces."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Velvet",
+      "placement": "Choli and kali panels",
+      "finish_and_movement": "A dense pile that deepens the aubergine and gives the panels their weight."
+    },
+    {
+      "fabric": "Net",
+      "placement": "Dupatta and midriff panel",
+      "finish_and_movement": "A fine open mesh that veils rather than covers and keeps the trail light."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["Zardozi metal-thread work", "Crystal embellishment", "Pearl detailing"],
+    "density": "A balanced amount of work following the panel seams and hem rather than filling the ground.",
+    "placement": ["Panel seams", "Skirt hem", "Dupatta border and trail"],
+    "motifs": ["Fine trailing vines", "Scattered pearl clusters"],
+    "restraint_notes": "Plain velvet is left between the seams so the panel structure stays readable."
+  },
+  "coverage_and_drape": {
+    "sleeves": "Sleeve length is left to styling preference.",
+    "neckline": "A sweetheart neckline curved like the top of a heart.",
+    "back_and_midriff": "A covered back with the waist veiled in sheer net rather than left bare.",
+    "head_covering": "The dupatta is drawn up over the head before it trails behind.",
+    "dupatta_or_saree_drape": "A matching aubergine dupatta taken over the head and left to trail."
+  },
+  "cultural_context": {
+    "regional_direction": "A broad Hyderabadi bridal influence guides the deep tone and the fine metalwork.",
+    "interpretation_notes": ["Offered as one broad direction rather than a rule for any single community."],
+    "safeguards": ["No family or regional custom is presented as the only correct approach to a walima."]
+  },
+  "styling_notes": ["Cool-toned jewellery echoes the silver work.", "Keep the trail clear when the dupatta is drawn over the head."],
+  "construction_caveats": [
+    "This is a concept visualisation, not a sewing pattern, and includes no measurements.",
+    "It does not guarantee that the garment can be constructed exactly as shown."
+  ],
+  "image_alt_text": "A model in an aubergine panelled kali lehenga with silver-grey zardozi, a sweetheart neckline and a matching dupatta drawn over the head and trailing behind."
+}

@@ -1,0 +1,74 @@
+{
+  "schema_version": 3,
+  "source_selections": {
+    "garment_type": "gharara",
+    "ceremony": "nikah",
+    "regional_style": "pakistani",
+    "silhouette": "farshi_gharara",
+    "fabric_colour": "#7b1f2b",
+    "embroidery_colour": "antique_gold",
+    "dupatta_colour": "ivory",
+    "custom_colours": ["#7b1f2b"],
+    "fabrics": ["raw_silk", "tissue"],
+    "embellishment_styles": ["dabka", "nakshi"],
+    "embellishment_density": "heavy",
+    "neckline_style": "band_collar",
+    "sleeves": "full_sleeve",
+    "back_coverage": "modest_back",
+    "midriff": "covered_midriff",
+    "head_covering": "hijab",
+    "dupatta_style": "front_drape",
+    "saree_drape": null
+  },
+  "title": "Deep wine farshi gharara for a nikah",
+  "concept_summary": "A composed nikah concept built on a farshi gharara in the bride's own deep wine, fitted through the knee before its flare lengthens into a floor-sweeping fall. Antique gold dabka works across a band-collared kurti, and an ivory dupatta is drawn across the front while a hijab keeps the hair covered throughout.",
+  "garment_breakdown": {
+    "overall_form": "A long band-collared kurti over farshi gharara trousers fitted to the knee before a floor-pooling flare.",
+    "garment_components": ["Band-collar kurti", "Farshi gharara trousers", "Ivory dupatta"],
+    "silhouette": "A close upper leg giving way to a wide below-knee flare that lengthens along the floor.",
+    "drape_or_layering": "The dupatta is carried across the front while a separate hijab covers the hair.",
+    "key_proportions": "A long, covering kurti balanced against the weight of the pooling gharara flare."
+  },
+  "colour_story": {
+    "palette_summary": "A deep wine ground warmed by antique gold, with ivory lifting the drape.",
+    "placement": "Deep wine carries the kurti and gharara, antique gold works the borders, and ivory lightens the dupatta.",
+    "rationale": "The wine reads formal for a nikah while gold and ivory keep the whole from turning heavy."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Raw silk",
+      "placement": "Kurti and gharara panels",
+      "finish_and_movement": "A textured, slightly slubbed weave that holds the gharara's structured flare."
+    },
+    {
+      "fabric": "Tissue",
+      "placement": "Dupatta",
+      "finish_and_movement": "A fine, lightly metallic sheer that keeps the drape airy over a covered head."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["Dabka coiled-wire detailing", "Nakshi threadwork"],
+    "density": "Worked richly through the borders, cuffs and collar rather than scattered across the ground.",
+    "placement": ["Band collar and cuffs", "Gharara knee joint and hem", "Dupatta border"],
+    "motifs": ["Interlaced vine borders", "Small repeating boota motifs"],
+    "restraint_notes": "Plain wine ground is left between the worked borders so the metalwork stays legible."
+  },
+  "coverage_and_drape": {
+    "sleeves": "Full-length fitted sleeves reaching the wrists.",
+    "neckline": "An upright band collar standing at the neck.",
+    "back_and_midriff": "A covered back and a fully covered waist with no bare skin.",
+    "head_covering": "A hijab covers the hair and neck throughout.",
+    "dupatta_or_saree_drape": "The ivory dupatta is carried across the front of the body."
+  },
+  "cultural_context": {
+    "regional_direction": "A broad Pakistani bridal influence guides the gharara construction and the border-led metalwork.",
+    "interpretation_notes": ["Treated as one broad regional direction, never a fixed rule for any family or community."],
+    "safeguards": ["The gharara is kept distinct from a sharara, with its flare beginning below the knee."]
+  },
+  "styling_notes": ["Warm-toned jewellery echoes the antique gold work.", "Keep the hijab styling simple so the collar stays visible."],
+  "construction_caveats": [
+    "This is a concept visualisation, not a sewing pattern, and includes no measurements.",
+    "It does not guarantee that the garment can be constructed exactly as shown."
+  ],
+  "image_alt_text": "A model in a deep wine farshi gharara with antique gold borderwork, a band collar, full sleeves, an ivory front-draped dupatta and a hijab."
+}

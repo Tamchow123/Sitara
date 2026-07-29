@@ -6,9 +6,14 @@ Nothing here reads or writes storage or network — this module only defines
 and validates the manifest's shape and its cultural/coverage guarantees.
 
 Every option value used to tag an asset (``garment_types``, ``ceremonies``,
-etc.) is drawn from questionnaire v1's own machine values so a tag is always
+etc.) is drawn from the questionnaire's own machine values so a tag is always
 meaningful against real user selections, but this module never re-implements
 questionnaire *answer* validation — it only constrains manifest content.
+
+The tagging vocabulary is WIDENED as the questionnaire grows and never narrowed:
+an already-committed manifest stays valid, and a tag an older pack does not use
+simply goes unmatched. Widening the allowlist changes no persisted structure, so
+it needs no manifest schema-version bump.
 """
 
 import hashlib
@@ -23,6 +28,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from sitara.generation import selection_semantics
 
 # Versions the persisted JSON STRUCTURE of a demo manifest. Bump only with a
 # new schema file and a migration/reviewed-manifest update. Version 2 (Phase
@@ -57,6 +64,22 @@ SILHOUETTES = frozenset(
         "knee_length_anarkali",
         "straight_kameez",
         "a_line_kameez",
+        # Questionnaire v4's per-garment silhouettes.
+        "straight_lehenga",
+        "panelled_kali_lehenga",
+        "pre_stitched_saree",
+        "half_saree",
+        "classic_gharara",
+        "farshi_gharara",
+        "slim_modern_gharara",
+        "classic_sharara",
+        "high_waisted_sharara",
+        "farshi_sharara",
+        "kalidar_anarkali",
+        "front_open_anarkali",
+        "jacket_style_anarkali",
+        "angrakha_kameez",
+        "long_line_kameez",
     }
 )
 COLOURS = frozenset(
@@ -102,6 +125,23 @@ COLOURS = frozenset(
         "brown",
         "black",
         "multicolour",
+        # Questionnaire v4's grouped colour vocabulary.
+        "scarlet",
+        "deep_maroon",
+        "oxblood",
+        "rust",
+        "rani_pink",
+        "old_rose",
+        "marigold",
+        "antique_gold",
+        "mehndi_green",
+        "pistachio",
+        "peacock",
+        "aubergine",
+        "amethyst",
+        "plum_wine",
+        "silver_grey",
+        "pearl",
     }
 )
 FABRICS = frozenset(
@@ -151,6 +191,7 @@ COVERAGE_PREFERENCES = frozenset(
         "head_drape_preferred",
     }
 )
+
 DUPATTA_STYLES = frozenset(
     {
         "head_drape",
@@ -160,10 +201,20 @@ DUPATTA_STYLES = frozenset(
         "double_dupatta",
         "cape_drape",
         "arm_drape",
+        # Questionnaire v4.
+        "trail_dupatta",
     }
 )
 SAREE_DRAPES = frozenset(
-    {"nivi_drape", "seedha_pallu", "bengali_drape", "open_pallu", "pinned_pleats"}
+    {
+        "nivi_drape",
+        "seedha_pallu",
+        "bengali_drape",
+        "open_pallu",
+        "pinned_pleats",
+        # Questionnaire v4.
+        "lehenga_drape",
+    }
 )
 REGIONAL_STYLES = frozenset(
     {
@@ -192,16 +243,84 @@ NECKLINES = frozenset(
     }
 )
 
+# How questionnaire v4's per-body-area coverage answers project onto the
+# COVERAGE_PREFERENCES tagging vocabulary above, which predates them. The
+# projection exists ONLY so a version-3 design can be matched against an
+# already-tagged asset pack; it is never user-facing wording and never feeds a
+# DesignSpec. It is deliberately partial and slightly lossy — a cap sleeve is
+# tagged as the nearest short-sleeve tag, and answers with no equivalent tag
+# (an open back, a bare or semi-sheer midriff, an uncovered head) project to
+# nothing at all rather than to a tag that would mean something else.
+_V4_COVERAGE_TAGS = {
+    "sleeves": {
+        "sleeveless": "sleeveless",
+        "cap_sleeve": "short_sleeves",
+        "elbow_sleeve": "elbow_sleeves",
+        "three_quarter_sleeve": "three_quarter_sleeves",
+        "full_sleeve": "full_sleeves",
+    },
+    "back_coverage": {"modest_back": "full_back"},
+    "midriff": {"covered_midriff": "full_midriff"},
+    "head_covering": {
+        "dupatta_over_head": "head_drape_preferred",
+        "veil_style": "head_drape_preferred",
+        "hijab": "head_drape_preferred",
+    },
+}
+
+
+def coverage_tags_for_selections(source_selections) -> tuple[str, ...]:
+    """A design's coverage selections as this manifest's tagging vocabulary.
+
+    Version 1/2 selections already speak that vocabulary and pass through
+    unchanged; version-3 selections are projected through
+    :data:`_V4_COVERAGE_TAGS`. Order follows the body-area order, so the result
+    is deterministic."""
+    areas = selection_semantics.coverage_area_values(source_selections)
+    if not areas:
+        return selection_semantics.legacy_coverage_values(source_selections)
+    tags = []
+    for field, value in areas:
+        tag = _V4_COVERAGE_TAGS.get(field, {}).get(value)
+        if tag is not None:
+            tags.append(tag)
+    return tuple(tags)
+
+
 # Garment/silhouette compatibility, mirroring the questionnaire v1
 # ``restrict_options`` rules — used only to reject internally contradictory
 # manifest tagging, never to validate a live questionnaire answer.
 _GARMENT_SILHOUETTES = {
-    "lehenga": frozenset({"flared_lehenga", "a_line_lehenga", "mermaid_lehenga"}),
-    "saree": frozenset({"classic_saree_drape", "lehenga_style_saree"}),
-    "gharara": frozenset({"gharara_construction"}),
-    "sharara": frozenset({"sharara_construction"}),
-    "anarkali": frozenset({"floor_length_anarkali", "knee_length_anarkali"}),
-    "shalwar_kameez": frozenset({"straight_kameez", "a_line_kameez"}),
+    "lehenga": frozenset(
+        {
+            "flared_lehenga",
+            "a_line_lehenga",
+            "mermaid_lehenga",
+            "straight_lehenga",
+            "panelled_kali_lehenga",
+        }
+    ),
+    "saree": frozenset(
+        {"classic_saree_drape", "lehenga_style_saree", "pre_stitched_saree", "half_saree"}
+    ),
+    "gharara": frozenset(
+        {"gharara_construction", "classic_gharara", "farshi_gharara", "slim_modern_gharara"}
+    ),
+    "sharara": frozenset(
+        {"sharara_construction", "classic_sharara", "high_waisted_sharara", "farshi_sharara"}
+    ),
+    "anarkali": frozenset(
+        {
+            "floor_length_anarkali",
+            "knee_length_anarkali",
+            "kalidar_anarkali",
+            "front_open_anarkali",
+            "jacket_style_anarkali",
+        }
+    ),
+    "shalwar_kameez": frozenset(
+        {"straight_kameez", "a_line_kameez", "angrakha_kameez", "long_line_kameez"}
+    ),
 }
 
 # A single asset may tag at most this many garment types — prevents any one

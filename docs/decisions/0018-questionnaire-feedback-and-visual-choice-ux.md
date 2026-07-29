@@ -98,6 +98,79 @@ the actual produced version is persisted (never a module default). Which version
 a design targets is decided by questionnaire capability (a `neckline_style`
 question ⇒ v2), computed once in the generation context.
 
+### DesignSpec schema version 3, with historical v1/v2 support
+
+Questionnaire v4 replaces `colour_palette` with a colour per garment role
+(`fabric_colour` / `embroidery_colour` / `dupatta_colour`, each either a
+canonical option value or a bride-supplied six-digit lower-case hex, plus the
+bounded `custom_colours` palette) and replaces `coverage_preferences` with one
+question per body area (`sleeves` / `back_coverage` / `midriff` /
+`head_covering`). That is a different `source_selections` contract, so it gets
+its own version rather than mutating v1 or v2.
+
+`SourceSelectionsV3` is deliberately **not** a subclass of `SourceSelections`:
+version 3 does not carry `colour_palette` or `coverage_preferences` at all, and
+`extra="forbid"` must reject them so a v1/v2 payload can never be mis-persisted
+as v3. `DesignSpecV3` overrides only `schema_version: Literal[3]` and
+`source_selections`; the narrative structure is unchanged, because
+`coverage_and_drape` already has a slot per body area and `colour_story` already
+describes placement. `_DESIGN_SPEC_MODELS` gains `3` — still a small explicit
+registry for known versions, never a generic schema framework — and
+`design_spec_v3.json` is committed by the same management command, with v1's and
+v2's files byte-identical. Which version a design targets stays a questionnaire
+capability check computed once in the generation context: an explicit ladder
+where v3 requires the **whole** v4 replacement question set, so a
+partially-migrated schema falls back to v2 and fails the contract check loudly
+rather than producing half a version-3 brief.
+
+Every replacement field is optional in the questionnaire, so every one is
+nullable in the contract — "no preference" stays a first-class answer here too.
+
+### `selection_semantics.py` — one adapter, not per-consumer version branches
+
+Three consumers — the deterministic image-prompt builder, the demo DesignSpec
+engine and the demo asset selector — need the same few questions answered for
+every version: which colours were chosen and in what order, and must the head or
+the midriff be covered. `sitara/generation/selection_semantics.py` is the single
+sanctioned place that answers them. It is a short list of named accessors over
+KNOWN versions (never a generic mapping framework), pure, and total over both a
+validated model instance and the equivalent plain mapping, because the demo
+engine builds its spec from the context's `source_selections` dict before any
+model exists. A future DesignSpec version extends this module rather than adding
+a version branch inside each consumer.
+
+`explicit_head_covering_decision()` is deliberately **tri-state**. Version 3 asks
+the head-covering question directly, so its answer is authoritative in both
+directions — an explicit `uncovered` beats any inference from the dupatta
+styling, exactly as `neckline_style` beats the retired `high_neckline`. Version
+1/2's multi-select can only express the positive case, so its absence returns
+`None` and each caller's own dupatta inference still applies, which is what keeps
+historical designs rendering and selecting unchanged. The prompt builder and the
+demo selector share that one rule, so a selected demo asset can never ask for the
+opposite of what the prompt asks for.
+
+### Demo engine and manifest under version 3
+
+`DEMO_SPEC_TEMPLATE_VERSION` 2.0.0 → 3.0.0 (it now produces v3 and renders each
+body area's own answer). `demo/phrases.py` gains v4's silhouettes, colours,
+drapes and the four per-area coverage maps **additively** — an older design must
+keep rendering its own vocabulary, so values are never removed. The demo
+manifest's tagging vocabulary is likewise widened (v4 silhouettes, colours,
+`trail_dupatta`, `lehenga_drape`) with **no** manifest schema-version bump:
+widening an allowlist changes no persisted structure and every committed manifest
+stays valid. `manifest.coverage_tags_for_selections()` projects v4's body-area
+answers onto the manifest's own pre-existing coverage tags for asset matching
+only — deliberately partial and slightly lossy (a cap sleeve takes the nearest
+short-sleeve tag; an open back, a bare or semi-sheer midriff and an uncovered
+head project to nothing rather than to a tag meaning something else). It is never
+user-facing wording and never feeds a DesignSpec.
+
+`DEMO_SELECTOR_VERSION` is deliberately **not** bumped: the selector now reads
+colour and coverage through the adapter, but for a version-1/2 spec those
+accessors return exactly the fields they replaced, so every score, tie-break and
+selection for an existing design is unchanged. Bumping would silently re-seed
+historical demo selections to no purpose.
+
 ### Dedicated neckline semantics
 
 The old multi-select `high_neckline` coverage value is migrated out of
@@ -177,12 +250,27 @@ pack gains one Anand Karaj asset and is never production-eligible. Necklines are
 a soft-scored optional dimension with no pack-wide coverage requirement,
 documented in the validator.
 
-### Prompt-builder version bump
+### Prompt-builder version bumps
 
 `PROMPT_BUILDER_VERSION` 5.0.0 → 6.0.0 (canonical inputs and visual requirements
 changed). Version-1 specs render byte-identically; golden snapshots were
 regenerated and manually reviewed (v1 snapshots unchanged, two new v2 fixtures
 added). Persisted prompts and builder versions remain immutable audit data.
+
+`PROMPT_BUILDER_VERSION` 6.0.0 → 7.0.0 for DesignSpec v3: colour is named per
+garment role (including a bride-supplied hex, rendered as a literal colour code,
+and `match_fabric` rendered as the relationship it is), and each answered body
+area becomes an explicit visual requirement whose model-authored narrative is
+suppressed so generated prose can never contradict a validated choice. Because
+each version-3 body area is a single explicit answer, a deliberately
+less-covered one is rendered too — it contradicts nothing, it states what the
+user chose — and that directive's heading drops the word "modesty" accordingly;
+version 1/2's multi-select keeps its original coverage-increasing-values-only
+treatment, because there an absent value meant nothing had been asked for. The
+bride's saved `custom_colours` palette is never rendered as a requirement: it is
+the set a role may be answered FROM, not a selection. All eight pre-existing
+golden snapshots stayed byte-identical through the bump; three new v3 fixtures
+and snapshots were added and reviewed.
 
 ## Consequences
 

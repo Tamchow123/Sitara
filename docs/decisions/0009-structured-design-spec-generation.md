@@ -6,6 +6,13 @@
   with total, fail-safe dispatch; version 1 stays fully read/validated and its
   committed JSON Schema byte-identical, never rewritten. `SPEC_TEMPLATE_VERSION`
   2.1.0 → 2.2.0.
+- **Amended again by ADR 0018 (Phase 16B, 2026-07-29):** **DesignSpec schema
+  version 3** carries questionnaire v4's contract — a colour per garment role
+  and a coverage answer per body area — through the same registry. Versions 1
+  and 2 stay fully read/validated with byte-identical committed JSON Schemas.
+  `sitara/generation/selection_semantics.py` becomes the single sanctioned
+  adapter for version-independent selection projections. `SPEC_TEMPLATE_VERSION`
+  2.2.0 → 2.3.0.
 - **Date:** 2026-07-18
 - **Deciders:** Sitara maintainers
 - **Phase:** Phase 8 (see ../phases/PHASES.md)

@@ -46,8 +46,8 @@ def _v2_spec_dict() -> dict:
 
 
 class TestVersionDispatch:
-    def test_supported_versions_are_one_and_two(self):
-        assert sorted(SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS) == [1, 2]
+    def test_supported_versions_are_one_two_and_three(self):
+        assert sorted(SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS) == [1, 2, 3]
 
     def test_v1_payload_validates_as_version_one(self):
         spec = validate_design_spec(_v1_spec_dict())
@@ -60,7 +60,7 @@ class TestVersionDispatch:
         assert spec.schema_version == 2
         assert spec.source_selections.neckline_style == "high_neck"
 
-    @pytest.mark.parametrize("bad", [0, 3, 99, "1", 1.0, True, None])
+    @pytest.mark.parametrize("bad", [0, 4, 99, "1", 1.0, True, None])
     def test_unsupported_version_fails_safely(self, bad):
         with pytest.raises(UnsupportedDesignSpecVersion):
             design_spec_model_for_version(bad)

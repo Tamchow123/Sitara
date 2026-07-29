@@ -1,12 +1,16 @@
 """Bounded, source-controlled phrase maps for the demo DesignSpec and
 refinement engines (Phase 15 Part B).
 
-Every map is keyed by a questionnaire v1 machine value (see
+Every map is keyed by a questionnaire machine value (see
 :mod:`sitara.generation.demo.manifest` for the same controlled vocabulary).
 The questionnaire remains the sole authority over which combination of
 values a user may submit — these maps only supply the deterministic
 narrative language the demo engines compose into a DesignSpec. Nothing here
-performs validation."""
+performs validation.
+
+Values from every published questionnaire version live side by side: a design
+answered on an older version must keep rendering its own vocabulary, so newer
+values are ADDED here and older ones are never removed."""
 
 GARMENT_PHRASES: dict[str, dict[str, str]] = {
     "lehenga": {
@@ -98,6 +102,24 @@ SILHOUETTE_PHRASES: dict[str, str] = {
     "knee_length_anarkali": "a shorter frock silhouette over churidar",
     "straight_kameez": "a clean, straight-falling kameez",
     "a_line_kameez": "a kameez that opens gently from the waist",
+    # Questionnaire v4 replaced the two generic gharara/sharara constructions
+    # and added per-garment silhouettes. The two constructions above are kept so
+    # a v1/v3-answered design still reads correctly.
+    "straight_lehenga": "a narrow, straight-falling skirt with very little flare",
+    "panelled_kali_lehenga": "a skirt built from vertical kali panels that swing as they flare",
+    "pre_stitched_saree": "a pre-stitched drape that keeps the saree's line without pinning",
+    "half_saree": "a half-saree pairing a skirt and blouse with a draped upper length",
+    "classic_gharara": "a classic gharara fitted to the knee before its below-knee flare",
+    "farshi_gharara": "a farshi gharara whose below-knee flare pools along the floor",
+    "slim_modern_gharara": "a slimmer modern gharara with a restrained below-knee flare",
+    "classic_sharara": "classic sharara trousers flaring evenly from the upper leg",
+    "high_waisted_sharara": "high-waisted sharara trousers flaring from a raised waistline",
+    "farshi_sharara": "a farshi sharara whose flare lengthens into a floor-sweeping fall",
+    "kalidar_anarkali": "a kalidar anarkali built from many tapering panels",
+    "front_open_anarkali": "a front-open anarkali layered over an inner garment",
+    "jacket_style_anarkali": "a jacket-style anarkali worn open over its base layer",
+    "angrakha_kameez": "an angrakha kameez crossed over and tied at the side",
+    "long_line_kameez": "a long-line kameez falling well below the knee",
 }
 
 REGIONAL_PHRASES: dict[str, str] = {
@@ -153,6 +175,25 @@ COLOUR_PHRASES: dict[str, str] = {
     "brown": "brown",
     "black": "black",
     "multicolour": "a considered multicolour mix",
+    # Questionnaire v4's grouped colour vocabulary. Added alongside the earlier
+    # values rather than replacing them: a v1/v3-answered design still needs its
+    # own colours to render.
+    "scarlet": "scarlet",
+    "deep_maroon": "deep maroon",
+    "oxblood": "oxblood",
+    "rust": "rust",
+    "rani_pink": "rani pink",
+    "old_rose": "old rose",
+    "marigold": "marigold",
+    "antique_gold": "antique gold",
+    "mehndi_green": "mehndi green",
+    "pistachio": "pistachio",
+    "peacock": "peacock blue",
+    "aubergine": "aubergine",
+    "amethyst": "amethyst",
+    "plum_wine": "wine plum",
+    "silver_grey": "silver grey",
+    "pearl": "pearl",
 }
 
 FABRIC_PHRASES: dict[str, str] = {
@@ -227,6 +268,8 @@ DUPATTA_PHRASES: dict[str, str] = {
     "double_dupatta": "styled as a double dupatta",
     "cape_drape": "styled in a cape-like drape",
     "arm_drape": "resting loosely along the arms",
+    # Questionnaire v4.
+    "trail_dupatta": "left to trail behind in a long sweep",
 }
 
 SAREE_DRAPE_PHRASES: dict[str, str] = {
@@ -235,6 +278,39 @@ SAREE_DRAPE_PHRASES: dict[str, str] = {
     "bengali_drape": "a Bengali-style drape with wide box pleats",
     "open_pallu": "an open, unpleated flowing pallu",
     "pinned_pleats": "crisp, pre-set pleats pinned for a structured look",
+    # Questionnaire v4.
+    "lehenga_drape": "a lehenga-style drape worn over a skirted lower half",
+}
+
+# Questionnaire v4 replaced the single coverage_preferences multi-select with one
+# question per body area, so each area gets its own phrase map. Every value is a
+# real answer — including the less-covered ones — because the user chose it
+# explicitly rather than by omission.
+SLEEVE_PHRASES: dict[str, str] = {
+    "sleeveless": "left sleeveless",
+    "cap_sleeve": "finished with short cap sleeves",
+    "elbow_sleeve": "finished with elbow-length sleeves",
+    "three_quarter_sleeve": "finished with three-quarter sleeves",
+    "full_sleeve": "finished with full-length sleeves",
+}
+
+BACK_COVERAGE_PHRASES: dict[str, str] = {
+    "open_back": "left open at the back",
+    "deep_cut_back": "cut deeply open at the back",
+    "modest_back": "given full back coverage",
+}
+
+MIDRIFF_PHRASES: dict[str, str] = {
+    "bare_midriff": "left bare at the waist",
+    "semi_sheer_midriff": "veiled in sheer fabric at the waist rather than left bare",
+    "covered_midriff": "given full midriff coverage, with no bare skin at the waist",
+}
+
+HEAD_COVERING_PHRASES: dict[str, str] = {
+    "uncovered": "left uncovered",
+    "dupatta_over_head": "kept covered, with the dupatta drawn up and over it",
+    "veil_style": "kept covered by a veil worn over the hair",
+    "hijab": "kept covered by a hijab over the hair and neck",
 }
 
 # A small, deliberately bounded allowlist of style-adjective keywords a demo

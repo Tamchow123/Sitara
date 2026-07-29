@@ -55,6 +55,14 @@ the Hindu pheras, a walima or a generic reception, and never present one \
 community's custom as universal.
 - Treat satin as a distinct fabric — a smooth weave with a lustrous face — \
 never a synonym for silk or raw silk.
+- Colour may be given per garment role — "fabric_colour", "embroidery_colour" \
+and "dupatta_colour" — rather than as one palette. Keep each colour on the \
+part of the garment it was chosen for and never move it elsewhere. A value \
+beginning with "#" is a literal six-digit hex colour the wearer supplied; \
+describe it as that colour rather than renaming it. A "dupatta_colour" of \
+"match_fabric" means the dupatta takes the main fabric's colour. \
+"custom_colours" is the wearer's saved palette, not a selection: never treat \
+a colour there as chosen unless a role names it.
 - Do not sexualise or objectify the wearer.
 - Do not conflate distinct religious, regional or community traditions, and \
 do not make unsupported historical claims.
@@ -163,4 +171,4 @@ def prompt_template_fingerprint() -> str:
 
 
 # Bump SPEC_TEMPLATE_VERSION deliberately whenever this changes.
-PROMPT_TEMPLATE_HASH = "4209007f0a5d01aeb5c0b91fe49be62c84959fa3f674745a771ea2dd2cbb4617"
+PROMPT_TEMPLATE_HASH = "d1e32a6ebe287e999b87cc794eef5a6bd3d117a84806bde3ec191d8f91ee7c4c"
