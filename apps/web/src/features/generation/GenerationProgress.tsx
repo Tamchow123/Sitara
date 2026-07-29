@@ -140,7 +140,7 @@ export function GenerationProgress({ designId, jobId }: Props) {
   if (job.status === "failed") {
     const friendly = friendlyGenerationError(job.error_code);
     return (
-      <main className="generation-progress">
+      <div className="generation-progress">
         <div role="alert" className="generation-failed">
           <h1>{friendly.heading}</h1>
           <p>{friendly.message}</p>
@@ -160,7 +160,7 @@ export function GenerationProgress({ designId, jobId }: Props) {
         <p className="generation-privacy-note">
           Your private design details are never made public during generation.
         </p>
-      </main>
+      </div>
     );
   }
 
@@ -185,7 +185,7 @@ export function GenerationProgress({ designId, jobId }: Props) {
           : "Your image is being generated, verified and stored privately.";
 
   return (
-    <main className="generation-progress">
+    <div className="generation-progress">
       <ol className="generation-stages">
         {STAGE_KEYS.map((stage, index) => (
           <li
@@ -218,6 +218,6 @@ export function GenerationProgress({ designId, jobId }: Props) {
       <p className="generation-privacy-note">
         Your private design details are never made public during generation.
       </p>
-    </main>
+    </div>
   );
 }

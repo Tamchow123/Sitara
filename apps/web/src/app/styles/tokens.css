@@ -72,9 +72,38 @@
   --color-accent-2-900: #272e1b;
 
   /* Status roles (kept from the pre-handoff palette; both clear AA on
-     the cream ground — #1d6b3c 5.48:1 and #a4262c 6.10:1). */
+     the cream ground — #1d6b3c 5.48:1 and #a4262c 6.10:1), each with the
+     tint used as the ground of its own message block. Body copy on those
+     tints is --color-text, which clears AAA on both. */
   --color-ok: #1d6b3c;
+  --color-ok-100: #eaf5ee;
   --color-bad: #a4262c;
+  --color-bad-100: #fdeceb;
+
+  /* The one legitimate white in the system: a tick, numeral or glyph
+     drawn ON an accent fill, where a ramp step would be unreadable.
+     Named so a reader can tell it apart from a surface that merely
+     happens to be pale. */
+  --color-on-accent: #ffffff;
+
+  /* Ink veils. The scrim sits behind a modal drawer; the swatch edge is
+     the hairline that keeps a pale colour swatch visible against the
+     cream ground; the glyph veil backs a tick drawn over photography. */
+  --color-scrim: rgba(32, 30, 29, 0.45);
+  --color-swatch-edge: rgba(32, 30, 29, 0.22);
+  --color-glyph-veil: rgba(32, 30, 29, 0.85);
+
+  /* The "Any colour" affordance. Decorative only — it never encodes a
+     value, and the control beside it always carries a text label. */
+  --gradient-colour-wheel: conic-gradient(
+    from 0deg,
+    #c22b33,
+    #e8a13a,
+    #1d6b4f,
+    #2b3d8f,
+    #46203f,
+    #c22b33
+  );
 
   /* Type. --font-display carries the Sitara wordmark and page h1s;
      --font-heading is the Organic display face for legends, card

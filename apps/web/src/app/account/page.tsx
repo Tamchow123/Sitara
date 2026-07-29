@@ -7,6 +7,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 
 const SIGN_OUT_FAILED_MESSAGE =
@@ -48,9 +49,9 @@ export default function AccountPage() {
   }
 
   return (
-    <main>
+    <AppShell width="narrow">
       <h1>Your account</h1>
-      <section aria-labelledby="account-heading">
+      <section className="panel" aria-labelledby="account-heading">
         <h2 id="account-heading">Account details</h2>
         <div role="status" aria-live="polite">
           {status === "loading" && <p>Checking your session…</p>}
@@ -67,7 +68,7 @@ export default function AccountPage() {
                 <dt>Email</dt>
                 <dd>{user.email}</dd>
               </dl>
-              <button type="button" onClick={onLogout} disabled={signingOut}>
+              <button type="button" className="btn btn-secondary" onClick={onLogout} disabled={signingOut}>
                 {signingOut ? "Signing out…" : "Sign out"}
               </button>
               {logoutError && (
@@ -79,13 +80,13 @@ export default function AccountPage() {
           )}
         </div>
       </section>
-      <section aria-labelledby="coming-heading">
+      <section className="panel" aria-labelledby="coming-heading">
         <h2 id="coming-heading">What&apos;s next</h2>
         <p>
           Bridal design features — the guided questionnaire, private concept
           generation and your design gallery — arrive in later phases.
         </p>
       </section>
-    </main>
+    </AppShell>
   );
 }

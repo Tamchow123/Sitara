@@ -257,7 +257,7 @@ export function ReviewSummary({ designId }: Props) {
   const describedBy = demoMode ? "generate-note demo-disclosure" : "generate-note";
 
   return (
-    <main className="review">
+    <div className="review">
       <h1>Review your design concept</h1>
 
       {!valid && (
@@ -445,6 +445,6 @@ export function ReviewSummary({ designId }: Props) {
           </button>
         </div>
       )}
-    </main>
+    </div>
   );
 }

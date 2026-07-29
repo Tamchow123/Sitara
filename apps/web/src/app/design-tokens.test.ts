@@ -19,12 +19,13 @@ import { describe, expect, it } from "vitest";
 // which partial a token or rule is moved into — and so a NEW partial is covered
 // the moment it is added, rather than silently escaping the contrast contract.
 const STYLES_DIR = path.join(__dirname, "styles");
+const PARTIALS = readdirSync(STYLES_DIR)
+  .filter((name) => name.endsWith(".css"))
+  .sort()
+  .map((name) => ({ name, source: readFileSync(path.join(STYLES_DIR, name), "utf8") }));
 const CSS = [
   readFileSync(path.join(__dirname, "globals.css"), "utf8"),
-  ...readdirSync(STYLES_DIR)
-    .filter((name) => name.endsWith(".css"))
-    .sort()
-    .map((name) => readFileSync(path.join(STYLES_DIR, name), "utf8")),
+  ...PARTIALS.map((partial) => partial.source),
 ].join("\n");
 
 /**
@@ -33,20 +34,39 @@ const CSS = [
  * Walks up from this file rather than hard-coding a depth, because the repo
  * root sits at a different level depending on where the suite runs: CI checks
  * the whole repo out and runs with `working-directory: apps/web`, while a local
- * containerised run mounts a narrower tree. Deliberately throws rather than
- * skipping — if the source of truth cannot be found, the transcription contract
- * below is unverified, and silently passing would defeat the point of the test.
+ * containerised run mounts a narrower tree.
+ *
+ * Two candidate paths, newest first: `design_handoff_sitara_flow/` is the
+ * bundle Phase 17 is built against and is therefore the binding source, and
+ * `design/sitara-handoff/` is the earlier vendored copy Phase 16B transcribed
+ * from. The two stylesheets are byte-identical today; the fallback exists so
+ * removing the older bundle does not silently unverify this contract, and the
+ * ordering means the newer bundle wins if they ever diverge.
+ *
+ * Deliberately throws rather than skipping — if the source of truth cannot be
+ * found the transcription contract below is unverified, and silently passing
+ * would defeat the point of the test.
  */
 function vendoredStylesheet(): string {
-  const relative = path.join("design", "sitara-handoff", "_ds", "organic-styles.css");
+  const candidates = [
+    path.join(
+      "design_handoff_sitara_flow",
+      "_ds",
+      "organic-ccb06f12-17fe-45b2-9248-ebf010085646",
+      "styles.css",
+    ),
+    path.join("design", "sitara-handoff", "_ds", "organic-styles.css"),
+  ];
   let dir = __dirname;
   for (;;) {
-    const candidate = path.join(dir, relative);
-    if (existsSync(candidate)) return readFileSync(candidate, "utf8");
+    for (const relative of candidates) {
+      const candidate = path.join(dir, relative);
+      if (existsSync(candidate)) return readFileSync(candidate, "utf8");
+    }
     const parent = path.dirname(dir);
     if (parent === dir) {
       throw new Error(
-        `could not find ${relative} in any ancestor of ${__dirname} — ` +
+        `could not find any of ${candidates.join(", ")} in an ancestor of ${__dirname} — ` +
           "the vendored design system is the source of truth for the token block " +
           "in globals.css and must be present for these tests to mean anything",
       );
@@ -226,6 +246,44 @@ describe("design tokens: color-mix() degrades instead of vanishing", () => {
     for (const name of withMix) {
       const count = [...CSS.matchAll(new RegExp(`${name}:\\s*[^;]+;`, "g"))].length;
       expect(count, `${name} uses color-mix() without a static fallback declaration`).toBe(2);
+    }
+  });
+});
+
+describe("design tokens: the palette lives in exactly one file", () => {
+  // Part A/1 of the Phase 17 brief: "Do not scatter copied hex values and
+  // spacing literals across route files." Before this guard the feature
+  // partials carried a dozen pre-handoff literals (#faf3ee, #fdeceb, #fff,
+  // #f0e7db …) that no palette retune could ever reach, which is a large part
+  // of why several screens still read as generic white-and-grey. Colour now
+  // enters the system only through tokens.css.
+  const COLOUR_LITERAL = /#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\(/gi;
+
+  it.each(PARTIALS.filter((partial) => partial.name !== "tokens.css").map((p) => p.name))(
+    "%s declares no raw colour literal",
+    (name) => {
+      const source = PARTIALS.find((partial) => partial.name === name)!.source;
+      // Comments explain the tokens by name, and naming a literal in prose is
+      // not the same as painting with it.
+      const code = source.replace(/\/\*[\s\S]*?\*\//g, "");
+      expect([...code.matchAll(COLOUR_LITERAL)].map((m) => m[0])).toEqual([]);
+    },
+  );
+
+  it("keeps every status tint legible under body ink", () => {
+    // The tints ground the error and success message blocks, whose copy is
+    // --color-text rather than the status colour itself.
+    for (const tint of ["color-ok-100", "color-bad-100"]) {
+      expect(contrast(token("color-text"), token(tint))).toBeGreaterThanOrEqual(7);
+    }
+  });
+
+  it("gives --color-on-accent AA against the accent grounds it is drawn on", () => {
+    // Ticks, rank badges and pill numerals are small, so AA (not AA-large) is
+    // the bar. --color-accent itself is a decorative fill and is excluded by
+    // the rule above it; these are the two grounds that actually carry glyphs.
+    for (const ground of ["color-accent-700", "color-accent-800"]) {
+      expect(contrast(token("color-on-accent"), token(ground))).toBeGreaterThanOrEqual(AA);
     }
   });
 });

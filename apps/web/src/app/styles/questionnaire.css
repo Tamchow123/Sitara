@@ -420,7 +420,7 @@
   width: 38px;
   height: 38px;
   border-radius: var(--radius-pill);
-  box-shadow: inset 0 0 0 1.5px rgba(32, 30, 29, 0.22);
+  box-shadow: inset 0 0 0 1.5px var(--color-swatch-edge);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-text) 22%, transparent);
   transition: transform var(--motion-fast) ease-out;
 }
@@ -441,7 +441,7 @@
   font-size: 0.9rem;
   line-height: 1;
   /* Legible on both dark and light swatches without knowing which it is. */
-  text-shadow: 0 0 3px rgba(32, 30, 29, 0.85);
+  text-shadow: 0 0 3px var(--color-glyph-veil);
 }
 .swatch-order {
   position: absolute;
@@ -507,7 +507,7 @@
   width: 19px;
   height: 19px;
   border-radius: var(--radius-pill);
-  background: conic-gradient(from 0deg, #c22b33, #e8a13a, #1d6b4f, #2b3d8f, #46203f, #c22b33);
+  background: var(--gradient-colour-wheel);
 }
 .custom-colour-panel {
   display: flex;
@@ -580,10 +580,10 @@
 /* ------------------------------------------------------------------ */
 /* Option info drawer                                                 */
 /* ------------------------------------------------------------------ */
-/* Both scrim declarations are the same ink at the same alpha: an engine
-   without color-mix() keeps the rgba() line, one with it takes the second.
-   Without the fallback the scrim would resolve to `transparent` and the
-   modal would read as part of the page. Same pattern as tokens.css. */
+/* --color-scrim is a plain rgba() rather than a color-mix(), precisely so
+   it cannot become invalid at computed-value time and resolve to
+   `transparent` — a scrim that vanishes would leave the modal reading as
+   part of the page. */
 .info-scrim {
   position: fixed;
   inset: 0;
@@ -591,8 +591,7 @@
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgba(32, 30, 29, 0.45);
-  background: color-mix(in srgb, var(--color-text) 45%, transparent);
+  background: var(--color-scrim);
 }
 .info-drawer {
   width: min(46rem, 100%);
@@ -698,14 +697,14 @@
   font: inherit;
   border: 1px solid var(--accent);
   border-radius: 6px;
-  background: #fff;
+  background: var(--color-neutral-100);
   color: var(--accent);
   cursor: pointer;
   text-decoration: none;
 }
 .wizard-nav button:last-child {
   background: var(--accent);
-  color: #fff;
+  color: var(--color-on-accent);
 }
 .wizard-nav button[disabled] {
   opacity: 0.5;
@@ -717,7 +716,7 @@
   border-radius: 8px;
   padding: 0.75rem 1.1rem;
   margin-bottom: 1.5rem;
-  background: #fdeceb;
+  background: var(--color-bad-100);
 }
 .error-summary h2 {
   color: var(--bad);
@@ -753,7 +752,7 @@
   border-radius: 8px;
   padding: 0;
   overflow: hidden;
-  background: #fff;
+  background: var(--color-neutral-100);
   cursor: pointer;
   font: inherit;
 }
@@ -772,7 +771,7 @@
   max-width: 100%;
   aspect-ratio: 1 / 1;
   object-fit: cover;
-  background: #f0e7db;
+  background: var(--color-neutral-200);
 }
 .inspiration-meta {
   display: flex;
@@ -798,7 +797,7 @@
   border-radius: 8px;
   padding: 0.75rem;
   color: var(--muted);
-  background: #f6f1ea;
+  background: var(--color-neutral-100);
 }
 .empty-state {
   color: var(--muted);
@@ -892,7 +891,7 @@
   border-radius: 8px;
   padding: 0.85rem 1rem;
   margin-bottom: 0.85rem;
-  background: #fffdf9;
+  background: var(--color-neutral-100);
 }
 .upload-disclosure p {
   margin: 0 0 0.6rem;
@@ -932,7 +931,7 @@
   padding: 0.5rem 1.1rem;
   cursor: pointer;
   font-size: 0.92rem;
-  background: #fff;
+  background: var(--color-neutral-100);
 }
 .upload-input:focus-visible + .upload-label {
   outline: 2px solid var(--accent);
@@ -959,7 +958,7 @@
   border: 2px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
-  background: #fff;
+  background: var(--color-neutral-100);
 }
 /* 3:4 — the aspect the concepts themselves are generated at, so a preview
    shows the crop the reference will actually contribute. */
@@ -970,7 +969,7 @@
   max-width: 100%;
   aspect-ratio: 3 / 4;
   object-fit: cover;
-  background: #f0e7db;
+  background: var(--color-neutral-200);
 }
 .upload-remove {
   display: block;
@@ -978,7 +977,7 @@
   border: 0;
   border-top: 1px solid var(--line);
   padding: 0.5rem;
-  background: #fff;
+  background: var(--color-neutral-100);
   cursor: pointer;
   font: inherit;
   font-size: 0.85rem;

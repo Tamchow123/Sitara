@@ -162,7 +162,7 @@ export function DesignResult({ designId, versionId }: Props) {
   const failed = designQuery.isSuccess && isRefinementFailed(design);
 
   return (
-    <main className="design-result">
+    <div className="design-result">
       <h1>{result.title}</h1>
       <ResultImage
         images={imageQuery.data}
@@ -200,6 +200,6 @@ export function DesignResult({ designId, versionId }: Props) {
           onRequiresRecheck={handleRequiresRecheck}
         />
       )}
-    </main>
+    </div>
   );
 }

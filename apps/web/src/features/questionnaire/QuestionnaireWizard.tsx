@@ -546,7 +546,7 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
       : null;
 
   return (
-    <main className="wizard">
+    <div className="wizard">
       <ProgressNav
         categories={categories}
         activeIndex={activeCategoryIndex}
@@ -680,6 +680,6 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
           {onInspirationScreen ? "Review" : "Continue"}
         </button>
       </div>
-    </main>
+    </div>
   );
 }

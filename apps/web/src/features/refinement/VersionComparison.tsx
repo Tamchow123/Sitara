@@ -117,7 +117,7 @@ export function VersionComparison({ designId, parentVersionId, refined }: Props)
   const changeType = refined.result.lineage.refinement?.change_type;
 
   return (
-    <main className="version-comparison">
+    <div className="version-comparison">
       <h1 id="comparison-heading">Compare your concepts</h1>
       <div className="comparison-disclosure" role="note" aria-label="Comparison disclaimer">
         <p>
@@ -172,6 +172,6 @@ export function VersionComparison({ designId, parentVersionId, refined }: Props)
 
         <VersionCard headingId="version-refined-heading" label="Refined concept" side={refined} />
       </div>
-    </main>
+    </div>
   );
 }

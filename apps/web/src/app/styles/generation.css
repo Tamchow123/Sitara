@@ -44,7 +44,7 @@
   border: 2px solid var(--bad);
   border-radius: 8px;
   padding: 1rem 1.25rem;
-  background: #fdeceb;
+  background: var(--color-bad-100);
 }
 .generation-failed h1,
 .generation-unavailable h1 {
@@ -69,7 +69,7 @@
 .result-disclaimer {
   border-left: 4px solid var(--accent);
   padding: 0.75rem 1.1rem;
-  background: #faf3ee;
+  background: var(--color-accent-100);
   border-radius: 0 8px 8px 0;
 }
 
@@ -110,7 +110,7 @@
   padding: 1.5rem;
   text-align: center;
   color: var(--muted);
-  background: #fff;
+  background: var(--color-neutral-100);
 }
 .result-image-state button {
   margin-top: 0.5rem;
@@ -143,12 +143,12 @@
   font: inherit;
   border: 1px solid var(--accent);
   border-radius: 6px;
-  background: #fff;
+  background: var(--color-neutral-100);
   color: var(--accent);
   cursor: pointer;
 }
 .result-actions button:hover {
-  background: #faf3ee;
+  background: var(--color-accent-100);
 }
 
 .copy-status {
@@ -201,7 +201,7 @@
   border-color: var(--accent);
   color: var(--accent);
   font-weight: bold;
-  background: #faf3ee;
+  background: var(--color-accent-100);
 }
 
 .refinement-note-count {
@@ -213,7 +213,7 @@
 .refinement-drift-warning {
   border-left: 4px solid var(--bad);
   padding: 0.75rem 1.1rem;
-  background: #fdeceb;
+  background: var(--color-bad-100);
   border-radius: 0 8px 8px 0;
   display: flex;
   flex-direction: column;
@@ -232,7 +232,7 @@
   border: 1px solid var(--accent);
   border-radius: 6px;
   background: var(--accent);
-  color: #fff;
+  color: var(--color-on-accent);
   cursor: pointer;
 }
 .refinement-actions button[disabled] {
@@ -244,13 +244,13 @@
   border: 2px solid var(--bad);
   border-radius: 8px;
   padding: 0.75rem 1rem;
-  background: #fdeceb;
+  background: var(--color-bad-100);
 }
 
 .refinement-running-notice {
   border-left: 4px solid var(--accent);
   padding: 0.75rem 1.1rem;
-  background: #faf3ee;
+  background: var(--color-accent-100);
   border-radius: 0 8px 8px 0;
 }
 
@@ -258,7 +258,7 @@
   border: 2px solid var(--bad);
   border-radius: 8px;
   padding: 1rem 1.25rem;
-  background: #fdeceb;
+  background: var(--color-bad-100);
 }
 .refinement-failed-notice h2 {
   color: var(--bad);
@@ -285,7 +285,7 @@
 .comparison-disclosure {
   border-left: 4px solid var(--accent);
   padding: 0.75rem 1.1rem;
-  background: #faf3ee;
+  background: var(--color-accent-100);
   border-radius: 0 8px 8px 0;
 }
 
