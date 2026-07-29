@@ -104,6 +104,35 @@ class TestQuestionnaireVisualKeys:
         """
         assert _non_colour_visual_keys(_schema(_V4_PATH)) == set(manifest)
 
+    def test_the_absence_options_stay_text_only(self) -> None:
+        """Two options must never gain a visual, and the reason is editorial.
+
+        "No specific regional direction" and "No embellishment" name the ABSENCE
+        of a choice. There is nothing to photograph, and giving either one an
+        image would make declining to choose look like a choice — a card with a
+        picture reads as an option with a character. The bidirectional check
+        above would not catch it: adding a ``visual_key`` AND a matching asset
+        keeps both sets equal and stays green.
+        """
+        absence_options = {
+            ("regional_style", "no_specific_direction"),
+            ("embellishment_styles", "none"),
+        }
+        seen = set()
+        for step in _schema(_V4_PATH)["steps"]:
+            for question in step["questions"]:
+                for option in question.get("options", []):
+                    identity = (question["id"], option["value"])
+                    if identity not in absence_options:
+                        continue
+                    seen.add(identity)
+                    assert (
+                        "visual_key" not in option
+                    ), f"{identity} names an absence and must stay text-only"
+        # The options themselves must still exist — a renamed or deleted option
+        # would otherwise make this test pass by vacuous truth.
+        assert seen == absence_options
+
     def test_every_manifest_entry_is_a_safe_local_asset(self, manifest: dict) -> None:
         for key, entry in manifest.items():
             path = entry["path"]

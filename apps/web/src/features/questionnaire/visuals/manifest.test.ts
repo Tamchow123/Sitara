@@ -84,6 +84,29 @@ describe("questionnaire visual manifest", () => {
       expect(actual).toBe(entry.contentHash);
     });
 
+    it("ships every question group, so a partial build cannot pass quietly", () => {
+      // The count above would catch a build that dropped a group, but only by
+      // arithmetic — "expected 104, got 92" does not say WHICH question lost
+      // its photography. Naming the groups makes a partial build report itself.
+      const groups = new Set(entries.map(([, entry]) => entry.path.split("/")[2]));
+      expect([...groups].sort()).toEqual([
+        "back-coverage",
+        "ceremonies",
+        "cultural-styling",
+        "dupatta",
+        "embellishment-density",
+        "embroidery",
+        "fabrics",
+        "garments",
+        "head-covering",
+        "midriff",
+        "necklines",
+        "saree-drapes",
+        "silhouettes",
+        "sleeves",
+      ]);
+    });
+
     it("gives every option within one question group a single card aspect", () => {
       // Cards in a grid must be the same shape, so a group directory may only
       // ever declare one width/height pair.
