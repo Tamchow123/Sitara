@@ -21,6 +21,8 @@ import { Controller, useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
 
 import { fetchActiveQuestionnaire, fetchCatalogue, fetchDesign } from "./api";
+import type { InspirationUpload } from "@/lib/api";
+
 import { InspirationPicker } from "./InspirationPicker";
 import { ProgressNav } from "./ProgressNav";
 import { QuestionField } from "./QuestionField";
@@ -79,6 +81,10 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
   const [versionId, setVersionId] = useState<string>("");
   const [answers, setAnswers] = useState<Answers>({});
   const [selection, setSelection] = useState<string[]>([]);
+  // The user's own uploaded references. Held here rather than inside the picker
+  // so a resumed design restores them from the server, and so both kinds of
+  // reference are counted against the one shared cap in a single place.
+  const [uploads, setUploads] = useState<InspirationUpload[]>([]);
   const [catalogue, setCatalogue] = useState<CatalogueState>({ status: "idle", assets: [] });
   const [catalogueAttempt, setCatalogueAttempt] = useState(0);
   const [screenIndex, setScreenIndex] = useState(0);
@@ -193,6 +199,7 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
           adopt(design.id);
           setAnswersSynced(loadedAnswers);
           setSelection(design.selected_inspirations.map((entry) => entry.id));
+          setUploads(design.inspiration_uploads ?? []);
           const loadedPlan = buildScreenPlan(loadedSchema, loadedAnswers);
           const visibility = visibleQuestions(loadedSchema, loadedAnswers);
           const required = requiredQuestions(loadedSchema, loadedAnswers, visibility);
@@ -543,6 +550,9 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
               selection={selection}
               max={MAX_INSPIRATIONS}
               onChange={onSelectionChange}
+              designId={saver.designId ?? undefined}
+              uploads={uploads}
+              onUploadsChange={setUploads}
             />
           )}
         </section>

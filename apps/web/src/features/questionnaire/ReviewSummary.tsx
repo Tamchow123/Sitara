@@ -20,7 +20,7 @@ import { answerLabels } from "./answer-utils";
 import { visibleQuestions } from "./rules";
 import { resolveDesignLifecycleTarget } from "@/lib/design-lifecycle";
 import { generationSubmitErrorMessage } from "@/features/generation/submit-errors";
-import type { PublicConfig } from "@/lib/api";
+import { inspirationUploadImageUrl, type PublicConfig } from "@/lib/api";
 import type { Answers, DesignDraft, Question, QuestionnaireSchema } from "./types";
 
 type Props = { designId: string };
@@ -245,6 +245,9 @@ export function ReviewSummary({ designId }: Props) {
   }
 
   const { design, schema, valid, errors, generationEnabled, demoMode, generationMode } = state;
+  // Read straight from the design the server returned — a resumed review must
+  // show the uploads that are actually attached, never a client-side guess.
+  const uploads = design.inspiration_uploads ?? [];
   const answers = (design.answers ?? {}) as Answers;
   const visibility = visibleQuestions(schema, answers);
   const editHref = `/design/${design.id}`;
@@ -325,14 +328,15 @@ export function ReviewSummary({ designId }: Props) {
           <h2 id="review-inspirations">Inspiration images</h2>
           <Link href={editHref}>Edit</Link>
         </div>
-        {design.selected_inspirations.length === 0 ? (
+        {design.selected_inspirations.length === 0 && uploads.length === 0 ? (
           <p>No inspiration images selected.</p>
         ) : (
           <>
             <p className="field-help">
-              Selected inspirations guide compatible details only — your garment, ceremony,
-              colour, embellishment and coverage answers always take priority. Images are used
-              through staff-written descriptions, not direct image matching.
+              Your references guide compatible details only — your garment, ceremony,
+              colour, embellishment and coverage answers always take priority. The images
+              below are sent to the external AI image provider that draws your concept, and
+              the concept will not be an exact copy of any of them.
             </p>
             <ul className="review-inspirations">
               {design.selected_inspirations.map((selection) => (
@@ -367,6 +371,30 @@ export function ReviewSummary({ designId }: Props) {
                 </li>
               ))}
             </ul>
+            {uploads.length > 0 && (
+              <>
+                <h3 className="review-uploads-heading">Your own photographs</h3>
+                <ul className="review-inspirations">
+                  {uploads.map((upload, index) => (
+                    <li key={upload.id}>
+                      <figure>
+                        {/* Plain <img>, never next/image: ownership-checked,
+                            no-store bytes must not be proxied or cached. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          className="upload-thumb"
+                          src={inspirationUploadImageUrl(design.id, upload.id)}
+                          alt={`Your uploaded inspiration image ${index + 1}`}
+                          width={upload.width}
+                          height={upload.height}
+                        />
+                        <figcaption>Uploaded by you</figcaption>
+                      </figure>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </>
         )}
       </section>

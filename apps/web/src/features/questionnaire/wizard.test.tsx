@@ -618,6 +618,53 @@ describe("QuestionnaireWizard", () => {
       ).toBeInTheDocument();
     });
 
+    it("restores uploads made in an earlier visit, and counts them against the budget", async () => {
+      // Uploads live on the server, not in the wizard's own state. If a resume
+      // did not restore them, the user would see an empty upload list for
+      // images that ARE still attached — and the picker would offer three more
+      // references than the server will accept.
+      mocks.fetchDesign.mockResolvedValue(
+        detail({
+          answers: {
+            garment_type: "lehenga",
+            silhouette: "flared_lehenga",
+            dupatta_style: "head_drape",
+          },
+          inspiration_uploads: [
+            {
+              id: "u1",
+              position: 1,
+              width: 900,
+              height: 1200,
+              rights_acknowledged_at: "2026-07-29T00:00:00Z",
+              created_at: "2026-07-29T00:00:00Z",
+            },
+          ],
+        }),
+      );
+      render(<QuestionnaireWizard initialDesignId="d1" />);
+
+      await screen.findByRole("heading", { name: "Inspiration images" });
+      expect(await screen.findByAltText(/uploaded inspiration image 1/i)).toHaveAttribute(
+        "src",
+        "/api/v1/designs/d1/inspiration-uploads/u1/image/",
+      );
+      expect(document.getElementById("inspiration-help")).toHaveTextContent(/1 of 3 used/i);
+      expect(screen.getByText(/2 of your inspiration slots are free/i)).toBeInTheDocument();
+    });
+
+    it("wires the upload control to the design created during the questionnaire", async () => {
+      // The design id only exists after the first autosave; the upload control
+      // has to pick it up, or an upload would have nothing to attach to.
+      render(<QuestionnaireWizard />);
+      await goToInspirationStep();
+      expect(
+        await screen.findByRole("heading", { name: /Your own photographs/i }),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText(/Choose an image/i)).toBeDisabled();
+      expect(screen.getByText(/3 of your inspiration slots are free/i)).toBeInTheDocument();
+    });
+
     it("recovers from a catalogue fetch failure via Try again", async () => {
       mocks.fetchCatalogue.mockReset();
       mocks.fetchCatalogue.mockRejectedValueOnce(new Error("network"));

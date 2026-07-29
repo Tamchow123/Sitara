@@ -241,6 +241,61 @@ describe("ReviewSummary", () => {
     expect(screen.queryByText(/answers always take priority/i)).not.toBeInTheDocument();
   });
 
+  describe("uploaded photographs", () => {
+    function upload(id: string, position: number) {
+      return {
+        id,
+        position,
+        width: 900,
+        height: 1200,
+        rights_acknowledged_at: "2026-07-29T00:00:00Z",
+        created_at: "2026-07-29T00:00:00Z",
+      };
+    }
+
+    it("shows an upload with no preset selected, rather than 'none selected'", async () => {
+      // An upload IS an inspiration image. Reporting none while one is about to
+      // be sent to the provider would be the review screen lying at the last
+      // point the user can still change their mind.
+      mocks.fetchDesign.mockResolvedValue(
+        design({ inspiration_uploads: [upload("u1", 1)] }),
+      );
+      render(<ReviewSummary designId="d1" />);
+
+      expect(await screen.findByText("Your own photographs")).toBeInTheDocument();
+      expect(screen.queryByText("No inspiration images selected.")).not.toBeInTheDocument();
+      expect(screen.getByText(/answers always take priority/i)).toHaveTextContent(
+        /sent to the external ai image provider/i,
+      );
+    });
+
+    it("renders each upload from the ownership-checked endpoint with its own name", async () => {
+      mocks.fetchDesign.mockResolvedValue(
+        design({ inspiration_uploads: [upload("u1", 1), upload("u2", 2)] }),
+      );
+      render(<ReviewSummary designId="d1" />);
+
+      const first = await screen.findByAltText(/uploaded inspiration image 1/i);
+      expect(first).toHaveAttribute("src", "/api/v1/designs/d1/inspiration-uploads/u1/image/");
+      expect(screen.getByAltText(/uploaded inspiration image 2/i)).toHaveAttribute(
+        "src",
+        "/api/v1/designs/d1/inspiration-uploads/u2/image/",
+      );
+      // Relative and ownership-checked: never an object-store URL, never the
+      // image optimiser (which would cache bytes that need a per-request check).
+      for (const image of screen.getAllByRole("img")) {
+        expect(image.getAttribute("src")).not.toMatch(/https?:|_next\/image|X-Amz|amazonaws/i);
+      }
+    });
+
+    it("keeps the section honest for a design with no images at all", async () => {
+      mocks.fetchDesign.mockResolvedValue(design({ inspiration_uploads: [] }));
+      render(<ReviewSummary designId="d1" />);
+      expect(await screen.findByText("No inspiration images selected.")).toBeInTheDocument();
+      expect(screen.queryByText("Your own photographs")).not.toBeInTheDocument();
+    });
+  });
+
   describe("Generate my concept", () => {
     it("enables the button when valid and generation is enabled", async () => {
       render(<ReviewSummary designId="d1" />);

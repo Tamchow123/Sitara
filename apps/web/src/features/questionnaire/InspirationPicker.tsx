@@ -4,11 +4,15 @@
 // keyboard-operable toggle cards (aria-pressed, not colour-only), enforces the
 // zero-to-three limit on the client (the server remains authoritative), and
 // renders any previously-selected asset that is no longer eligible as a
-// neutral placeholder the user can remove. Images use a plain <img> (no
+// neutral placeholder the user can remove. The cap is on REFERENCES, so
+// curated presets and the user's own uploads draw from one shared budget. Images use a plain <img> (no
 // Next.js optimisation/proxy) so the backend's no-store eligibility checks
 // always apply. No storage path, hash, rights evidence or internal metadata
 // is ever shown.
 
+import type { InspirationUpload as Upload } from "@/lib/api";
+
+import { InspirationUpload } from "./InspirationUpload";
 import type { PublicAsset } from "./types";
 
 type Props = {
@@ -16,20 +20,36 @@ type Props = {
   selection: string[];
   max: number;
   onChange: (ids: string[]) => void;
+  // Uploads share the SAME budget as presets — the cap is on references, not on
+  // where they came from. Omitted while no design exists yet to attach them to.
+  designId?: string;
+  uploads?: Upload[];
+  onUploadsChange?: (uploads: Upload[]) => void;
 };
 
-export function InspirationPicker({ assets, selection, max, onChange }: Props) {
+export function InspirationPicker({
+  assets,
+  selection,
+  max,
+  onChange,
+  designId,
+  uploads,
+  onUploadsChange,
+}: Props) {
   const catalogueIds = new Set(assets.map((asset) => asset.id));
   // Selected ids that are no longer in the eligible catalogue → unavailable.
   const unavailable = selection.filter((id) => !catalogueIds.has(id));
-  const selectedCount = selection.length;
+  const uploadCount = uploads?.length ?? 0;
+  // One budget across both kinds. The server enforces the same total under a
+  // row lock; this only keeps the UI from offering what it would reject.
+  const usedCount = selection.length + uploadCount;
 
   const toggle = (assetId: string): void => {
     if (selection.includes(assetId)) {
       onChange(selection.filter((id) => id !== assetId));
       return;
     }
-    if (selectedCount >= max) return; // client block; server also rejects
+    if (usedCount >= max) return; // client block; server also rejects
     onChange([...selection, assetId]);
   };
 
@@ -40,11 +60,12 @@ export function InspirationPicker({ assets, selection, max, onChange }: Props) {
   return (
     <div className="inspiration">
       <p className="field-help" id="inspiration-help">
-        Choose up to {max} inspiration images (optional). {selectedCount} of {max} selected.
-        Sitara uses each selected image&apos;s staff-written description as a secondary visual
-        cue — your questionnaire answers remain authoritative, the image files themselves are not
-        sent to the AI models in this version, and the generated concept will not be an exact
-        copy.
+        Choose up to {max} inspiration images in total (optional) — from this
+        collection, your own photographs, or a mix. {usedCount} of {max} used.
+        Your questionnaire answers stay authoritative, and the generated concept
+        will not be an exact copy. The images you choose are sent to the external
+        AI image provider that draws your concept, along with each catalogue
+        image&apos;s staff-written description.
       </p>
 
       {unavailable.length > 0 && (
@@ -67,7 +88,7 @@ export function InspirationPicker({ assets, selection, max, onChange }: Props) {
           {assets.map((asset) => {
             const selected = selection.includes(asset.id);
             const position = selection.indexOf(asset.id) + 1;
-            const blocked = !selected && selectedCount >= max;
+            const blocked = !selected && usedCount >= max;
             return (
               <li key={asset.id}>
                 <button
@@ -107,6 +128,15 @@ export function InspirationPicker({ assets, selection, max, onChange }: Props) {
           })}
         </ul>
       )}
+
+      {designId && uploads && onUploadsChange ? (
+        <InspirationUpload
+          designId={designId}
+          uploads={uploads}
+          slotsRemaining={Math.max(max - usedCount, 0)}
+          onChange={onUploadsChange}
+        />
+      ) : null}
     </div>
   );
 }

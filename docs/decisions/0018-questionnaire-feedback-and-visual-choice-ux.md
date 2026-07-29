@@ -160,6 +160,33 @@ Storage API and is *not* bounded by the batch size; that is documented on the
 function rather than glossed. Counts only reach the log; a storage key never
 does.
 
+**The upload UI: consent has to come before the file picker.** ADR 0019 accepted
+a real, unresolved exposure — a perpetual, irrevocable train-and-improve licence
+over inputs, unresolved coverage of Replicate-routed traffic, no published
+retention window — and that decision only becomes legitimate at the moment a
+user is told about it. So the disclosure is rendered above the affirmation, the
+affirmation checkbox is `aria-describedby` the disclosure, and the file input is
+disabled until the affirmation is given. The handler re-checks the affirmation
+rather than trusting the `disabled` attribute: a consent gate should not rest on
+a DOM property. The affirmation's wording names it as the user's own claim
+("I have the right to use these images"), never as verified rights, matching the
+model boundary below.
+
+Two pieces of existing copy asserted the *opposite* of what now happens — the
+picker said image files "are not sent to the AI models in this version" and the
+review summary said images are used "through staff-written descriptions, not
+direct image matching". Both are corrected, and the picker's test now asserts
+the retired claim cannot return in any wording. Saying the opposite of what the
+system does is worse than saying nothing.
+
+Uploads and curated presets share one budget because the cap is on *references*,
+not on their provenance; the picker owns that arithmetic and hands the upload
+control only the remaining count. Multipart cannot use the JSON wrapper (the
+browser must set its own boundary), so the upload wrappers re-prove the same
+policy independently — same-origin, no-store, in-memory CSRF token, exactly one
+retry on a stale token — with the one deliberate difference that a
+15 MB body gets a 60s budget instead of the 5s JSON one.
+
 **Relationship to ADR 0006 — deliberately NOT the staff rights model.** A user
 upload is *private user content*, not catalogue content. It therefore has no
 `RightsRecord`, no verifier identity, no expiry, no approval workflow, no

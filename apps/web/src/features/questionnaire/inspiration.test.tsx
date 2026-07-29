@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { InspirationUpload } from "@/lib/api";
+
 import { InspirationPicker } from "./InspirationPicker";
 import type { PublicAsset } from "./types";
 
@@ -15,6 +17,17 @@ function asset(id: string, overrides: Partial<PublicAsset> = {}): PublicAsset {
     image_url: `/api/v1/inspiration-assets/${id}/image/`,
     thumbnail_url: `/api/v1/inspiration-assets/${id}/thumbnail/`,
     ...overrides,
+  };
+}
+
+function upload(id: string): InspirationUpload {
+  return {
+    id,
+    position: 1,
+    width: 900,
+    height: 1200,
+    rights_acknowledged_at: "2026-07-29T00:00:00Z",
+    created_at: "2026-07-29T00:00:00Z",
   };
 }
 
@@ -81,17 +94,55 @@ describe("InspirationPicker", () => {
     expect(screen.getByText(/No inspiration images are available yet/i)).toBeInTheDocument();
   });
 
-  it("explains the metadata-only influence and associates it with the picker", () => {
+  it("states honestly that chosen images reach the provider, and stays associated with the picker", () => {
+    // Phase 16B (ADR 0019) reversed this: the images a user chooses ARE now
+    // sent to the image provider. The old copy said the opposite, and saying
+    // the opposite is worse than saying nothing.
     const { container } = render(
       <InspirationPicker assets={[asset("a")]} selection={[]} max={3} onChange={vi.fn()} />,
     );
     const help = document.getElementById("inspiration-help");
     expect(help).toHaveTextContent(/optional/i);
     expect(help).toHaveTextContent(/staff-written description/i);
-    expect(help).toHaveTextContent(/questionnaire answers remain authoritative/i);
-    expect(help).toHaveTextContent(/not sent to the ai models/i);
+    expect(help).toHaveTextContent(/questionnaire answers stay authoritative/i);
+    expect(help).toHaveTextContent(/sent to the external ai image provider/i);
     expect(help).toHaveTextContent(/will not be an exact copy/i);
+    // The retired claim must not creep back in any wording.
+    expect(help).not.toHaveTextContent(/not sent to the ai/i);
+    expect(help).not.toHaveTextContent(/image files themselves are not sent/i);
     const grid = container.querySelector("ul.inspiration-grid");
     expect(grid).toHaveAttribute("aria-describedby", "inspiration-help");
+  });
+
+  it("counts uploads against the same reference budget as presets", () => {
+    // The cap is on REFERENCES. Two uploads plus one preset must fill it, or
+    // the UI would offer a fourth the server is bound to reject.
+    const onChange = vi.fn();
+    render(
+      <InspirationPicker
+        assets={[asset("a"), asset("b")]}
+        selection={["a"]}
+        max={3}
+        onChange={onChange}
+        designId="design-1"
+        uploads={[upload("u1"), upload("u2")]}
+        onUploadsChange={vi.fn()}
+      />,
+    );
+    expect(document.getElementById("inspiration-help")).toHaveTextContent(/3 of 3 used/i);
+    const other = screen.getByRole("button", { name: /Look b/i });
+    expect(other).toBeDisabled();
+    fireEvent.click(other);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("shows no upload control until a design exists to attach one to", () => {
+    render(<InspirationPicker assets={[asset("a")]} selection={[]} max={3} onChange={vi.fn()} />);
+    // By role, not by text: the picker's own help copy also mentions "your own
+    // photographs", so a text query would match the wrong element.
+    expect(
+      screen.queryByRole("heading", { name: /Your own photographs/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Choose an image/i)).not.toBeInTheDocument();
   });
 });

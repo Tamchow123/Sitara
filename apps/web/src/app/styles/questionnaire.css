@@ -823,3 +823,119 @@
     width: auto;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* User inspiration uploads (Phase 16B)                                */
+/* ------------------------------------------------------------------ */
+.upload {
+  margin-top: 1.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
+.upload-heading {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+/* The rights/provider disclosure. Given real weight on the page because a
+   user cannot consent to something the interface has not told them. */
+.upload-disclosure {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.85rem;
+  background: #fffdf9;
+}
+.upload-disclosure p {
+  margin: 0 0 0.6rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+.upload-disclosure p:last-child {
+  margin-bottom: 0;
+}
+.upload-acknowledge {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+}
+.upload-acknowledge label {
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+/* The native input stays in the accessibility tree and keeps its own keyboard
+   behaviour; the label is what carries the visible affordance. */
+.upload-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.upload-label {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.5rem 1.1rem;
+  cursor: pointer;
+  font-size: 0.92rem;
+  background: #fff;
+}
+.upload-input:focus-visible + .upload-label {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.upload-input:disabled + .upload-label {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.upload-status {
+  min-height: 1.4em;
+  margin: 0.6rem 0 0;
+  font-size: 0.9rem;
+}
+.upload-grid {
+  list-style: none;
+  padding: 0;
+  margin: 0.85rem 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.75rem;
+}
+.upload-card {
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+/* 3:4 — the aspect the concepts themselves are generated at, so a preview
+   shows the crop the reference will actually contribute. */
+.upload-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  background: #f0e7db;
+}
+.upload-remove {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: 0.5rem;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+}
+.upload-remove[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
