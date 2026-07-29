@@ -114,6 +114,52 @@ anonymous-session-owned, CSRF-protected, throttled per session and per hashed IP
 and return the same indistinguishable 404 for foreign and nonexistent designs. No
 storage key, hash or byte size is ever serialised into a response.
 
+**Lifecycle: two cleanup paths, because one is structurally blind.** Writing the
+object before the row is the right order — a row pointing at a missing object
+would be the worse failure — but it opens a window in which a crash leaves an
+object with nothing naming it. The retention purge closes only half of this: it
+enumerates upload keys FROM the rows before the `Design` cascade removes them, so
+an uploaded image lives at most `DESIGN_RETENTION_DAYS`, but it can never see an
+object no row names. A second periodic task,
+`maintenance.sweep_orphaned_upload_objects`, is therefore the only thing that
+removes one — which makes *reaching* every object as much a requirement as
+deleting safely.
+
+Safety: it walks `design-uploads/` alone; considers only objects older than
+`USER_UPLOAD_ORPHAN_GRACE_SECONDS`, long enough that an object whose row is
+still committing is never a candidate; re-checks row existence per key
+immediately before deleting; and before each delete normalises the key and
+re-checks containment. Normalisation is the point — a plain `startswith` accepts
+`design-uploads/../catalogue/x.webp`, which resolves onto a rights-controlled
+catalogue object.
+
+Reachability: a bounded run that always restarted at the same place would leave
+the tail of the keyspace permanently unswept, and a private user photograph
+would then outlive retention with nothing reporting it. Two things prevent that.
+The run scans its directories first, then asks in **one query scoped to those
+keys** which of them rows name; a key that is named is skipped for free, so
+healthy uploads never consume the orphan budget. Each directory contributes at
+most `MAX_INSPIRATION_IMAGES + 8` keys per run and those slices are examined
+**round-robin**, so neither a directory full of live uploads nor one that has
+piled up crash-window orphans can spend the whole run while a neighbour's lone
+orphan survives every pass. (Loading *every* upload key instead would have been
+simpler and was rejected: it grows with the platform on every tick regardless of
+how little the run then does.)
+And the per-design directories are visited from a rotating offset derived from
+the clock, advancing a whole window per scheduled run, so while the directory
+count is stable the whole prefix is covered in exactly
+`ceil(directories / USER_UPLOAD_SWEEP_BATCH_SIZE)` runs — for every combination,
+not only where they divide evenly. Under churn that becomes a close
+approximation rather than a proof; what churn cannot do is systematically
+exclude a directory, which is the property that matters. The rotation is
+stateless — nothing to persist, corrupt or reset.
+
+A truncated run reports `truncated: true` rather than reading like a complete
+one. One `listdir` of the top-level prefix per run is unavoidable through the
+Storage API and is *not* bounded by the batch size; that is documented on the
+function rather than glossed. Counts only reach the log; a storage key never
+does.
+
 **Relationship to ADR 0006 — deliberately NOT the staff rights model.** A user
 upload is *private user content*, not catalogue content. It therefore has no
 `RightsRecord`, no verifier identity, no expiry, no approval workflow, no

@@ -76,10 +76,11 @@ def generate_design_attempt(self, attempt_id):
 
 
 # ---------------------------------------------------------------------------
-# Periodic maintenance tasks (Phase 16, Part C) — scheduled by Celery Beat.
-# Both are bounded and idempotent, so a duplicate Beat delivery is safe: the
-# purge re-selects a fresh batch and re-deletes idempotently, and the stuck
-# reconciler re-checks each attempt under the advisory lock.
+# Periodic maintenance tasks (Phase 16 Part C; upload sweep added in Phase 16B)
+# — scheduled by Celery Beat. All are bounded and idempotent, so a duplicate
+# Beat delivery is safe: the purge re-selects a fresh batch and re-deletes
+# idempotently, the stuck reconciler re-checks each attempt under the advisory
+# lock, and the upload sweep re-checks the row immediately before each delete.
 # ---------------------------------------------------------------------------
 @shared_task(name="sitara.generation.tasks.purge_expired_designs")
 def purge_expired_designs():
@@ -93,3 +94,10 @@ def reconcile_stuck_generations():
     from .maintenance import reconcile_stuck_generations as _reconcile
 
     return _reconcile()
+
+
+@shared_task(name="sitara.generation.tasks.sweep_orphaned_upload_objects")
+def sweep_orphaned_upload_objects():
+    from .maintenance import sweep_orphaned_upload_objects as _sweep
+
+    return _sweep()

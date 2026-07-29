@@ -784,6 +784,16 @@ GENERATION_STUCK_BATCH_SIZE = env_positive_int("GENERATION_STUCK_BATCH_SIZE", 50
 # How often (seconds) Celery Beat runs each maintenance task.
 DESIGN_PURGE_INTERVAL_SECONDS = env_positive_int("DESIGN_PURGE_INTERVAL_SECONDS", 3600)
 GENERATION_STUCK_INTERVAL_SECONDS = env_positive_int("GENERATION_STUCK_INTERVAL_SECONDS", 120)
+# A user-upload object younger than this is NEVER swept: an upload writes its
+# object before it can create the row naming it, so a young unreferenced object
+# may simply be a request still in flight. Generous by design — the cost of
+# waiting is one stale object for an hour; the cost of being wrong is deleting
+# an image a user just uploaded.
+USER_UPLOAD_ORPHAN_GRACE_SECONDS = env_positive_int("USER_UPLOAD_ORPHAN_GRACE_SECONDS", 3600)
+# Objects EXAMINED per sweep run (not objects deleted): the bound is on the
+# listing walk, because orphans are rare and the scan is the real cost.
+USER_UPLOAD_SWEEP_BATCH_SIZE = env_positive_int("USER_UPLOAD_SWEEP_BATCH_SIZE", 500)
+USER_UPLOAD_SWEEP_INTERVAL_SECONDS = env_positive_int("USER_UPLOAD_SWEEP_INTERVAL_SECONDS", 3600)
 
 # ---------------------------------------------------------------------------
 # Deterministic zero-cost demo pipeline (Phase 15). The active demo manifest
