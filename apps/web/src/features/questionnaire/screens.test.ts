@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { requiredQuestions, visibleQuestions } from "./rules";
 import {
   buildScreenPlan,
+  firstUnansweredScreenIndex,
   hasRequiredQuestion,
   INSPIRATION_SCREEN_ID,
   isInspirationScreen,
@@ -212,6 +213,37 @@ describe("screen completeness", () => {
     const colours = plan(answers).screens.find((s) => s.categoryId === "colours");
     expect(isScreenAnswered(colours!, answers, required(answers))).toBe(true);
     expect(hasRequiredQuestion(colours!, required(answers))).toBe(false);
+  });
+});
+
+describe("firstUnansweredScreenIndex", () => {
+  it("reports the first screen still needing a required answer", () => {
+    const answers = { ceremony: "nikah" };
+    expect(firstUnansweredScreenIndex(plan(answers), answers, required(answers))).toBe(1);
+  });
+
+  it("returns -1 — not a screen index — once nothing is outstanding", () => {
+    // The distinction resumeScreenIndex cannot make: it would return the
+    // inspiration screen's index here, which as a navigation ceiling would be
+    // indistinguishable from "stop at the inspiration screen".
+    const answers = { ceremony: "nikah", garment_type: "lehenga" };
+    expect(firstUnansweredScreenIndex(plan(answers), answers, required(answers))).toBe(-1);
+  });
+
+  it("does not treat the inspiration screen itself as outstanding", () => {
+    const answers = { ceremony: "nikah", garment_type: "lehenga" };
+    const built = plan(answers);
+    expect(isInspirationScreen(built.screens.at(-1)!)).toBe(true);
+    expect(firstUnansweredScreenIndex(built, answers, required(answers))).toBe(-1);
+  });
+
+  it("reopens a gap behind the user when a later change clears an answer", () => {
+    // The reported defect: an answer can go missing on a screen already passed,
+    // and the ceiling has to fall back to it rather than staying at the end.
+    const complete = { ceremony: "nikah", garment_type: "lehenga" };
+    expect(firstUnansweredScreenIndex(plan(complete), complete, required(complete))).toBe(-1);
+    const cleared: Answers = { ceremony: "nikah" };
+    expect(firstUnansweredScreenIndex(plan(cleared), cleared, required(cleared))).toBe(1);
   });
 });
 

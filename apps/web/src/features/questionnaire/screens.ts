@@ -150,6 +150,26 @@ export function hasRequiredQuestion(
   return screen.questions.some((question) => required[question.id]);
 }
 
+// The first screen with an unanswered required question, or -1 when there is
+// none outstanding.
+//
+// Deliberately NOT resumeScreenIndex below. That one answers "where should a
+// returning user land", so it falls back to the inspiration screen and can
+// never say "nothing is outstanding" — index 0 means both "the very first
+// question is unanswered" and, for a plan of one screen, "you are done". A
+// navigation ceiling has to tell those apart, so this returns -1 for a
+// complete draft and never treats the inspiration screen as a blocker (it has
+// no required questions of its own).
+export function firstUnansweredScreenIndex(
+  plan: ScreenPlan,
+  answers: Answers,
+  required: Record<string, boolean>,
+): number {
+  return plan.screens.findIndex(
+    (screen) => !isInspirationScreen(screen) && !isScreenAnswered(screen, answers, required),
+  );
+}
+
 // The screen a resumed draft should open on: the first whose required questions
 // are not all answered, or the inspiration screen when the questionnaire is
 // complete. Screen-based rather than step-based, so resuming lands on the exact

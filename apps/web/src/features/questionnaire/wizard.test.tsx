@@ -685,6 +685,70 @@ describe("QuestionnaireWizard", () => {
       expect(screen.getByText(/3 of your inspiration slots are free/i)).toBeInTheDocument();
     });
 
+    it("will not carry the user to review once a later change clears an answer", async () => {
+      // The reported defect. Reaching the end and being told there are missing
+      // answers is too late: the user was never stopped on the question. It
+      // happens because `maxReached` is monotonic — it records how far they
+      // GOT, not whether the screens behind them are still answered. Switching
+      // the garment restricts the silhouette options, clearStaleAnswers drops
+      // the now-disallowed answer, and the progress nav still offered a jump
+      // straight over the reopened gap to the review screen.
+      render(<QuestionnaireWizard />);
+      await goToInspirationStep();
+
+      // Back to the garment and change it, which invalidates the silhouette.
+      fireEvent.click(screen.getByRole("button", { name: "Garment step" }));
+      fireEvent.click(await screen.findByRole("radio", { name: "Saree" }));
+      await waitFor(() => expect(mocks.updateDesignDraft).toHaveBeenCalled());
+
+      // The defect in one line: this pill was still offered, and taking it
+      // jumped straight over the reopened silhouette question to the end, from
+      // where Continue pushed to review and the server reported the miss.
+      fireEvent.click(screen.getByRole("button", { name: /^Inspiration/ }));
+      expect(
+        screen.queryByRole("heading", { name: "Inspiration images" }),
+      ).not.toBeInTheDocument();
+
+      // Continue must land on the reopened question, NOT the review screen.
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      expect(await screen.findByRole("heading", { name: "Silhouette" })).toBeInTheDocument();
+      expect(mocks.push).not.toHaveBeenCalled();
+
+      // ...and answering it restores the way forward. A saree swaps the dupatta
+      // question out for the drape question, so that is the next screen.
+      fireEvent.click(await screen.findByRole("radio", { name: "Draped" }));
+      await waitFor(() => expect(mocks.updateDesignDraft).toHaveBeenCalled());
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      expect(await screen.findByRole("heading", { name: "Saree drape" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+      expect(
+        await screen.findByRole("heading", { name: "Inspiration images" }),
+      ).toBeInTheDocument();
+    });
+
+    it("re-locks the categories beyond a reopened gap", async () => {
+      // The nav must not keep claiming a category is complete when the answer
+      // that completed it has gone — a ticked pill offering a jump over the
+      // gap is how the user got past it in the first place.
+      render(<QuestionnaireWizard />);
+      await goToInspirationStep();
+      // Matched loosely: a locked pill appends a visually-hidden
+      // "(not yet available)" to its accessible name, which is the announcement
+      // this assertion is really about.
+      expect(screen.getByRole("button", { name: /^Inspiration/ })).toBeEnabled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Garment step" }));
+      fireEvent.click(await screen.findByRole("radio", { name: "Saree" }));
+      await waitFor(() => expect(mocks.updateDesignDraft).toHaveBeenCalled());
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /^Inspiration/ })).toBeDisabled(),
+      );
+      expect(
+        screen.getByRole("button", { name: /Inspiration \(not yet available\)/ }),
+      ).toBeInTheDocument();
+    });
+
     it("recovers from a catalogue fetch failure via Try again", async () => {
       mocks.fetchCatalogue.mockReset();
       mocks.fetchCatalogue.mockRejectedValueOnce(new Error("network"));

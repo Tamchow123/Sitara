@@ -30,6 +30,7 @@ import { allowedOptions, questionsById, requiredQuestions, visibleQuestions } fr
 import { clearStaleAnswers } from "./answer-utils";
 import {
   buildScreenPlan,
+  firstUnansweredScreenIndex,
   hasRequiredQuestion,
   isInspirationScreen,
   isScreenAnswered,
@@ -120,6 +121,35 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
     [schema, answers],
   );
   const planRef = useLatest(plan);
+
+  // Visibility and requiredness gate navigation here AND drive the render pass
+  // further down. Computed once so the two can never disagree about whether a
+  // question still counts.
+  const visibility = useMemo(
+    () => (schema ? visibleQuestions(schema, answers) : {}),
+    [schema, answers],
+  );
+  const required = useMemo(
+    () => (schema ? requiredQuestions(schema, answers, visibility) : {}),
+    [schema, answers, visibility],
+  );
+
+  // How far the user may move. `maxReached` records how far they HAVE got, but
+  // it is monotonic and says nothing about whether the screens behind them are
+  // still answered. An answer can disappear after the fact: clearStaleAnswers
+  // drops one whenever a controlling choice changes (switching the garment from
+  // lehenga to saree discards the lehenga silhouette), and a `show` rule can
+  // reveal a required question the user has already walked past. Without this
+  // ceiling a progress pill carries them over the gap to the review screen,
+  // where the first they hear of it is a server 400 listing questions they were
+  // never stopped on.
+  const frontier = useMemo(() => {
+    if (!plan) return 0;
+    const gap = firstUnansweredScreenIndex(plan, answers, required);
+    return gap === -1 ? maxReached : Math.min(maxReached, gap);
+  }, [plan, answers, required, maxReached]);
+  const frontierRef = useLatest(frontier);
+  const requiredRef = useLatest(required);
 
   // React Hook Form drives the CURRENT visible screen; the cross-screen Answers
   // object remains the source of truth (RHF mirrors it through `values`). The
@@ -350,17 +380,17 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
     [flush, form, runNavigation],
   );
 
-  // Progress-nav jump. Clamped to an already-reached screen here as well as
-  // being offered only for unlocked categories, so the guarantee does not
-  // depend on the navigation component alone.
+  // Progress-nav jump. Clamped to the frontier here as well as being offered
+  // only for unlocked categories, so the guarantee does not depend on the
+  // navigation component alone.
   const goToScreen = useCallback(
     (target: number) =>
       runNavigation(async () => {
         form.clearErrors();
         await flush();
-        setScreenIndex(Math.min(Math.max(target, 0), maxReached));
+        setScreenIndex(Math.min(Math.max(target, 0), frontierRef.current));
       }),
-    [flush, form, maxReached, runNavigation],
+    [flush, form, frontierRef, runNavigation],
   );
 
   const advance = useCallback(async () => {
@@ -371,15 +401,30 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
       return;
     }
     const currentPlan = planRef.current;
+    // Enforced here and not only by the disabled Continue button: the button
+    // reflects the CURRENT screen, while an answer can go missing on a screen
+    // behind the user (see the frontier above). Forward movement stops at the
+    // outstanding question wherever it is.
+    const gap = currentPlan
+      ? firstUnansweredScreenIndex(currentPlan, answersRef.current, requiredRef.current)
+      : -1;
     const screen = currentPlan?.screens[screenIndexRef.current];
     if (screen && isInspirationScreen(screen)) {
+      // Never hand the user to the review screen with a required question
+      // outstanding — that is exactly the path that ends in "you missed some
+      // questions" once it is too late to be useful. Take them to it instead.
+      if (gap !== -1) {
+        setScreenIndex(gap);
+        return;
+      }
       if (saver.designId) router.push(`/design/${saver.designId}/review`);
       return;
     }
     const nextIndex = screenIndexRef.current + 1;
-    setScreenIndex(nextIndex);
-    setMaxReached((reached) => Math.max(reached, nextIndex));
-  }, [flush, planRef, screenIndexRef, saver.designId, router]);
+    const target = gap !== -1 && gap < nextIndex ? gap : nextIndex;
+    setScreenIndex(target);
+    setMaxReached((reached) => Math.max(reached, target));
+  }, [flush, planRef, screenIndexRef, answersRef, requiredRef, saver.designId, router]);
 
   const goForward = useMemo(
     () => form.handleSubmit(advance, () => setErrorTick((tick) => tick + 1)),
@@ -426,19 +471,20 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
     );
   }
 
-  const visibility = visibleQuestions(schema, answers);
   const allowed = allowedOptions(schema, answers);
-  const required = requiredQuestions(schema, answers, visibility);
   const index = questionsById(schema);
 
   const activeCategoryIndex = plan.screens[screenIndex]?.categoryIndex ?? 0;
   // The handoff locks every category until the required openers (the ceremony
-  // and the garment) are answered. `maxReached` already IS that rule: it only
-  // advances through Continue, and Continue is unavailable while the screen in
-  // front of the user has an unanswered required question — so nothing beyond
-  // the opening category can have been reached until they are answered. A
-  // second gate on the same fact would be state that can drift out of step
-  // with it.
+  // and the garment) are answered. The frontier IS that rule: it only advances
+  // through Continue, and Continue is unavailable while the screen in front of
+  // the user has an unanswered required question — so nothing beyond the
+  // opening category can have been reached until they are answered.
+  //
+  // Read the frontier rather than maxReached so the nav tells the truth after
+  // an answer disappears: a category whose question was cleared by a later
+  // change goes back to incomplete and everything past it re-locks, instead of
+  // staying ticked and offering a jump straight over the gap.
   const categories: ProgressCategory[] = plan.categories.map((category, position) => {
     // Complete once the user has moved past the category's LAST screen, which
     // is the next category's first (or the end of the plan).
@@ -447,8 +493,8 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
       id: category.id,
       label: category.label,
       step: category.firstScreen,
-      complete: maxReached >= endsBefore,
-      locked: category.firstScreen > maxReached,
+      complete: frontier >= endsBefore,
+      locked: category.firstScreen > frontier,
     };
   });
 
