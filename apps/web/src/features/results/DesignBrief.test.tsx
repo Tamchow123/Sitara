@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { DesignBrief } from "./DesignBrief";
@@ -79,6 +79,14 @@ describe("DesignBrief — demo disclosure", () => {
   });
 });
 
+// Every specification card starts collapsed, exactly as the handoff's concept
+// screen does, and a collapsed card does not render its panel at all. These
+// tests open the card they are about instead of asserting on content no user
+// could reach yet.
+function openCard(name: RegExp | string) {
+  fireEvent.click(screen.getByRole("button", { name }));
+}
+
 describe("DesignBrief — inspiration acknowledgements", () => {
   it("renders no acknowledgement section when the list is empty", () => {
     render(<DesignBrief result={result()} />);
@@ -96,6 +104,7 @@ describe("DesignBrief — inspiration acknowledgements", () => {
       />,
     );
     expect(screen.getByText("Inspiration acknowledgements")).toBeInTheDocument();
+    openCard(/Inspiration acknowledgements/i);
     expect(screen.getByText("Emerald look")).toBeInTheDocument();
     expect(screen.getByText(/Studio A/)).toBeInTheDocument();
   });
@@ -112,6 +121,7 @@ describe("DesignBrief — inspiration acknowledgements", () => {
         })}
       />,
     );
+    openCard(/Inspiration acknowledgements/i);
     const items = screen.getAllByRole("listitem").filter((li) =>
       ["First look", "Second look", "Third look"].some((title) =>
         li.textContent?.includes(title),
@@ -134,6 +144,7 @@ describe("DesignBrief — inspiration acknowledgements", () => {
         })}
       />,
     );
+    openCard(/Inspiration acknowledgements/i);
     const item = screen.getByText("Unattributed look").closest("li");
     expect(item?.textContent).toBe("Unattributed look");
   });
@@ -148,6 +159,7 @@ describe("DesignBrief — inspiration acknowledgements", () => {
         })}
       />,
     );
+    openCard(/Inspiration acknowledgements/i);
     expect(screen.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument();
     expect(document.querySelector("script")).not.toBeInTheDocument();
   });
@@ -162,13 +174,19 @@ describe("DesignBrief — inspiration acknowledgements", () => {
         })}
       />,
     );
+    openCard(/Inspiration acknowledgements/i);
     const text = document.body.textContent ?? "";
     expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
     expect(text).not.toMatch(/garment_type/i);
     expect(text).not.toMatch(/visual_description/i);
   });
 
-  it("includes the metadata-only limitation copy", () => {
+  it("tells the truth about what happened to a selected reference image", () => {
+    // This copy used to say the source images "were not sent to the generation
+    // models". ADR 0019 reversed that for the references a user actually picks,
+    // and CLAUDE.md forbids describing the exposure as removed anywhere. A
+    // stale reassurance here is worse than no reassurance: it is the sentence
+    // a bride would rely on when deciding what to upload.
     render(
       <DesignBrief
         result={result({
@@ -178,7 +196,21 @@ describe("DesignBrief — inspiration acknowledgements", () => {
         })}
       />,
     );
-    expect(screen.getByText(/staff-curated descriptions/i)).toBeInTheDocument();
-    expect(screen.getByText(/not sent to the generation models/i)).toBeInTheDocument();
+    openCard(/Inspiration acknowledgements/i);
+    expect(screen.getByText(/sent to the AI image provider/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not sent to the generation models/i)).toBeNull();
+  });
+
+  it("says nothing was sent to a provider when the concept came from the demo pack", () => {
+    render(
+      <DesignBrief
+        result={result({
+          is_demo: true,
+          inspiration_acknowledgements: [{ position: 1, title: "Emerald look", attribution: "" }],
+        })}
+      />,
+    );
+    openCard(/Inspiration acknowledgements/i);
+    expect(screen.getByText(/no image .* was sent to an AI provider/i)).toBeInTheDocument();
   });
 });

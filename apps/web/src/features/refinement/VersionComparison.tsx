@@ -42,15 +42,25 @@ function VersionCard({
   headingId,
   label,
   side,
+  current = false,
 }: {
   headingId: string;
   label: string;
   side: SideProps;
+  /** The latest version — rendered larger and tagged, per the History screen. */
+  current?: boolean;
 }) {
   const { result } = side;
   return (
-    <article className="version-card" aria-labelledby={headingId}>
+    <article
+      className={current ? "version-card version-card-current" : "version-card"}
+      aria-labelledby={headingId}
+    >
       <h2 id={headingId}>
+        {/* The tag is the History screen's "Current" marker. It is inside the
+            heading so the distinction is announced with the heading rather
+            than floating beside it as colour alone. */}
+        {current && <span className="tag tag-accent">Current</span>}
         {label} — version {result.version_number}
         <span className="version-mode-label" data-mode={result.is_demo ? "demo" : "live"}>
           {result.is_demo ? "Demo" : "Live"}
@@ -118,7 +128,15 @@ export function VersionComparison({ designId, parentVersionId, refined }: Props)
 
   return (
     <div className="version-comparison">
+      {/* `Sitara History.dc.html`'s hierarchy, with its wording corrected to
+          the number of versions that can actually exist: the prototype's
+          "Every version of your vision" and "3 refinements left" describe an
+          unlimited history, and Sitara has exactly two versions at most. */}
+      <p className="kicker">Design history</p>
       <h1 id="comparison-heading">Compare your concepts</h1>
+      <p className="lede">
+        Your current design alongside the concept it was refined from. Both stay private to you.
+      </p>
       <div className="comparison-disclosure" role="note" aria-label="Comparison disclaimer">
         <p>
           The refined image is a <strong>new generation</strong>, not an edit of the original —
@@ -133,44 +151,66 @@ export function VersionComparison({ designId, parentVersionId, refined }: Props)
         )}
       </div>
 
+      {/* Latest first, as the History screen puts the current design first and
+           earlier ones under "Previous designs". The refined side needs no
+           query of its own — DesignResult already holds it — so it renders
+           immediately while the original is still loading beside it. */}
       <div className="comparison-grid">
-        {parentResultQuery.isPending && (
-          <p role="status" aria-live="polite">
-            Loading your original concept…
-          </p>
-        )}
-        {parentResultQuery.isError &&
-          (() => {
-            const kind = classifyResultError(parentResultQuery.error);
-            const copy = resultErrorCopy(kind);
-            return (
-              <div role="alert">
-                <h2>{copy.heading}</h2>
-                <p>{copy.message}</p>
-                {kind !== "not_found" && (
-                  <button type="button" onClick={() => void parentResultQuery.refetch()}>
-                    Try again
-                  </button>
-                )}
-              </div>
-            );
-          })()}
-        {parentResultQuery.data && (
-          <VersionCard
-            headingId="version-original-heading"
-            label="Original concept"
-            side={{
-              result: parentResultQuery.data,
-              images: parentImageQuery.data,
-              imagesPending: parentImageQuery.isPending,
-              imagesFetching: parentImageQuery.isFetching,
-              imagesError: parentImageQuery.error,
-              onRetryImages: () => void parentImageQuery.refetch(),
-            }}
-          />
-        )}
+        <VersionCard
+          headingId="version-refined-heading"
+          label="Refined concept"
+          side={refined}
+          current
+        />
 
-        <VersionCard headingId="version-refined-heading" label="Refined concept" side={refined} />
+        <div className="version-previous">
+          <h2 className="kicker" id="version-previous-heading">
+            Previous design
+          </h2>
+          {parentResultQuery.isPending && (
+            <p role="status" aria-live="polite">
+              Loading your original concept…
+            </p>
+          )}
+          {parentResultQuery.isError &&
+            (() => {
+              const kind = classifyResultError(parentResultQuery.error);
+              const copy = resultErrorCopy(kind);
+              return (
+                <div role="alert">
+                  <h3>{copy.heading}</h3>
+                  <p>{copy.message}</p>
+                  {kind !== "not_found" && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => void parentResultQuery.refetch()}
+                    >
+                      Try again
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+          {parentResultQuery.data && (
+            <VersionCard
+              headingId="version-original-heading"
+              label="Original concept"
+              side={{
+                result: parentResultQuery.data,
+                images: parentImageQuery.data,
+                imagesPending: parentImageQuery.isPending,
+                imagesFetching: parentImageQuery.isFetching,
+                imagesError: parentImageQuery.error,
+                onRetryImages: () => void parentImageQuery.refetch(),
+              }}
+            />
+          )}
+          <p className="version-limit-note">
+            You have used your one refinement. To take the design somewhere else, edit your answers
+            and start a new concept.
+          </p>
+        </div>
       </div>
     </div>
   );

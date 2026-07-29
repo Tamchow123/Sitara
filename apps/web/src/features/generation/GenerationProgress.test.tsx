@@ -105,14 +105,52 @@ describe("GenerationProgress", () => {
     expect(screen.getByText(/never made public/i)).toBeInTheDocument();
   });
 
-  it("marks the active stage with aria-current=step", async () => {
+  it("distinguishes completed, active and pending stages by text, not only colour", async () => {
     mocks.fetchGenerationJob.mockResolvedValue(job({ status: "running_text" }));
     renderProgress();
     await screen.findByText(/Creating your design brief/i);
-    const active = screen.getByText("Design brief").closest("li");
-    expect(active).toHaveAttribute("aria-current", "step");
-    const complete = screen.getByText(/Preparing \(complete\)/i);
-    expect(complete.closest("li")).not.toHaveAttribute("aria-current");
+
+    const stages = screen.getAllByRole("listitem");
+    expect(stages).toHaveLength(3);
+    // Each state says what it is in words, so the three are told apart with
+    // the stylesheet switched off — the badge glyph and the accent tint are
+    // reinforcement, never the only signal.
+    expect(stages[0]).toHaveTextContent(/Preparing \(complete\)/);
+    expect(stages[1]).toHaveTextContent(/Design brief \(in progress\)/);
+    expect(stages[2]).toHaveTextContent(/Visual concept/);
+    expect(stages[2]).not.toHaveTextContent(/complete|in progress/);
+
+    expect(stages[1]).toHaveAttribute("aria-current", "step");
+    expect(stages[0]).not.toHaveAttribute("aria-current");
+    expect(stages[2]).not.toHaveAttribute("aria-current");
+  });
+
+  it("shows a tick for a finished stage and a numeral for one still to come", async () => {
+    mocks.fetchGenerationJob.mockResolvedValue(job({ status: "running_image" }));
+    renderProgress();
+    await screen.findByText(/Creating your visual concept/i);
+    const badges = document.querySelectorAll(".generation-stage-badge");
+    // Decorative: the parenthetical text beside each already says the same
+    // thing, so announcing the glyph too would double up.
+    for (const badge of badges) expect(badge).toHaveAttribute("aria-hidden", "true");
+    expect([...badges].map((b) => b.textContent)).toEqual(["✓", "✓", "3"]);
+  });
+
+  it("animates only a decorative medallion, and never claims an amount of progress", async () => {
+    mocks.fetchGenerationJob.mockResolvedValue(job({ status: "queued" }));
+    renderProgress();
+    await screen.findByText(/Preparing your concept/i);
+
+    const medallion = document.querySelector(".generation-medallion");
+    expect(medallion).not.toBeNull();
+    expect(medallion).toHaveAttribute("aria-hidden", "true");
+
+    // A durable job reports a stage, not a fraction. Nothing on this screen
+    // may imply otherwise — no progressbar, no percentage, no estimate.
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    const page = document.body.textContent ?? "";
+    expect(page).not.toMatch(/\d+\s*%/);
+    expect(page).not.toMatch(/minutes? (left|remaining)|almost done|nearly there/i);
   });
 
   it("uses honest demo wording for a demo job, never claiming a live provider", async () => {

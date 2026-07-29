@@ -187,24 +187,47 @@ export function GenerationProgress({ designId, jobId }: Props) {
   return (
     <div className="generation-progress">
       <ol className="generation-stages">
-        {STAGE_KEYS.map((stage, index) => (
-          <li
-            key={stage}
-            aria-current={index === stageIndex ? "step" : undefined}
-            className={
-              index < stageIndex
-                ? "generation-stage-complete"
-                : index === stageIndex
-                  ? "generation-stage-active"
-                  : "generation-stage-pending"
-            }
-          >
-            {STAGE_LABELS[stage]}
-            {index < stageIndex ? " (complete)" : null}
-          </li>
-        ))}
+        {STAGE_KEYS.map((stage, index) => {
+          const state =
+            index < stageIndex ? "complete" : index === stageIndex ? "active" : "pending";
+          return (
+            <li
+              key={stage}
+              aria-current={state === "active" ? "step" : undefined}
+              className={`generation-stage generation-stage-${state}`}
+            >
+              {/* The badge carries a tick or a numeral, so the three states are
+                  distinguished by glyph and by text as well as by colour. The
+                  parenthetical is what a screen reader reads; the tick is
+                  decorative because it says the same thing. */}
+              <span className="generation-stage-badge" aria-hidden="true">
+                {state === "complete" ? "✓" : index + 1}
+              </span>
+              {STAGE_LABELS[stage]}
+              {state === "complete" ? " (complete)" : null}
+              {state === "active" ? " (in progress)" : null}
+            </li>
+          );
+        })}
       </ol>
-      <div role="status" aria-live="polite">
+
+      {/* The handoff's pulsing star medallion. It is the only moving thing on
+          the screen, it is driven by "a stage is active" and nothing else, and
+          it encodes no amount — there is no percentage to encode, because a
+          durable job reports a stage, not a fraction. tokens.css zeroes the
+          animation under prefers-reduced-motion, which leaves the medallion
+          sitting still rather than disappearing. */}
+      <span className="generation-medallion" aria-hidden="true">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2 L14.4 9.6 L22 12 L14.4 14.4 L12 22 L9.6 14.4 L2 12 L9.6 9.6 Z" />
+        </svg>
+      </span>
+
+      {/* One polite live region for the whole screen. Its content changes only
+          when the job's status does, so a poll that returns the same stage
+          announces nothing — the announcements a user hears are exactly the
+          three stage changes, never a poll frame and never the animation. */}
+      <div role="status" aria-live="polite" className="generation-narration">
         <h1>{heading}</h1>
         <p>{explanation}</p>
       </div>

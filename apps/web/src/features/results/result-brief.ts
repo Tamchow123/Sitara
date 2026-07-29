@@ -76,10 +76,17 @@ export function formatDesignBrief(result: DesignResult): string {
           : `- ${acknowledgement.title}`,
       );
     }
+    // Kept word-for-word in step with the same paragraph in DesignBrief.tsx:
+    // ADR 0019 sends the references a user actually selected to the image
+    // provider, so neither surface may still say they were not sent.
     lines.push(
-      "Selected inspirations influenced this concept through staff-curated descriptions. " +
-        "The source images themselves were not sent to the generation models, and the result " +
-        "is not an exact reproduction.",
+      result.is_demo
+        ? "These looks guided the concept through staff-written descriptions of them. This " +
+            "concept came from Sitara's demo pack, so no image — neither these nor anything you " +
+            "uploaded — was sent to an AI provider. The result is not a reproduction of any of them."
+        : "These looks guided the concept, both through staff-written descriptions of them and " +
+            "as visual references sent to the AI image provider that drew it. The result is not " +
+            "a reproduction of any of them.",
     );
     lines.push("");
   }

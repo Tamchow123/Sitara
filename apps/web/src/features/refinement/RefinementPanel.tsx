@@ -111,13 +111,24 @@ export function RefinementPanel({
   const remaining = REFINEMENT_NOTE_MAX_LENGTH - note.length;
 
   return (
-    <section className="refinement-panel" aria-labelledby="refinement-heading">
-      <h2 id="refinement-heading">Refine this concept</h2>
-      <p>You may request exactly one change to your design brief, then generate a fresh concept.</p>
+    <section className="refinement-panel" id="refine-concept" aria-labelledby="refinement-heading">
+      {/* The Amendments screen's kicker counts refinements. It says "one",
+          because one is the number — the prototype's "3 of 3 left" describes a
+          product Sitara is not. */}
+      <p className="kicker">Refine this concept · one refinement</p>
+      <h2 id="refinement-heading">What would you change?</h2>
+      <p className="refinement-lede">
+        You may request exactly one change to your design brief, then generate a fresh concept.
+        Sitara holds everything you have not asked to change as steady as it can.
+      </p>
 
       <fieldset className="refinement-chip-group">
         <legend>Choose one change</legend>
-        <div role="radiogroup" aria-label="Choose one change" className="refinement-chips">
+        {/* Radios, not the prototype's aria-pressed toggle buttons: exactly one
+            of these may hold, and a radio group is what says so to assistive
+            technology and to the keyboard (arrow keys move within the group).
+            The card look is styling on top of that, not a replacement for it. */}
+        <div className="refinement-chips">
           {REFINEMENT_CHANGE_TYPE_OPTIONS.map((option) => (
             <label
               key={option.value}
@@ -132,7 +143,7 @@ export function RefinementPanel({
                 checked={changeType === option.value}
                 onChange={() => setChangeType(option.value)}
               />
-              {option.label}
+              <span className="refinement-chip-label">{option.label}</span>
             </label>
           ))}
         </div>
@@ -186,26 +197,31 @@ export function RefinementPanel({
       <div className="refinement-actions">
         <button
           type="button"
+          className="btn btn-primary"
           onClick={() => void handleSubmit()}
           disabled={!canSubmit}
+          aria-busy={submitting || undefined}
           aria-describedby="refinement-disclaimer refinement-submit-note"
         >
           {submitting ? "Starting…" : "Request refinement"}
         </button>
+        {/* The handoff's hint sits beside the button and always carries the
+            reason the button is where it is — a disabled control with no
+            explanation is the state this line exists to prevent. */}
+        <p id="refinement-submit-note" role="status" aria-live="polite" className="field-help">
+          {submitting
+            ? "Starting your refinement…"
+            : changeType === null
+              ? "Choose one change to enable refinement."
+              : !acknowledged
+                ? "Please acknowledge the disclaimer above before submitting."
+                : "Ready to request your refinement."}
+        </p>
       </div>
-      <p id="refinement-submit-note" role="status" aria-live="polite" className="field-help">
-        {submitting
-          ? "Starting your refinement…"
-          : changeType === null
-            ? "Choose one change to enable refinement."
-            : !acknowledged
-              ? "Please acknowledge the disclaimer above before submitting."
-              : "Ready to request your refinement."}
-      </p>
       {submit.status === "error" && (
         <div className="refinement-error" role="alert">
           <p>{submit.message}</p>
-          <button type="button" onClick={() => void handleSubmit()}>
+          <button type="button" className="btn btn-secondary" onClick={() => void handleSubmit()}>
             Try again
           </button>
         </div>

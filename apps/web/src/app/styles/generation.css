@@ -1,342 +1,757 @@
 /* ------------------------------------------------------------------ */
-/* Generation progress                                                */
+/* Generation progress — `Sitara Generation.dc.html`                  */
+/*                                                                    */
+/* A centred, narrow column: the three stages as pills, one pulsing    */
+/* medallion, the stage title in the display face, and the sentence    */
+/* explaining what is happening now.                                   */
+/*                                                                    */
+/* Deliberately ABSENT: the prototype's 0-100% progress bar. A durable  */
+/* job reports which stage it is in, not how far through it is, so any  */
+/* bar we drew would be an invented number. The pills carry the state   */
+/* the job actually has, and the medallion carries "still working".     */
 /* ------------------------------------------------------------------ */
 .generation-progress {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  align-items: center;
+  gap: var(--space-4);
+  max-width: 560px;
+  margin: 0 auto;
+  padding-block: var(--space-6);
+  text-align: center;
 }
 
 .generation-stages {
   list-style: none;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  justify-content: center;
+  gap: var(--space-2);
   padding: 0;
-  margin: 0;
+  margin: 0 0 var(--space-4);
 }
 
-.generation-stages li {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0.35rem 0.9rem;
-  font-size: 0.9rem;
-  color: var(--muted);
+.generation-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 15px 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: 13.5px;
+  font-weight: 600;
+  transition:
+    background var(--motion-fast),
+    color var(--motion-fast);
 }
 
+.generation-stage-badge {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Three states, three grounds — but each also carries its own glyph and
+   its own words ("(complete)", "(in progress)"), so none of them is
+   signalled by colour alone. */
 .generation-stage-complete {
-  border-color: var(--ok);
-  color: var(--ok);
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+}
+.generation-stage-complete .generation-stage-badge {
+  background: var(--color-accent-700);
+  color: var(--color-on-accent);
 }
 
 .generation-stage-active {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: bold;
+  background: var(--color-accent-700);
+  color: var(--color-bg);
+}
+.generation-stage-active .generation-stage-badge {
+  background: var(--color-accent-900);
+  color: var(--color-on-accent);
 }
 
 .generation-stage-pending {
-  border-style: dashed;
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-700);
+  border-color: var(--color-neutral-300);
+}
+.generation-stage-pending .generation-stage-badge {
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-800);
+}
+
+.generation-medallion {
+  display: inline-grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-100);
+  color: var(--color-accent-700);
+  animation: sitara-pulse 1600ms ease-in-out infinite;
+}
+
+/* Non-essential by construction: it conveys nothing the pills and the
+   heading do not already say, so stopping it (which tokens.css does under
+   prefers-reduced-motion) costs no information. */
+@keyframes sitara-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+}
+
+.generation-narration h1 {
+  margin: 0 0 var(--space-2);
+}
+
+.generation-narration p {
+  margin: 0 auto;
+  max-width: 44ch;
+  /* Two lines held open so the column does not jump as the sentence
+     changes between stages. */
+  min-height: 2.6em;
+  font-size: 15.5px;
+  color: var(--color-neutral-800);
 }
 
 .generation-failed,
 .generation-unavailable {
-  border: 2px solid var(--bad);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-6);
+  border-left: 4px solid var(--color-bad);
+  border-radius: var(--radius-md);
   background: var(--color-bad-100);
+  text-align: left;
 }
 .generation-failed h1,
 .generation-unavailable h1 {
-  color: var(--bad);
   margin-top: 0;
+  font-size: clamp(24px, 3.5vw, 32px);
 }
 
 .generation-privacy-note {
-  color: var(--muted);
-  font-size: 0.9rem;
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-neutral-700);
 }
 
 /* ------------------------------------------------------------------ */
-/* Private concept result                                             */
+/* Private concept result — `Sitara Concept.dc.html`                   */
+/*                                                                     */
+/* A sticky render column beside the specification on a wide screen,   */
+/* one column below 860px. The breakpoint is the handoff's own, and it  */
+/* is a min-width query on purpose: the single-column rules are the    */
+/* base, so a narrow screen never has to undo a desktop layout.        */
 /* ------------------------------------------------------------------ */
 .design-result {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: var(--space-6);
+}
+
+.result-header {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  animation: sitara-up var(--motion-page) both;
+}
+
+.result-header-text {
+  flex: 1;
+  min-width: 280px;
+}
+
+.result-header h1 {
+  margin: 0;
+  max-width: 22ch;
+}
+
+.result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+}
+
+.result-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.concept-cols {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-6);
+}
+
+.concept-render {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.concept-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+@media (min-width: 860px) {
+  .concept-cols {
+    grid-template-columns: minmax(320px, 42%) 1fr;
+    align-items: start;
+  }
+  /* Sticky only where there are two columns to be sticky beside. In the
+     single-column fallback the same element is a normal block, so nothing
+     needs unsetting and nothing can pin over the content below it. */
+  .concept-render {
+    position: sticky;
+    top: var(--space-4);
+  }
 }
 
 .result-disclaimer {
-  border-left: 4px solid var(--accent);
-  padding: 0.75rem 1.1rem;
-  background: var(--color-accent-100);
-  border-radius: 0 8px 8px 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-800);
+  font-size: 13.5px;
+  line-height: 1.55;
 }
 
 .result-image-figure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   margin: 0;
 }
 
 .result-image-figure a {
   display: block;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
 .result-image {
   display: block;
   width: 100%;
   height: auto;
-  max-width: 100%;
-  border-radius: 8px;
-  border: 1px solid var(--line);
+  /* The handoff frames the render at 3:4. `object-fit: contain` rather than
+     `cover`, because this is the user's concept: letterboxing an unexpected
+     aspect ratio is honest, cropping their garment out of frame is not. */
+  aspect-ratio: 3 / 4;
+  object-fit: contain;
+  background: var(--color-neutral-100);
+  border-radius: var(--radius-lg);
 }
 
 .result-image-actions {
   display: flex;
-  justify-content: flex-end;
-  padding-top: 0.5rem;
+  justify-content: flex-start;
+  padding: 0;
 }
+
 .result-image-actions a {
-  color: var(--accent);
-  font-weight: bold;
-  text-decoration: none;
-}
-.result-image-actions a:hover {
-  text-decoration: underline;
+  font-size: 13.5px;
+  font-weight: 600;
 }
 
 .result-image-state {
-  border: 1px dashed var(--line);
-  border-radius: 8px;
-  padding: 1.5rem;
-  text-align: center;
-  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  aspect-ratio: 3 / 4;
+  justify-content: center;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
   background: var(--color-neutral-100);
-}
-.result-image-state button {
-  margin-top: 0.5rem;
-  padding: 0.5rem 1.1rem;
-  font: inherit;
-  cursor: pointer;
+  color: var(--color-neutral-800);
+  text-align: center;
 }
 
-.design-brief section h3 {
-  font-size: 0.95rem;
-  margin: 0.75rem 0 0.4rem;
-  color: var(--muted);
+/* ------------------------------------------------------------------ */
+/* The specification: a stack of collapsible cards                     */
+/* ------------------------------------------------------------------ */
+.design-brief {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.brief-summary {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--color-neutral-900);
+}
+
+.brief-toolbar {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.brief-toolbar .kicker {
+  flex: 1;
+  margin: 0;
+}
+
+.brief-expand-all {
+  min-height: 0;
+  padding: 4px 0;
+  font-size: 13.5px;
+}
+
+.brief-section-heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.brief-section:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.brief-section-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.brief-section-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 21px;
+  line-height: 1.15;
+  color: var(--color-text);
+}
+
+.brief-section-summary {
+  overflow: hidden;
+  font-size: 13.5px;
+  color: var(--color-neutral-700);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brief-section .disclosure-body {
+  border-top: 1px solid var(--color-neutral-200);
+  padding-top: var(--space-3);
+  margin: 0 var(--space-4);
+  padding-inline: 0;
+}
+
+.brief-section dl {
+  margin: 0;
+}
+
+.brief-section h3 {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-accent-2-800);
 }
 
 .fabrics-list,
-.styling-list {
-  list-style: disc;
-  padding-left: 1.25rem;
+.styling-list,
+.inspiration-acknowledgements {
   margin: 0;
+  padding-left: 1.25rem;
+  list-style: disc;
 }
 
 .result-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem;
-}
-.result-actions button {
-  padding: 0.65rem 1.3rem;
-  font: inherit;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  background: var(--color-neutral-100);
-  color: var(--accent);
-  cursor: pointer;
-}
-.result-actions button:hover {
-  background: var(--color-accent-100);
+  gap: var(--space-3);
 }
 
 .copy-status {
-  min-height: 1.2rem;
+  min-height: 1.4em;
   margin: 0;
-  color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 14px;
+  color: var(--color-neutral-700);
 }
 
 /* ------------------------------------------------------------------ */
-/* Refinement panel (Phase 14)                                        */
+/* Refinement — `Sitara Amendments.dc.html`, one round only            */
 /* ------------------------------------------------------------------ */
 .refinement-panel {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 1.25rem;
-  margin-top: 1rem;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--color-neutral-100);
+  scroll-margin-top: var(--space-4);
+}
+
+.refinement-panel h2 {
+  margin: 0;
+  font-size: clamp(26px, 3.4vw, 34px);
+}
+
+.refinement-lede {
+  margin: 0;
+  max-width: 58ch;
+  font-size: 15.5px;
+  line-height: 1.6;
+  color: var(--color-neutral-800);
 }
 
 .refinement-chip-group {
-  border: none;
   padding: 0;
   margin: 0;
-}
-.refinement-chip-group legend {
-  font-weight: bold;
-  padding: 0 0 0.5rem;
+  border: none;
 }
 
+.refinement-chip-group legend {
+  padding: 0 0 var(--space-2);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-accent-700);
+}
+
+/* The Amendments grid: two across on a phone, four on a wide screen. */
 .refinement-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+@media (min-width: 700px) {
+  .refinement-chips {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .refinement-chip {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 0.4rem;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0.4rem 0.9rem;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: var(--space-3);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
-  font-size: 0.95rem;
 }
-.refinement-chip-selected {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: bold;
+
+.refinement-chip:hover {
   background: var(--color-accent-100);
 }
 
+/* The radio itself stays a real, visible, focusable radio — the card is
+   the label around it, not a replacement for it. Selection is therefore
+   never signalled by the accent fill alone. */
+.refinement-chip input {
+  flex: none;
+  accent-color: var(--color-accent-700);
+  width: 18px;
+  height: 18px;
+}
+
+.refinement-chip:focus-within {
+  outline: 2px solid var(--color-accent-700);
+  outline-offset: 2px;
+}
+
+.refinement-chip-selected {
+  border-color: var(--color-accent-700);
+  background: var(--color-accent-100);
+  color: var(--color-accent-900);
+}
+
 .refinement-note-count {
-  color: var(--muted);
-  font-size: 0.85rem;
   margin: 0;
+  font-size: 13px;
+  color: var(--color-neutral-700);
 }
 
 .refinement-drift-warning {
-  border-left: 4px solid var(--bad);
-  padding: 0.75rem 1.1rem;
-  background: var(--color-bad-100);
-  border-radius: 0 8px 8px 0;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: var(--space-2);
+  max-width: 62ch;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-100);
+  color: var(--color-accent-900);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.refinement-drift-warning p {
+  margin: 0;
 }
 
 .refinement-ack {
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
-}
-
-.refinement-actions button {
-  padding: 0.65rem 1.3rem;
-  font: inherit;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  background: var(--accent);
-  color: var(--color-on-accent);
+  gap: var(--space-2);
+  font-weight: 600;
   cursor: pointer;
 }
-.refinement-actions button[disabled] {
-  opacity: 0.5;
-  cursor: not-allowed;
+
+.refinement-ack input {
+  flex: none;
+  margin-top: 2px;
+  accent-color: var(--color-accent-700);
+  width: 18px;
+  height: 18px;
 }
 
-.refinement-error {
-  border: 2px solid var(--bad);
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  background: var(--color-bad-100);
+.refinement-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
 }
 
-.refinement-running-notice {
-  border-left: 4px solid var(--accent);
-  padding: 0.75rem 1.1rem;
-  background: var(--color-accent-100);
-  border-radius: 0 8px 8px 0;
-}
-
-.refinement-failed-notice {
-  border: 2px solid var(--bad);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  background: var(--color-bad-100);
-}
-.refinement-failed-notice h2 {
-  color: var(--bad);
-  margin-top: 0;
-}
-
-.refinement-progress-notes {
-  color: var(--muted);
-  font-size: 0.9rem;
-  padding-left: 1.25rem;
+.refinement-actions .field-help {
   margin: 0;
 }
 
+.refinement-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-left: 4px solid var(--color-bad);
+  border-radius: var(--radius-md);
+  background: var(--color-bad-100);
+}
+
+.refinement-error p {
+  margin: 0;
+}
+
+.refinement-locked p {
+  margin: 0;
+  max-width: 62ch;
+  line-height: 1.6;
+}
+
+.refinement-running-notice,
+.refinement-failed-notice {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+}
+
+.refinement-running-notice {
+  background: var(--color-accent-100);
+  color: var(--color-accent-900);
+}
+
+.refinement-running-notice p {
+  margin: 0;
+}
+
+.refinement-failed-notice {
+  border-left: 4px solid var(--color-bad);
+  background: var(--color-bad-100);
+}
+
+.refinement-failed-notice h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 20px;
+}
+
+.refinement-failed-notice p {
+  margin: 0;
+}
+
+.refinement-progress-notes {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 14px;
+  color: var(--color-neutral-700);
+}
+
 /* ------------------------------------------------------------------ */
-/* Version comparison (Phase 14)                                      */
+/* Version comparison — `Sitara History.dc.html`'s hierarchy           */
+/*                                                                     */
+/* Current design first and larger; the version it came from under     */
+/* "Previous design". Sitara has at most two versions, so the          */
+/* prototype's open-ended grid becomes one prominent card and one       */
+/* secondary one.                                                      */
 /* ------------------------------------------------------------------ */
 .version-comparison {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: var(--space-4);
+  animation: sitara-up var(--motion-page) both;
+}
+
+.version-comparison h1 {
+  margin: 0;
+}
+
+.version-comparison .lede {
+  margin: 0;
 }
 
 .comparison-disclosure {
-  border-left: 4px solid var(--accent);
-  padding: 0.75rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 66ch;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
   background: var(--color-accent-100);
-  border-radius: 0 8px 8px 0;
+  color: var(--color-accent-900);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.comparison-disclosure p {
+  margin: 0;
 }
 
 .comparison-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-6);
+  align-items: start;
+  margin-top: var(--space-2);
+}
+
+@media (min-width: 860px) {
+  .comparison-grid {
+    grid-template-columns: minmax(300px, 46%) 1fr;
+  }
+}
+
+.version-previous {
   display: flex;
-  gap: 1.5rem;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.version-previous .kicker {
+  margin: 0;
 }
 
 .version-card {
-  flex: 1 1 0;
-  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 1rem;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-neutral-100);
+}
+
+.version-card h2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.version-card-current {
+  background: var(--color-bg);
+  box-shadow: var(--shadow-md);
+}
+
+.version-mode-label {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.version-mode-label[data-mode="demo"] {
+  background: var(--color-accent-2-100);
+  color: var(--color-accent-2-800);
+}
+
+.version-mode-label[data-mode="live"] {
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-800);
 }
 
 .version-card-title {
-  font-weight: bold;
   margin: 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .version-card-summary {
   margin: 0;
-  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--color-neutral-800);
 }
 
 .version-card-details summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-accent-700);
   cursor: pointer;
-  color: var(--accent);
-  font-weight: bold;
 }
 
-@media (max-width: 48rem) {
-  .comparison-grid {
-    flex-direction: column;
-  }
+.version-limit-note {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--color-accent-2-800);
+  font-weight: 600;
 }
 
 @media (max-width: 34rem) {
-  .result-actions {
+  .result-actions,
+  .result-header-actions {
     flex-direction: column;
     align-items: stretch;
   }
-  .generation-stages {
-    flex-direction: column;
-  }
   .refinement-chips {
-    flex-direction: column;
-    align-items: flex-start;
+    grid-template-columns: 1fr;
   }
 }

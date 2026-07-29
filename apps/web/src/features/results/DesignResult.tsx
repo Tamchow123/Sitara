@@ -25,6 +25,8 @@ import {
   isRefinementEligible,
   isRefinementFailed,
   isRefinementRunning,
+  isRefinementUsed,
+  refinedVersionId,
 } from "@/features/refinement/refinement-eligibility";
 import { friendlyGenerationError } from "@/features/generation/generation-errors";
 import { fetchDesign, fetchDesignImageUrls, fetchDesignResult, fetchPublicConfig } from "@/lib/api";
@@ -160,46 +162,124 @@ export function DesignResult({ designId, versionId }: Props) {
   const eligible = designQuery.isSuccess && isRefinementEligible(result, design, generationEnabled);
   const running = designQuery.isSuccess && isRefinementRunning(design);
   const failed = designQuery.isSuccess && isRefinementFailed(design);
+  // Locked, not merely absent: once the Design's own state is known and the
+  // form is not on offer, the page says which of the two reasons applies.
+  // Until designQuery resolves, nothing is claimed either way.
+  const locked = designQuery.isSuccess && !eligible && !running && !failed;
+  const used = isRefinementUsed(design);
+  const refinedId = refinedVersionId(design);
 
   return (
     <div className="design-result">
-      <h1>{result.title}</h1>
-      <ResultImage
-        images={imageQuery.data}
-        isPending={imageQuery.isPending}
-        isFetching={imageQuery.isFetching}
-        error={imageQuery.error}
-        altText={result.image_alt_text}
-        onRetry={() => void imageQuery.refetch()}
-      />
-      <DesignBrief result={result} />
-
-      {running && design?.latest_job && (
-        <div role="status" aria-live="polite" className="refinement-running-notice">
-          <p>
-            A refinement is currently running.{" "}
-            <a href={`/design/${designId}/generation/${design.latest_job.id}`}>
-              View refinement progress
-            </a>
+      {/* The concept screen's masthead: kicker, title, then the labels that say
+          WHICH concept this is (version number, and whether it came from the
+          demo pack or a provider). The handoff's third header action — a
+          "Design history" link — is deliberately absent: this application has
+          no history route, and the refined version's own comparison view is
+          where two versions are read side by side. */}
+      <header className="result-header">
+        <div className="result-header-text">
+          <p className="kicker">Your concept</p>
+          <h1>{result.title}</h1>
+          <p className="result-meta">
+            <span className="tag tag-neutral">Version {result.version_number}</span>
+            <span className={result.is_demo ? "tag tag-accent-2" : "tag tag-accent"}>
+              {result.is_demo ? "Demo concept" : "AI-generated concept"}
+            </span>
           </p>
         </div>
-      )}
-
-      {failed && design?.latest_job && (
-        <div role="alert" className="refinement-failed-notice">
-          <h2>{friendlyGenerationError(design.latest_job.error_code).heading}</h2>
-          <p>{friendlyGenerationError(design.latest_job.error_code).message}</p>
+        <div className="result-header-actions">
+          <a className="btn btn-secondary" href={`/design/${designId}`}>
+            Edit answers
+          </a>
+          {eligible && (
+            <a className="btn btn-primary" href="#refine-concept">
+              Refine this concept
+            </a>
+          )}
         </div>
-      )}
+      </header>
 
-      {eligible && (
-        <RefinementPanel
-          designId={designId}
-          sourceVersionId={versionId}
-          isDemo={result.is_demo}
-          onRequiresRecheck={handleRequiresRecheck}
-        />
-      )}
+      <div className="concept-cols">
+        {/* Sticky on a wide screen so the render stays beside whichever card is
+            being read; `position: sticky` simply does not apply in the single
+            column the same CSS falls back to below 860px. */}
+        <div className="concept-render">
+          <ResultImage
+            images={imageQuery.data}
+            isPending={imageQuery.isPending}
+            isFetching={imageQuery.isFetching}
+            error={imageQuery.error}
+            altText={result.image_alt_text}
+            onRetry={() => void imageQuery.refetch()}
+          />
+        </div>
+
+        <div className="concept-detail">
+          <DesignBrief result={result} />
+
+          {running && design?.latest_job && (
+            <div role="status" aria-live="polite" className="refinement-running-notice">
+              <p>
+                A refinement is currently running.{" "}
+                <a href={`/design/${designId}/generation/${design.latest_job.id}`}>
+                  View refinement progress
+                </a>
+              </p>
+            </div>
+          )}
+
+          {failed && design?.latest_job && (
+            <div role="alert" className="refinement-failed-notice">
+              <h2>{friendlyGenerationError(design.latest_job.error_code).heading}</h2>
+              <p>{friendlyGenerationError(design.latest_job.error_code).message}</p>
+            </div>
+          )}
+
+          {eligible && (
+            <RefinementPanel
+              designId={designId}
+              sourceVersionId={versionId}
+              isDemo={result.is_demo}
+              onRequiresRecheck={handleRequiresRecheck}
+            />
+          )}
+
+          {locked && (
+            <section
+              className="refinement-panel refinement-locked"
+              aria-labelledby="refinement-locked-heading"
+            >
+              <h2 id="refinement-locked-heading">Refinement</h2>
+              {used ? (
+                <>
+                  <p>
+                    You have used your one refinement for this design. Sitara allows a single
+                    constrained change, so there is nothing further to request here.
+                  </p>
+                  {refinedId && (
+                    <p>
+                      <a href={`/design/${designId}/result/${refinedId}`}>
+                        View your refined concept
+                      </a>
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p>
+                  Concept generation is not currently available, so this concept cannot be refined.
+                </p>
+              )}
+              <p>To take the design somewhere else, edit your answers and start a new concept.</p>
+              <div className="refinement-actions">
+                <a className="btn btn-secondary" href={`/design/${designId}`}>
+                  Edit answers
+                </a>
+              </div>
+            </section>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
