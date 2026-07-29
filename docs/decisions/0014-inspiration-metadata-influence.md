@@ -1,6 +1,7 @@
 # 0014 — Rights-safe inspiration metadata influence
 
-- **Status:** accepted
+- **Status:** accepted; the reference-image prohibition is **overridden by ADR
+  0019** (Phase 16B, 2026-07-29) — everything else below still stands
 - **Date:** 2026-07-20
 - **Deciders:** Sitara maintainers
 - **Phase:** Phase 13 (see ../phases/PHASES.md)
@@ -28,6 +29,20 @@ or cost-control invariant.
 ## Decision
 
 ### Metadata-only influence, not reference-image conditioning
+
+> **Superseded in part by ADR 0019 (2026-07-29).** The bytes of the references a
+> user actually selected — their own uploads and the curated presets they picked
+> — **will be** sent to the IMAGE provider, as short-TTL signed URLs minted
+> inside the generation job, once ADR 0019's implementing slice lands. *Not yet
+> implemented at the time of writing: `ImageGenerationRequest` still raises
+> `ReferenceImagesNotEnabled` unconditionally, so no reference byte can be sent
+> under any configuration; CLAUDE.md §13 is the authoritative current-status
+> source.* That is a deliberate, recorded override of the paragraph
+> below, taken with the BFL perpetual-training-licence, unresolved
+> Replicate-routing and unpublished-retention-window exposure in view. Nothing
+> below changes for **Anthropic**, which still receives metadata only, and the
+> snapshot contract, double re-validation, leakage checks and audit immutability
+> in the rest of this ADR are unchanged and still govern.
 
 Selected inspiration image **bytes are never sent to Anthropic or Replicate**.
 The only provider-facing signal is a curated cue built from catalogue fields
@@ -213,6 +228,11 @@ feature.
   fail-closed with nothing to enable), and sending image bytes to a provider
   raises rights, pricing, and provider-terms questions a scoped, separately
   authorised evaluation would need to answer first.
+  **ADR 0019 (Phase 16B) is that authorisation and reverses this rejection.** It
+  answers the questions by ACCEPTING the exposure with it recorded, not by
+  resolving it: the BFL train-and-improve licence over Inputs is perpetual and
+  irrevocable, its coverage of Replicate-routed traffic is unresolved, and no
+  input retention window is published.
 - **A generic tags/ontology or arbitrary-metadata engine** — rejected: the
   phase reuses exactly the three already-frozen, already-curated catalogue
   fields; no new catalogue metadata field, free-form tag system, or automated

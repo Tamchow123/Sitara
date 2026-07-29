@@ -6,7 +6,7 @@ Task-specific instructions may add constraints but must not weaken the security,
 
 ## 1. Project purpose
 
-Sitara is an AI-assisted South Asian bridalwear **concept-design** application. A user will: complete a guided bridalwear questionnaire; optionally select up to three rights-approved inspiration images; receive a structured bridal design description; receive a FLUX-generated visual concept; request one constrained refinement.
+Sitara is an AI-assisted South Asian bridalwear **concept-design** application. A user will: complete a guided bridalwear questionnaire; optionally supply up to three inspiration references (rights-approved catalogue assets, their own uploaded photographs, or a mix — one shared budget of three); receive a structured bridal design description; receive a FLUX-generated visual concept; request one constrained refinement.
 
 Sitara is for **concept visualisation only** — no sewing patterns, manufacturing specs, or construction guarantees.
 
@@ -14,28 +14,46 @@ Sitara is for **concept visualisation only** — no sewing patterns, manufacturi
 
 - Cultural accuracy matters. Do not flatten distinct garments, regions, communities, or ceremonies into generic "South Asian" styling.
 - Privacy is the default. Designs are never public merely because their UUID is known.
-- Image rights must be documented and verified before catalogue approval or AI use.
+- Image rights must be documented and verified before catalogue approval or AI use. Two different bars, deliberately: a CATALOGUE asset needs staff-verified, unexpired, evidenced rights (ADR 0006) before it is approved or reaches a provider; a user's OWN uploaded reference rests on a bounded per-upload self-affirmation, which is weaker and is never to be presented — in code, copy or documentation — as verified rights (ADR 0018, ADR 0019, §13).
 - Accessibility is a product requirement, not later polish.
 - Demo mode makes zero paid AI calls. Paid-provider access fails closed and stays explicitly gated.
 - Keep Django/Next.js flows understandable; prefer small, reviewable vertical slices over speculative infrastructure.
 
 ## 3. Current repository state
 
-Phases 1–16 are delivered and merged to `main` (Phase 16: live-generation security and cost controls, ADR 0017), followed by the inserted generated-image composition/coverage-first prompt restructure (also merged; `PROMPT_BUILDER_VERSION` 5.0.0, ADR 0010 amended). The roadmap next runs the inserted **Phase 16B** (questionnaire feedback, cultural expansion, and visual choice UX — satin, Anand Karaj, a dedicated neckline question, expanded grouped colours, no-preference controls, DesignSpec schema v2), then **Phase 17** (UI polish and accessibility), **Phase 18** (E2E tests and deployment), **Phase 19** (private stylist annotation workspace), and **Phase 20** (optional, flag-gated height/body representation). Delivered: Phase 2 image-model evaluation; app foundation; session auth/CSRF; anonymous + authenticated design ownership; versioned questionnaire; rights-controlled catalogue; OpenAPI-generated client; structured DesignSpec generation; deterministic image-prompt builder; async Celery/Replicate generation; permanent design-image storage; generation-progress and private results; curated inspiration-metadata influence on generation; single-round constrained refinement with version comparison; deterministic zero-cost demo generation reusing the same asynchronous pipeline, storage, job/result APIs and frontend UI as live generation; live-generation gating with atomic reserve-before-spend micro-USD budget ceiling, per-session/hashed-IP throttles and a global UTC daily count limit, retention purge and stuck-job reconciliation on Celery Beat, production security hardening (CSP, headers, admin lockdown), correlation-aware structured logging, and privacy-safe DSN-gated Sentry — live generation still disabled, provider pricing operator-configured and unverified.
+Phases 1–16 are delivered and merged to `main` (Phase 16: live-generation security and cost controls, ADR 0017), followed by the inserted generated-image composition/coverage-first prompt restructure (also merged; `PROMPT_BUILDER_VERSION` 5.0.0, ADR 0010 amended). **Phase 16B is IN PROGRESS on a branch** (not merged): questionnaire feedback, cultural expansion and visual choice UX — satin, Anand Karaj, a dedicated neckline question, expanded grouped colours, no-preference controls, DesignSpec schema v2, then questionnaire v4 / DesignSpec v3 with per-role colour and per-area coverage, a one-question-per-screen wizard, private user inspiration uploads, and the ADR 0019 reference-image/flux-2-max override. Then **Phase 17** (UI polish and accessibility), **Phase 18** (E2E tests and deployment), **Phase 19** (private stylist annotation workspace), and **Phase 20** (optional, flag-gated height/body representation). Delivered: Phase 2 image-model evaluation; app foundation; session auth/CSRF; anonymous + authenticated design ownership; versioned questionnaire; rights-controlled catalogue; OpenAPI-generated client; structured DesignSpec generation; deterministic image-prompt builder; async Celery/Replicate generation; permanent design-image storage; generation-progress and private results; curated inspiration-metadata influence on generation; single-round constrained refinement with version comparison; deterministic zero-cost demo generation reusing the same asynchronous pipeline, storage, job/result APIs and frontend UI as live generation; live-generation gating with atomic reserve-before-spend micro-USD budget ceiling, per-session/hashed-IP throttles and a global UTC daily count limit, retention purge and stuck-job reconciliation on Celery Beat, production security hardening (CSP, headers, admin lockdown), correlation-aware structured logging, and privacy-safe DSN-gated Sentry — live generation still disabled, provider pricing operator-configured and unverified.
 
 `docs/phases/PHASES.md` is authoritative for future work — always inspect the current branch and that file rather than relying on this paragraph.
 
-Selected image model (default and fast) unless a later documented evaluation changes it:
+Selected image models. ADR 0001 chose `flux-1.1-pro` for both tiers and that is
+still what `settings.py` and `.env.example` ship. ADR 0019 (Phase 16B, in
+progress, **not yet merged and not yet implemented**) DECIDES that the default
+tier becomes `flux-2-max` once its implementing slice lands — chosen for a
+capability `flux-1.1-pro` lacks, reference-image input, with no new evaluation
+run:
 
 ```text
-black-forest-labs/flux-1.1-pro
+DEFAULT_IMAGE_MODEL  black-forest-labs/flux-2-max     (ADR 0019)
+FAST_IMAGE_MODEL     black-forest-labs/flux-1.1-pro   (ADR 0001, unchanged)
 ```
+
+**On this branch this is the recorded DECISION, not yet the configured default:**
+`settings.py` still ships `flux-1.1-pro` for both tiers until the Phase 16B
+reference-image commit lands. Check `DEFAULT_IMAGE_MODEL` in
+`apps/api/config/settings.py` rather than trusting this block if the two ever
+disagree.
+
+flux-2-max is materially more expensive per image (roughly 1.75× on the
+maintainer's recorded figures — an ESTIMATE, not a verified price; see ADR 0019),
+so changing the model **must** bump `LIVE_GENERATION_PRICING_PROFILE`; carrying
+the old profile over would under-reserve every image. Any further model change still needs a scoped,
+documented evaluation.
 
 ## 4. Read these files first
 
 For any substantial task, read the relevant code plus `README.md`, `docs/PROPOSAL.md`, `docs/phases/PHASES.md`, `docs/decisions/`, `compose.yaml`, `.github/workflows/ci.yml`. For a phase task with its own spec file, read that file in full before editing.
 
-ADRs currently on record: 0001 image model, 0002 application foundation, 0003 session authentication, 0004 private design ownership, 0005 versioned questionnaire schema, 0006 rights-controlled inspiration catalogue, 0007 OpenAPI generated client, 0008 questionnaire draft and wizard, 0009 structured design-spec generation, 0010 deterministic image-prompt builder, 0011 asynchronous generation pipeline, 0012 private design-image storage, 0013 generation progress and results, 0014 rights-safe inspiration metadata influence, 0015 single-round constrained refinement, 0016 deterministic demo mode, 0017 live-generation security and cost controls.
+ADRs currently on record: 0001 image model, 0002 application foundation, 0003 session authentication, 0004 private design ownership, 0005 versioned questionnaire schema, 0006 rights-controlled inspiration catalogue, 0007 OpenAPI generated client, 0008 questionnaire draft and wizard, 0009 structured design-spec generation, 0010 deterministic image-prompt builder, 0011 asynchronous generation pipeline, 0012 private design-image storage, 0013 generation progress and results, 0014 rights-safe inspiration metadata influence, 0015 single-round constrained refinement, 0016 deterministic demo mode, 0017 live-generation security and cost controls, 0018 questionnaire feedback and visual choice UX (Phase 16B), 0019 reference-image conditioning and the flux-2-max switch.
 
 ## 5. Repository layout
 
@@ -114,7 +132,7 @@ Cultural distinctions to keep intact: gharara vs. sharara are different construc
 
 ## 13. Inspiration catalogue and image rights
 
-Staff-managed only. Never add without a separately approved phase: user uploads, remote URL imports, scraping, automatic rights verification, public object ACLs, or unverified images sent to AI providers.
+Staff-managed only. Never add without a separately approved phase: user uploads **into this shared catalogue** (a user's private per-design reference upload is a separate, ADR 0018/0019-authorised path and never enters the catalogue), remote URL imports, scraping, automatic rights verification, public object ACLs, or unverified images sent to AI providers.
 
 Public eligibility requires, on every request: approved status, verified and unexpired rights, and public-display, AI-input, derivative-generation, and commercial-use all allowed. The central `publicly_eligible()` queryset is the single definition — use it for catalogue JSON and every image variant.
 
@@ -124,7 +142,9 @@ Never expose storage keys, object-store URLs, image hashes, rights evidence, int
 
 The manual checkpoint using three genuine rights-cleared images is still pending. Never substitute downloaded/unlicensed images or fabricate rights evidence; locally generated synthetic images are fine for clearly labelled engineering tests.
 
-Selected inspiration image bytes, URLs and storage keys must never be sent to any AI provider (Phase 13, ADR 0014). Provider-facing inspiration influence is restricted to the frozen `garment_type`/`alt_text`/`cultural_context` fields, built only through `generation/inspiration_context.py`'s versioned, hashed `InspirationContextSnapshot` — re-validated against `publicly_eligible()` and the generated-content safety scan every time a design is generated, never trusted from a prior selection. Asset UUID, title and public attribution may be persisted for private audit/acknowledgement display but must never reach a provider. A `DesignVersion`'s persisted `inspiration_context`/`_schema_version`/`_sha256` is immutable historical audit data (read-only in admin, all-or-none database constraints) — a later asset retirement, expiry or rights revocation blocks future selection but must never rewrite an existing design's stored snapshot or acknowledgement. Reference-image conditioning stays fail-closed (`ReferenceImagesNotEnabled`); enabling it requires a separately approved phase with its own rights, pricing and provider-terms review — do not add a flag or partial implementation ahead of that phase.
+**Reference images — the one deliberate override (Phase 16B, ADR 0019).** ADR 0019 DECIDES that the bytes of the references a user actually selected for a design — their own uploads *and* the curated catalogue presets they picked — are sent to the image provider, as short-TTL signed URLs minted inside the Celery job and never persisted, returned or logged. **Implementation status at this commit: not built.** `ImageGenerationRequest` still raises `ReferenceImagesNotEnabled` for any non-empty `reference_image_urls`, unconditionally and regardless of any flag — that exception, not a runtime gate, is what protects the boundary today. When the implementing slice lands it removes this sentence. The decision overrides ADR 0014's absolute prohibition; it is the project owner's decision, taken with the provider terms in view and reaffirmed after they were put explicitly: BFL's terms take a **perpetual, irrevocable licence over Inputs** to train and improve its technologies, coverage of Replicate-routed traffic is **unresolved**, and Replicate publishes **no input retention window**. The upload UI must say so before a user uploads. Nothing leaves the machine while `LIVE_GENERATION_ENABLED=false` or in demo mode. Everything else in this section still binds: a storage key, bucket name, endpoint, asset UUID, title, attribution, rights record or verifier identity must never reach a provider; nor may any asset the user did not select or that fails `publicly_eligible()` at generation time.
+
+Apart from that override, selected inspiration image bytes, URLs and storage keys must never be sent to any AI provider (Phase 13, ADR 0014). Provider-facing inspiration influence is restricted to the frozen `garment_type`/`alt_text`/`cultural_context` fields, built only through `generation/inspiration_context.py`'s versioned, hashed `InspirationContextSnapshot` — re-validated against `publicly_eligible()` and the generated-content safety scan every time a design is generated, never trusted from a prior selection. Asset UUID, title and public attribution may be persisted for private audit/acknowledgement display but must never reach a provider. A `DesignVersion`'s persisted `inspiration_context`/`_schema_version`/`_sha256` is immutable historical audit data (read-only in admin, all-or-none database constraints) — a later asset retirement, expiry or rights revocation blocks future selection but must never rewrite an existing design's stored snapshot or acknowledgement. Reference-image conditioning is fail-closed (`ReferenceImagesNotEnabled`) and stays so until the ADR 0019 override above is implemented; the "separately approved phase with its own rights, pricing and provider-terms review" it required is that ADR. Its rights and provider-terms answer is *the exposure is accepted and recorded*, not *the exposure was removed* — do not paraphrase it as the latter anywhere.
 
 ## 14. Storage rules
 
