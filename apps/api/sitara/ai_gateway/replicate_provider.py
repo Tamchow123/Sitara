@@ -80,9 +80,6 @@ class ReplicateImageProvider:
 
         if not image_generation_is_available():
             raise ImageProviderError("gate_closed")
-        # Defence in depth: reference images are rejected at request construction
-        # (ImageGenerationRequest.__post_init__), so a request that reached here
-        # already carries none.
         client = self._client()
         model_input = {
             "prompt": request.prompt,
@@ -91,8 +88,17 @@ class ReplicateImageProvider:
             "output_format": request.output_format,
             "output_quality": request.output_quality,
             "safety_tolerance": request.safety_tolerance,
-            "prompt_upsampling": request.prompt_upsampling,
         }
+        # Omitted entirely, not sent as False, for a model that does not accept
+        # it: an unknown input key is a submission error, and a submission error
+        # here is charged-or-ambiguous territory.
+        if request.prompt_upsampling is not None:
+            model_input["prompt_upsampling"] = request.prompt_upsampling
+        # The user's selected references (ADR 0019). Bounds-checked at request
+        # construction; absent unless the user chose some. The URLs themselves
+        # are never logged — they are short-lived bearer credentials.
+        if request.reference_image_urls:
+            model_input["input_images"] = list(request.reference_image_urls)
         try:
             prediction = client.predictions.create(model=request.model, input=model_input)
         except SoftTimeLimitExceeded:

@@ -34,7 +34,12 @@ empty list — inspiration context is never a readiness requirement.
 
 from pydantic import ValidationError
 
-from sitara.generation.design_spec import DESIGN_SPEC_SCHEMA_VERSION, DesignSpec
+from sitara.generation.design_spec import (
+    SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS,
+    DesignSpec,
+    UnsupportedDesignSpecVersion,
+    validate_design_spec,
+)
 from sitara.generation.input_safety import GeneratedContentRejected
 from sitara.generation.inspiration_context import (
     INSPIRATION_CONTEXT_SCHEMA_VERSION,
@@ -86,12 +91,12 @@ def load_validated_design_spec(version: DesignVersion) -> DesignSpec:
     if not _has_result_prerequisites(version):
         raise DesignResultNotReady("this design version has no complete result yet")
 
-    if version.design_spec_schema_version != DESIGN_SPEC_SCHEMA_VERSION:
+    if version.design_spec_schema_version not in SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS:
         raise DesignResultUnavailable("persisted design spec schema version is not supported")
 
     try:
-        spec = DesignSpec.model_validate(version.design_spec)
-    except ValidationError as exc:
+        spec = validate_design_spec(version.design_spec)
+    except (ValidationError, UnsupportedDesignSpecVersion) as exc:
         raise DesignResultUnavailable("stored design spec failed validation") from exc
 
     try:

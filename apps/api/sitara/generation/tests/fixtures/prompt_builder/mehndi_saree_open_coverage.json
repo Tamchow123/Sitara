@@ -1,0 +1,69 @@
+{
+  "schema_version": 3,
+  "source_selections": {
+    "garment_type": "saree",
+    "ceremony": "mehndi",
+    "regional_style": null,
+    "silhouette": "pre_stitched_saree",
+    "fabric_colour": "mehndi_green",
+    "embroidery_colour": "marigold",
+    "dupatta_colour": null,
+    "custom_colours": [],
+    "fabrics": ["georgette"],
+    "embellishment_styles": ["mirror_work", "gota_patti"],
+    "embellishment_density": "minimal",
+    "neckline_style": null,
+    "sleeves": "sleeveless",
+    "back_coverage": "deep_cut_back",
+    "midriff": "bare_midriff",
+    "head_covering": "uncovered",
+    "dupatta_style": null,
+    "saree_drape": "lehenga_drape"
+  },
+  "title": "Mehndi green pre-stitched saree for a mehndi",
+  "concept_summary": "A light, celebratory mehndi concept in a pre-stitched mehndi green saree draped lehenga-style over a sleeveless blouse. Marigold mirror work and gota patti sit sparingly along the pallu and border, keeping the whole airy enough to move and dance in through the evening.",
+  "garment_breakdown": {
+    "overall_form": "A pre-stitched saree draped lehenga-style over a sleeveless, deep-backed blouse.",
+    "garment_components": ["Sleeveless blouse", "Pre-stitched saree", "Lehenga-style pallu"],
+    "silhouette": "A skirted lower half carrying the drape, with the pallu falling free from the shoulder.",
+    "drape_or_layering": "The pallu falls loose from the shoulder rather than being pinned tight.",
+    "key_proportions": "A short blouse read against a full skirted drape keeps the line light."
+  },
+  "colour_story": {
+    "palette_summary": "A mehndi green ground brightened by marigold.",
+    "placement": "Mehndi green carries the drape and blouse, with marigold picked out through the mirror work.",
+    "rationale": "Green and marigold read festive for a mehndi without weighing the outfit down."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Georgette",
+      "placement": "Blouse and full saree length",
+      "finish_and_movement": "A fine, fluid crepe that keeps the pleats soft and moving."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["Mirror work", "Gota patti appliqué"],
+    "density": "Kept minimal and airy, scattered rather than massed.",
+    "placement": ["Pallu edge", "Blouse hem"],
+    "motifs": ["Small round mirrors", "Simple gota leaf trails"],
+    "restraint_notes": "Wide plain ground is left between motifs so the fabric keeps its movement."
+  },
+  "coverage_and_drape": {
+    "sleeves": "The blouse is sleeveless as chosen.",
+    "neckline": "A softly curved blouse neckline suited to the drape.",
+    "back_and_midriff": "A deeply cut open back and a bare midriff at the waist.",
+    "head_covering": "The head is left uncovered.",
+    "dupatta_or_saree_drape": "A lehenga-style drape worn over a skirted lower half."
+  },
+  "cultural_context": {
+    "regional_direction": null,
+    "interpretation_notes": ["No specific regional direction was requested; the styling stays broadly bridal."],
+    "safeguards": ["The saree stays a draped garment over a fitted blouse and is never turned into a stitched gown."]
+  },
+  "styling_notes": ["Light, movable jewellery suits the mehndi celebration.", "Keep the hair styled away from the pallu."],
+  "construction_caveats": [
+    "This is a concept visualisation only and is not a sewing pattern.",
+    "It does not guarantee that the garment can be constructed exactly as shown."
+  ],
+  "image_alt_text": "A model in a mehndi green pre-stitched saree draped lehenga-style, with marigold mirror work, a sleeveless blouse and an uncovered head."
+}

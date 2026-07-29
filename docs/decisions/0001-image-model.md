@@ -5,6 +5,14 @@
 - **Deciders:** project owner (blind human scoring is authoritative)
 - **Phase:** Phase 2 (see ../PHASES.md)
 
+> **Superseded for the default tier by ADR 0019 (Phase 16B, 2026-07-29):** the
+> default image model is now `black-forest-labs/flux-2-max`. It is chosen for a
+> capability `flux-1.1-pro` lacks — reference-image input — and NOT on any
+> quality comparison. No new blind evaluation was run and the Phase 2 evidence
+> below is untouched and still authoritative for what it measured. The per-image
+> price roughly 1.75×es (~$0.04 → ~$0.07), so a pricing-profile version bump is
+> mandatory. The fast tier is unchanged.
+>
 > **Decision: `black-forest-labs/flux-1.1-pro`** is Sitara's default MVP
 > production image model AND its paid fast/development model. Demo mode
 > makes **zero paid model calls** and serves pre-generated private fixtures

@@ -1,6 +1,13 @@
 # 0015 — Single-round constrained refinement
 
 - **Status:** accepted
+- **Amended by ADR 0018 (Phase 16B, 2026-07-23):** refinement is version-aware —
+  a v1 or v2 source is validated by dispatch and the refined output must keep the
+  source's `schema_version`. The dedicated canonical `neckline_style` lives in
+  `source_selections`, already an immutable refinement root, so it can never be
+  changed by any refinement category, and the prompt builder renders the
+  canonical neckline authoritatively so coverage-refinement prose cannot
+  contradict it.
 - **Date:** 2026-07-20
 - **Deciders:** Sitara maintainers
 - **Phase:** Phase 14 (see ../phases/PHASES.md)

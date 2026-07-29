@@ -56,6 +56,7 @@ from sitara.ai_gateway.image_generation import (
     PREDICTION_SUCCEEDED,
     ImageGenerationRequest,
     ImageProviderError,
+    ReferenceImagesRejected,
 )
 from sitara.ai_gateway.policy import generation_is_available
 from sitara.ai_gateway.structured_design import StructuredDesignProviderError
@@ -82,10 +83,11 @@ from .demo.provider import (
     DemoStructuredDesignProvider,
 )
 from .demo.selector import DemoAssetSelection, DemoAssetUnavailable, select_demo_asset
-from .design_spec import DesignSpec
+from .design_spec import UnsupportedDesignSpecVersion, validate_design_spec
 from .image_download import MAX_REDIRECTS
 from .prompt_builder import ImagePromptBuildError
 from .prompt_service import ImagePromptImmutable, build_and_store_image_prompt
+from .reference_images import reference_image_urls
 from .refinement import (
     REFINEMENT_REQUEST_SCHEMA_VERSION,
     RefinementRequest,
@@ -150,8 +152,13 @@ _sleep = time.sleep
 DEFAULT_ASPECT_RATIO = "3:4"
 DEFAULT_OUTPUT_FORMAT = "webp"
 DEFAULT_OUTPUT_QUALITY = 80
+# flux-2-max takes safety_tolerance on a 1-5 scale; 2 sits in range for it and
+# for the flux-1.1-pro fast tier, so the reviewed value is unchanged.
 DEFAULT_SAFETY_TOLERANCE = 2
-DEFAULT_PROMPT_UPSAMPLING = False
+# None means "do not send this parameter at all" (ADR 0019): flux-2-max does not
+# accept prompt_upsampling, and an unknown input key is a submission error —
+# which at the create boundary is charged-or-ambiguous territory.
+DEFAULT_PROMPT_UPSAMPLING = None
 
 
 @dataclass(frozen=True)
@@ -166,7 +173,7 @@ class PipelineConfig:
     output_format: str = DEFAULT_OUTPUT_FORMAT
     output_quality: int = DEFAULT_OUTPUT_QUALITY
     safety_tolerance: int = DEFAULT_SAFETY_TOLERANCE
-    prompt_upsampling: bool = DEFAULT_PROMPT_UPSAMPLING
+    prompt_upsampling: bool | None = DEFAULT_PROMPT_UPSAMPLING
     poll_interval_seconds: float = 0.0
     poll_max_attempts: int = 90
     # Wall-clock bound (seconds) on the whole poll loop; 0 disables it (tests
@@ -1372,8 +1379,8 @@ def _select_demo_asset_for_attempt(attempt, version) -> tuple[DemoAssetSelection
         )
 
     try:
-        spec = DesignSpec.model_validate(version.design_spec)
-    except ValidationError as exc:
+        spec = validate_design_spec(version.design_spec)
+    except (ValidationError, UnsupportedDesignSpecVersion) as exc:
         raise _TerminalGenerationError(errors.DEMO_ASSETS_UNAVAILABLE) from exc
     try:
         selection = select_demo_asset(spec, version.image_prompt, manifest)
@@ -1544,6 +1551,60 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
         "safety_tolerance": config.safety_tolerance,
         "prompt_upsampling": config.prompt_upsampling,
     }
+
+    # The user's selected references (ADR 0019), minted HERE — inside the job,
+    # immediately before submission — so a short-TTL bearer URL never outlives
+    # the request that needs it and is never persisted, returned or logged.
+    #
+    # Deliberately BEFORE the budget reservation and the in-flight marker:
+    # signing touches storage and can fail, and a failure after either of those
+    # would leak a reservation and strand the attempt as ambiguous spend. Here,
+    # nothing has been reserved and nothing submitted, so a failure is cleanly
+    # terminal.
+    #
+    # Demo attempts never reach this: the branch is on the FROZEN is_demo flag,
+    # so a demo run constructs no URL at all and the zero-cost guarantee holds.
+    references: tuple[str, ...] = ()
+    if not attempt.is_demo:
+        try:
+            references = reference_image_urls(version.design)
+        except SoftTimeLimitExceeded:
+            # A worker interruption is never a domain failure — same invariant
+            # as every other interruptible call in this module. Let the
+            # top-level handler convert it to a bounded retry, so the attempt
+            # resumes instead of terminalising on a deploy or autoscale event.
+            raise
+        except Exception as exc:
+            # Signing failed. Submitting anyway would send the provider fewer
+            # references than the user chose and misrepresent what the concept
+            # was built from. Only the exception TYPE is logged — a presigned
+            # URL is a bearer credential and must never reach a log line.
+            logger.warning(
+                "reference image signing failed attempt=%s exception_type=%s",
+                attempt.pk,
+                type(exc).__name__,
+            )
+            raise _TerminalGenerationError(errors.INTERNAL_GENERATION_ERROR) from None
+
+    try:
+        request = ImageGenerationRequest(
+            prompt=version.image_prompt,
+            model=model,
+            seed=seed,
+            aspect_ratio=config.aspect_ratio,
+            output_format=config.output_format,
+            output_quality=config.output_quality,
+            safety_tolerance=config.safety_tolerance,
+            prompt_upsampling=config.prompt_upsampling,
+            reference_image_urls=references,
+        )
+    except ReferenceImagesRejected as exc:
+        # The boundary refused what this module produced — e.g. a plaintext
+        # signing origin. Fail before any spend rather than degrade to a
+        # partial or insecure request.
+        logger.warning("reference images rejected at the boundary attempt=%s", attempt.pk)
+        raise _TerminalGenerationError(errors.INTERNAL_GENERATION_ERROR) from exc
+
     # Cost control (Phase 16, Part A): reserve the conservative maximum image-call
     # cost BEFORE the in-flight marker and the provider create call. A rejected or
     # unavailable reservation fails closed — the provider is never invoked. Demo
@@ -1588,16 +1649,6 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
         )
     attempt.refresh_from_db()
 
-    request = ImageGenerationRequest(
-        prompt=version.image_prompt,
-        model=model,
-        seed=seed,
-        aspect_ratio=config.aspect_ratio,
-        output_format=config.output_format,
-        output_quality=config.output_quality,
-        safety_tolerance=config.safety_tolerance,
-        prompt_upsampling=config.prompt_upsampling,
-    )
     try:
         prediction = provider.create_prediction(request)
     except ImageProviderError as exc:

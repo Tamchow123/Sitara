@@ -1,7 +1,16 @@
 """Versioned, provider-safe inspiration context snapshot (Phase 13).
 
-Selected inspiration IMAGE BYTES are never sent to any provider. This module
-builds a strict, versioned snapshot from the frozen catalogue fields already
+This is the METADATA half of inspiration influence, and nothing here ever
+carries image bytes, a URL or a storage key to a provider.
+
+That is a statement about this module, not about the system: ADR 0019
+deliberately overrode ADR 0014, and the bytes of a selected reference — curated
+preset or user upload — now DO reach the image provider, as short-TTL signed
+URLs minted in :mod:`sitara.generation.reference_images`, which is the only
+place allowed to produce one. Read that module before concluding anything about
+what a provider receives.
+
+This module builds a strict, versioned snapshot from the frozen catalogue fields already
 attached to each currently publicly-eligible selected asset —
 ``garment_type``, ``alt_text`` (exposed as ``visual_description``) and
 ``cultural_context`` — plus audit-only ``title``/``attribution`` that may be

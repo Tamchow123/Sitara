@@ -5,11 +5,11 @@ Local manual test (documented in the README):
     docker compose exec api python -c \
         "from sitara.health.tasks import ping; print(ping.delay().get(timeout=10))"
 
-Celery Beat (Phase 16, Part C) schedules two bounded, idempotent maintenance
-tasks — the stuck-generation reconciler and the expired-design retention purge —
-using a STATIC settings-based schedule (no django-celery-beat / database-managed
-schedules; static settings are sufficient). No endpoint may enqueue arbitrary
-tasks.
+Celery Beat schedules three bounded, idempotent maintenance tasks — the
+stuck-generation reconciler and the expired-design retention purge (Phase 16
+Part C), plus the orphaned-upload-object sweeper (Phase 16B) — using a STATIC
+settings-based schedule (no django-celery-beat / database-managed schedules;
+static settings are sufficient). No endpoint may enqueue arbitrary tasks.
 """
 
 import os
@@ -63,4 +63,11 @@ def _register_beat_schedule(sender, **_kwargs):
         schedule(run_every=settings.DESIGN_PURGE_INTERVAL_SECONDS),
         sender.signature("sitara.generation.tasks.purge_expired_designs", queue="generation"),
         name="purge-expired-designs",
+    )
+    sender.add_periodic_task(
+        schedule(run_every=settings.USER_UPLOAD_SWEEP_INTERVAL_SECONDS),
+        sender.signature(
+            "sitara.generation.tasks.sweep_orphaned_upload_objects", queue="generation"
+        ),
+        name="sweep-orphaned-upload-objects",
     )

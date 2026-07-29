@@ -11,9 +11,24 @@ import hashlib
 import json
 from dataclasses import dataclass
 
-from .manifest import DemoManifest, manifest_sha256
+from sitara.generation.selection_semantics import (
+    covered_midriff_requested,
+    explicit_head_covering_decision,
+    ordered_colour_values,
+)
 
-DEMO_SELECTOR_VERSION = "1.0.0"
+from .manifest import DemoManifest, coverage_tags_for_selections, manifest_sha256
+
+# 2.0.0 (Phase 16B): adds a neckline scoring dimension and the fail-closed
+# coverage/ceremony hard constraints below; the version participates in the
+# seed and tie-break recipe, so a bump changes demo seeds and selections.
+#
+# DELIBERATELY NOT BUMPED for DesignSpec v3 support: colour and coverage are now
+# read through version-independent accessors, but for a version-1/2 spec those
+# accessors return exactly the fields they replaced, so every score, tie-break
+# and selection for an existing design is unchanged. Bumping would silently
+# re-seed historical demo selections to no purpose.
+DEMO_SELECTOR_VERSION = "2.0.0"
 
 # Explicit, source-controlled scoring weights. Never derived from user free
 # text, database ordering or Python's process-randomised ``hash()``.
@@ -24,6 +39,7 @@ _WEIGHT_FABRIC = 2
 _WEIGHT_EMBELLISHMENT_STYLE = 2
 _WEIGHT_EMBELLISHMENT_DENSITY = 2
 _WEIGHT_COVERAGE = 1
+_WEIGHT_NECKLINE = 2
 _WEIGHT_DUPATTA = 2
 _WEIGHT_SAREE_DRAPE = 2
 _WEIGHT_REGIONAL = 1
@@ -32,6 +48,21 @@ _WEIGHT_REGIONAL = 1
 _WEIGHT_PROMPT_TERM_BONUS = 1
 
 _NO_REGIONAL_DIRECTION = "no_specific_direction"
+
+# Coverage machine values that trigger a fail-closed HARD constraint (Phase
+# 16B): a selection that demands the head be covered or the midriff fully
+# covered must never be satisfied by an asset that shows an uncovered head or an
+# exposed midriff — the pipeline surfaces a controlled unavailable outcome
+# rather than a misleading image. What the DESIGN asked for is read through the
+# version-independent accessors; the tags below are how an ASSET says it.
+_HEAD_COVER_PREF = "head_drape_preferred"
+_FULL_MIDRIFF = "full_midriff"
+_HEAD_DRAPE_DUPATTA = "head_drape"
+_DOUBLE_DUPATTA = "double_dupatta"
+# The culturally-distinct ceremony that must never be substituted with a
+# nearest-neighbour asset (Phase 16B): an Anand Karaj design requires an asset
+# explicitly tagged for it, or generation fails closed.
+_ANAND_KARAJ = "anand_karaj"
 
 
 class DemoAssetUnavailable(Exception):
@@ -72,7 +103,7 @@ def _score_asset(source_selections, asset, prompt_lower: str) -> int:
     if source_selections.silhouette in asset.silhouettes:
         score += _WEIGHT_SILHOUETTE
 
-    matched_colours = set(source_selections.colour_palette) & set(asset.colours)
+    matched_colours = set(ordered_colour_values(source_selections)) & set(asset.colours)
     score += _WEIGHT_COLOUR * len(matched_colours)
     counted_terms |= matched_colours
 
@@ -93,9 +124,18 @@ def _score_asset(source_selections, asset, prompt_lower: str) -> int:
         score += _WEIGHT_EMBELLISHMENT_DENSITY
         counted_terms.add(source_selections.embellishment_density)
 
-    matched_coverage = set(source_selections.coverage_preferences) & set(asset.coverage_preferences)
+    matched_coverage = set(coverage_tags_for_selections(source_selections)) & set(
+        asset.coverage_preferences
+    )
     score += _WEIGHT_COVERAGE * len(matched_coverage)
     counted_terms |= matched_coverage
+
+    # The dedicated canonical neckline (DesignSpec v2). A v1 spec has no
+    # neckline_style attribute, so ``getattr`` degrades gracefully.
+    neckline = getattr(source_selections, "neckline_style", None)
+    if neckline and neckline in asset.necklines:
+        score += _WEIGHT_NECKLINE
+        counted_terms.add(neckline)
 
     if source_selections.dupatta_style and source_selections.dupatta_style in asset.dupatta_styles:
         score += _WEIGHT_DUPATTA
@@ -122,6 +162,7 @@ def _score_asset(source_selections, asset, prompt_lower: str) -> int:
         | set(asset.embellishment_styles)
         | set(asset.embellishment_densities)
         | set(asset.coverage_preferences)
+        | set(asset.necklines)
     ) - counted_terms
     for term in sorted(bonus_pool):
         if _phrase(term) in prompt_lower:
@@ -142,12 +183,37 @@ def _tie_break_key(*, manifest_hash: str, source_selections_json: str, asset_id:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _design_wants_head_covered(source_selections) -> bool:
+    """Whether this design's HARD head-covering filter applies.
+
+    The user's own decision wins whenever they made one — a version-3 design
+    that explicitly answered "uncovered" must not be narrowed to covered-head
+    assets (and must not fail closed with no candidates) merely because its
+    dupatta styling would otherwise imply a covering. That is the same authority
+    rule the deterministic prompt builder applies, so the selected asset and the
+    prompt can never ask for opposite things. With no explicit decision — every
+    version-1/2 design, and a version-3 one left blank — the dupatta inference
+    below is unchanged, double dupatta included."""
+    decision = explicit_head_covering_decision(source_selections)
+    if decision is not None:
+        return decision
+    return source_selections.dupatta_style in {_HEAD_DRAPE_DUPATTA, _DOUBLE_DUPATTA}
+
+
+def _asset_shows_covered_head(asset) -> bool:
+    return _HEAD_COVER_PREF in asset.coverage_preferences or bool(
+        {_HEAD_DRAPE_DUPATTA, _DOUBLE_DUPATTA} & set(asset.dupatta_styles)
+    )
+
+
 def select_demo_asset(design_spec, image_prompt: str, manifest: DemoManifest) -> DemoAssetSelection:
     """Deterministically select one manifest asset for ``design_spec``.
 
-    Raises :class:`DemoAssetUnavailable` if no asset's ``garment_types``
-    exactly includes ``design_spec.source_selections.garment_type`` — an
-    incompatible garment is never a fallback candidate."""
+    Applies hard, fail-closed filters before scoring — an incompatible garment,
+    a missing Anand Karaj asset, an uncovered-head asset for a covered-head
+    selection, or an exposed-midriff asset for a full-midriff selection is never
+    a fallback candidate. Raises :class:`DemoAssetUnavailable` when no asset
+    survives the filters."""
     source_selections = design_spec.source_selections
     garment_type = source_selections.garment_type
 
@@ -156,6 +222,24 @@ def select_demo_asset(design_spec, image_prompt: str, manifest: DemoManifest) ->
         raise DemoAssetUnavailable(
             "no manifest asset is compatible with this design's garment type"
         )
+
+    # Anand Karaj must never be shown a nearest-neighbour ceremony asset.
+    if source_selections.ceremony == _ANAND_KARAJ:
+        candidates = [a for a in candidates if _ANAND_KARAJ in a.ceremonies]
+        if not candidates:
+            raise DemoAssetUnavailable("no manifest asset is an approved match for this ceremony")
+
+    # A covered-head selection must not be satisfied by an uncovered-head asset.
+    if _design_wants_head_covered(source_selections):
+        candidates = [a for a in candidates if _asset_shows_covered_head(a)]
+        if not candidates:
+            raise DemoAssetUnavailable("no manifest asset satisfies the requested head covering")
+
+    # A full-midriff selection must not be satisfied by an exposed-midriff asset.
+    if covered_midriff_requested(source_selections):
+        candidates = [a for a in candidates if _FULL_MIDRIFF in a.coverage_preferences]
+        if not candidates:
+            raise DemoAssetUnavailable("no manifest asset satisfies the requested midriff coverage")
 
     manifest_hash = manifest_sha256(manifest)
     prompt_lower = image_prompt.lower()

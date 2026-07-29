@@ -27,6 +27,11 @@ _VERSION_UUID = (
     r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
 )
 
+_UPLOAD_UUID = (
+    r"(?P<upload_id>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+    r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+)
+
 urlpatterns = [
     re_path(r"^designs/?$", views.DesignListCreateView.as_view(), name="design-list"),
     re_path(rf"^designs/{_UUID}/?$", views.DesignDetailView.as_view(), name="design-detail"),
@@ -54,6 +59,21 @@ urlpatterns = [
         rf"^designs/{_UUID}/versions/{_VERSION_UUID}/result/?$",
         views.DesignVersionResultView.as_view(),
         name="design-version-result",
+    ),
+    re_path(
+        rf"^designs/{_UUID}/inspiration-uploads/?$",
+        views.DesignInspirationUploadView.as_view(),
+        name="design-inspiration-upload-list",
+    ),
+    re_path(
+        rf"^designs/{_UUID}/inspiration-uploads/{_UPLOAD_UUID}/?$",
+        views.DesignInspirationUploadDetailView.as_view(),
+        name="design-inspiration-upload-detail",
+    ),
+    re_path(
+        rf"^designs/{_UUID}/inspiration-uploads/{_UPLOAD_UUID}/image/?$",
+        views.DesignInspirationUploadImageView.as_view(),
+        name="design-inspiration-upload-image",
     ),
     re_path(rf"^jobs/{_JOB_UUID}/?$", views.GenerationJobView.as_view(), name="generation-job"),
 ]

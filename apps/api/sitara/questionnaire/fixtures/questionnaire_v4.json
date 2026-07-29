@@ -1,0 +1,1643 @@
+[
+  {
+    "model": "questionnaire.questionnaireversion",
+    "pk": "6b1f0f3e-5c2a-4d8b-9f77-2a4c0d9e51b4",
+    "fields": {
+      "version": 4,
+      "status": "draft",
+      "created_by": null,
+      "activated_by": null,
+      "activated_at": null,
+      "created_at": "2026-07-22T00:00:00Z",
+      "updated_at": "2026-07-22T00:00:00Z",
+      "schema": {
+        "schema_version": 1,
+        "key": "sitara_bridal_questionnaire_v1",
+        "title": "Design your bridalwear concept",
+        "steps": [
+          {
+            "id": "garment_and_ceremony",
+            "title": "Your garment and occasion",
+            "questions": [
+              {
+                "id": "ceremony",
+                "type": "single_choice",
+                "label": "Which ceremony is this outfit for?",
+                "required": true,
+                "options": [
+                  {
+                    "value": "nikah",
+                    "label": "Nikah",
+                    "description": "The Islamic marriage ceremony.",
+                    "visual_key": "ceremony_nikah"
+                  },
+                  {
+                    "value": "mehndi",
+                    "label": "Mehndi",
+                    "description": "The henna celebration before the wedding.",
+                    "visual_key": "ceremony_mehndi"
+                  },
+                  {
+                    "value": "baraat",
+                    "label": "Baraat",
+                    "description": "The main wedding day, welcoming the groom's procession.",
+                    "visual_key": "ceremony_baraat"
+                  },
+                  {
+                    "value": "walima",
+                    "label": "Walima",
+                    "description": "The celebration hosted after the nikah.",
+                    "visual_key": "ceremony_walima"
+                  },
+                  {
+                    "value": "pheras",
+                    "label": "Pheras",
+                    "description": "The Hindu wedding rites around the sacred fire.",
+                    "visual_key": "ceremony_pheras"
+                  },
+                  {
+                    "value": "anand_karaj",
+                    "label": "Anand Karaj",
+                    "description": "The Sikh marriage ceremony centred on the Anand Karaj rites.",
+                    "visual_key": "ceremony_anand_karaj"
+                  },
+                  {
+                    "value": "reception",
+                    "label": "Reception",
+                    "description": "The reception celebration with family and friends.",
+                    "visual_key": "ceremony_reception"
+                  }
+                ]
+              },
+              {
+                "id": "garment_type",
+                "type": "single_choice",
+                "label": "Which garment would you like to design?",
+                "required": true,
+                "options": [
+                  {
+                    "value": "lehenga",
+                    "label": "Lehenga",
+                    "description": "A fitted blouse with a full, flared skirt, usually styled with a dupatta.",
+                    "visual_key": "garment_lehenga"
+                  },
+                  {
+                    "value": "saree",
+                    "label": "Saree",
+                    "description": "A single length of fabric styled through its drape over a fitted blouse — the drape, not stitched construction, defines the look.",
+                    "visual_key": "garment_saree"
+                  },
+                  {
+                    "value": "gharara",
+                    "label": "Gharara",
+                    "description": "A short kurti with trousers fitted through the upper leg and knee that open into a wide, dramatic flare below the knee.",
+                    "visual_key": "garment_gharara"
+                  },
+                  {
+                    "value": "sharara",
+                    "label": "Sharara",
+                    "description": "A kurti with trousers that flare broadly from the waist or upper leg all the way down.",
+                    "visual_key": "garment_sharara"
+                  },
+                  {
+                    "value": "anarkali",
+                    "label": "Anarkali",
+                    "description": "A fitted bodice flowing into a long, frock-style silhouette, usually worn with churidar and dupatta.",
+                    "visual_key": "garment_anarkali"
+                  },
+                  {
+                    "value": "shalwar_kameez",
+                    "label": "Shalwar kameez",
+                    "description": "A kameez worn over shalwar trousers, usually styled with a dupatta.",
+                    "visual_key": "garment_shalwar_kameez"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "cultural_direction",
+            "title": "Cultural styling direction",
+            "questions": [
+              {
+                "id": "regional_style",
+                "type": "single_choice",
+                "label": "Would you like a particular regional direction?",
+                "help_text": "Every option can be interpreted many ways; this only sets a general direction.",
+                "required": false,
+                "options": [
+                  {
+                    "value": "no_specific_direction",
+                    "label": "No specific regional direction"
+                  },
+                  {
+                    "value": "pakistani",
+                    "label": "Pakistani bridal influences",
+                    "visual_key": "regional_pakistani"
+                  },
+                  {
+                    "value": "bangladeshi",
+                    "label": "Bangladeshi bridal influences",
+                    "visual_key": "regional_bangladeshi"
+                  },
+                  {
+                    "value": "north_indian",
+                    "label": "North Indian bridal influences",
+                    "visual_key": "regional_north_indian"
+                  },
+                  {
+                    "value": "south_indian",
+                    "label": "South Indian bridal influences",
+                    "visual_key": "regional_south_indian"
+                  },
+                  {
+                    "value": "punjabi",
+                    "label": "Punjabi bridal influences",
+                    "visual_key": "regional_punjabi"
+                  },
+                  {
+                    "value": "gujarati",
+                    "label": "Gujarati bridal influences",
+                    "visual_key": "regional_gujarati"
+                  },
+                  {
+                    "value": "rajasthani",
+                    "label": "Rajasthani bridal influences",
+                    "visual_key": "regional_rajasthani"
+                  },
+                  {
+                    "value": "hyderabadi",
+                    "label": "Hyderabadi bridal influences",
+                    "visual_key": "regional_hyderabadi"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "silhouette",
+            "title": "Silhouette",
+            "questions": [
+              {
+                "id": "silhouette",
+                "type": "single_choice",
+                "label": "Which silhouette do you love?",
+                "required": true,
+                "options": [
+                  {
+                    "value": "a_line_lehenga",
+                    "label": "A-line",
+                    "description": "Skims outward gently from the waist in a clean A - light to wear and universally flattering.",
+                    "visual_key": "silhouette_a_line_lehenga"
+                  },
+                  {
+                    "value": "flared_lehenga",
+                    "label": "Full flare",
+                    "description": "A circular skirt with maximum sweep - made for twirling and grand entrances.",
+                    "visual_key": "silhouette_flared_lehenga"
+                  },
+                  {
+                    "value": "mermaid_lehenga",
+                    "label": "Mermaid",
+                    "description": "Fitted through the hips and flaring below the knee - modern and sculptural.",
+                    "visual_key": "silhouette_mermaid_lehenga"
+                  },
+                  {
+                    "value": "straight_lehenga",
+                    "label": "Straight cut",
+                    "description": "Falls straight and sleek, often with a slit for movement - quietly contemporary.",
+                    "visual_key": "silhouette_straight_lehenga"
+                  },
+                  {
+                    "value": "panelled_kali_lehenga",
+                    "label": "Panelled kali",
+                    "description": "Traditional stitched panels (kalis) give heirloom structure and fullness.",
+                    "visual_key": "silhouette_panelled_kali_lehenga"
+                  },
+                  {
+                    "value": "classic_saree_drape",
+                    "label": "Classic saree",
+                    "description": "The timeless free-draped saree - pleats at the front, pallu over the shoulder.",
+                    "visual_key": "silhouette_classic_saree_drape"
+                  },
+                  {
+                    "value": "lehenga_style_saree",
+                    "label": "Lehenga saree",
+                    "description": "Pre-pleated to fall like a lehenga skirt - the drama of a saree, none of the draping.",
+                    "visual_key": "silhouette_lehenga_style_saree"
+                  },
+                  {
+                    "value": "pre_stitched_saree",
+                    "label": "Pre-stitched",
+                    "description": "Sewn into place so you simply step in - effortless for long celebrations.",
+                    "visual_key": "silhouette_pre_stitched_saree"
+                  },
+                  {
+                    "value": "half_saree",
+                    "label": "Half saree",
+                    "description": "The langa-voni: skirt, blouse and a draped voni - a South Indian favourite.",
+                    "visual_key": "silhouette_half_saree"
+                  },
+                  {
+                    "value": "classic_gharara",
+                    "label": "Classic",
+                    "description": "The traditional knee-flare gharara with a short kurti - timeless Lucknowi grace.",
+                    "visual_key": "silhouette_classic_gharara"
+                  },
+                  {
+                    "value": "farshi_gharara",
+                    "label": "Farshi",
+                    "description": "Floor-trailing and voluminous - the grandest, most regal form of the gharara.",
+                    "visual_key": "silhouette_farshi_gharara"
+                  },
+                  {
+                    "value": "slim_modern_gharara",
+                    "label": "Slim modern",
+                    "description": "A pared-back flare with a longer kameez - a contemporary take.",
+                    "visual_key": "silhouette_slim_modern_gharara"
+                  },
+                  {
+                    "value": "classic_sharara",
+                    "label": "Classic flare",
+                    "description": "Loose from the waist with a generous sweep - the traditional sharara.",
+                    "visual_key": "silhouette_classic_sharara"
+                  },
+                  {
+                    "value": "high_waisted_sharara",
+                    "label": "High-waisted",
+                    "description": "Fitted at the natural waist before flaring - elongating and modern.",
+                    "visual_key": "silhouette_high_waisted_sharara"
+                  },
+                  {
+                    "value": "farshi_sharara",
+                    "label": "Farshi",
+                    "description": "Extra-long, floor-pooling flare in the old courtly style.",
+                    "visual_key": "silhouette_farshi_sharara"
+                  },
+                  {
+                    "value": "floor_length_anarkali",
+                    "label": "Floor-length",
+                    "description": "The flare falls all the way to the floor - a gown-like sweep.",
+                    "visual_key": "silhouette_floor_length_anarkali"
+                  },
+                  {
+                    "value": "kalidar_anarkali",
+                    "label": "Kalidar",
+                    "description": "Built from many stitched panels for structured, traditional fullness.",
+                    "visual_key": "silhouette_kalidar_anarkali"
+                  },
+                  {
+                    "value": "front_open_anarkali",
+                    "label": "Front-open",
+                    "description": "Opens over a slim inner layer, like a flowing jacket.",
+                    "visual_key": "silhouette_front_open_anarkali"
+                  },
+                  {
+                    "value": "jacket_style_anarkali",
+                    "label": "Jacket style",
+                    "description": "A longer structured jacket layered over the flare - regal and warm.",
+                    "visual_key": "silhouette_jacket_style_anarkali"
+                  },
+                  {
+                    "value": "straight_kameez",
+                    "label": "Straight",
+                    "description": "A clean, straight-falling kameez - understated and elegant.",
+                    "visual_key": "silhouette_straight_kameez"
+                  },
+                  {
+                    "value": "a_line_kameez",
+                    "label": "A-line",
+                    "description": "Flares softly from the bust for gentle movement.",
+                    "visual_key": "silhouette_a_line_kameez"
+                  },
+                  {
+                    "value": "angrakha_kameez",
+                    "label": "Angrakha",
+                    "description": "A crossover, wrap-tied bodice in the Mughal court style.",
+                    "visual_key": "silhouette_angrakha_kameez"
+                  },
+                  {
+                    "value": "long_line_kameez",
+                    "label": "Long-line",
+                    "description": "An ankle-grazing kameez with a stately, columnar fall.",
+                    "visual_key": "silhouette_long_line_kameez"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "colours",
+            "title": "Which colours are yours?",
+            "questions": [
+              {
+                "id": "fabric_colour",
+                "type": "colour_choice",
+                "label": "The fabric",
+                "help_text": "The colour the cloth itself is dyed.",
+                "required": false,
+                "options": [
+                  {
+                    "value": "scarlet",
+                    "label": "Scarlet",
+                    "visual_key": "colour_scarlet",
+                    "group": "reds_maroons"
+                  },
+                  {
+                    "value": "deep_maroon",
+                    "label": "Deep maroon",
+                    "visual_key": "colour_deep_maroon",
+                    "group": "reds_maroons"
+                  },
+                  {
+                    "value": "oxblood",
+                    "label": "Oxblood",
+                    "visual_key": "colour_oxblood",
+                    "group": "reds_maroons"
+                  },
+                  {
+                    "value": "rust",
+                    "label": "Rust",
+                    "visual_key": "colour_rust",
+                    "group": "reds_maroons"
+                  },
+                  {
+                    "value": "blush",
+                    "label": "Blush",
+                    "visual_key": "colour_blush",
+                    "group": "pinks_roses"
+                  },
+                  {
+                    "value": "rose",
+                    "label": "Rose",
+                    "visual_key": "colour_rose",
+                    "group": "pinks_roses"
+                  },
+                  {
+                    "value": "rani_pink",
+                    "label": "Rani pink",
+                    "visual_key": "colour_rani_pink",
+                    "group": "pinks_roses"
+                  },
+                  {
+                    "value": "old_rose",
+                    "label": "Old rose",
+                    "visual_key": "colour_old_rose",
+                    "group": "pinks_roses"
+                  },
+                  {
+                    "value": "marigold",
+                    "label": "Marigold",
+                    "visual_key": "colour_marigold",
+                    "group": "golds_ivories"
+                  },
+                  {
+                    "value": "antique_gold",
+                    "label": "Antique gold",
+                    "visual_key": "colour_antique_gold",
+                    "group": "golds_ivories"
+                  },
+                  {
+                    "value": "champagne",
+                    "label": "Champagne",
+                    "visual_key": "colour_champagne",
+                    "group": "golds_ivories"
+                  },
+                  {
+                    "value": "ivory",
+                    "label": "Ivory",
+                    "visual_key": "colour_ivory",
+                    "group": "golds_ivories"
+                  },
+                  {
+                    "value": "emerald",
+                    "label": "Emerald",
+                    "visual_key": "colour_emerald",
+                    "group": "greens"
+                  },
+                  {
+                    "value": "mehndi_green",
+                    "label": "Mehndi green",
+                    "visual_key": "colour_mehndi_green",
+                    "group": "greens"
+                  },
+                  {
+                    "value": "sage",
+                    "label": "Sage",
+                    "visual_key": "colour_sage",
+                    "group": "greens"
+                  },
+                  {
+                    "value": "pistachio",
+                    "label": "Pistachio",
+                    "visual_key": "colour_pistachio",
+                    "group": "greens"
+                  },
+                  {
+                    "value": "royal_blue",
+                    "label": "Royal blue",
+                    "visual_key": "colour_royal_blue",
+                    "group": "blues"
+                  },
+                  {
+                    "value": "navy",
+                    "label": "Navy",
+                    "visual_key": "colour_navy",
+                    "group": "blues"
+                  },
+                  {
+                    "value": "peacock",
+                    "label": "Peacock",
+                    "visual_key": "colour_peacock",
+                    "group": "blues"
+                  },
+                  {
+                    "value": "powder_blue",
+                    "label": "Powder blue",
+                    "visual_key": "colour_powder_blue",
+                    "group": "blues"
+                  },
+                  {
+                    "value": "aubergine",
+                    "label": "Aubergine",
+                    "visual_key": "colour_aubergine",
+                    "group": "purples_wines"
+                  },
+                  {
+                    "value": "amethyst",
+                    "label": "Amethyst",
+                    "visual_key": "colour_amethyst",
+                    "group": "purples_wines"
+                  },
+                  {
+                    "value": "lilac",
+                    "label": "Lilac",
+                    "visual_key": "colour_lilac",
+                    "group": "purples_wines"
+                  },
+                  {
+                    "value": "plum_wine",
+                    "label": "Plum wine",
+                    "visual_key": "colour_plum_wine",
+                    "group": "purples_wines"
+                  },
+                  {
+                    "value": "silver_grey",
+                    "label": "Silver grey",
+                    "visual_key": "colour_silver_grey",
+                    "group": "silvers_pastels"
+                  },
+                  {
+                    "value": "pearl",
+                    "label": "Pearl",
+                    "visual_key": "colour_pearl",
+                    "group": "silvers_pastels"
+                  },
+                  {
+                    "value": "mint",
+                    "label": "Mint",
+                    "visual_key": "colour_mint",
+                    "group": "silvers_pastels"
+                  },
+                  {
+                    "value": "peach",
+                    "label": "Peach",
+                    "visual_key": "colour_peach",
+                    "group": "silvers_pastels"
+                  }
+                ],
+                "constraints": {
+                  "allow_custom": true
+                }
+              },
+              {
+                "id": "embroidery_colour",
+                "type": "colour_choice",
+                "label": "The embroidery",
+                "help_text": "The colour the handwork is stitched in.",
+                "required": false,
+                "options": [
+                  {
+                    "value": "scarlet",
+                    "label": "Scarlet",
+                    "visual_key": "colour_scarlet",
+                    "group": "reds_maroons"
+                  },
+                  {
+                    "value": "deep_maroon",
+                    "label": "Deep maroon",
+                    "visual_key": "colour_deep_maroon",
+                    "group": "reds_maroons"
+                  },
+                  {
+                    "value": "oxblood",
+                    "label": "Oxblood",
+                    "visual_key": "colour_oxblood",
+                    "group": "reds_maroons"
+                  },
+                  {
+                    "value": "rust",
+                    "label": "Rust",
+                    "visual_key": "colour_rust",
+                    "group": "reds_maroons"
+                  },
+                  {
+                    "value": "blush",
+                    "label": "Blush",
+                    "visual_key": "colour_blush",
+                    "group": "pinks_roses"
+                  },
+                  {
+                    "value": "rose",
+                    "label": "Rose",
+                    "visual_key": "colour_rose",
+                    "group": "pinks_roses"
+                  },
+                  {
+                    "value": "rani_pink",
+                    "label": "Rani pink",
+                    "visual_key": "colour_rani_pink",
+                    "group": "pinks_roses"
+                  },
+                  {
+                    "value": "old_rose",
+                    "label": "Old rose",
+                    "visual_key": "colour_old_rose",
+                    "group": "pinks_roses"
+                  },
+                  {
+                    "value": "marigold",
+                    "label": "Marigold",
+                    "visual_key": "colour_marigold",
+                    "group": "golds_ivories"
+                  },
+                  {
+                    "value": "antique_gold",
+                    "label": "Antique gold",
+                    "visual_key": "colour_antique_gold",
+                    "group": "golds_ivories"
+                  },
+                  {
+                    "value": "champagne",
+                    "label": "Champagne",
+                    "visual_key": "colour_champagne",
+                    "group": "golds_ivories"
+                  },
+                  {
+                    "value": "ivory",
+                    "label": "Ivory",
+                    "visual_key": "colour_ivory",
+                    "group": "golds_ivories"
+                  },
+                  {
+                    "value": "emerald",
+                    "label": "Emerald",
+                    "visual_key": "colour_emerald",
+                    "group": "greens"
+                  },
+                  {
+                    "value": "mehndi_green",
+                    "label": "Mehndi green",
+                    "visual_key": "colour_mehndi_green",
+                    "group": "greens"
+                  },
+                  {
+                    "value": "sage",
+                    "label": "Sage",
+                    "visual_key": "colour_sage",
+                    "group": "greens"
+                  },
+                  {
+                    "value": "pistachio",
+                    "label": "Pistachio",
+                    "visual_key": "colour_pistachio",
+                    "group": "greens"
+                  },
+                  {
+                    "value": "royal_blue",
+                    "label": "Royal blue",
+                    "visual_key": "colour_royal_blue",
+                    "group": "blues"
+                  },
+                  {
+                    "value": "navy",
+                    "label": "Navy",
+                    "visual_key": "colour_navy",
+                    "group": "blues"
+                  },
+                  {
+                    "value": "peacock",
+                    "label": "Peacock",
+                    "visual_key": "colour_peacock",
+                    "group": "blues"
+                  },
+                  {
+                    "value": "powder_blue",
+                    "label": "Powder blue",
+                    "visual_key": "colour_powder_blue",
+                    "group": "blues"
+                  },
+                  {
+                    "value": "aubergine",
+                    "label": "Aubergine",
+                    "visual_key": "colour_aubergine",
+                    "group": "purples_wines"
+                  },
+                  {
+                    "value": "amethyst",
+                    "label": "Amethyst",
+                    "visual_key": "colour_amethyst",
+                    "group": "purples_wines"
+                  },
+                  {
+                    "value": "lilac",
+                    "label": "Lilac",
+                    "visual_key": "colour_lilac",
+                    "group": "purples_wines"
+                  },
+                  {
+                    "value": "plum_wine",
+                    "label": "Plum wine",
+                    "visual_key": "colour_plum_wine",
+                    "group": "purples_wines"
+                  },
+                  {
+                    "value": "silver_grey",
+                    "label": "Silver grey",
+                    "visual_key": "colour_silver_grey",
+                    "group": "silvers_pastels"
+                  },
+                  {
+                    "value": "pearl",
+                    "label": "Pearl",
+                    "visual_key": "colour_pearl",
+                    "group": "silvers_pastels"
+                  },
+                  {
+                    "value": "mint",
+                    "label": "Mint",
+                    "visual_key": "colour_mint",
+                    "group": "silvers_pastels"
+                  },
+                  {
+                    "value": "peach",
+                    "label": "Peach",
+                    "visual_key": "colour_peach",
+                    "group": "silvers_pastels"
+                  }
+                ],
+                "constraints": {
+                  "allow_custom": true
+                }
+              },
+              {
+                "id": "dupatta_colour",
+                "type": "colour_choice",
+                "label": "The dupatta",
+                "help_text": "Match the fabric, or set the dupatta apart in its own colour.",
+                "required": false,
+                "options": [
+                  {
+                    "value": "match_fabric",
+                    "label": "Match the fabric",
+                    "description": "The dupatta takes the same colour as the fabric.",
+                    "visual_key": "colour_match_fabric",
+                    "group": "match"
+                  },
+                  {
+                    "value": "scarlet",
+                    "label": "Scarlet",
+                    "visual_key": "colour_scarlet",
+                    "group": "reds_maroons"
+                  },
+                  {
+                    "value": "deep_maroon",
+                    "label": "Deep maroon",
+                    "visual_key": "colour_deep_maroon",
+                    "group": "reds_maroons"
+                  },
+                  {
+                    "value": "oxblood",
+                    "label": "Oxblood",
+                    "visual_key": "colour_oxblood",
+                    "group": "reds_maroons"
+                  },
+                  {
+                    "value": "rust",
+                    "label": "Rust",
+                    "visual_key": "colour_rust",
+                    "group": "reds_maroons"
+                  },
+                  {
+                    "value": "blush",
+                    "label": "Blush",
+                    "visual_key": "colour_blush",
+                    "group": "pinks_roses"
+                  },
+                  {
+                    "value": "rose",
+                    "label": "Rose",
+                    "visual_key": "colour_rose",
+                    "group": "pinks_roses"
+                  },
+                  {
+                    "value": "rani_pink",
+                    "label": "Rani pink",
+                    "visual_key": "colour_rani_pink",
+                    "group": "pinks_roses"
+                  },
+                  {
+                    "value": "old_rose",
+                    "label": "Old rose",
+                    "visual_key": "colour_old_rose",
+                    "group": "pinks_roses"
+                  },
+                  {
+                    "value": "marigold",
+                    "label": "Marigold",
+                    "visual_key": "colour_marigold",
+                    "group": "golds_ivories"
+                  },
+                  {
+                    "value": "antique_gold",
+                    "label": "Antique gold",
+                    "visual_key": "colour_antique_gold",
+                    "group": "golds_ivories"
+                  },
+                  {
+                    "value": "champagne",
+                    "label": "Champagne",
+                    "visual_key": "colour_champagne",
+                    "group": "golds_ivories"
+                  },
+                  {
+                    "value": "ivory",
+                    "label": "Ivory",
+                    "visual_key": "colour_ivory",
+                    "group": "golds_ivories"
+                  },
+                  {
+                    "value": "emerald",
+                    "label": "Emerald",
+                    "visual_key": "colour_emerald",
+                    "group": "greens"
+                  },
+                  {
+                    "value": "mehndi_green",
+                    "label": "Mehndi green",
+                    "visual_key": "colour_mehndi_green",
+                    "group": "greens"
+                  },
+                  {
+                    "value": "sage",
+                    "label": "Sage",
+                    "visual_key": "colour_sage",
+                    "group": "greens"
+                  },
+                  {
+                    "value": "pistachio",
+                    "label": "Pistachio",
+                    "visual_key": "colour_pistachio",
+                    "group": "greens"
+                  },
+                  {
+                    "value": "royal_blue",
+                    "label": "Royal blue",
+                    "visual_key": "colour_royal_blue",
+                    "group": "blues"
+                  },
+                  {
+                    "value": "navy",
+                    "label": "Navy",
+                    "visual_key": "colour_navy",
+                    "group": "blues"
+                  },
+                  {
+                    "value": "peacock",
+                    "label": "Peacock",
+                    "visual_key": "colour_peacock",
+                    "group": "blues"
+                  },
+                  {
+                    "value": "powder_blue",
+                    "label": "Powder blue",
+                    "visual_key": "colour_powder_blue",
+                    "group": "blues"
+                  },
+                  {
+                    "value": "aubergine",
+                    "label": "Aubergine",
+                    "visual_key": "colour_aubergine",
+                    "group": "purples_wines"
+                  },
+                  {
+                    "value": "amethyst",
+                    "label": "Amethyst",
+                    "visual_key": "colour_amethyst",
+                    "group": "purples_wines"
+                  },
+                  {
+                    "value": "lilac",
+                    "label": "Lilac",
+                    "visual_key": "colour_lilac",
+                    "group": "purples_wines"
+                  },
+                  {
+                    "value": "plum_wine",
+                    "label": "Plum wine",
+                    "visual_key": "colour_plum_wine",
+                    "group": "purples_wines"
+                  },
+                  {
+                    "value": "silver_grey",
+                    "label": "Silver grey",
+                    "visual_key": "colour_silver_grey",
+                    "group": "silvers_pastels"
+                  },
+                  {
+                    "value": "pearl",
+                    "label": "Pearl",
+                    "visual_key": "colour_pearl",
+                    "group": "silvers_pastels"
+                  },
+                  {
+                    "value": "mint",
+                    "label": "Mint",
+                    "visual_key": "colour_mint",
+                    "group": "silvers_pastels"
+                  },
+                  {
+                    "value": "peach",
+                    "label": "Peach",
+                    "visual_key": "colour_peach",
+                    "group": "silvers_pastels"
+                  }
+                ],
+                "constraints": {
+                  "allow_custom": true
+                }
+              },
+              {
+                "id": "custom_colours",
+                "type": "colour_list",
+                "label": "Your own colours",
+                "help_text": "Colours you have added yourself. They stay available across all three choices above.",
+                "required": false,
+                "constraints": {
+                  "max_items": 8
+                }
+              }
+            ]
+          },
+          {
+            "id": "cloth_and_handwork",
+            "title": "Cloth and handwork",
+            "questions": [
+              {
+                "id": "fabrics",
+                "type": "multi_choice",
+                "label": "Any fabrics you are drawn to?",
+                "help_text": "Optional — leave empty to let the concept choose.",
+                "required": false,
+                "options": [
+                  {
+                    "value": "silk",
+                    "label": "Silk",
+                    "visual_key": "fabric_silk"
+                  },
+                  {
+                    "value": "raw_silk",
+                    "label": "Raw silk",
+                    "visual_key": "fabric_raw_silk"
+                  },
+                  {
+                    "value": "satin",
+                    "label": "Satin",
+                    "description": "A smooth fabric with a lustrous face that catches light cleanly.",
+                    "visual_key": "fabric_satin"
+                  },
+                  {
+                    "value": "velvet",
+                    "label": "Velvet",
+                    "visual_key": "fabric_velvet"
+                  },
+                  {
+                    "value": "organza",
+                    "label": "Organza",
+                    "visual_key": "fabric_organza"
+                  },
+                  {
+                    "value": "chiffon",
+                    "label": "Chiffon",
+                    "visual_key": "fabric_chiffon"
+                  },
+                  {
+                    "value": "georgette",
+                    "label": "Georgette",
+                    "visual_key": "fabric_georgette"
+                  },
+                  {
+                    "value": "net",
+                    "label": "Net",
+                    "visual_key": "fabric_net"
+                  },
+                  {
+                    "value": "brocade",
+                    "label": "Brocade",
+                    "visual_key": "fabric_brocade"
+                  },
+                  {
+                    "value": "jamawar",
+                    "label": "Jamawar",
+                    "visual_key": "fabric_jamawar"
+                  },
+                  {
+                    "value": "tissue",
+                    "label": "Tissue",
+                    "visual_key": "fabric_tissue"
+                  },
+                  {
+                    "value": "cotton_silk",
+                    "label": "Cotton silk",
+                    "visual_key": "fabric_cotton_silk"
+                  }
+                ],
+                "constraints": {
+                  "max_items": 3
+                }
+              },
+              {
+                "id": "embellishment_styles",
+                "type": "multi_choice",
+                "label": "Which embellishment work speaks to you?",
+                "help_text": "Pick up to five, or choose \"No embellishment\" for an unadorned look.",
+                "required": true,
+                "options": [
+                  {
+                    "value": "zardozi",
+                    "label": "Zardozi",
+                    "visual_key": "embellishment_zardozi"
+                  },
+                  {
+                    "value": "dabka",
+                    "label": "Dabka",
+                    "visual_key": "embellishment_dabka"
+                  },
+                  {
+                    "value": "nakshi",
+                    "label": "Nakshi",
+                    "visual_key": "embellishment_nakshi"
+                  },
+                  {
+                    "value": "gota_patti",
+                    "label": "Gota patti",
+                    "visual_key": "embellishment_gota_patti"
+                  },
+                  {
+                    "value": "mirror_work",
+                    "label": "Mirror work",
+                    "visual_key": "embellishment_mirror_work"
+                  },
+                  {
+                    "value": "resham_threadwork",
+                    "label": "Resham threadwork",
+                    "visual_key": "embellishment_resham_threadwork"
+                  },
+                  {
+                    "value": "chikankari",
+                    "label": "Chikankari",
+                    "visual_key": "embellishment_chikankari"
+                  },
+                  {
+                    "value": "sequins",
+                    "label": "Sequins",
+                    "visual_key": "embellishment_sequins"
+                  },
+                  {
+                    "value": "pearls",
+                    "label": "Pearls",
+                    "visual_key": "embellishment_pearls"
+                  },
+                  {
+                    "value": "crystals",
+                    "label": "Crystals",
+                    "visual_key": "embellishment_crystals"
+                  },
+                  {
+                    "value": "beads",
+                    "label": "Beadwork",
+                    "visual_key": "embellishment_beads"
+                  },
+                  {
+                    "value": "applique",
+                    "label": "Appliqué",
+                    "visual_key": "embellishment_applique"
+                  },
+                  {
+                    "value": "none",
+                    "label": "No embellishment"
+                  }
+                ],
+                "constraints": {
+                  "min_items": 1,
+                  "max_items": 5,
+                  "exclusive_values": [
+                    "none"
+                  ]
+                }
+              },
+              {
+                "id": "embellishment_density",
+                "type": "single_choice",
+                "label": "How richly worked should it be?",
+                "required": false,
+                "options": [
+                  {
+                    "value": "minimal",
+                    "label": "Minimal and airy",
+                    "visual_key": "density_minimal"
+                  },
+                  {
+                    "value": "balanced",
+                    "label": "Balanced",
+                    "visual_key": "density_balanced"
+                  },
+                  {
+                    "value": "heavy",
+                    "label": "Rich and heavily worked",
+                    "visual_key": "density_heavy"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "coverage",
+            "title": "Coverage",
+            "questions": [
+              {
+                "id": "neckline_style",
+                "type": "single_choice",
+                "label": "Which neckline would you like?",
+                "help_text": "Optional — leave this to \"No preference\" to let the concept choose a neckline that suits the silhouette.",
+                "required": false,
+                "options": [
+                  {
+                    "value": "classic_crew",
+                    "label": "Classic crew",
+                    "description": "A rounded neckline that sits at the base of the neck.",
+                    "visual_key": "neckline_classic_crew",
+                    "group": "necklines"
+                  },
+                  {
+                    "value": "curved_scoop",
+                    "label": "Curved scoop",
+                    "description": "A softly rounded neckline scooped below the collarbone.",
+                    "visual_key": "neckline_curved_scoop",
+                    "group": "necklines"
+                  },
+                  {
+                    "value": "v_neck",
+                    "label": "V-neck",
+                    "description": "A V-shaped neckline of moderate depth.",
+                    "visual_key": "neckline_v_neck",
+                    "group": "necklines"
+                  },
+                  {
+                    "value": "deep_v_neck",
+                    "label": "Deep V-neck",
+                    "description": "A pronounced V that plunges well below the collarbone.",
+                    "visual_key": "neckline_deep_v_neck",
+                    "group": "necklines"
+                  },
+                  {
+                    "value": "boat_neck",
+                    "label": "Boat neck",
+                    "description": "A wide neckline running straight across from shoulder to shoulder.",
+                    "visual_key": "neckline_boat_neck",
+                    "group": "necklines"
+                  },
+                  {
+                    "value": "square_neck",
+                    "label": "Square neck",
+                    "description": "A neckline cut in a clean square across the chest.",
+                    "visual_key": "neckline_square_neck",
+                    "group": "necklines"
+                  },
+                  {
+                    "value": "sweetheart_neck",
+                    "label": "Sweetheart",
+                    "description": "A curved neckline shaped like the top of a heart.",
+                    "visual_key": "neckline_sweetheart_neck",
+                    "group": "necklines"
+                  },
+                  {
+                    "value": "high_neck",
+                    "label": "High neck",
+                    "description": "A neckline that rises high on the neck for fuller coverage.",
+                    "visual_key": "neckline_high_neck",
+                    "group": "necklines"
+                  },
+                  {
+                    "value": "band_collar",
+                    "label": "Band or mandarin collar",
+                    "description": "An upright band or mandarin collar standing at the neck.",
+                    "visual_key": "neckline_band_collar",
+                    "group": "necklines"
+                  }
+                ]
+              },
+              {
+                "id": "sleeves",
+                "type": "single_choice",
+                "label": "How much sleeve?",
+                "required": false,
+                "options": [
+                  {
+                    "value": "sleeveless",
+                    "label": "Sleeveless",
+                    "description": "No sleeve - shoulders bare, ideal under a heavy dupatta.",
+                    "visual_key": "sleeves_sleeveless"
+                  },
+                  {
+                    "value": "cap_sleeve",
+                    "label": "Cap sleeve",
+                    "description": "A whisper of a sleeve, just covering the shoulder.",
+                    "visual_key": "sleeves_cap_sleeve"
+                  },
+                  {
+                    "value": "elbow_sleeve",
+                    "label": "Elbow",
+                    "description": "Ends at the elbow - balanced and comfortable.",
+                    "visual_key": "sleeves_elbow_sleeve"
+                  },
+                  {
+                    "value": "three_quarter_sleeve",
+                    "label": "Three-quarter",
+                    "description": "Ends mid-forearm, leaving room for bangles and mehndi.",
+                    "visual_key": "sleeves_three_quarter_sleeve"
+                  },
+                  {
+                    "value": "full_sleeve",
+                    "label": "Full sleeve",
+                    "description": "To the wrist - elegant coverage and a canvas for embroidery.",
+                    "visual_key": "sleeves_full_sleeve"
+                  }
+                ]
+              },
+              {
+                "id": "back_coverage",
+                "type": "single_choice",
+                "label": "How should the back be cut?",
+                "required": false,
+                "options": [
+                  {
+                    "value": "open_back",
+                    "label": "Open back",
+                    "description": "A deep open back - dramatic from every angle.",
+                    "visual_key": "back_coverage_open_back"
+                  },
+                  {
+                    "value": "deep_cut_back",
+                    "label": "Deep cut",
+                    "description": "A generous scoop, softened with dori ties or latkans.",
+                    "visual_key": "back_coverage_deep_cut_back"
+                  },
+                  {
+                    "value": "modest_back",
+                    "label": "Modest",
+                    "description": "A high, covered back - comfortable and traditional.",
+                    "visual_key": "back_coverage_modest_back"
+                  }
+                ]
+              },
+              {
+                "id": "midriff",
+                "type": "single_choice",
+                "label": "And the midriff?",
+                "required": false,
+                "options": [
+                  {
+                    "value": "bare_midriff",
+                    "label": "Bare",
+                    "description": "A classic gap between blouse and skirt - traditional for sarees and lehengas.",
+                    "visual_key": "midriff_bare_midriff"
+                  },
+                  {
+                    "value": "semi_sheer_midriff",
+                    "label": "Semi-sheer",
+                    "description": "Veiled with net or organza - coverage with lightness.",
+                    "visual_key": "midriff_semi_sheer_midriff"
+                  },
+                  {
+                    "value": "covered_midriff",
+                    "label": "Covered",
+                    "description": "Fully covered by a longer bodice or kameez.",
+                    "visual_key": "midriff_covered_midriff"
+                  }
+                ]
+              },
+              {
+                "id": "head_covering",
+                "type": "single_choice",
+                "label": "Will you cover your head?",
+                "required": false,
+                "options": [
+                  {
+                    "value": "uncovered",
+                    "label": "Uncovered",
+                    "description": "Hair dressed and open - the dupatta stays on the shoulders.",
+                    "visual_key": "head_covering_uncovered"
+                  },
+                  {
+                    "value": "dupatta_over_head",
+                    "label": "Dupatta over head",
+                    "description": "The dupatta drawn gracefully over the head - traditional for many ceremonies.",
+                    "visual_key": "head_covering_dupatta_over_head"
+                  },
+                  {
+                    "value": "veil_style",
+                    "label": "Veil style",
+                    "description": "A long, trailing veil-style dupatta pinned from the crown.",
+                    "visual_key": "head_covering_veil_style"
+                  },
+                  {
+                    "value": "hijab",
+                    "label": "Hijab",
+                    "description": "Full coverage with the hair completely covered - styled to sit with the outfit.",
+                    "visual_key": "head_covering_hijab"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "the_drape",
+            "title": "The drape",
+            "questions": [
+              {
+                "id": "dupatta_style",
+                "type": "single_choice",
+                "label": "How should the dupatta be styled?",
+                "required": false,
+                "options": [
+                  {
+                    "value": "one_shoulder",
+                    "label": "One shoulder",
+                    "description": "Pinned at one shoulder to fall in a single clean cascade.",
+                    "visual_key": "dupatta_one_shoulder"
+                  },
+                  {
+                    "value": "front_drape",
+                    "label": "Seedha pallu",
+                    "description": "Draped across the front from the right shoulder - displays the work fully.",
+                    "visual_key": "dupatta_front_drape"
+                  },
+                  {
+                    "value": "head_drape",
+                    "label": "Over the head",
+                    "description": "Framing the face from the crown - soft, bridal and traditional.",
+                    "visual_key": "dupatta_head_drape"
+                  },
+                  {
+                    "value": "double_dupatta",
+                    "label": "Double dupatta",
+                    "description": "One framing the head and shoulders, a second trailing - grand and layered.",
+                    "visual_key": "dupatta_double_dupatta"
+                  },
+                  {
+                    "value": "trail_dupatta",
+                    "label": "Trail",
+                    "description": "Pinned to sweep behind you like a train.",
+                    "visual_key": "dupatta_trail_dupatta"
+                  }
+                ]
+              },
+              {
+                "id": "saree_drape",
+                "type": "single_choice",
+                "label": "How should the saree be draped?",
+                "help_text": "Drape styles carry their own regional histories — pick the one you love.",
+                "required": false,
+                "options": [
+                  {
+                    "value": "nivi_drape",
+                    "label": "Nivi drape",
+                    "description": "Front-tucked pleats with the pallu over the left shoulder - the timeless classic.",
+                    "visual_key": "saree_drape_nivi_drape"
+                  },
+                  {
+                    "value": "bengali_drape",
+                    "label": "Bengali atpoure",
+                    "description": "Broad box pleats with the pallu wrapped around both shoulders.",
+                    "visual_key": "saree_drape_bengali_drape"
+                  },
+                  {
+                    "value": "seedha_pallu",
+                    "label": "Seedha pallu",
+                    "description": "The pallu brought over the right shoulder to fan across the front.",
+                    "visual_key": "saree_drape_seedha_pallu"
+                  },
+                  {
+                    "value": "lehenga_drape",
+                    "label": "Lehenga drape",
+                    "description": "Pleats fanned like a skirt with a fitted wrap - a modern shortcut.",
+                    "visual_key": "saree_drape_lehenga_drape"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "final_notes",
+            "title": "Anything else?",
+            "questions": [
+              {
+                "id": "final_notes",
+                "type": "text",
+                "label": "Anything else we should know?",
+                "help_text": "Optional — a short note about anything the questionnaire didn't ask.",
+                "required": false,
+                "constraints": {
+                  "min_length": 0,
+                  "max_length": 500
+                }
+              }
+            ]
+          }
+        ],
+        "rules": [
+          {
+            "id": "saree_shows_saree_drape",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": [
+                "saree"
+              ]
+            },
+            "then": {
+              "action": "show",
+              "question_id": "saree_drape"
+            }
+          },
+          {
+            "id": "saree_hides_dupatta_style",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": [
+                "saree"
+              ]
+            },
+            "then": {
+              "action": "hide",
+              "question_id": "dupatta_style"
+            }
+          },
+          {
+            "id": "non_saree_hides_saree_drape",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "not_in",
+              "values": [
+                "saree"
+              ]
+            },
+            "then": {
+              "action": "hide",
+              "question_id": "saree_drape"
+            }
+          },
+          {
+            "id": "none_hides_embellishment_density",
+            "when": {
+              "question_id": "embellishment_styles",
+              "operator": "equals",
+              "values": [
+                "none"
+              ]
+            },
+            "then": {
+              "action": "hide",
+              "question_id": "embellishment_density"
+            }
+          },
+          {
+            "id": "lehenga_silhouettes",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": [
+                "lehenga"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "silhouette",
+              "values": [
+                "a_line_lehenga",
+                "flared_lehenga",
+                "mermaid_lehenga",
+                "straight_lehenga",
+                "panelled_kali_lehenga"
+              ]
+            }
+          },
+          {
+            "id": "saree_silhouettes",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": [
+                "saree"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "silhouette",
+              "values": [
+                "classic_saree_drape",
+                "lehenga_style_saree",
+                "pre_stitched_saree",
+                "half_saree"
+              ]
+            }
+          },
+          {
+            "id": "gharara_silhouettes",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": [
+                "gharara"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "silhouette",
+              "values": [
+                "classic_gharara",
+                "farshi_gharara",
+                "slim_modern_gharara"
+              ]
+            }
+          },
+          {
+            "id": "sharara_silhouettes",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": [
+                "sharara"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "silhouette",
+              "values": [
+                "classic_sharara",
+                "high_waisted_sharara",
+                "farshi_sharara"
+              ]
+            }
+          },
+          {
+            "id": "anarkali_silhouettes",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": [
+                "anarkali"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "silhouette",
+              "values": [
+                "floor_length_anarkali",
+                "kalidar_anarkali",
+                "front_open_anarkali",
+                "jacket_style_anarkali"
+              ]
+            }
+          },
+          {
+            "id": "shalwar_kameez_silhouettes",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": [
+                "shalwar_kameez"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "silhouette",
+              "values": [
+                "straight_kameez",
+                "a_line_kameez",
+                "angrakha_kameez",
+                "long_line_kameez"
+              ]
+            }
+          },
+          {
+            "id": "saree_hides_dupatta_colour",
+            "when": {
+              "question_id": "garment_type",
+              "operator": "equals",
+              "values": [
+                "saree"
+              ]
+            },
+            "then": {
+              "action": "hide",
+              "question_id": "dupatta_colour"
+            }
+          },
+          {
+            "id": "uncovered_head_excludes_head_drapes",
+            "when": {
+              "question_id": "head_covering",
+              "operator": "in",
+              "values": [
+                "uncovered"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "dupatta_style",
+              "values": [
+                "one_shoulder",
+                "front_drape",
+                "trail_dupatta"
+              ]
+            }
+          },
+          {
+            "id": "dupatta_over_head_requires_head_drape",
+            "when": {
+              "question_id": "head_covering",
+              "operator": "in",
+              "values": [
+                "dupatta_over_head"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "dupatta_style",
+              "values": [
+                "head_drape",
+                "double_dupatta"
+              ]
+            }
+          },
+          {
+            "id": "veil_style_requires_crown_pinned_drape",
+            "when": {
+              "question_id": "head_covering",
+              "operator": "in",
+              "values": [
+                "veil_style"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "dupatta_style",
+              "values": [
+                "head_drape",
+                "double_dupatta",
+                "trail_dupatta"
+              ]
+            }
+          },
+          {
+            "id": "covered_midriff_excludes_deep_v_neck",
+            "when": {
+              "question_id": "midriff",
+              "operator": "in",
+              "values": [
+                "covered_midriff"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "neckline_style",
+              "values": [
+                "classic_crew",
+                "curved_scoop",
+                "v_neck",
+                "boat_neck",
+                "square_neck",
+                "sweetheart_neck",
+                "high_neck",
+                "band_collar"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+]

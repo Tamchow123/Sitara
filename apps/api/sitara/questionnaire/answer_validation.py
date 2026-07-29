@@ -28,7 +28,16 @@ Rule semantics (visibility / required / restrictions) live in
 
 from __future__ import annotations
 
+import re
+
 from . import rules
+from .schema_validation import MAX_CUSTOM_COLOURS_LIMIT
+
+# Accepts what a native <input type="color"> emits, case-insensitively, and
+# normalises to lower case. No 3-digit shorthand, no named colours, no
+# rgb()/hsl(), no alpha — so nothing but a plain six-digit hex is ever
+# persisted or handed to the prompt builder.
+_HEX_COLOUR_INPUT = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 # Error codes / messages are safe to surface: they never echo the raw
 # submitted value, only which question failed and why.
@@ -46,6 +55,12 @@ _NO_OPTIONS = "No options are available for your current answers."
 _TOO_SHORT = "Please use at least {count} characters."
 _TOO_LONG = "Please use at most {count} characters."
 _REQUIRED = "This question is required."
+_WRONG_TYPE_COLOUR = "Choose a colour."
+_WRONG_TYPE_COLOUR_LIST = "Your own colours must be a list of colours."
+_BAD_HEX = "That is not a valid colour."
+_DUPLICATE_COLOUR = "You have already added that colour."
+_UNKNOWN_CUSTOM_COLOUR = "That colour is no longer in your own colours."
+_CUSTOM_NOT_ALLOWED = "This question only takes one of the shown colours."
 
 # Special error keys (not question ids, which are lower-case machine ids).
 TOP_LEVEL_ERROR_KEY = "__all__"
@@ -69,8 +84,58 @@ def normalise_text(value: str) -> str:
     return unified.strip()
 
 
+def _normalise_colour_list(value: object) -> tuple[list[str] | None, str | None]:
+    """Validate a custom palette: unique six-digit hex, normalised to lower case.
+
+    Bounded BEFORE any per-item work. Unlike a multi_choice — whose items are
+    checked against a small declared-option set, so a hostile list fails on its
+    first unknown value — every syntactically valid hex passes, which would let
+    a caller choose how much work this loop does. The schema validator caps any
+    colour_list's declared ``max_items`` at ``MAX_CUSTOM_COLOURS_LIMIT``, so
+    refusing anything longer here costs nothing legitimate and keeps the cost
+    of rejecting an oversized array constant. Dedup uses a set for the same
+    reason; ``ordered`` preserves insertion order for the persisted answer.
+    """
+    if not isinstance(value, list):
+        return None, _WRONG_TYPE_COLOUR_LIST
+    if len(value) > MAX_CUSTOM_COLOURS_LIMIT:
+        # Reported as a count violation, matching the per-question max_items
+        # message the caller would otherwise have produced.
+        return None, _TOO_MANY_ITEMS.format(count=MAX_CUSTOM_COLOURS_LIMIT)
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str) or not _HEX_COLOUR_INPUT.fullmatch(item):
+            return None, _BAD_HEX
+        lowered = item.lower()
+        if lowered in seen:
+            return None, _DUPLICATE_COLOUR
+        seen.add(lowered)
+        ordered.append(lowered)
+    return ordered, None
+
+
+def _custom_palette(index: dict[str, dict], answers: dict) -> frozenset[str]:
+    """The design's own colours, resolved BEFORE the main structural pass.
+
+    A ``colour_choice`` answer may be a custom hex, and whether that hex is
+    legitimate depends on the sibling ``colour_list`` answer — which dict
+    iteration order gives no guarantee of reaching first. Resolving it up
+    front makes validation order-independent. A malformed palette yields an
+    empty set here and is reported on its own question by the main pass, so a
+    custom colour_choice referencing it fails too rather than being silently
+    accepted.
+    """
+    for question_id, question in index.items():
+        if question.get("type") != "colour_list":
+            continue
+        normalised, message = _normalise_colour_list(answers.get(question_id))
+        return frozenset() if message is not None or normalised is None else frozenset(normalised)
+    return frozenset()
+
+
 def _structural_value(
-    question: dict, value: object
+    question: dict, value: object, custom_palette: frozenset[str]
 ) -> tuple[object | None, str | None, set | None]:
     """Validate a value's basic SHAPE against its question type.
 
@@ -109,12 +174,38 @@ def _structural_value(
             return None, _WRONG_TYPE_TEXT, None
         return normalise_text(value), None, None
 
+    if question_type == "colour_choice":
+        # Either a declared swatch or, when the question allows it, one of the
+        # design's own colours. The selected-set is always None: a colour never
+        # participates in rule evaluation (see rules._RULE_REFERENCEABLE_TYPES),
+        # so a custom hex can never leak into a condition or a restriction.
+        if not isinstance(value, str):
+            return None, _WRONG_TYPE_COLOUR, None
+        if value in declared:
+            return value, None, None
+        if not _HEX_COLOUR_INPUT.fullmatch(value):
+            return None, _UNKNOWN_OPTION, None
+        if not question.get("constraints", {}).get("allow_custom", False):
+            return None, _CUSTOM_NOT_ALLOWED, None
+        lowered = value.lower()
+        if lowered not in custom_palette:
+            # The bride removed this colour from her palette (or never added
+            # it). Rejecting keeps the answer and the palette consistent.
+            return None, _UNKNOWN_CUSTOM_COLOUR, None
+        return lowered, None, None
+
+    if question_type == "colour_list":
+        normalised, message = _normalise_colour_list(value)
+        if message is not None:
+            return None, message, None
+        return normalised, None, None
+
     # Unreachable for a format-valid schema.
     return None, _WRONG_TYPE_TEXT, None
 
 
 def _is_answered(question: dict, normalised: object) -> bool:
-    if question.get("type") == "multi_choice":
+    if question.get("type") in ("multi_choice", "colour_list"):
         return isinstance(normalised, list) and len(normalised) > 0
     if question.get("type") == "text":
         return isinstance(normalised, str) and normalised != ""
@@ -140,6 +231,9 @@ def validate_questionnaire_answers(
         raise QuestionnaireAnswerError({TOP_LEVEL_ERROR_KEY: ["Answers must be an object."]})
 
     errors: dict[str, list[str]] = {}
+    # The design's own palette, resolved first so a custom colour_choice can be
+    # checked against it regardless of key order.
+    custom_palette = _custom_palette(index, answers)
     # Structural pass: type + declared-option membership only, so we can build
     # the selected-values view that rule evaluation needs.
     structural: dict[str, object] = {}
@@ -149,7 +243,7 @@ def validate_questionnaire_answers(
         if question is None:
             errors[str(key)] = [_UNKNOWN_QUESTION]
             continue
-        structural_value, message, selected_set = _structural_value(question, value)
+        structural_value, message, selected_set = _structural_value(question, value, custom_palette)
         if message is not None:
             errors[key] = [message]
             continue
@@ -184,6 +278,15 @@ def validate_questionnaire_answers(
             message = _validate_multi(structural_value, constraints, require_complete)
             if message is not None:
                 errors[key] = [message]
+                continue
+        elif question_type == "colour_list":
+            max_items = constraints.get("max_items")
+            if (
+                isinstance(max_items, int)
+                and not isinstance(max_items, bool)
+                and len(structural_value) > max_items
+            ):
+                errors[key] = [_TOO_MANY_ITEMS.format(count=max_items)]
                 continue
         elif question_type == "text":
             message = _validate_text(structural_value, constraints, require_complete)

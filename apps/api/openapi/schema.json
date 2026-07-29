@@ -692,6 +692,275 @@
                 }
             }
         },
+        "/api/v1/designs/{design_id}/inspiration-uploads/": {
+            "post": {
+                "operationId": "designs_inspiration_upload_create",
+                "description": "Sanitises one uploaded image (JPEG, PNG or single-frame WebP) into a clean WebP: EXIF orientation applied, then all EXIF/GPS/XMP/ICC metadata stripped. The original bytes are never stored. The user must affirm they hold the rights to the image. Uploads and curated selections share one limit. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Upload an inspiration image",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "requestBody": {
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/InspirationUploadWriteRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InspirationUploadResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "The design's inspiration limit is already reached."
+                    },
+                    "413": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "The request body is too large."
+                    },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Too many uploads for now."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "The image could not be stored, or uploads are briefly unavailable."
+                    }
+                }
+            }
+        },
+        "/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/": {
+            "delete": {
+                "operationId": "designs_inspiration_upload_delete",
+                "description": "Deletes the private object and then the row. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Remove an uploaded inspiration image",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "upload_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Removed."
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "The image could not be removed."
+                    }
+                }
+            }
+        },
+        "/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/image/": {
+            "get": {
+                "operationId": "designs_inspiration_upload_image",
+                "description": "Streams the sanitised WebP for one of the design's own uploads. No storage keys or storage URLs are exposed. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "An uploaded inspiration image",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "upload_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The sanitised WebP image bytes."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "The image is temporarily unreadable."
+                    }
+                }
+            }
+        },
         "/api/v1/designs/{design_id}/refine/": {
             "post": {
                 "operationId": "designs_refine",
@@ -1564,6 +1833,12 @@
                             "$ref": "#/components/schemas/SelectedInspiration"
                         }
                     },
+                    "inspiration_uploads": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/InspirationUpload"
+                        }
+                    },
                     "latest_job": {
                         "allOf": [
                             {
@@ -1585,6 +1860,7 @@
                     "answers",
                     "created_at",
                     "id",
+                    "inspiration_uploads",
                     "latest_job",
                     "questionnaire",
                     "selected_inspirations",
@@ -2211,6 +2487,72 @@
                     "assets"
                 ]
             },
+            "InspirationUpload": {
+                "type": "object",
+                "description": "One image the user uploaded as inspiration for their own design.\n\nOnly the sanitised WebP derivative exists server-side; its bytes are served\nexclusively by the ownership-checked image endpoint. No storage key, image\nhash, byte size, filename or client-declared content type is ever\nexposed.",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "position": {
+                        "type": "integer"
+                    },
+                    "width": {
+                        "type": "integer"
+                    },
+                    "height": {
+                        "type": "integer"
+                    },
+                    "rights_acknowledged_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "When the user affirmed they hold the rights to this image."
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": [
+                    "created_at",
+                    "height",
+                    "id",
+                    "position",
+                    "rights_acknowledged_at",
+                    "width"
+                ]
+            },
+            "InspirationUploadResponse": {
+                "type": "object",
+                "properties": {
+                    "upload": {
+                        "$ref": "#/components/schemas/InspirationUpload"
+                    }
+                },
+                "required": [
+                    "upload"
+                ]
+            },
+            "InspirationUploadWriteRequest": {
+                "type": "object",
+                "description": "The multipart upload body.\n\nThe client's filename and declared content type are deliberately IGNORED —\nthe decoded image is the only thing trusted (see\n``designs.upload_processing``).",
+                "properties": {
+                    "image": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "The image file. JPEG, PNG or single-frame WebP."
+                    },
+                    "rights_acknowledged": {
+                        "type": "boolean",
+                        "description": "Must be true: the user affirms they hold the rights to this image."
+                    }
+                },
+                "required": [
+                    "image",
+                    "rights_acknowledged"
+                ]
+            },
             "LiveResponse": {
                 "type": "object",
                 "properties": {
@@ -2408,7 +2750,7 @@
             },
             "QuestionConstraintsSchema": {
                 "type": "object",
-                "description": "Bounded per-question-type constraint mapping (all keys optional).\n\n``min_items``/``max_items``/``exclusive_values`` apply to ``multi_choice``;\n``min_length``/``max_length`` apply to ``text``. Choice questions may omit\nconstraints entirely.",
+                "description": "Bounded per-question-type constraint mapping (all keys optional).\n\n``min_items``/``max_items``/``exclusive_values`` apply to ``multi_choice``;\n``min_length``/``max_length`` apply to ``text``; ``max_items`` alone applies\nto ``colour_list``; ``allow_custom`` applies to ``colour_choice``.\n``single_choice`` takes no constraints.",
                 "properties": {
                     "min_items": {
                         "type": "integer"
@@ -2427,6 +2769,10 @@
                     },
                     "max_length": {
                         "type": "integer"
+                    },
+                    "allow_custom": {
+                        "type": "boolean",
+                        "description": "colour_choice only. When true the answer may also be a six-digit lower-case hex colour drawn from the design's colour_list answer, in addition to the declared swatches."
                     }
                 }
             },
@@ -2442,6 +2788,14 @@
                     },
                     "description": {
                         "type": "string"
+                    },
+                    "visual_key": {
+                        "type": "string",
+                        "description": "Optional lower-case machine key mapping to a frontend-owned explanatory visual. Never a URL, path or asset reference."
+                    },
+                    "group": {
+                        "type": "string",
+                        "description": "Optional lower-case machine group for compact grouped rendering (e.g. colour groups). Presentation only; never influences generation."
                     }
                 },
                 "required": [
@@ -2473,7 +2827,7 @@
                         "items": {
                             "$ref": "#/components/schemas/QuestionOptionSchema"
                         },
-                        "description": "Present for choice questions."
+                        "description": "Present for single_choice, multi_choice and colour_choice. Absent for text and colour_list, whose values are user-supplied."
                     },
                     "constraints": {
                         "$ref": "#/components/schemas/QuestionConstraintsSchema"
@@ -2781,12 +3135,14 @@
             },
             "TypeEnum": {
                 "enum": [
+                    "colour_choice",
+                    "colour_list",
                     "multi_choice",
                     "single_choice",
                     "text"
                 ],
                 "type": "string",
-                "description": "* `multi_choice` - multi_choice\n* `single_choice` - single_choice\n* `text` - text"
+                "description": "* `colour_choice` - colour_choice\n* `colour_list` - colour_list\n* `multi_choice` - multi_choice\n* `single_choice` - single_choice\n* `text` - text"
             },
             "ValidationErrorEnvelope": {
                 "type": "object",

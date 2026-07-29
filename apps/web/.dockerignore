@@ -1,0 +1,6 @@
+# The image installs a clean, platform-correct dependency tree via `npm ci`;
+# never copy a host node_modules (which may carry the wrong platform's native
+# binaries) or local build output over it.
+node_modules
+.next
+npm-debug.log*

@@ -330,7 +330,8 @@ class TestControlledUnavailability:
     def test_unsupported_schema_version_returns_controlled_503(self):
         client = csrf_client()
         design_id = _make_owned_design(client)
-        version = _attach_ready_version(design_id, schema_version=2)
+        # 1 and 2 are supported; 99 is a genuinely unsupported future version.
+        version = _attach_ready_version(design_id, schema_version=99)
         response = client.get(_result_url(design_id, version.pk))
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "design_result_unavailable"

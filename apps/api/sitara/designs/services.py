@@ -380,13 +380,25 @@ def _replace_inspirations(design: Design, inspiration_asset_ids) -> None:
             "Invalid inspiration selection.",
             field_errors={"inspiration_asset_ids": ["Must be a list of asset ids."]},
         )
-    if len(inspiration_asset_ids) > settings.MAX_INSPIRATION_IMAGES:
+    # The limit is SHARED with the design's own uploaded inspirations (Phase
+    # 16B): a bride who has uploaded two of her own images may select only one
+    # curated preset. Counted under the Design row lock the caller holds, so a
+    # concurrent upload cannot slip past it.
+    limit = settings.MAX_INSPIRATION_IMAGES
+    uploads_used = design.inspiration_uploads.count()
+    # Clamped at zero: if the cap were ever lowered below an existing upload
+    # count, a negative budget would reject even CLEARING the curated
+    # selections — the one action that helps.
+    if len(inspiration_asset_ids) > max(limit - uploads_used, 0):
         raise DraftUpdateError(
             "validation_failed",
             "Too many inspiration images selected.",
             field_errors={
                 "inspiration_asset_ids": [
-                    f"Select at most {settings.MAX_INSPIRATION_IMAGES} inspiration images."
+                    f"Select at most {limit} inspiration images in total, including "
+                    "any you have uploaded."
+                    if uploads_used
+                    else f"Select at most {limit} inspiration images."
                 ]
             },
         )

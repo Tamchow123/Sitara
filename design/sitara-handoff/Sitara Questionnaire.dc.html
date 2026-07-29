@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="_ds/organic-ccb06f12-17fe-45b2-9248-ebf010085646/styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+  <script src="_ds/organic-ccb06f12-17fe-45b2-9248-ebf010085646/_ds_bundle.js"></script>
+  <script src="image-slot.js"></script>
+  <style>
+    html, body { margin: 0; background: var(--color-bg); }
+    a { color: var(--color-accent-700); } a:hover { color: var(--color-accent-800); }
+    @keyframes sitaraUp { from { transform: translateY(18px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes sitaraFade { from { opacity: 0; } to { opacity: 1; } }
+    .qgrid { grid-template-columns: repeat(2, 1fr); }
+    @media (min-width: 700px) { .qgrid { grid-template-columns: repeat(3, 1fr); } }
+    .optcard:focus-within { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+    .stepnav-desktop { display: none; }
+    .stepnav-mobile { display: flex; }
+    @media (min-width: 700px) { .stepnav-desktop { display: flex; } .stepnav-mobile { display: none; } }
+  </style>
+</helmet>
+<div style="min-height:100vh;font-family:var(--font-body);color:var(--color-text);font-size:16px">
+  <header style="max-width:1020px;margin:0 auto;padding:var(--space-6) var(--space-4) 0">
+    <a href="Sitara Home.dc.html" aria-label="Sitara — back to start" style="display:inline-flex;align-items:center;gap:var(--space-2);text-decoration:none;color:var(--color-text);border-radius:999px;padding:4px 14px 4px 4px;transition:background .15s" style-hover="background:var(--color-accent-100)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">
+      <span style="width:36px;height:36px;border-radius:999px;background:var(--color-accent);color:var(--color-bg);display:grid;place-items:center;flex:none">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 L14.4 9.6 L22 12 L14.4 14.4 L12 22 L9.6 14.4 L2 12 L9.6 9.6 Z"></path></svg>
+      </span>
+      <span style="font-family:'Cormorant Garamond',serif;font-weight:600;letter-spacing:.04em;font-size:27px">Sitara</span>
+    </a>
+    <p style="margin:var(--space-3) 0 0;font-size:15px;color:var(--color-neutral-800);max-width:58ch">Answer as much or as little as you like — anything you leave open, Sitara will imagine for you.</p>
+    <nav aria-label="Questionnaire progress" class="stepnav-desktop" style="flex-wrap:wrap;gap:var(--space-1);margin:var(--space-4) 0 0">
+      <sc-for list="{{ steps }}" as="st" hint-placeholder-count="7">
+        <button onClick="{{ st.go }}" disabled="{{ st.locked }}" style="display:inline-flex;align-items:center;gap:7px;padding:6px 13px 6px 7px;border-radius:999px;border:none;cursor:pointer;background:{{ st.bg }};color:{{ st.fg }};font-family:var(--font-body);font-size:13px;font-weight:600;opacity:{{ st.opacity }};transition:background .15s" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">
+          <span style="width:21px;height:21px;border-radius:999px;display:grid;place-items:center;background:{{ st.dotBg }};color:{{ st.dotFg }};font-size:11px;font-weight:700;flex:none">{{ st.num }}</span>{{ st.label }}
+        </button>
+      </sc-for>
+    </nav>
+    <div class="stepnav-mobile" style="flex-direction:column;gap:var(--space-2);margin:var(--space-4) 0 0">
+      <div style="display:flex;align-items:center;gap:var(--space-3)">
+        <span style="font-size:13.5px;font-weight:700;white-space:nowrap;flex:none">Step {{ stepNum }} of 9</span>
+        <span style="flex:1"></span>
+        <button aria-expanded="{{ navOpen }}" onClick="{{ toggleNav }}" class="btn btn-ghost" style="padding:5px 14px;font-size:13px">{{ navLabel }}</button>
+      </div>
+      <div role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progPct }}" aria-label="Questionnaire progress" style="height:6px;border-radius:999px;background:var(--color-neutral-200);overflow:hidden">
+        <div style="height:100%;width:{{ progW }};background:var(--color-accent);border-radius:999px;transition:width .3s"></div>
+      </div>
+      <sc-if value="{{ navOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:2px;background:var(--color-neutral-100);border-radius:var(--radius-md);padding:var(--space-2)">
+          <sc-for list="{{ steps }}" as="st" hint-placeholder-count="3">
+            <button onClick="{{ st.go }}" disabled="{{ st.locked }}" style="display:flex;align-items:center;gap:var(--space-2);padding:9px 12px;border:none;border-radius:var(--radius-md);background:{{ st.bg }};color:{{ st.fg }};font-family:var(--font-body);font-size:14px;font-weight:600;cursor:pointer;text-align:left;opacity:{{ st.opacity }}" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">
+              <span style="width:21px;height:21px;border-radius:999px;display:grid;place-items:center;background:{{ st.dotBg }};color:{{ st.dotFg }};font-size:11px;font-weight:700;flex:none">{{ st.num }}</span>
+              <span style="flex:1">{{ st.label }}</span>
+              <span style="font-size:11.5px;font-weight:600;opacity:.75">{{ st.status }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+  </header>
+  <main style="max-width:1020px;margin:0 auto;padding:0 var(--space-4) var(--space-8)">
+    <sc-if value="{{ notReview }}" hint-placeholder-val="{{ true }}">
+      <div key="{{ stepKey }}" style="animation:sitaraUp .35s both">
+        <div style="margin:var(--space-8) 0 var(--space-6)">
+          <p style="margin:0 0 var(--space-1);font-size:13px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--color-accent-700)">{{ stepKicker }}</p>
+          <h1 style="font-family:var(--font-heading);font-weight:400;font-size:clamp(30px,4.5vw,42px);margin:0;line-height:1.12;text-wrap:pretty">{{ stepTitle }}</h1>
+        </div>
+        <sc-for list="{{ questions }}" as="q" hint-placeholder-count="2">
+          <fieldset style="margin:0 0 var(--space-8);border:none;padding:0;min-inline-size:auto">
+            <legend style="padding:0;margin:0;font-family:var(--font-heading);font-weight:400;font-size:24px;color:var(--color-text)">{{ q.title }}</legend>
+            <span role="status" style="font-size:13px;font-weight:600;color:var(--color-accent-2-700)">{{ q.limitNote }}</span>
+            <p style="margin:var(--space-1) 0 var(--space-4);font-size:15px;color:var(--color-neutral-800);max-width:62ch">{{ q.helper }}</p>
+            <sc-if value="{{ q.isCards }}" hint-placeholder-val="{{ true }}">
+              <div class="qgrid" style="display:grid;gap:var(--space-3)">
+                <sc-for list="{{ q.options }}" as="opt" hint-placeholder-count="4">
+                  <label class="optcard" style="grid-column:{{ opt.span }};position:relative;display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-2);background:{{ opt.bg }};border:2px solid {{ opt.border }};border-radius:var(--radius-md);cursor:pointer;transition:box-shadow .18s,transform .18s,border-color .18s,background .18s" style-hover="box-shadow:var(--shadow-md);transform:translateY(-2px)">
+                    <input type="{{ q.inputType }}" name="{{ q.key }}" checked="{{ opt.selected }}" onChange="{{ opt.toggle }}" aria-label="{{ opt.title }}" style="position:absolute;opacity:0;width:1px;height:1px;margin:0;pointer-events:none" />
+                    <sc-if value="{{ opt.hasImg }}" hint-placeholder-val="{{ true }}">
+                      <div onClickCapture="{{ opt.slotClick }}" class="washed" style="aspect-ratio:{{ q.aspect }};border-radius:calc(var(--radius-md) - 6px);overflow:hidden">
+                        <image-slot id="{{ opt.slotId }}" src="{{ opt.src }}" shape="rounded" radius="10" placeholder="{{ opt.ph }}"></image-slot>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ opt.hasIcon }}" hint-placeholder-val="{{ false }}">
+                      <div style="aspect-ratio:{{ q.aspect }};border-radius:calc(var(--radius-md) - 6px);background:{{ opt.iconBg }};color:{{ opt.iconFg }};display:grid;place-items:center">{{ opt.icon }}</div>
+                    </sc-if>
+                    <div style="display:flex;align-items:center;gap:var(--space-2);padding:2px var(--space-1) 3px">
+                      <sc-if value="{{ opt.compact }}" hint-placeholder-val="{{ false }}">
+                        <span style="color:var(--color-accent-2-700);display:grid;place-items:center;flex:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3 L13.9 10.1 L21 12 L13.9 13.9 L12 21 L10.1 13.9 L3 12 L10.1 10.1 Z"></path></svg></span>
+                      </sc-if>
+                      <span style="font-weight:600;font-size:15px;flex:1;line-height:1.25">{{ opt.title }}</span>
+                      <sc-if value="{{ opt.selected }}" hint-placeholder-val="{{ false }}">
+                        <span style="width:22px;height:22px;border-radius:999px;background:var(--color-accent);color:#fff;display:grid;place-items:center;flex:none">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+                        </span>
+                      </sc-if>
+                    </div>
+                    <sc-if value="{{ opt.hasInfo }}" hint-placeholder-val="{{ true }}">
+                      <button aria-label="About {{ opt.title }}" onClick="{{ opt.openInfo }}" style="position:absolute;top:9px;right:9px;width:26px;height:26px;border-radius:999px;border:none;background:color-mix(in srgb, #201e1d 52%, transparent);color:#fff;font-family:var(--font-heading);font-size:13px;cursor:pointer;display:grid;place-items:center;z-index:2;transition:background .15s" style-hover="background:var(--color-accent)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">i</button>
+                    </sc-if>
+                  </label>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ q.isNote }}" hint-placeholder-val="{{ false }}">
+              <textarea value="{{ q.noteVal }}" onChange="{{ q.setNote }}" rows="5" placeholder="{{ q.notePh }}" aria-label="{{ q.title }}" style="width:100%;box-sizing:border-box;max-width:640px;font-family:var(--font-body);font-size:16px;line-height:1.55;color:var(--color-text);background:var(--color-neutral-100);border:2px solid var(--color-neutral-200);border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);resize:vertical;outline:none" style-focus="border-color:var(--color-accent)"></textarea>
+            </sc-if>
+            <sc-if value="{{ q.isSwatch }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+                <div role="group" aria-label="{{ q.title }}" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+                  <sc-if value="{{ q.matchOff }}" hint-placeholder-val="{{ false }}">
+                    <button aria-pressed="false" onClick="{{ q.toggleMatch }}" style="height:38px;padding:0 16px;border-radius:999px;border:none;cursor:pointer;background:var(--color-neutral-100);color:var(--color-text);font-family:var(--font-body);font-size:13.5px;font-weight:600;transition:background .15s" style-hover="background:var(--color-neutral-200)" style-focus="outline:2px solid var(--color-accent);outline-offset:3px">Match the fabric</button>
+                  </sc-if>
+                  <sc-if value="{{ q.matchOn }}" hint-placeholder-val="{{ false }}">
+                    <button aria-pressed="true" onClick="{{ q.toggleMatch }}" style="height:38px;padding:0 16px;border-radius:999px;border:none;cursor:pointer;background:var(--color-accent);color:#fff;font-family:var(--font-body);font-size:13.5px;font-weight:600;display:inline-flex;align-items:center;gap:7px" style-focus="outline:2px solid var(--color-accent);outline-offset:3px">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>Match the fabric
+                    </button>
+                  </sc-if>
+                  <sc-for list="{{ q.swatches }}" as="c" hint-placeholder-count="12">
+                    <button title="{{ c.name }}" aria-label="{{ c.name }}" aria-pressed="{{ c.selected }}" onClick="{{ c.toggle }}" style="position:relative;width:38px;height:38px;border-radius:999px;border:none;padding:0;cursor:pointer;background:{{ c.hex }};box-shadow:{{ c.ring }};transition:box-shadow .15s,transform .15s" style-hover="transform:scale(1.09)" style-focus="outline:2px solid var(--color-accent);outline-offset:3px">
+                      <sc-if value="{{ c.selected }}" hint-placeholder-val="{{ false }}">
+                        <span style="position:absolute;inset:0;display:grid;place-items:center;color:{{ c.tick }}">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+                        </span>
+                      </sc-if>
+                      <sc-if value="{{ c.rank }}" hint-placeholder-val="{{ false }}">
+                        <span style="position:absolute;top:-6px;right:-6px;width:19px;height:19px;border-radius:999px;background:var(--color-text);color:var(--color-bg);font-size:11px;font-weight:700;display:grid;place-items:center;box-shadow:var(--shadow-sm)">{{ c.rank }}</span>
+                      </sc-if>
+                    </button>
+                  </sc-for>
+                  <button aria-expanded="{{ q.pickerOpen }}" onClick="{{ q.togglePicker }}" title="Choose any colour" style="display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 15px 0 11px;border-radius:999px;border:2px dashed var(--color-neutral-300);background:transparent;color:var(--color-neutral-800);cursor:pointer;font-family:var(--font-body);font-size:13.5px;font-weight:600" style-hover="border-color:var(--color-accent);color:var(--color-accent-700)" style-focus="outline:2px solid var(--color-accent);outline-offset:3px">
+                    <span style="width:19px;height:19px;border-radius:999px;background:conic-gradient(#c22b33,#e8a13a,#5d6e33,#14606b,#2b3d8f,#7c4a78,#c2377b,#c22b33);flex:none"></span>Any colour
+                  </button>
+                </div>
+                <sc-if value="{{ q.pickerOpen }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;padding:var(--space-3) var(--space-4);background:var(--color-neutral-100);border-radius:var(--radius-lg);max-width:520px;animation:sitaraFade .18s both">
+                    <input type="color" value="{{ q.draft }}" onChange="{{ q.setDraft }}" aria-label="Pick any colour" style="width:56px;height:56px;padding:0;border:none;border-radius:999px;background:none;cursor:pointer;flex:none" />
+                    <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:120px">
+                      <span style="font-size:13.5px;font-weight:700">{{ q.draft }}</span>
+                      <span style="font-size:12.5px;color:var(--color-neutral-700)">Drag the wheel, then add it to your palette.</span>
+                    </div>
+                    <button class="btn btn-primary" onClick="{{ q.addCustom }}" style="padding:8px 18px;font-size:14px">Add</button>
+                    <button class="btn btn-ghost" onClick="{{ q.togglePicker }}" style="padding:8px 14px;font-size:14px">Cancel</button>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ q.hasChosen }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center">
+                    <sc-for list="{{ q.chips }}" as="p" hint-placeholder-count="1">
+                      <span style="display:inline-flex;align-items:center;gap:7px;padding:5px 6px 5px 11px;border-radius:999px;background:var(--color-neutral-100);font-size:13px;font-weight:600">
+                        <span style="width:14px;height:14px;border-radius:999px;background:{{ p.hex }};flex:none"></span>{{ p.label }}
+                        <button aria-label="Remove {{ p.name }}" onClick="{{ p.remove }}" style="width:20px;height:20px;border-radius:999px;border:none;background:var(--color-neutral-200);color:var(--color-neutral-800);cursor:pointer;display:grid;place-items:center;font-size:13px;line-height:1" style-hover="background:var(--color-accent);color:#fff">×</button>
+                      </span>
+                    </sc-for>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-if>
+            <sc-if value="{{ q.hasUpload }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:var(--space-5);padding-top:var(--space-4);border-top:1px solid var(--color-neutral-200);display:flex;flex-direction:column;gap:var(--space-3)">
+                <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+                  <label style="display:inline-flex;align-items:center;gap:9px;padding:9px 18px;border-radius:999px;border:2px dashed var(--color-neutral-300);cursor:pointer;font-size:14px;font-weight:600;color:var(--color-neutral-800)" style-hover="border-color:var(--color-accent);color:var(--color-accent-700)">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
+                    Upload your own
+                    <input type="file" accept="image/*" multiple onChange="{{ q.onUpload }}" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" />
+                  </label>
+                  <span style="font-size:13.5px;color:var(--color-neutral-700)">{{ q.uploadNote }}</span>
+                </div>
+                <sc-if value="{{ q.hasUploads }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:var(--space-3)">
+                    <sc-for list="{{ q.uploads }}" as="u" hint-placeholder-count="0">
+                      <div style="position:relative">
+                        <div class="washed" role="img" aria-label="{{ u.name }}" style="{{ u.thumbStyle }}"></div>
+                        <button aria-label="Remove upload" onClick="{{ u.remove }}" style="position:absolute;top:7px;right:7px;width:26px;height:26px;border-radius:999px;border:none;background:color-mix(in srgb, #201e1d 55%, transparent);color:#fff;cursor:pointer;display:grid;place-items:center;font-size:14px;line-height:1" style-hover="background:var(--color-accent)">×</button>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-if>
+          </fieldset>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;border-top:1px solid var(--color-neutral-200);padding-top:var(--space-4)">
+          <sc-if value="{{ canBack }}" hint-placeholder-val="{{ false }}">
+            <button class="btn btn-secondary" onClick="{{ goBack }}">Back</button>
+          </sc-if>
+          <span style="flex:1;font-size:13.5px;color:var(--color-neutral-700);min-width:180px">{{ footHint }}</span>
+          <sc-if value="{{ showSkip }}" hint-placeholder-val="{{ false }}">
+            <button class="btn btn-ghost" onClick="{{ goNext }}">Skip</button>
+          </sc-if>
+          <button class="btn btn-primary" onClick="{{ goNext }}" disabled="{{ cannotContinue }}">{{ nextLabel }}</button>
+        </div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ isReview }}" hint-placeholder-val="{{ false }}">
+      <div style="animation:sitaraUp .35s both">
+        <div style="margin:var(--space-8) 0 var(--space-6)">
+          <p style="margin:0 0 var(--space-1);font-size:13px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--color-accent-700)">Your brief</p>
+          <h1 style="font-family:var(--font-heading);font-weight:400;font-size:clamp(30px,4.5vw,42px);margin:0;line-height:1.12;text-wrap:pretty">Everything Sitara will design from</h1>
+          <p style="margin:var(--space-3) 0 0;font-size:15px;color:var(--color-neutral-800);max-width:60ch">Look it over, and tap edit to revisit anything. Whatever you left open is Sitara's to dream up.</p>
+        </div>
+        <div style="background:var(--color-neutral-100);border-radius:var(--radius-lg);padding:var(--space-2) var(--space-6)">
+          <sc-for list="{{ summary }}" as="s" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) 0;border-bottom:1px solid {{ s.rule }}">
+              <span style="flex:0 0 29%;font-size:12px;text-transform:uppercase;letter-spacing:.07em;font-weight:700;color:var(--color-neutral-700)">{{ s.label }}</span>
+              <span style="flex:1;font-size:15px;font-weight:500;color:{{ s.color }}">{{ s.value }}</span>
+              <button class="btn btn-ghost" onClick="{{ s.edit }}" style="padding:5px 14px;font-size:13px">Edit</button>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display:flex;gap:var(--space-3);margin-top:var(--space-6);flex-wrap:wrap;align-items:center">
+          <a href="Sitara Generation.dc.html" class="btn btn-primary" style="text-decoration:none">Begin designing</a>
+          <button class="btn btn-ghost" onClick="{{ startOver }}">Start over</button>
+        </div>
+      </div>
+    </sc-if>
+  </main>
+  <sc-if value="{{ drawerOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeDrawer }}" style="position:fixed;inset:0;background:rgba(32,30,29,.45);z-index:50;animation:sitaraFade .2s both"></div>
+    <div role="dialog" aria-modal="true" aria-label="{{ drawerTitle }}" ref="{{ drawerRef }}" tabIndex="-1" onKeyDown="{{ drawerKey }}" style="outline:none;position:fixed;left:0;right:0;bottom:0;z-index:51;background:var(--color-bg);border-radius:var(--radius-lg) var(--radius-lg) 0 0;box-shadow:var(--shadow-lg);padding:var(--space-3) var(--space-6) var(--space-8);max-width:620px;margin:0 auto;animation:sitaraUp .28s both">
+      <div style="width:44px;height:5px;border-radius:999px;background:var(--color-neutral-300);margin:0 auto var(--space-4)"></div>
+      <div style="display:flex;align-items:center;gap:var(--space-3)">
+        <h3 style="font-family:var(--font-heading);font-weight:400;font-size:24px;margin:0;flex:1">{{ drawerTitle }}</h3>
+        <button class="btn btn-ghost" onClick="{{ closeDrawer }}" style="padding:6px 16px">Close</button>
+      </div>
+      <p style="font-size:16px;line-height:1.6;margin:var(--space-3) 0 var(--space-2)">{{ drawerBody }}</p>
+      <p style="font-size:13px;color:var(--color-accent-700);margin:0;font-weight:700;letter-spacing:.04em">{{ drawerMeta }}</p>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;maxFabricColours&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:2,&quot;min&quot;:1,&quot;max&quot;:4,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Selection limits&quot;},&quot;maxEmbColours&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:3,&quot;min&quot;:1,&quot;max&quot;:5,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Selection limits&quot;},&quot;maxFabrics&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:3,&quot;min&quot;:1,&quot;max&quot;:6,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Selection limits&quot;},&quot;maxEmbroidery&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:4,&quot;min&quot;:1,&quot;max&quot;:8,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Selection limits&quot;},&quot;showHelpers&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Copy&quot;}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { step: 0, maxReached: 0, drawer: null, finished: false, navOpen: false, picker: null, draft: '#c67139', a: this.blank() };
+    const SH = ['M4 60 C6 40 12 33 24 29', 'M76 60 C74 40 68 33 56 29'];
+    const neck = (extra) => this.ic(SH.concat(extra).map(d => ({ d })));
+    const arm = (frac) => {
+      const items = [{ d: 'M14 12 C36 8 58 22 64 56', o: .3 }, { cx: 14, cy: 12, r: 3.2, fill: true }];
+      if (frac > 0) items.push({ d: 'M14 12 C36 8 58 22 64 56', w: 6.5, pl: 100, dash: frac + ' 100' });
+      return this.ic(items);
+    };
+    const back = (d) => this.ic(SH.map(x => ({ d: x })).concat([{ d }, { d: 'M22 58 L58 58', o: .3 }]));
+    const mid = (extra) => this.ic([{ d: 'M24 8 L19 56', o: .3 }, { d: 'M56 8 L61 56', o: .3 }, { d: 'M15 56 L65 56' }].concat(extra));
+    const dots = (pts) => this.ic([{ x: 12, y: 8, wd: 56, ht: 48, rx: 12 }].concat(pts.map(p => ({ cx: p[0], cy: p[1], r: 2.4, fill: true }))));
+    this.icons = {
+      crew: neck(['M24 29 C30 38 50 38 56 29']), scoop: neck(['M24 29 C28 48 52 48 56 29']),
+      v: neck(['M24 29 L40 50 L56 29']), deepv: neck(['M24 29 L40 60 L56 29']),
+      boat: neck(['M20 28 C32 34 48 34 60 28']), square: neck(['M24 29 L24 46 L56 46 L56 29']),
+      sweetheart: neck(['M24 29 C24 41 32 45 40 38 C48 45 56 41 56 29']),
+      high: neck(['M26 20 C32 25 48 25 54 20', 'M26 20 L24 29', 'M54 20 L56 29']),
+      band: neck(['M27 22 L27 14 Q27 11 30 11 L50 11 Q53 11 53 14 L53 22', 'M27 22 C34 26 46 26 53 22']),
+      sl0: arm(0), sl14: arm(14), sl46: arm(46), sl70: arm(70), sl100: arm(100),
+      backOpen: back('M24 29 C27 60 53 60 56 29'), backDeep: back('M24 29 C28 47 52 47 56 29'), backModest: back('M24 29 C31 36 49 36 56 29'),
+      midBare: mid([{ d: 'M23 26 L57 26' }]),
+      midSheer: mid([{ d: 'M23 26 L57 26' }, { d: 'M31 26 L29 56', dash: '3 5', w: 2 }, { d: 'M40 26 L40 56', dash: '3 5', w: 2 }, { d: 'M49 26 L51 56', dash: '3 5', w: 2 }]),
+      midCovered: mid([{ d: 'M23 26 L57 26', o: .25 }, { d: 'M20 51 L60 51' }]),
+      headNone: this.ic([{ cx: 40, cy: 24, r: 13 }, { d: 'M20 60 C26 44 54 44 60 60' }]),
+      headDupatta: this.ic([{ cx: 40, cy: 27, r: 10.5 }, { d: 'M25 30 C20 4 60 4 55 30 C55 44 58 50 62 58' }, { d: 'M25 30 C25 44 22 50 18 58' }]),
+      headVeil: this.ic([{ cx: 40, cy: 27, r: 10.5 }, { d: 'M25 28 C20 2 60 2 55 28' }, { d: 'M25 28 C22 44 16 54 9 62' }, { d: 'M55 28 C58 44 64 54 71 62' }, { d: 'M40 38 L40 62', dash: '2 6', o: .45, w: 2 }]),
+      sparkle: this.ic([{ d: 'M40 12 L44 27 L59 32 L44 37 L40 52 L36 37 L21 32 L36 27 Z' }]),
+      rich1: dots([[26, 40], [40, 20], [54, 40]]),
+      rich2: dots([[26, 18], [54, 18], [40, 30], [26, 42], [54, 42]]),
+      rich3: dots([[20, 16], [33, 16], [47, 16], [60, 16], [20, 32], [33, 32], [47, 32], [60, 32], [20, 48], [33, 48], [47, 48], [60, 48]])
+    };
+    this.D = this.data();
+    this.IMG = this.imgMap();
+  }
+  imgMap() {
+    const U = 'uploads/images/';
+    const m = {
+      'ceremony:nikah': '@Nikah.png',
+      'ceremony:mehndi': '@mendhi.png',
+      'ceremony:baraat': '@Baraat.png',
+      'ceremony:walima': '@Walima.png',
+      'ceremony:pheras': '@Pheras.png',
+      'ceremony:anand': '@Anand%20Karaj.png',
+      'ceremony:reception': '@Reception.png',
+
+      'garment:lehenga': '03-garments/sitara__garments__lehenga__v2.jpg',
+      'garment:saree': '03-garments/sitara__garments__saree__v1.jpg',
+      'garment:gharara': '03-garments/sitara__garments__gharara__v2.jpg',
+      'garment:sharara': '03-garments/sitara__garments__sharara__v3.jpg',
+      'garment:anarkali': '03-garments/sitara__garments__anarkali__v1.jpg',
+      'garment:shalwar': '03-garments/sitara__garments__shalwar_kameez__v1.jpg',
+
+      'culture:pakistani': '04-cultural-styling/sitara__cultural_styling__pakistani__v2.jpg',
+      'culture:bangladeshi': '04-cultural-styling/sitara__cultural_styling__bangladeshi__v2.jpg',
+      'culture:north-indian': '04-cultural-styling/sitara__cultural_styling__north_indian__v2.jpg',
+      'culture:south-indian': '04-cultural-styling/sitara__cultural_styling__south_indian__v2.jpg',
+      'culture:punjabi': '04-cultural-styling/sitara__cultural_styling__punjabi__v2.jpg',
+      'culture:gujarati': '04-cultural-styling/sitara__cultural_styling__gujarati__v2.jpg',
+      'culture:rajasthani': '04-cultural-styling/sitara__cultural_styling__rajasthani__v1.jpg',
+      'culture:hyderabadi': '04-cultural-styling/sitara__cultural_styling__hyderabadi__v1.jpg',
+
+      'silhouette:a-line': '05-silhouettes/lehenga/sitara__silhouettes_lehenga__a_line_lehenga__v1.jpg',
+      'silhouette:flare': '05-silhouettes/lehenga/sitara__silhouettes_lehenga__flared_lehenga__v1.jpg',
+      'silhouette:mermaid': '05-silhouettes/lehenga/sitara__silhouettes_lehenga__mermaid_lehenga__v1.jpg',
+      'silhouette:kali': '@Lehenga%20-%20Panelled%20kali.png',
+      'silhouette:classic-drape': '05-silhouettes/saree/sitara__silhouettes_saree__classic_saree_drape__v1.jpg',
+      'silhouette:lehenga-saree': '05-silhouettes/saree/sitara__silhouettes_saree__lehenga_style_saree__v1.jpg',
+      'silhouette:half-saree': '@clean/half-saree-langa-voni.png',
+      'silhouette:classic-gharara': '05-silhouettes/gharara/sitara__silhouettes_gharara__gharara_construction__v1.jpg',
+      'silhouette:farshi-gharara': '@Gharara%20-%20Farshi.png',
+      'silhouette:slim-gharara': '05-silhouettes/gharara/sitara__silhouettes_gharara__gharara_construction__v2.jpg',
+      'silhouette:classic-sharara': '@Sharara%20-%20Classic%20flare.png',
+      'silhouette:high-sharara': '05-silhouettes/sharara/sitara__silhouettes_sharara__sharara_construction__v1.jpg',
+      'silhouette:farshi-sharara': '@Farshi.png',
+      'silhouette:floor-anarkali': '05-silhouettes/anarkali/sitara__silhouettes_anarkali__floor_length_anarkali__v1.jpg',
+      'silhouette:kalidar': '@Anarkali%20-%20Kalidar.png',
+      'silhouette:front-open': '@../front-open.png',
+      'silhouette:jacket-anarkali': '@../jacket-style.png',
+      'silhouette:straight-kameez': '05-silhouettes/shalwar-kameez/sitara__silhouettes_shalwar_kameez__straight_kameez__v1.jpg',
+      'silhouette:aline-kameez': '05-silhouettes/shalwar-kameez/sitara__silhouettes_shalwar_kameez__a_line_kameez__v1.jpg',
+
+      'silhouette:straight': '@Straight-cut%20lehenga.png',
+      'silhouette:pre-stitched': '@Pre-stitched%20saree.png',
+      'silhouette:angrakha': '@Angrakha%20kameez.png',
+      'silhouette:longline': '@Long-line%20kameez.png',
+      'midriff:midSheer': '@../Semi-sheer%20midriff-f675490e.png',
+      'head:headHijab': '@clean/hijab-full-coverage.png',
+      'richness:minimal': '@sitara-minimal.png',
+      'richness:balanced': '@sitara-balanced.png',
+      'richness:rich': '@sitara-heavy.png',
+
+      'fabrics:silk': '06-fabrics/sitara__fabrics__silk.jpg',
+      'fabrics:rawsilk': '06-fabrics/sitara__fabrics__raw_silk__v1.jpg',
+      'fabrics:satin': '06-fabrics/sitara__fabrics__satin.jpg',
+      'fabrics:velvet': '06-fabrics/sitara__fabrics__velvet.jpg',
+      'fabrics:organza': '06-fabrics/sitara__fabrics__organza.jpg',
+      'fabrics:chiffon': '06-fabrics/sitara__fabrics__chiffon.jpg',
+      'fabrics:georgette': '06-fabrics/sitara__fabrics__georgette__v1.jpg',
+      'fabrics:net': '06-fabrics/sitara__fabrics__net__v1.jpg',
+      'fabrics:brocade': '06-fabrics/sitara__fabrics__brocade.jpg',
+      'fabrics:jamawar': '06-fabrics/sitara__fabrics__jamawar__v1.jpg',
+      'fabrics:tissue': '06-fabrics/sitara__fabrics__tissue__v1.jpg',
+      'fabrics:cottonsilk': '06-fabrics/sitara__fabrics__cotton_silk__v1.jpg',
+
+      'embroidery:zardozi': '07-embroidery/sitara__embroidery__zardozi__v1.jpg',
+      'embroidery:dabka': '07-embroidery/sitara__embroidery__dabka__v1.jpg',
+      'embroidery:nakshi': '07-embroidery/sitara__embroidery__nakshi__v1.jpg',
+      'embroidery:gota': '07-embroidery/sitara__embroidery__gota_patti__v1.jpg',
+      'embroidery:mirror': '07-embroidery/sitara__embroidery__mirror_work__v3.jpg',
+      'embroidery:resham': '07-embroidery/sitara__embroidery__resham__v2.jpg',
+      'embroidery:chikankari': '07-embroidery/sitara__embroidery__chikankari__v1.jpg',
+      'embroidery:sequins': '07-embroidery/sitara__embroidery__sequins__v1.jpg',
+      'embroidery:pearls': '07-embroidery/sitara__embroidery__pearls__v1.jpg',
+      'embroidery:crystals': '07-embroidery/sitara__embroidery__crystals__v1.jpg',
+      'embroidery:beads': '07-embroidery/sitara__embroidery__beadwork__v2.jpg',
+      'embroidery:applique': '07-embroidery/sitara__embroidery__applique__v1.jpg',
+
+      'neckline:crew': '08-necklines/sitara__necklines__crew__v1.jpg',
+      'neckline:scoop': '08-necklines/sitara__necklines__scoop__v1.jpg',
+      'neckline:v': '08-necklines/sitara__necklines__v_neck__v1.jpg',
+      'neckline:deepv': '08-necklines/sitara__necklines__deep_v__v1.jpg',
+      'neckline:boat': '08-necklines/sitara__necklines__boat__v1.jpg',
+      'neckline:square': '08-necklines/sitara__necklines__square__v1.jpg',
+      'neckline:sweetheart': '08-necklines/sitara__necklines__sweetheart__v1.jpg',
+      'neckline:high': '08-necklines/sitara__necklines__high_neck__v2.jpg',
+      'neckline:band': '08-necklines/sitara__necklines__band_mandarin_collar__v1.jpg',
+
+      'sleeves:sl0': '09-sleeves/sitara__sleeves__sleeveless__v1.jpg',
+      'sleeves:sl14': '@../sitara__sleeves__short_sleeves__v2.jpg',
+      'sleeves:sl46': '09-sleeves/sitara__sleeves__elbow_sleeves__v1.jpg',
+      'sleeves:sl70': '09-sleeves/sitara__sleeves__three_quarter_sleeves__v1.jpg',
+      'sleeves:sl100': '09-sleeves/sitara__sleeves__full_sleeve__v1.jpg',
+
+      'back:backOpen': '10-back-coverage/sitara__back_coverage__open_back__v1.jpg',
+      'back:backDeep': '10-back-coverage/sitara__back_coverage__deep_cut_back__v1.jpg',
+      'back:backModest': '10-back-coverage/sitara__back_coverage__modest_back__v1.jpg',
+
+      'midriff:midBare': '11-midriff/sitara__midriff__bare__v1.jpg',
+      'midriff:midCovered': '11-midriff/sitara__midriff__covered__v1.jpg',
+
+      'head:headNone': '12-head-covering/sitara__head_covering__uncovered__v1.jpg',
+      'head:headDupatta': '12-head-covering/sitara__head_covering__dupatta_over_head__v1.jpg',
+      'head:headVeil': '12-head-covering/sitara__head_covering__veil_style__v2.jpg',
+
+      'drape:nivi': '13-saree-drapes/sitara__saree_drapes__nivi_drape__v1.jpg',
+      'drape:atpoure': '13-saree-drapes/sitara__saree_drapes__bengali_drape__v1.jpg',
+      'drape:seedha': '13-saree-drapes/sitara__saree_drapes__seedha_pallu__v1.jpg',
+      'drape:lehenga-drape': '13-saree-drapes/sitara__saree_drapes__pinned_pleats__v1.jpg',
+
+      'dupatta:one-shoulder': '14-dupatta-styling/sitara__dupatta_styling__one_shoulder__v1.jpg',
+      'dupatta:front-pallu': '14-dupatta-styling/sitara__dupatta_styling__front_drape__v1.jpg',
+      'dupatta:over-head': '@Dupatta%20Over%20the%20head.png',
+      'dupatta:double': '14-dupatta-styling/sitara__dupatta_styling__double_dupatta__v1.jpg',
+      'dupatta:trail': '@Dupatta%20Trail.png',
+
+      'inspiration:insp-blush-gharara': '03-garments/sitara__garments__gharara__v1.jpg',
+      'inspiration:insp-ivory-anarkali': '03-garments/sitara__garments__anarkali__v2.jpg',
+      'inspiration:insp-maroon-saree': '02-ceremonies/sitara__ceremonies__pheras__v2.jpg',
+      'inspiration:insp-emerald-lehenga': '02-ceremonies/sitara__ceremonies__walima__v2.jpg',
+      'inspiration:insp-champagne-sharara': '03-garments/sitara__garments__sharara__v1.jpg',
+      'inspiration:insp-rani-lehenga': '03-garments/sitara__garments__lehenga__v3.jpg',
+      'inspiration:insp-scarlet-benarasi': '02-ceremonies/sitara__ceremonies__anand_karaj__v2.jpg',
+      'inspiration:insp-powder-anarkali': '03-garments/sitara__garments__anarkali__v3.jpg',
+      'inspiration:insp-rust-farshi': '03-garments/sitara__garments__gharara__v3.jpg',
+      'inspiration:insp-pearl-chikankari': '03-garments/sitara__garments__shalwar_kameez__v2.jpg',
+      'inspiration:insp-peacock-halfsaree': '03-garments/sitara__garments__sharara__v4.jpg',
+      'inspiration:insp-gold-jamawar': '03-garments/sitara__garments__lehenga__v1.jpg'
+    };
+    const out = {};
+    Object.keys(m).forEach(k => { const v = m[k]; out[k] = v[0] === '@' ? 'uploads/gaps/' + v.slice(1) : U + v; });
+    return out;
+  }
+  blank() {
+    return { ceremony: null, garment: null, culture: null, silhouette: null, fabricColours: [], embColours: [], dupattaColour: null, customColours: [], uploads: [], fabrics: [], embroidery: [], richness: null, neckline: null, sleeves: null, back: null, midriff: null, head: null, drape: null, dupatta: null, inspiration: [], note: '' };
+  }
+  ic(items) {
+    return React.createElement('svg', { viewBox: '0 0 80 64', style: { width: '72%', height: '72%', maxWidth: 110 }, 'aria-hidden': true },
+      items.map((it, i) => {
+        const p = { key: i, fill: it.fill ? 'currentColor' : 'none', stroke: it.fill ? 'none' : 'currentColor', strokeWidth: it.w || 2.75, strokeLinecap: 'round', strokeLinejoin: 'round', opacity: it.o, strokeDasharray: it.dash };
+        if (it.d) return React.createElement('path', Object.assign(p, { d: it.d, pathLength: it.pl }));
+        if (it.r != null) return React.createElement('circle', Object.assign(p, { cx: it.cx, cy: it.cy, r: it.r }));
+        return React.createElement('rect', Object.assign(p, { x: it.x, y: it.y, width: it.wd, height: it.ht, rx: it.rx }));
+      }));
+  }
+  data() {
+    const o = (id, t, info, meta) => ({ id, t, info, meta });
+    return {
+      ceremonies: [
+        o('nikah', 'Nikah', 'The Islamic marriage contract ceremony — often intimate and serene. Brides frequently choose softer palettes: ivory, blush, silver and gold.', 'Muslim tradition'),
+        o('mehndi', 'Mehndi', 'The henna night — the most joyful, colourful event. Yellows, greens and oranges in lighter outfits that are easy to dance in.', 'Celebrated across South Asia'),
+        o('baraat', 'Baraat', 'The main wedding day in Pakistani tradition, when the groom\u2019s procession arrives. The bride\u2019s most formal, richly worked ensemble.', 'Pakistani tradition'),
+        o('walima', 'Walima', 'The reception feast hosted by the groom\u2019s family after the nikah. Elegant pastels, regal silhouettes and refined embellishment.', 'Muslim tradition'),
+        o('pheras', 'Pheras', 'The Hindu vows taken in circles around the sacred fire. Traditionally auspicious reds and maroons woven with gold.', 'Hindu tradition'),
+        o('anand', 'Anand Karaj', 'The Sikh wedding ceremony held at the gurdwara. Rich daytime colours with modest coverage and the head gracefully covered.', 'Sikh tradition'),
+        o('reception', 'Reception', 'The celebration where convention relaxes — contemporary glamour, deep jewel tones and statement silhouettes all belong.', 'Celebrated across South Asia')
+      ],
+      garments: [
+        o('lehenga', 'Lehenga', 'A full, flared skirt paired with a fitted blouse (choli) and a dupatta. The most beloved bridal choice across North India and Pakistan.', 'Worn across South Asia'),
+        o('saree', 'Saree', 'A single unstitched length of cloth, five to nine yards, draped over a blouse and petticoat. Endlessly versatile in drape, fabric and mood.', 'Worn across South Asia'),
+        o('gharara', 'Gharara', 'Wide-legged trousers that flare dramatically from the knee, worn with a short kurti and dupatta. A signature of Lucknowi and Pakistani weddings.', 'Lucknowi & Pakistani heritage'),
+        o('sharara', 'Sharara', 'Flared, palazzo-like trousers falling loose from the waist, paired with a kameez or short kurti. Festive, graceful and easy to move in.', 'Mughal-era heritage'),
+        o('anarkali', 'Anarkali', 'A long, frock-style kameez that flares from the bodice into a full skirt, worn over slim churidar trousers. Named for its Mughal-court silhouette.', 'Mughal-era heritage'),
+        o('shalwar', 'Shalwar Kameez', 'A tunic (kameez) worn over drawn trousers (shalwar) with a dupatta. Graceful, comfortable and deeply traditional.', 'Pakistani & Punjabi heritage')
+      ],
+      cultures: [
+        o('pakistani', 'Pakistani', 'Farshi ghararas, generous dupattas, and kundan and dabka work in deep reds, rusts and golds.', 'Styling influence'),
+        o('bangladeshi', 'Bangladeshi', 'Rich Benarasi and jamdani weaves, red-and-white motifs, and gold jewellery layered high.', 'Styling influence'),
+        o('north-indian', 'North Indian', 'Classic red bridal lehengas, zardozi and kundan work, and double-dupatta styling.', 'Styling influence'),
+        o('south-indian', 'South Indian', 'Kanjeevaram silks with broad zari borders, temple jewellery and jasmine in the hair.', 'Styling influence'),
+        o('punjabi', 'Punjabi', 'Vivid phulkari-inspired colour, the chooda and kalire, and joyful maximalism.', 'Styling influence'),
+        o('gujarati', 'Gujarati', 'Panetar and gharchola sarees, bandhani dots, and the seedha pallu front drape.', 'Styling influence'),
+        o('rajasthani', 'Rajasthani', 'Leheriya and bandhej dyes, gota patti shimmer, and regal poshak-inspired layering.', 'Styling influence'),
+        o('hyderabadi', 'Hyderabadi', 'The khada dupatta ensemble, pearls of the Nizams, and kalidar kurtas over ghararas.', 'Styling influence'),
+        Object.assign(o('any-culture', 'No preference — let Sitara decide', 'Sitara will blend influences freely, guided by your other answers.', ''), { compact: true })
+      ],
+      silhouettes: {
+        lehenga: [
+          o('a-line', 'A-line', 'Skims outward gently from the waist in a clean \u201cA\u201d — light to wear and universally flattering.', 'Lehenga shape'),
+          o('flare', 'Full flare', 'A circular skirt with maximum sweep — made for twirling and grand entrances.', 'Lehenga shape'),
+          o('mermaid', 'Mermaid', 'Fitted through the hips and flaring below the knee — modern and sculptural.', 'Lehenga shape'),
+          o('straight', 'Straight cut', 'Falls straight and sleek, often with a slit for movement — quietly contemporary.', 'Lehenga shape'),
+          o('kali', 'Panelled kali', 'Traditional stitched panels (kalis) give heirloom structure and fullness.', 'Lehenga shape')
+        ],
+        saree: [
+          o('classic-drape', 'Classic saree', 'The timeless free-draped saree — pleats at the front, pallu over the shoulder.', 'Saree style'),
+          o('lehenga-saree', 'Lehenga saree', 'Pre-pleated to fall like a lehenga skirt — the drama of a saree, none of the draping.', 'Saree style'),
+          o('pre-stitched', 'Pre-stitched', 'Sewn into place so you simply step in — effortless for long celebrations.', 'Saree style'),
+          o('half-saree', 'Half saree', 'The langa-voni: skirt, blouse and a draped voni — a South Indian favourite.', 'Saree style')
+        ],
+        gharara: [
+          o('classic-gharara', 'Classic', 'The traditional knee-flare gharara with a short kurti — timeless Lucknowi grace.', 'Gharara shape'),
+          o('farshi-gharara', 'Farshi', 'Floor-trailing and voluminous — the grandest, most regal form of the gharara.', 'Gharara shape'),
+          o('slim-gharara', 'Slim modern', 'A pared-back flare with a longer kameez — a contemporary take.', 'Gharara shape')
+        ],
+        sharara: [
+          o('classic-sharara', 'Classic flare', 'Loose from the waist with a generous sweep — the traditional sharara.', 'Sharara shape'),
+          o('high-sharara', 'High-waisted', 'Fitted at the natural waist before flaring — elongating and modern.', 'Sharara shape'),
+          o('farshi-sharara', 'Farshi', 'Extra-long, floor-pooling flare in the old courtly style.', 'Sharara shape')
+        ],
+        anarkali: [
+          o('floor-anarkali', 'Floor-length', 'The flare falls all the way to the floor — a gown-like sweep.', 'Anarkali shape'),
+          o('kalidar', 'Kalidar', 'Built from many stitched panels for structured, traditional fullness.', 'Anarkali shape'),
+          o('front-open', 'Front-open', 'Opens over a slim inner layer, like a flowing jacket.', 'Anarkali shape'),
+          o('jacket-anarkali', 'Jacket style', 'A longer structured jacket layered over the flare — regal and warm.', 'Anarkali shape')
+        ],
+        shalwar: [
+          o('straight-kameez', 'Straight', 'A clean, straight-falling kameez — understated and elegant.', 'Kameez shape'),
+          o('aline-kameez', 'A-line', 'Flares softly from the bust for gentle movement.', 'Kameez shape'),
+          o('angrakha', 'Angrakha', 'A crossover, wrap-tied bodice in the Mughal court style.', 'Kameez shape'),
+          o('longline', 'Long-line', 'An ankle-grazing kameez with a stately, columnar fall.', 'Kameez shape')
+        ]
+      },
+      colourGroups: [
+        { name: 'Reds & maroons', colors: [['scarlet', 'Scarlet', '#c22b33'], ['maroon', 'Deep maroon', '#701a2b'], ['oxblood', 'Oxblood', '#4e1620'], ['rust', 'Rust', '#b0512f']] },
+        { name: 'Pinks & roses', colors: [['blush', 'Blush', '#e9bcbd', 1], ['rose', 'Rose', '#d98a9c'], ['rani', 'Rani pink', '#c2377b'], ['oldrose', 'Old rose', '#b97a7a']] },
+        { name: 'Golds & ivories', colors: [['marigold', 'Marigold', '#e8a13a'], ['gold', 'Antique gold', '#c08a2e'], ['champagne', 'Champagne', '#e7d3a8', 1], ['ivory', 'Ivory', '#f6efe0', 1]] },
+        { name: 'Greens', colors: [['emerald', 'Emerald', '#1d6b4f'], ['mehndi-grn', 'Mehndi green', '#5d6e33'], ['sage', 'Sage', '#8f9a72'], ['pistachio', 'Pistachio', '#c3c79b', 1]] },
+        { name: 'Blues', colors: [['royal', 'Royal blue', '#2b3d8f'], ['navy', 'Navy', '#1d2547'], ['peacock', 'Peacock', '#14606b'], ['powder', 'Powder blue', '#aac3da', 1]] },
+        { name: 'Purples & wines', colors: [['aubergine', 'Aubergine', '#46203f'], ['amethyst', 'Amethyst', '#7c4a78'], ['lilac', 'Lilac', '#b9a1c6', 1], ['plum', 'Plum wine', '#5b2340']] },
+        { name: 'Silvers & pastels', colors: [['silver', 'Silver grey', '#c9c9cf', 1], ['pearl', 'Pearl', '#efe9e4', 1], ['mint', 'Mint', '#cfe0d3', 1], ['peach', 'Peach', '#f2cdb4', 1]] }
+      ],
+      fabrics: [
+        o('silk', 'Silk', 'Lustrous and fluid — takes deep, saturated dye beautifully.', 'Fabric'),
+        o('rawsilk', 'Raw silk', 'A matte, gently nubbly texture with real structure — holds heavy embroidery well.', 'Fabric'),
+        o('satin', 'Satin', 'High shine and a liquid, sculptural drape.', 'Fabric'),
+        o('velvet', 'Velvet', 'Plush, deep and regal — a winter-wedding classic.', 'Fabric'),
+        o('organza', 'Organza', 'Crisp and sheer — holds airy, floating volume.', 'Fabric'),
+        o('chiffon', 'Chiffon', 'Feather-light and soft-flowing — graceful in movement.', 'Fabric'),
+        o('georgette', 'Georgette', 'A matte crepe texture with a forgiving, fluid drape.', 'Fabric'),
+        o('net', 'Net', 'A sheer base that carries the heaviest embellishment weightlessly.', 'Fabric'),
+        o('brocade', 'Brocade', 'Metallic motifs woven straight into the cloth — needs little added work.', 'Fabric'),
+        o('jamawar', 'Jamawar', 'Densely woven, all-over patterning in the Kashmiri tradition.', 'Woven in the Kashmiri tradition'),
+        o('tissue', 'Tissue', 'Gossamer-fine with a metallic, translucent glow.', 'Fabric'),
+        o('cottonsilk', 'Cotton silk', 'A breathable blend with a soft sheen — lovely for daytime ceremonies.', 'Fabric')
+      ],
+      embroidery: [
+        o('zardozi', 'Zardozi', 'Raised metallic embroidery in gold and silver thread — the grandest Mughal-heritage work.', 'Mughal heritage'),
+        o('dabka', 'Dabka', 'Fine coiled metallic wire worked into dense, glinting motifs.', 'Pakistani & North Indian craft'),
+        o('nakshi', 'Nakshi', 'Twisted spring-wire spangles that catch light with fine texture.', 'Traditional metalwork'),
+        o('gota', 'Gota patti', 'Appliqu\u00e9d gold ribbon shaped into petals and leaves — Rajasthani sparkle.', 'Rajasthani craft'),
+        o('mirror', 'Mirror work', 'Tiny mirrors (shisha) stitched into patterns that flash as you move.', 'Gujarati & Rajasthani craft'),
+        o('resham', 'Resham', 'Coloured silk threadwork — soft, painterly florals.', 'Threadwork'),
+        o('chikankari', 'Chikankari', 'Delicate white-on-pastel shadow embroidery from Lucknow.', 'Lucknowi craft'),
+        o('sequins', 'Sequins', 'All-over light-catching sparkle, from subtle to full shimmer.', 'Embellishment'),
+        o('pearls', 'Pearls', 'Seed pearls for quiet, lustrous luxury.', 'Embellishment'),
+        o('crystals', 'Crystals', 'Faceted stones for the highest shine.', 'Embellishment'),
+        o('beads', 'Beadwork', 'Dimensional beads in trails, fringes and clusters.', 'Embellishment'),
+        o('applique', 'Appliqu\u00e9', 'Cut fabric motifs layered and stitched for bold, graphic texture.', 'Embellishment')
+      ],
+      richness: [
+        o('minimal', 'Minimal & airy', 'Open ground with delicate borders — lightness and breath come first.', 'Embellishment richness'),
+        o('balanced', 'Balanced', 'A worked bodice and borders with calm, open space between.', 'Embellishment richness'),
+        o('rich', 'Rich & heavily worked', 'Densely covered, heirloom-heavy — full ceremonial grandeur.', 'Embellishment richness')
+      ],
+      necklines: [
+        ['crew', 'Classic crew', 'A close, rounded neckline sitting at the base of the throat.'],
+        ['scoop', 'Curved scoop', 'A soft, deeper curve that opens up the neckline gracefully.'],
+        ['v', 'V-neck', 'A clean V that lengthens the neck — classic with heavy jewellery.'],
+        ['deepv', 'Deep V', 'A dramatic, plunging V — modern and statement-making.'],
+        ['boat', 'Boat neck', 'Wide and shallow, tracing the collarbones — elegant and modest.'],
+        ['square', 'Square neck', 'Straight lines and clean corners — regal and architectural.'],
+        ['sweetheart', 'Sweetheart', 'Curved like the top of a heart — romantic and softly framing.'],
+        ['high', 'High neck', 'Rises to the throat for graceful, full coverage.'],
+        ['band', 'Band collar', 'A short standing collar in the mandarin style — poised and traditional.']
+      ],
+      sleeves: [
+        ['sl0', 'Sleeveless', 'No sleeve — shoulders bare, ideal under a heavy dupatta.'],
+        ['sl14', 'Cap sleeve', 'A whisper of a sleeve, just covering the shoulder.'],
+        ['sl46', 'Elbow', 'Ends at the elbow — balanced and comfortable.'],
+        ['sl70', 'Three-quarter', 'Ends mid-forearm, leaving room for bangles and mehndi.'],
+        ['sl100', 'Full sleeve', 'To the wrist — elegant coverage and a canvas for embroidery.']
+      ],
+      backs: [
+        ['backOpen', 'Open back', 'A deep open back — dramatic from every angle.'],
+        ['backDeep', 'Deep cut', 'A generous scoop, softened with dori ties or latkans.'],
+        ['backModest', 'Modest', 'A high, covered back — comfortable and traditional.']
+      ],
+      midriffs: [
+        ['midBare', 'Bare', 'A classic gap between blouse and skirt — traditional for sarees and lehengas.'],
+        ['midSheer', 'Semi-sheer', 'Veiled with net or organza — coverage with lightness.'],
+        ['midCovered', 'Covered', 'Fully covered by a longer bodice or kameez.']
+      ],
+      heads: [
+        ['headNone', 'Uncovered', 'Hair dressed and open — the dupatta stays on the shoulders.'],
+        ['headDupatta', 'Dupatta over head', 'The dupatta drawn gracefully over the head — traditional for many ceremonies.'],
+        ['headVeil', 'Veil style', 'A long, trailing veil-style dupatta pinned from the crown.'],
+        ['headHijab', 'Hijab', 'Full coverage with the hair completely covered \u2014 styled to sit with the outfit.'],
+        ['sparkle', 'No preference', 'Sitara will style the head covering to suit the ceremony.']
+      ],
+      drapes: [
+        o('nivi', 'Nivi drape', 'Front-tucked pleats with the pallu over the left shoulder — the timeless classic.', 'Pan-Indian style'),
+        o('atpoure', 'Bengali atpoure', 'Broad box pleats with the pallu wrapped around both shoulders.', 'Bengali tradition'),
+        o('seedha', 'Seedha pallu', 'The pallu brought over the right shoulder to fan across the front.', 'Gujarati & Rajasthani tradition'),
+        o('lehenga-drape', 'Lehenga drape', 'Pleats fanned like a skirt with a fitted wrap — a modern shortcut.', 'Contemporary style')
+      ],
+      dupattas: [
+        o('one-shoulder', 'One shoulder', 'Pinned at one shoulder to fall in a single clean cascade.', 'Dupatta styling'),
+        o('front-pallu', 'Seedha pallu', 'Draped across the front from the right shoulder — displays the work fully.', 'Gujarati-influenced styling'),
+        o('over-head', 'Over the head', 'Framing the face from the crown — soft, bridal and traditional.', 'Dupatta styling'),
+        o('double', 'Double dupatta', 'One framing the head and shoulders, a second trailing — grand and layered.', 'North Indian bridal styling'),
+        o('trail', 'Trail', 'Pinned to sweep behind you like a train.', 'Contemporary styling')
+      ],
+      inspirations: [
+        o('insp-blush-gharara', 'Champagne silver gharara', 'Pale champagne gharara with silver shimmer and a sheer dupatta — airy and romantic.', 'Inspiration look'),
+        o('insp-ivory-anarkali', 'Antique gold anarkali', 'Floor-length anarkali worked all over in antique gold — regal and full-skirted.', 'Inspiration look'),
+        o('insp-maroon-saree', 'Maroon ceremonial saree', 'Deep maroon saree with a gold border — traditional and ceremonial.', 'Inspiration look'),
+        o('insp-emerald-lehenga', 'Emerald and gold lehenga', 'Deep emerald with dense gold work — rich evening grandeur.', 'Inspiration look'),
+        o('insp-champagne-sharara', 'Ivory brocade sharara', 'Ivory sharara in soft brocade with a short kurti — quiet sparkle.', 'Inspiration look'),
+        o('insp-rani-lehenga', 'Crimson bridal lehenga', 'Vivid crimson lehenga worked edge to edge — full bridal weight.', 'Inspiration look'),
+        o('insp-scarlet-benarasi', 'Red and gold bridal set', 'Classic scarlet and gold with the dupatta drawn over the head.', 'Inspiration look'),
+        o('insp-powder-anarkali', 'Blush pink flared set', 'Soft blush pink with a wide flare and a matching dupatta.', 'Inspiration look'),
+        o('insp-rust-farshi', 'Gold short-kurti gharara', 'Antique gold gharara with a cropped kurti — light and festive.', 'Inspiration look'),
+        o('insp-pearl-chikankari', 'Bottle green kameez', 'Deep green kameez and trousers with gold borders — poised and covered.', 'Inspiration look'),
+        o('insp-peacock-halfsaree', 'Peacock teal sharara', 'Teal and blue-green sharara with silver work — jewel-toned.', 'Inspiration look'),
+        o('insp-gold-jamawar', 'Gold zardozi lehenga', 'Warm antique gold lehenga in dense zardozi — heirloom richness.', 'Inspiration look')
+      ]
+    };
+  }
+  set(k, v) {
+    this.setState(s => {
+      const a = Object.assign({}, s.a); a[k] = v;
+      if (k === 'garment' && v !== s.a.garment) { a.silhouette = null; a.drape = null; a.dupatta = null; }
+      return { a };
+    });
+  }
+  allColours() {
+    const base = [];
+    this.D.colourGroups.forEach(g => g.colors.forEach(c => base.push({ id: c[0], name: c[1], hex: c[2], light: !!c[3] })));
+    return base.concat(this.state.a.customColours);
+  }
+  setPicker(k) { this.setState(s => ({ picker: s.picker === k ? null : k })); }
+  addCustom(key, multi, limit) {
+    const hex = (this.state.draft || '').trim();
+    if (!/^#[0-9a-f]{6}$/i.test(hex)) return;
+    const id = 'custom-' + hex.slice(1).toLowerCase();
+    this.setState(s => {
+      const a = Object.assign({}, s.a);
+      if (!a.customColours.some(c => c.id === id)) {
+        const n = parseInt(hex.slice(1), 16);
+        const lum = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+        a.customColours = a.customColours.concat([{ id, name: hex.toUpperCase(), hex, light: lum > 0.65, custom: true }]);
+      }
+      if (multi) { if (a[key].indexOf(id) < 0) a[key] = (a[key].length < limit ? a[key] : a[key].slice(1)).concat([id]); }
+      else a[key] = id;
+      return { a, picker: null };
+    });
+  }
+  onUpload(e) {
+    const files = Array.prototype.slice.call(e.target.files || []);
+    files.forEach(file => {
+      const url = URL.createObjectURL(file);
+      this.setState(s => {
+        const a = Object.assign({}, s.a);
+        a.uploads = a.uploads.concat([{ id: 'u' + Date.now() + Math.random().toString(36).slice(2, 6), url, name: file.name }]);
+        return { a };
+      });
+    });
+    e.target.value = '';
+  }
+  removeUpload(id) {
+    this.setState(s => {
+      const a = Object.assign({}, s.a);
+      const gone = a.uploads.find(u => u.id === id);
+      if (gone && /^blob:/.test(gone.url)) URL.revokeObjectURL(gone.url);
+      a.uploads = a.uploads.filter(u => u.id !== id);
+      return { a };
+    });
+  }
+  swatchQ(cfg) {
+    const a = this.state.a, multi = !!cfg.multi, limit = cfg.limit || 1;
+    const cur = a[cfg.key];
+    const isSel = (id) => multi ? cur.indexOf(id) >= 0 : cur === id;
+    const list = this.allColours();
+    const swatches = list.map(c => {
+      const sel = isSel(c.id);
+      const rank = multi && sel ? cur.indexOf(c.id) + 1 : 0;
+      return {
+        id: c.id, name: c.name, hex: c.hex, selected: sel, rank,
+        tick: c.light ? '#201e1d' : '#ffffff',
+        ring: sel ? '0 0 0 3px var(--color-bg), 0 0 0 6px var(--color-accent)' : (c.light ? 'inset 0 0 0 1.5px rgba(32,30,29,.22)' : 'none'),
+        toggle: () => multi ? this.toggleMulti(cfg.key, c.id, limit) : this.pick(cfg.key, c.id)
+      };
+    });
+    const chosen = multi ? cur : (cur && cur !== 'match' ? [cur] : []);
+    const chips = chosen.map((id, i) => {
+      const c = list.find(x => x.id === id) || { name: id, hex: '#ccc' };
+      return { name: c.name, label: multi ? (i + 1) + '. ' + c.name : c.name, hex: c.hex, remove: () => multi ? this.toggleMulti(cfg.key, id, limit) : this.pick(cfg.key, id) };
+    });
+    return {
+      key: cfg.key, title: cfg.title, helper: this.showHelpers() ? cfg.helper : '',
+      limitNote: multi ? (cur.length + ' of ' + limit + ' chosen') : (cur ? 'Chosen' : 'Choose one'),
+      isSwatch: true, swatches,
+      hasMatch: !!cfg.match, matchOn: !!cfg.match && cur === 'match', matchOff: !!cfg.match && cur !== 'match',
+      toggleMatch: () => this.pick(cfg.key, 'match'),
+      pickerOpen: this.state.picker === cfg.key,
+      togglePicker: () => this.setPicker(cfg.key),
+      draft: this.state.draft,
+      setDraft: (e) => { const v = e.target.value; this.setState({ draft: v }); },
+      addCustom: () => this.addCustom(cfg.key, multi, limit),
+      chips, hasChosen: chips.length > 0
+    };
+  }
+  pick(k, id) { this.set(k, this.state.a[k] === id ? null : id); }
+  toggleMulti(k, id, limit) {
+    this.setState(s => {
+      const cur = s.a[k]; let next;
+      if (cur.indexOf(id) >= 0) next = cur.filter(x => x !== id);
+      else if (cur.length < limit) next = cur.concat([id]);
+      else next = cur;
+      const a = Object.assign({}, s.a); a[k] = next; return { a };
+    });
+  }
+  go(n) {
+    this.setState(s => ({ step: n, maxReached: Math.max(s.maxReached, n), drawer: null, finished: false, navOpen: false }));
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  openInfo(title, body, meta) { this._lastFocus = (typeof document !== 'undefined') ? document.activeElement : null; this.setState({ drawer: { title, body, meta } }); }
+  closeDrawer() { this.setState({ drawer: null }); const lf = this._lastFocus; if (lf && lf.focus) setTimeout(() => lf.focus(), 0); }
+  cardQ(cfg) {
+    const a = this.state.a;
+    const multi = !!cfg.multi;
+    const sel = a[cfg.key];
+    const n = multi ? sel.length : (sel ? 1 : 0);
+    const options = cfg.options.map(op => {
+      const isSel = multi ? sel.indexOf(op.id) >= 0 : sel === op.id;
+      const toggle = () => multi ? this.toggleMulti(cfg.key, op.id, cfg.limit) : this.pick(cfg.key, op.id);
+      const compact = !!op.compact;
+      const icon = op.iconKey ? this.icons[op.iconKey] : null;
+      return {
+        id: op.id, title: op.t, selected: isSel, compact,
+        span: compact ? '1 / -1' : 'auto',
+        hasImg: !compact && !icon, slotId: 'q-' + cfg.key + '-' + op.id, ph: op.ph || (op.t + ' photo'),
+        src: this.IMG[cfg.key + ':' + op.id] || '',
+        hasIcon: !!icon, icon, iconBg: 'var(--color-accent-2-100)', iconFg: 'var(--color-accent-2-800)',
+        bg: isSel ? 'var(--color-accent-100)' : 'var(--color-neutral-100)',
+        border: isSel ? 'var(--color-accent)' : 'transparent',
+        hasInfo: !!op.info,
+        toggle,
+        slotClick: (e) => { e.stopPropagation(); e.preventDefault(); toggle(); },
+        openInfo: (e) => { e.stopPropagation(); e.preventDefault(); this.openInfo(op.t, op.info, op.meta); }
+      };
+    });
+    return {
+      key: cfg.key, title: cfg.title, helper: this.showHelpers() ? cfg.helper : '',
+      limitNote: multi ? ('Choose up to ' + cfg.limit + ' \u00b7 ' + n + ' selected') : 'Choose one',
+      isCards: true, isSwatch: false,
+      inputType: multi ? 'checkbox' : 'radio',
+      aspect: cfg.aspect || '4 / 5', minCol: cfg.minCol || 150, options
+    };
+  }
+  showHelpers() { return this.props.showHelpers !== false; }
+  renderVals() {
+    const st = this.state, a = st.a, D = this.D;
+    const maxFabricColours = this.props.maxFabricColours ?? 2;
+    const maxEmbColours = this.props.maxEmbColours ?? 3;
+    const maxFabrics = this.props.maxFabrics ?? 3;
+    const maxEmb = this.props.maxEmbroidery ?? 4;
+    const step0done = !!(a.ceremony && a.garment);
+    const labels = ['Occasion', 'Heritage', 'Colour & cloth', 'Adornment', 'Coverage', 'The drape', 'Inspiration', 'Anything else', 'Review'];
+    const titles = null;
+    const isSaree = a.garment === 'saree';
+    const SCR = [
+      { cat: 0, key: 'ceremony', title: 'Which celebration are we dressing?', required: true },
+      { cat: 0, key: 'garment', title: 'Which garment calls to you?', required: true },
+      { cat: 1, key: 'culture', title: 'Whose traditions shape the look?' },
+      { cat: 1, key: 'silhouette', title: 'Which silhouette speaks to you?' },
+      { cat: 2, key: 'colours', title: 'Which colours are yours?' },
+      { cat: 2, key: 'fabrics', title: 'What should it be made of?' },
+      { cat: 3, key: 'embroidery', title: 'Which handwork do you love?' },
+      { cat: 3, key: 'richness', title: 'How richly should it be worked?' },
+      { cat: 4, key: 'neckline', title: 'How should it frame your face?' },
+      { cat: 4, key: 'sleeves', title: 'How much sleeve?' },
+      { cat: 4, key: 'back', title: 'How should the back be cut?' },
+      { cat: 4, key: 'midriff', title: 'And the midriff?' },
+      { cat: 4, key: 'head', title: 'Will you cover your head?' },
+      { cat: 5, key: isSaree ? 'drape' : 'dupatta', title: 'How should it flow?' },
+      { cat: 6, key: 'inspiration', title: 'Which looks inspire you?' },
+      { cat: 7, key: 'note', title: 'Anything we missed?' },
+      { cat: 8, key: 'review', title: '' }
+    ];
+    const pos = Math.min(st.step, SCR.length - 1);
+    const scr = SCR[pos];
+    const firstPos = [0, 2, 4, 6, 8, 13, 14, 15, 16];
+    const curCat = scr.cat;
+    const catCount = SCR.filter(x => x.cat === curCat).length;
+    const catIdx = pos - firstPos[curCat];
+    const steps = labels.map((label, i) => {
+      const done = i < curCat, current = i === curCat;
+      const locked = firstPos[i] > st.maxReached || (i > 0 && !step0done);
+      return {
+        label, num: done ? '\u2713' : String(i + 1), locked: locked && !current,
+        status: current ? 'Current' : done ? 'Done' : (locked && !current) ? 'Locked' : '',
+        go: () => this.go(firstPos[i]),
+        bg: current ? 'var(--color-accent)' : done ? 'var(--color-accent-100)' : 'transparent',
+        fg: current ? '#fff' : done ? 'var(--color-accent-800)' : 'var(--color-neutral-700)',
+        dotBg: current ? 'rgba(255,255,255,.25)' : done ? 'var(--color-accent)' : 'var(--color-neutral-200)',
+        dotFg: current ? '#fff' : done ? '#fff' : 'var(--color-neutral-800)',
+        opacity: locked && !current ? .55 : 1
+      };
+    });
+    const gTitle = a.garment ? D.garments.find(g => g.id === a.garment).t : '';
+    const iconOpts = (list, meta) => list.map(x => x[0] === 'sparkle' ? { id: x[0], t: x[1], info: x[2], meta, compact: true } : { id: x[0], t: x[1], info: x[2], meta, ph: x[1] + ' — ' + meta + ' photo' });
+    let questions = [];
+    if (scr.key === 'ceremony') questions = [
+      this.cardQ({ key: 'ceremony', title: 'The ceremony', helper: 'Each event carries its own mood and palette \u2014 tell us which one this outfit is for.', aspect: '3 / 2', minCol: 240, options: D.ceremonies })
+    ];
+    if (scr.key === 'garment') questions = [
+      this.cardQ({ key: 'garment', title: 'The garment', helper: 'The silhouette everything else will be built around.', aspect: '3 / 4', options: D.garments })
+    ];
+    if (scr.key === 'culture') questions = [
+      this.cardQ({ key: 'culture', title: 'Cultural styling direction', helper: 'A regional influence to guide motifs, colour and styling \u2014 or leave it open.', aspect: '2 / 3', options: D.cultures })
+    ];
+    if (scr.key === 'silhouette') questions = [
+      this.cardQ({ key: 'silhouette', title: 'The silhouette', helper: 'Shapes shown for your ' + gTitle + '.', aspect: '2 / 3', options: (D.silhouettes[a.garment] || []).concat([{ id: 'any-sil', t: 'No preference — let Sitara decide', info: 'Sitara will choose the shape that best suits your other answers.', meta: '', compact: true }]) })
+    ];
+    if (scr.key === 'colours') questions = [
+      this.swatchQ({ key: 'fabricColours', title: 'The fabric', helper: 'The main cloth colour \u2014 up to ' + maxFabricColours + '. Use Any colour for a shade that isn\u2019t here.', multi: true, limit: maxFabricColours }),
+      this.swatchQ({ key: 'embColours', title: 'The embroidery', helper: 'Thread and embellishment colours \u2014 gold and silver are traditional, a contrast is bolder.', multi: true, limit: maxEmbColours }),
+      this.swatchQ({ key: 'dupattaColour', title: 'The dupatta', helper: 'Match the fabric, or set it apart.', match: true })
+    ];
+    if (scr.key === 'fabrics') questions = [
+      this.cardQ({ key: 'fabrics', title: 'The fabrics', helper: 'Choose the cloths you\u2019re drawn to \u2014 tap the i to learn how each behaves.', multi: true, limit: maxFabrics, aspect: '3 / 2', minCol: 150, options: D.fabrics })
+    ];
+    if (scr.key === 'embroidery') questions = [
+      this.cardQ({ key: 'embroidery', title: 'Embroidery & embellishment', helper: 'The handwork that will cover the cloth.', multi: true, limit: maxEmb, aspect: '1 / 1', minCol: 132, options: D.embroidery })
+    ];
+    if (scr.key === 'richness') questions = [
+      this.cardQ({ key: 'richness', title: 'How heavily worked?', helper: '', aspect: '1 / 1', minCol: 170, options: D.richness })
+    ];
+    if (scr.key === 'neckline') questions = [
+      this.cardQ({ key: 'neckline', title: 'The neckline', helper: 'How the bodice frames the face and jewellery.', aspect: '5 / 4', minCol: 132, options: iconOpts(D.necklines, 'Neckline') })
+    ];
+    if (scr.key === 'sleeves') questions = [
+      this.cardQ({ key: 'sleeves', title: 'Sleeve length', helper: '', aspect: '4 / 5', minCol: 132, options: iconOpts(D.sleeves, 'Sleeves') })
+    ];
+    if (scr.key === 'back') questions = [
+      this.cardQ({ key: 'back', title: 'Back coverage', helper: '', aspect: '4 / 5', minCol: 132, options: iconOpts(D.backs, 'Back') })
+    ];
+    if (scr.key === 'midriff') questions = [
+      this.cardQ({ key: 'midriff', title: 'Midriff', helper: '', aspect: '4 / 5', minCol: 132, options: iconOpts(D.midriffs, 'Midriff') })
+    ];
+    if (scr.key === 'head') questions = [
+      this.cardQ({ key: 'head', title: 'Head covering', helper: '', aspect: '4 / 5', minCol: 132, options: iconOpts(D.heads, 'Head covering') })
+    ];
+    if (scr.key === 'drape' || scr.key === 'dupatta') {
+      questions = a.garment === 'saree'
+        ? [this.cardQ({ key: 'drape', title: 'The saree drape', helper: 'Each region drapes the same cloth into a different silhouette.', aspect: '2 / 3', options: D.drapes })]
+        : [this.cardQ({ key: 'dupatta', title: 'The dupatta', helper: 'How the dupatta should be worn with your ' + (gTitle || 'outfit') + '.', aspect: '3 / 4', options: D.dupattas })];
+    }
+    if (scr.key === 'inspiration') {
+      const insp = this.cardQ({ key: 'inspiration', title: 'Inspiration images', helper: 'Optional — choose up to 3 looks whose mood speaks to you. They guide Sitara as a secondary visual cue; your answers stay authoritative.', multi: true, limit: 3, aspect: '3 / 4', options: D.inspirations });
+      insp.hasUpload = true;
+      insp.uploads = a.uploads.map(u => ({
+        id: u.id, name: u.name, remove: () => this.removeUpload(u.id),
+        thumbStyle: 'aspect-ratio:3 / 4;border-radius:var(--radius-md);overflow:hidden;background-color:var(--color-neutral-100);background-size:cover;background-position:center;background-image:url("' + u.url + '")'
+      }));
+      insp.hasUploads = a.uploads.length > 0;
+      insp.uploadNote = a.uploads.length ? a.uploads.length + ' of your own added' : 'Screenshots, saved posts, a photo of a family piece — anything.';
+      insp.onUpload = (e) => this.onUpload(e);
+      questions = [insp];
+    }
+    if (scr.key === 'note') questions = [{
+      key: 'note', title: 'One last note', limitNote: 'Optional',
+      helper: this.showHelpers() ? 'A short note about anything the questionnaire didn’t ask — a family heirloom to match, a motif that matters, something to avoid.' : '',
+      isCards: false, isSwatch: false, isNote: true,
+      noteVal: a.note, notePh: 'e.g. “My nani’s dupatta is deep rust with gold gota — I’d love the outfit to sit well beside it.”',
+      setNote: (e) => this.set('note', e.target.value)
+    }];
+    const find = (list, id) => { const f = (list || []).find(x => x.id === id); return f ? f.t : null; };
+    const flat = (key, list) => a[key].map(id => find(list, id)).filter(Boolean).join(', ');
+    const iconFind = (list, id) => { const f = list.find(x => x[0] === id); return f ? f[1] : null; };
+    const allSil = Object.keys(D.silhouettes).reduce((acc, k) => acc.concat(D.silhouettes[k]), []);
+    const cLookup = this.allColours();
+    const cName = (id) => { const c = cLookup.find(x => x.id === id); return c ? c.name : null; };
+    const cList = (ids) => ids.map(cName).filter(Boolean).join(' \u00b7 ');
+    const rows = [
+      ['Ceremony', find(D.ceremonies, a.ceremony), 0], ['Garment', find(D.garments, a.garment), 0],
+      ['Cultural direction', a.culture === 'any-culture' ? 'Open \u2014 Sitara decides' : find(D.cultures, a.culture), 2],
+      ['Silhouette', a.silhouette === 'any-sil' ? 'Open \u2014 Sitara decides' : find(allSil, a.silhouette), 3],
+      ['Fabric colour', cList(a.fabricColours) || null, 4],
+      ['Embroidery colour', cList(a.embColours) || null, 4],
+      ['Dupatta colour', a.dupattaColour === 'match' ? 'Matching the fabric' : cName(a.dupattaColour), 4],
+      ['Fabrics', flat('fabrics', D.fabrics) || null, 5],
+      ['Embellishment', flat('embroidery', D.embroidery) || null, 6], ['Richness', find(D.richness, a.richness), 7],
+      ['Neckline', iconFind(D.necklines, a.neckline), 8], ['Sleeves', iconFind(D.sleeves, a.sleeves), 9],
+      ['Back', iconFind(D.backs, a.back), 10], ['Midriff', iconFind(D.midriffs, a.midriff), 11],
+      ['Head covering', iconFind(D.heads, a.head), 12],
+      a.garment === 'saree' ? ['Drape', find(D.drapes, a.drape), 13] : ['Dupatta', find(D.dupattas, a.dupatta), 13],
+      ['Inspiration', flat('inspiration', D.inspirations) || null, 14],
+      ['Your uploads', a.uploads.length ? a.uploads.length + (a.uploads.length === 1 ? ' image' : ' images') + ' added' : null, 14],
+      ['Your note', a.note || null, 15]
+    ];
+    const summary = rows.map((r, i) => ({
+      label: r[0], value: r[1] || 'Left to Sitara\u2019s imagination',
+      color: r[1] ? 'var(--color-text)' : 'var(--color-accent-2-700)',
+      rule: i === rows.length - 1 ? 'transparent' : 'var(--color-neutral-200)',
+      edit: () => this.go(r[2])
+    }));
+    const isReview = scr.key === 'review';
+    const cannotContinue = !!scr.required && !a[scr.key];
+    return {
+      steps, stepKey: 'step-' + pos,
+      stepNum: curCat + 1, progW: Math.round(((pos + 1) / SCR.length) * 100) + '%',
+      progPct: Math.round(((pos + 1) / SCR.length) * 100),
+      navOpen: st.navOpen,
+      toggleNav: () => this.setState(s => ({ navOpen: !s.navOpen })),
+      navLabel: st.navOpen ? 'Hide steps' : 'All steps',
+      stepKicker: 'Step ' + (curCat + 1) + ' of 9 \u2014 ' + labels[curCat] + (catCount > 1 ? ' \u00b7 Question ' + (catIdx + 1) + ' of ' + catCount : ''),
+      stepTitle: scr.title || '', questions,
+      isReview, notReview: !isReview,
+      canBack: st.step > 0, goBack: () => this.go(st.step - 1), goNext: () => this.go(st.step + 1),
+      cannotContinue,
+      nextLabel: scr.key === 'note' ? 'Review my brief' : 'Continue',
+      showSkip: !scr.required && !isReview,
+      footHint: cannotContinue ? 'Choose a ceremony and a garment to continue.' : 'Skip anything you\u2019re unsure of \u2014 Sitara will decide.',
+      drawerOpen: !!st.drawer,
+      drawerTitle: st.drawer ? st.drawer.title : '', drawerBody: st.drawer ? st.drawer.body : '',
+      drawerMeta: st.drawer ? st.drawer.meta : '',
+      closeDrawer: () => this.closeDrawer(),
+      drawerRef: (el) => { if (el) el.focus(); },
+      drawerKey: (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); this.closeDrawer(); return; }
+        if (e.key === 'Tab') {
+          const f = e.currentTarget.querySelectorAll('button, a[href], textarea, input');
+          if (!f.length) return;
+          const first = f[0], last = f[f.length - 1], ae = document.activeElement;
+          if (e.shiftKey && (ae === first || ae === e.currentTarget)) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && ae === last) { e.preventDefault(); first.focus(); }
+        }
+      },
+      summary,
+      startOver: () => this.setState({ step: 0, maxReached: 0, drawer: null, finished: false, a: this.blank() })
+    };
+  }
+}
+</script>
+</body>
+</html>

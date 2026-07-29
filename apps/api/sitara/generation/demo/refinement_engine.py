@@ -26,6 +26,7 @@ from sitara.generation.refinement import (
     SLEEVES_AND_COVERAGE,
     STYLING_DETAILS,
 )
+from sitara.generation.selection_semantics import ordered_colour_values
 
 from . import phrases
 
@@ -74,7 +75,10 @@ def _pick(candidates: list, fingerprint: str, salt: str):
 
 
 def _edit_colour_story(spec: dict, note: str, fingerprint: str) -> dict:
-    used = set(spec["source_selections"].get("colour_palette") or [])
+    # Version-independent: v1/v2 keep one palette, v3 names a colour per garment
+    # role. Either way the refinement must not "change" a colour to one already
+    # chosen.
+    used = set(ordered_colour_values(spec["source_selections"]))
     hinted = _note_keyword(note, _COLOUR_KEYWORDS)
     candidates = [k for k in phrases.COLOUR_PHRASES if k not in used]
     colour_key = (

@@ -33,6 +33,13 @@ Semantics (Phase 7 §6):
 
 from __future__ import annotations
 
+# Types a rule may read or narrow. The colour types are excluded for the same
+# reason the schema validator bars them: a colour_choice answer may be a custom
+# hex that is not a declared option, so it can neither satisfy a condition nor
+# be described by a restriction. Mirrors
+# ``schema_validation.RULE_REFERENCEABLE_TYPES`` and the frontend's rules.ts.
+_RULE_REFERENCEABLE_TYPES = frozenset({"single_choice", "multi_choice"})
+
 
 def questions_by_id(schema: dict) -> dict[str, dict]:
     """Index every question in the schema by its stable id."""
@@ -55,7 +62,7 @@ def build_selected(schema: dict, answers: dict) -> dict[str, set[str]]:
     set of its values; text and empty answers contribute nothing."""
     selected: dict[str, set[str]] = {}
     for question in questions_by_id(schema).values():
-        if question.get("type") == "text":
+        if question.get("type") not in _RULE_REFERENCEABLE_TYPES:
             continue
         value = (answers or {}).get(question["id"])
         if isinstance(value, str) and value:
@@ -144,7 +151,11 @@ def allowed_options(schema: dict, selected: dict[str, set[str]]) -> dict[str, se
     index = questions_by_id(schema)
     allowed: dict[str, set[str]] = {}
     for question_id, question in index.items():
-        if question.get("type") == "text":
+        # Colour questions are excluded alongside text: a colour_choice's
+        # allowed set is its declared swatches PLUS the design's custom
+        # palette, which only the answer validator can see, so it resolves
+        # membership itself rather than through a restriction-aware set here.
+        if question.get("type") not in _RULE_REFERENCEABLE_TYPES:
             continue
         declared = set(declared_option_values(question))
         for rule in schema.get("rules", []):

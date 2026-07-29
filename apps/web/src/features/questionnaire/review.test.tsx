@@ -50,6 +50,26 @@ const SCHEMA: QuestionnaireSchema = {
   rules: [],
 };
 
+// The same schema plus an optional question the user did not answer.
+const SCHEMA_WITH_OPTIONAL: QuestionnaireSchema = {
+  ...SCHEMA,
+  steps: [
+    {
+      ...SCHEMA.steps[0],
+      questions: [
+        ...SCHEMA.steps[0].questions,
+        {
+          id: "regional_style",
+          type: "single_choice",
+          label: "Regional direction",
+          required: false,
+          options: [{ value: "punjabi", label: "Punjabi" }],
+        },
+      ],
+    },
+  ],
+};
+
 function design(overrides: Record<string, unknown> = {}) {
   return {
     id: "d1",
@@ -89,6 +109,28 @@ describe("ReviewSummary", () => {
     expect(await screen.findByText("Lehenga")).toBeInTheDocument();
     expect(screen.getByText("Which garment?")).toBeInTheDocument();
     expect(mocks.validateDesignDraft).toHaveBeenCalledWith("d1");
+  });
+
+  it("shows an unanswered question as left to Sitara rather than omitting it", async () => {
+    mocks.fetchDesign.mockResolvedValue(
+      design({ questionnaire: { id: "v1", version: 1, schema: SCHEMA_WITH_OPTIONAL } }),
+    );
+    render(<ReviewSummary designId="d1" />);
+
+    // The row is present — a silently missing one would read as "never asked".
+    expect(await screen.findByText("Regional direction")).toBeInTheDocument();
+    expect(screen.getByText("Left to Sitara's imagination")).toBeInTheDocument();
+    // ...and it can still be edited from here.
+    expect(screen.getByRole("link", { name: "Edit Regional direction" })).toHaveAttribute(
+      "href",
+      "/design/d1?q=regional_style",
+    );
+  });
+
+  it("gives each row its own Edit link, deep-linked to that question's screen", async () => {
+    render(<ReviewSummary designId="d1" />);
+    const edit = await screen.findByRole("link", { name: "Edit Which garment?" });
+    expect(edit).toHaveAttribute("href", "/design/d1?q=garment_type");
   });
 
   it("16a: an HTTP 400 routes the user back to complete the incomplete draft", async () => {
@@ -197,6 +239,61 @@ describe("ReviewSummary", () => {
     render(<ReviewSummary designId="d1" />);
     expect(await screen.findByText("No inspiration images selected.")).toBeInTheDocument();
     expect(screen.queryByText(/answers always take priority/i)).not.toBeInTheDocument();
+  });
+
+  describe("uploaded photographs", () => {
+    function upload(id: string, position: number) {
+      return {
+        id,
+        position,
+        width: 900,
+        height: 1200,
+        rights_acknowledged_at: "2026-07-29T00:00:00Z",
+        created_at: "2026-07-29T00:00:00Z",
+      };
+    }
+
+    it("shows an upload with no preset selected, rather than 'none selected'", async () => {
+      // An upload IS an inspiration image. Reporting none while one is about to
+      // be sent to the provider would be the review screen lying at the last
+      // point the user can still change their mind.
+      mocks.fetchDesign.mockResolvedValue(
+        design({ inspiration_uploads: [upload("u1", 1)] }),
+      );
+      render(<ReviewSummary designId="d1" />);
+
+      expect(await screen.findByText("Your own photographs")).toBeInTheDocument();
+      expect(screen.queryByText("No inspiration images selected.")).not.toBeInTheDocument();
+      expect(screen.getByText(/answers always take priority/i)).toHaveTextContent(
+        /sent to the external ai image provider/i,
+      );
+    });
+
+    it("renders each upload from the ownership-checked endpoint with its own name", async () => {
+      mocks.fetchDesign.mockResolvedValue(
+        design({ inspiration_uploads: [upload("u1", 1), upload("u2", 2)] }),
+      );
+      render(<ReviewSummary designId="d1" />);
+
+      const first = await screen.findByAltText(/uploaded inspiration image 1/i);
+      expect(first).toHaveAttribute("src", "/api/v1/designs/d1/inspiration-uploads/u1/image/");
+      expect(screen.getByAltText(/uploaded inspiration image 2/i)).toHaveAttribute(
+        "src",
+        "/api/v1/designs/d1/inspiration-uploads/u2/image/",
+      );
+      // Relative and ownership-checked: never an object-store URL, never the
+      // image optimiser (which would cache bytes that need a per-request check).
+      for (const image of screen.getAllByRole("img")) {
+        expect(image.getAttribute("src")).not.toMatch(/https?:|_next\/image|X-Amz|amazonaws/i);
+      }
+    });
+
+    it("keeps the section honest for a design with no images at all", async () => {
+      mocks.fetchDesign.mockResolvedValue(design({ inspiration_uploads: [] }));
+      render(<ReviewSummary designId="d1" />);
+      expect(await screen.findByText("No inspiration images selected.")).toBeInTheDocument();
+      expect(screen.queryByText("Your own photographs")).not.toBeInTheDocument();
+    });
   });
 
   describe("Generate my concept", () => {

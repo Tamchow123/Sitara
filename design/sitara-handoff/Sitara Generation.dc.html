@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="_ds/organic-ccb06f12-17fe-45b2-9248-ebf010085646/styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+  <script src="_ds/organic-ccb06f12-17fe-45b2-9248-ebf010085646/_ds_bundle.js"></script>
+  <style>
+    html, body { margin: 0; background: var(--color-bg); }
+    a { color: var(--color-accent-700); } a:hover { color: var(--color-accent-800); }
+    @keyframes sitaraUp { from { transform: translateY(18px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes sitaraSpin { to { transform: rotate(360deg); } }
+    @keyframes sitaraPulse { 0%,100% { transform: scale(1); opacity: .9; } 50% { transform: scale(1.12); opacity: 1; } }
+  </style>
+</helmet>
+<div style="min-height:100vh;font-family:var(--font-body);color:var(--color-text);display:flex;flex-direction:column">
+  <header style="max-width:1020px;width:100%;margin:0 auto;padding:var(--space-4) var(--space-4) 0;box-sizing:border-box">
+    <a href="Sitara Home.dc.html" aria-label="Sitara home" style="display:inline-flex;align-items:center;gap:var(--space-2);text-decoration:none;color:var(--color-text);border-radius:999px;padding:4px 14px 4px 4px;transition:background .15s" style-hover="background:var(--color-accent-100)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">
+      <span style="width:36px;height:36px;border-radius:999px;background:var(--color-accent);color:var(--color-bg);display:grid;place-items:center;flex:none">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 L14.4 9.6 L22 12 L14.4 14.4 L12 22 L9.6 14.4 L2 12 L9.6 9.6 Z"></path></svg>
+      </span>
+      <span style="font-family:'Cormorant Garamond',serif;font-weight:600;letter-spacing:.04em;font-size:27px">Sitara</span>
+    </a>
+  </header>
+  <main style="flex:1;display:grid;place-items:center;padding:var(--space-6) var(--space-4)">
+    <div style="width:100%;max-width:560px;text-align:center;animation:sitaraUp .4s both">
+      <div style="display:flex;justify-content:center;gap:var(--space-2);flex-wrap:wrap;margin-bottom:var(--space-8)">
+        <sc-for list="{{ phases }}" as="p" hint-placeholder-count="3">
+          <span style="display:inline-flex;align-items:center;gap:7px;padding:7px 15px 7px 8px;border-radius:999px;font-size:13.5px;font-weight:600;background:{{ p.bg }};color:{{ p.fg }};transition:background .3s,color .3s">
+            <span style="width:20px;height:20px;border-radius:999px;display:grid;place-items:center;background:{{ p.dotBg }};color:{{ p.dotFg }};font-size:11px;font-weight:700;flex:none">{{ p.mark }}</span>{{ p.label }}
+          </span>
+        </sc-for>
+      </div>
+      <span style="display:inline-grid;place-items:center;width:76px;height:76px;border-radius:999px;background:var(--color-accent-100);color:var(--color-accent-700);animation:sitaraPulse 1.6s ease-in-out infinite;margin-bottom:var(--space-4)">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 L14.4 9.6 L22 12 L14.4 14.4 L12 22 L9.6 14.4 L2 12 L9.6 9.6 Z"></path></svg>
+      </span>
+      <h1 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:clamp(30px,5vw,42px);line-height:1.1;margin:0 0 var(--space-2);text-wrap:pretty">{{ phaseTitle }}</h1>
+      <p style="margin:0 auto var(--space-6);font-size:15.5px;color:var(--color-neutral-800);max-width:44ch;min-height:2.6em">{{ phaseBody }}</p>
+      <div role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ pct }}" aria-label="Generation progress" style="height:10px;border-radius:999px;background:var(--color-neutral-200);overflow:hidden;margin-bottom:var(--space-2)">
+        <div style="height:100%;width:{{ pctW }};border-radius:999px;background:var(--color-accent);transition:width .12s linear"></div>
+      </div>
+      <p style="margin:0 0 var(--space-8);font-size:13px;font-weight:700;color:var(--color-accent-700)">{{ pctLabel }}</p>
+      <p style="margin:0 0 var(--space-4);font-size:13px;color:var(--color-neutral-700)">Your private design details are never made public during generation.</p>
+      <button class="btn btn-ghost" onClick="{{ skip }}" style="font-size:13.5px">Skip — demo only</button>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { pct: 0 };
+  componentDidMount() {
+    this.timer = setInterval(() => {
+      this.setState(s => {
+        const pct = Math.min(100, s.pct + 100 / (5000 / 80));
+        if (pct >= 100) { clearInterval(this.timer); setTimeout(() => { window.location.href = 'Sitara Concept.dc.html'; }, 500); }
+        return { pct };
+      });
+    }, 80);
+  }
+  componentWillUnmount() { clearInterval(this.timer); }
+  renderVals() {
+    const pct = this.state.pct;
+    const phase = pct < 33 ? 0 : pct < 72 ? 1 : 2;
+    const P = [
+      ['Preparing', 'Gathering your palette', 'Weighing your answers \u2014 ceremony, garment, colours and coverage \u2014 into one coherent starting point.'],
+      ['Design brief', 'Creating your design brief', 'The details you selected are being converted into a structured concept: silhouette, cloth, embellishment and drape.'],
+      ['Visual concept', 'Painting your visual concept', 'Rendering an original concept image faithful to your brief and traditions.']
+    ];
+    const phases = P.map((p, i) => ({
+      label: p[0],
+      mark: i < phase ? '\u2713' : String(i + 1),
+      bg: i === phase ? 'var(--color-accent)' : i < phase ? 'var(--color-accent-100)' : 'var(--color-neutral-100)',
+      fg: i === phase ? '#fff' : i < phase ? 'var(--color-accent-800)' : 'var(--color-neutral-700)',
+      dotBg: i === phase ? 'rgba(255,255,255,.25)' : i < phase ? 'var(--color-accent)' : 'var(--color-neutral-200)',
+      dotFg: i === phase ? '#fff' : i < phase ? '#fff' : 'var(--color-neutral-800)'
+    }));
+    return {
+      phases, phaseTitle: P[phase][1], phaseBody: P[phase][2],
+      pct: Math.round(pct), pctW: pct + '%', pctLabel: Math.round(pct) + '%',
+      skip: () => { clearInterval(this.timer); window.location.href = 'Sitara Concept.dc.html'; }
+    };
+  }
+}
+</script>
+</body>
+</html>

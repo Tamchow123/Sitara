@@ -57,6 +57,35 @@
               { "value": "ivory", "label": "Ivory" }
             ],
             "constraints": { "min_items": 1, "max_items": 2 }
+          },
+          {
+            "id": "dupatta_colour",
+            "type": "colour_choice",
+            "label": "The dupatta",
+            "required": false,
+            "options": [
+              { "value": "match_fabric", "label": "Match the fabric", "visual_key": "colour_match_fabric", "group": "match" },
+              { "value": "scarlet", "label": "Scarlet", "visual_key": "colour_scarlet", "group": "reds_maroons" },
+              { "value": "pearl", "label": "Pearl", "visual_key": "colour_pearl", "group": "silvers_pastels" }
+            ],
+            "constraints": { "allow_custom": true }
+          },
+          {
+            "id": "fabric_colour",
+            "type": "colour_choice",
+            "label": "The fabric",
+            "required": false,
+            "options": [
+              { "value": "scarlet", "label": "Scarlet", "visual_key": "colour_scarlet", "group": "reds_maroons" },
+              { "value": "ivory", "label": "Ivory", "visual_key": "colour_ivory", "group": "golds_ivories" }
+            ]
+          },
+          {
+            "id": "custom_colours",
+            "type": "colour_list",
+            "label": "Your own colours",
+            "required": false,
+            "constraints": { "max_items": 8 }
           }
         ]
       },
@@ -395,6 +424,109 @@
       "require_complete": false,
       "answers": { "garment_type": "lehenga", "embellishment_styles": ["none"] },
       "valid": true
+    },
+    {
+      "name": "colour_choice_accepts_a_declared_swatch",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "dupatta_colour": "scarlet" },
+      "valid": true
+    },
+    {
+      "name": "colour_choice_rejects_an_undeclared_value",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "dupatta_colour": "chartreuse" },
+      "valid": false,
+      "error_questions": ["dupatta_colour"]
+    },
+    {
+      "name": "colour_choice_rejects_a_list",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "dupatta_colour": ["scarlet"] },
+      "valid": false,
+      "error_questions": ["dupatta_colour"]
+    },
+    {
+      "name": "colour_choice_accepts_a_hex_from_the_palette",
+      "require_complete": false,
+      "answers": {
+        "garment_type": "lehenga",
+        "custom_colours": ["#7f2b4a"],
+        "dupatta_colour": "#7f2b4a"
+      },
+      "valid": true
+    },
+    {
+      "name": "colour_choice_accepts_an_upper_case_hex_and_normalises_it",
+      "require_complete": false,
+      "answers": {
+        "garment_type": "lehenga",
+        "custom_colours": ["#7F2B4A"],
+        "dupatta_colour": "#7F2B4A"
+      },
+      "valid": true
+    },
+    {
+      "name": "colour_choice_rejects_a_hex_absent_from_the_palette",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "dupatta_colour": "#7f2b4a" },
+      "valid": false,
+      "error_questions": ["dupatta_colour"]
+    },
+    {
+      "name": "colour_choice_rejects_a_hex_when_the_palette_is_malformed",
+      "require_complete": false,
+      "answers": {
+        "garment_type": "lehenga",
+        "custom_colours": ["not-a-hex"],
+        "dupatta_colour": "#7f2b4a"
+      },
+      "valid": false,
+      "error_questions": ["custom_colours", "dupatta_colour"]
+    },
+    {
+      "name": "colour_list_rejects_a_value_that_is_not_a_hex",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "custom_colours": ["red"] },
+      "valid": false,
+      "error_questions": ["custom_colours"]
+    },
+    {
+      "name": "colour_list_rejects_the_same_colour_twice",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "custom_colours": ["#111111", "#111111"] },
+      "valid": false,
+      "error_questions": ["custom_colours"]
+    },
+    {
+      "name": "colour_list_rejects_a_bare_string",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "custom_colours": "#111111" },
+      "valid": false,
+      "error_questions": ["custom_colours"]
+    },
+    {
+      "name": "colour_choice_without_allow_custom_accepts_a_declared_swatch",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "fabric_colour": "ivory" },
+      "valid": true
+    },
+    {
+      "name": "colour_choice_without_allow_custom_rejects_a_hex_even_from_the_palette",
+      "require_complete": false,
+      "answers": {
+        "garment_type": "lehenga",
+        "custom_colours": ["#7f2b4a"],
+        "fabric_colour": "#7f2b4a"
+      },
+      "valid": false,
+      "error_questions": ["fabric_colour"]
+    },
+    {
+      "name": "colour_list_rejects_more_than_the_declared_maximum",
+      "require_complete": false,
+      "answers": { "garment_type": "lehenga", "custom_colours": ["#111100", "#111101", "#111102", "#111103", "#111104", "#111105", "#111106", "#111107", "#111108"] },
+      "valid": false,
+      "error_questions": ["custom_colours"]
     }
   ]
 }

@@ -182,7 +182,7 @@ describe("save coordinator", () => {
     fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
     await waitFor(() => expect(mocks.createDesignDraft).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    const notes = await screen.findByLabelText("Notes");
+    const notes = await screen.findByRole("textbox", { name: "Notes" });
 
     mocks.updateDesignDraft.mockClear();
     fireEvent.change(notes, { target: { value: "Elegant" } });
@@ -209,8 +209,8 @@ describe("save coordinator", () => {
       fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     });
     // Still on the garment step — the failed save blocked advancing.
-    expect(screen.getByRole("heading", { name: "Garment step" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Notes step" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Garment" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Notes" })).not.toBeInTheDocument();
   });
 
   it("9: retry after a failed answer save resends the latest answer snapshot", async () => {
@@ -241,7 +241,7 @@ describe("save coordinator", () => {
     fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
     await waitFor(() => expect(mocks.createDesignDraft).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    const notes = await screen.findByLabelText("Notes");
+    const notes = await screen.findByRole("textbox", { name: "Notes" });
 
     mocks.updateDesignDraft.mockClear();
     fireEvent.change(notes, { target: { value: "later" } }); // schedules a 600ms debounce
@@ -389,6 +389,33 @@ const REQUIRED_TWO_STEP: QuestionnaireSchema = {
   rules: [],
 };
 
+// One screen whose required question can be answered and still invalid.
+const BOUNDED_MULTI: QuestionnaireSchema = {
+  schema_version: 1,
+  key: "test",
+  title: "Test",
+  steps: [
+    {
+      id: "handwork",
+      title: "Handwork step",
+      questions: [
+        {
+          id: "embellishment_styles",
+          type: "multi_choice",
+          label: "Embellishment",
+          required: true,
+          constraints: { min_items: 2, max_items: 3 },
+          options: [
+            { value: "zari", label: "Zari" },
+            { value: "zardozi", label: "Zardozi" },
+          ],
+        },
+      ],
+    },
+  ],
+  rules: [],
+};
+
 describe("wizard initialisation race (synchronous refs)", () => {
   it("1: clicking an answer the instant the control appears sends one POST with version v1", async () => {
     const create = deferred<{ ok: true; data: ReturnType<typeof detail> }>();
@@ -417,16 +444,19 @@ describe("wizard initialisation race (synchronous refs)", () => {
     expect(screen.queryByText(/Could not save/i)).not.toBeInTheDocument();
   });
 
-  it("3: clicking Continue the instant the first required step appears does not bypass validation", async () => {
+  it("3: the instant the first required screen appears, Continue is already unavailable", async () => {
     render(<QuestionnaireWizard />);
-    // Wait only for the step control, then Continue immediately without answering.
+    // Wait only for the screen control, then try to Continue without answering.
     await screen.findByRole("radio", { name: "Lehenga" });
+    const forward = screen.getByRole("button", { name: "Continue" });
+    // Disabled from the first render — not enabled-then-corrected once some
+    // effect catches up, which is what the synchronous refs exist to prevent.
+    expect(forward).toBeDisabled();
+    expect(screen.getByText("Choose an option to continue.")).toBeInTheDocument();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      fireEvent.click(forward);
     });
-    // Validation ran against the current step → blocked, no design created.
-    expect(screen.getByRole("heading", { name: "Garment step" })).toBeInTheDocument();
-    expect(await screen.findByRole("alert", { name: "There is a problem" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Garment" })).toBeInTheDocument();
     expect(mocks.createDesignDraft).not.toHaveBeenCalled();
   });
 
@@ -446,16 +476,46 @@ describe("wizard initialisation race (synchronous refs)", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     });
-    // Now on the silhouette step; Continue immediately without answering it.
-    expect(await screen.findByRole("heading", { name: "Silhouette step" })).toBeInTheDocument();
+    // Now on the silhouette screen; it is the NEW screen's required question
+    // that governs, not the answered previous one.
+    expect(await screen.findByRole("heading", { name: "Silhouette" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     });
-    // The NEW step's required question blocks — we did not advance past it.
-    expect(screen.getByRole("heading", { name: "Silhouette step" })).toBeInTheDocument();
-    expect(screen.getByRole("alert", { name: "There is a problem" })).toHaveTextContent(
-      /Silhouette/,
+    expect(screen.getByRole("heading", { name: "Silhouette" })).toBeInTheDocument();
+
+    // Answering it releases the gate — proving the disabled state tracked the
+    // current screen rather than being stuck from the previous one.
+    fireEvent.click(screen.getByRole("radio", { name: "Flared" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Continue" })).not.toBeDisabled(),
     );
+  });
+
+  it("4b: an answered-but-invalid screen is still refused by the resolver, not just by the gate", async () => {
+    // The disabled Continue only knows whether a required question HAS a value.
+    // A bounded multi-choice can be answered and still invalid, so the derived
+    // Zod resolver must remain the second line of defence.
+    mocks.fetchActiveQuestionnaire.mockResolvedValue({
+      id: "v1",
+      version: 1,
+      schema: BOUNDED_MULTI,
+    });
+    render(<QuestionnaireWizard />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Zari" }));
+    await waitFor(() => expect(mocks.createDesignDraft).toHaveBeenCalled());
+    const forward = screen.getByRole("button", { name: "Continue" });
+    expect(forward).not.toBeDisabled();
+
+    await act(async () => {
+      fireEvent.click(forward);
+    });
+
+    expect(await screen.findByRole("alert", { name: "There is a problem" })).toHaveTextContent(
+      /Embellishment/,
+    );
+    expect(screen.getByRole("heading", { name: "Embellishment" })).toBeInTheDocument();
   });
 
   it("5: two rapid initial changes create exactly one design and persist the newest state", async () => {

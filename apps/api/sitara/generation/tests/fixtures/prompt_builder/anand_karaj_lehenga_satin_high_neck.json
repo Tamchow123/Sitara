@@ -1,0 +1,68 @@
+{
+  "schema_version": 2,
+  "source_selections": {
+    "garment_type": "lehenga",
+    "ceremony": "anand_karaj",
+    "regional_style": "punjabi",
+    "silhouette": "flared_lehenga",
+    "colour_palette": ["ruby", "gold"],
+    "fabrics": ["satin", "organza"],
+    "embellishment_styles": ["zardozi", "dabka"],
+    "embellishment_density": "balanced",
+    "coverage_preferences": ["full_sleeves", "full_midriff", "head_drape_preferred"],
+    "neckline_style": "high_neck",
+    "dupatta_style": "double_dupatta",
+    "saree_drape": null
+  },
+  "title": "Ruby and gold flared lehenga for an Anand Karaj",
+  "concept_summary": "A luminous Anand Karaj concept built around a full-flared ruby lehenga with a fitted, fully covered choli and a double dupatta with one layer drawn over the head. Gold zardozi catches the light while the mood stays reverent and restrained for the Sikh marriage ceremony.",
+  "garment_breakdown": {
+    "overall_form": "A fitted, high-necked choli paired with a voluminous circular lehenga skirt and a double dupatta.",
+    "garment_components": ["Fitted high-neck choli", "Full-flared lehenga skirt", "Two matched dupattas"],
+    "silhouette": "A cleanly fitted upper body opening into a wide, evenly gathered floor-length flare.",
+    "drape_or_layering": "One dupatta is drawn over the head while the second rests along the body.",
+    "key_proportions": "A close bodice, covered waist and a full skirt keep the proportions balanced and formal."
+  },
+  "colour_story": {
+    "palette_summary": "A ruby base lifted by warm gold, kept rich rather than harsh.",
+    "placement": "Ruby leads across the skirt and choli, with gold as the accent through the embroidery and border.",
+    "rationale": "Ruby reads celebratory for an Anand Karaj, while gold adds warmth without overwhelming the look."
+  },
+  "fabrics_and_texture": [
+    {
+      "fabric": "Satin",
+      "placement": "Choli and lehenga skirt base",
+      "finish_and_movement": "A smooth, lustrous-faced weave that catches light cleanly and holds the skirt's flare."
+    },
+    {
+      "fabric": "Organza",
+      "placement": "Dupattas",
+      "finish_and_movement": "A crisp, translucent layer that floats lightly over the head and shoulders."
+    }
+  ],
+  "embellishment_plan": {
+    "techniques": ["Zardozi metal-thread work", "Dabka coiled-wire detailing"],
+    "density": "A balanced amount of work concentrated at borders and the bodice rather than all over.",
+    "placement": ["Choli bodice", "Skirt hem border", "Dupatta edges"],
+    "motifs": ["Fine floral vines", "Small scattered buti motifs"],
+    "restraint_notes": "Open ruby ground is left between motifs so the metalwork stays elegant."
+  },
+  "coverage_and_drape": {
+    "sleeves": "Full-length fitted sleeves reaching the wrists as requested.",
+    "neckline": "A high, fully closed neckline covering the collarbone and upper chest.",
+    "back_and_midriff": "A fully covered midriff with no bare skin at the waist.",
+    "head_covering": "One dupatta layer is worn over the head throughout, honouring the stated preference.",
+    "dupatta_or_saree_drape": "A double dupatta, one layer over the head and one down the body."
+  },
+  "cultural_context": {
+    "regional_direction": "A broad Punjabi bridal influence guides the restraint and metalwork emphasis.",
+    "interpretation_notes": ["Treated as one broad regional direction, not a fixed rule for any community."],
+    "safeguards": ["The Anand Karaj is treated as the Sikh marriage ceremony and never conflated with other rites."]
+  },
+  "styling_notes": ["Keep jewellery warm-toned to echo the gold work.", "A covered hairstyle suits the head drape."],
+  "construction_caveats": [
+    "This is a concept visualisation, not a sewing pattern, and includes no measurements.",
+    "It does not guarantee that the garment can be constructed exactly as shown."
+  ],
+  "image_alt_text": "A model in a ruby flared lehenga with gold embroidery, a high neckline and a double dupatta drawn over the head for an Anand Karaj."
+}

@@ -34,7 +34,12 @@ from sitara.designs.models import Design, DesignVersion, GenerationAttempt
 from sitara.designs.services import DesignVersionLimitReached, create_next_design_version_locked
 
 from . import cost_accounting, cost_control
-from .design_spec import DESIGN_SPEC_SCHEMA_VERSION, DesignSpec
+from .design_spec import (
+    SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS,
+    DesignSpec,
+    UnsupportedDesignSpecVersion,
+    validate_design_spec,
+)
 from .input_safety import GeneratedContentRejected, contains_phrase, iter_strings
 from .inspiration_context import InspirationContextSnapshot, inspiration_context_sha256
 from .refinement import (
@@ -165,13 +170,13 @@ def validate_source_version(source_version: DesignVersion) -> _SourceContext:
         raise RefinementSourceUnavailable("only a version 1 design may be refined")
     if source_version.design_spec is None or source_version.design_spec_schema_version is None:
         raise RefinementSourceUnavailable("the source design has no generated specification")
-    if source_version.design_spec_schema_version != DESIGN_SPEC_SCHEMA_VERSION:
+    if source_version.design_spec_schema_version not in SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS:
         raise RefinementSourceUnavailable("the source specification schema is not supported")
     if not source_version.has_permanent_image:
         raise RefinementSourceUnavailable("the source design has no complete image yet")
     try:
-        spec = DesignSpec.model_validate(source_version.design_spec)
-    except ValidationError:
+        spec = validate_design_spec(source_version.design_spec)
+    except (ValidationError, UnsupportedDesignSpecVersion):
         raise RefinementSourceUnavailable("the source specification failed validation") from None
     try:
         scan_design_spec_or_raise(spec)
@@ -248,7 +253,11 @@ def _validate_refined_output(
     on any failure (all treated as retryable by the caller, EXCEPT an empty
     diff, which is tracked separately so the caller can distinguish "no
     change produced" from every other invalid-output reason)."""
-    spec = DesignSpec.model_validate(payload)
+    spec = validate_design_spec(payload)
+    # A refinement never changes the DesignSpec structure version — a mismatch
+    # is treated the same as any other immutable change.
+    if spec.schema_version != source_spec.schema_version:
+        raise RefinementOutputRejected(RefinementOutputCategory.IMMUTABLE_FIELD_CHANGED)
     scan_design_spec_or_raise(spec)
     _assert_source_selections_unchanged(spec, source_spec.source_selections.model_dump())
     _assert_no_refinement_process_leakage(spec)
@@ -297,6 +306,7 @@ def _generate_valid_refined_spec(
             source_selections=source_spec.source_selections.model_dump(),
             max_output_tokens=settings.DESIGN_SPEC_MAX_OUTPUT_TOKENS,
             attempt=attempt,
+            schema_version=source_spec.schema_version,
         )
         stage = _REFINEMENT_STRUCTURED_STAGES[attempt]
         # Reserve BEFORE the submission marker (spec Part A §6); a rejected or
@@ -348,7 +358,12 @@ def _generate_valid_refined_spec(
                 logger.warning(
                     "refinement output unchanged design=%s attempt=%s", design_id, attempt
                 )
-            except (ValidationError, GeneratedContentRejected, RefinementOutputRejected) as exc:
+            except (
+                ValidationError,
+                UnsupportedDesignSpecVersion,
+                GeneratedContentRejected,
+                RefinementOutputRejected,
+            ) as exc:
                 no_change_only = False
                 logger.warning(
                     "refinement output rejected design=%s attempt=%s exception_type=%s",
@@ -417,7 +432,8 @@ def _finalise_refinement_atomic(
                 "this design has already reached its maximum number of versions"
             ) from None
         version.design_spec = spec.model_dump(mode="json")
-        version.design_spec_schema_version = DESIGN_SPEC_SCHEMA_VERSION
+        # The refined spec keeps the source's structure version (enforced above).
+        version.design_spec_schema_version = spec.schema_version
         version.design_spec_template_version = REFINEMENT_DESIGN_SPEC_TEMPLATE_VERSION
         version.design_spec_provider = usage.provider
         version.design_spec_model = usage.model

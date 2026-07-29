@@ -41,7 +41,8 @@ class TestStrictness:
             DemoManifest.model_validate(data)
 
     def test_unsupported_schema_version_is_rejected(self):
-        data = mutate(a_valid_manifest_dict(), schema_version=2)
+        # Version 1 is the retired structure; only version 2 is accepted now.
+        data = mutate(a_valid_manifest_dict(), schema_version=1)
         with pytest.raises(ValidationError):
             DemoManifest.model_validate(data)
 
@@ -141,6 +142,12 @@ class TestAssetFieldValidation:
         with pytest.raises(ValidationError):
             DemoManifest.model_validate(data)
 
+    def test_unknown_neckline_is_rejected(self):
+        data = a_valid_manifest_dict()
+        data["assets"][0]["necklines"] = ["high_neck", "not_a_real_neckline"]
+        with pytest.raises(ValidationError):
+            DemoManifest.model_validate(data)
+
     def test_unknown_provenance_status_is_rejected(self):
         data = a_valid_manifest_dict()
         data["assets"][0]["provenance_status"] = "trust_me"
@@ -202,6 +209,16 @@ class TestCoverageValidation:
             # "walima" appears on two synthetic assets, each with a second
             # ceremony too, so removing it never empties a ceremonies list.
             asset["ceremonies"] = [c for c in asset["ceremonies"] if c != "walima"]
+        manifest = DemoManifest.model_validate(data)
+        with pytest.raises(ManifestCoverageError):
+            validate_manifest_coverage(manifest)
+
+    def test_missing_anand_karaj_coverage_is_rejected(self):
+        # Anand Karaj is a culturally-distinct required ceremony: a pack with no
+        # asset tagged for it must fail closed at validation, never activate
+        # with a nearest-neighbour substitute. Only asset 007 tags it here.
+        data = a_valid_manifest_dict()
+        data["assets"] = [a for a in data["assets"] if "anand_karaj" not in a["ceremonies"]]
         manifest = DemoManifest.model_validate(data)
         with pytest.raises(ManifestCoverageError):
             validate_manifest_coverage(manifest)

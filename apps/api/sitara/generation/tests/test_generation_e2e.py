@@ -119,19 +119,23 @@ def test_end_to_end_generation_succeeds_via_eager_task(settings, monkeypatch):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_end_to_end_generation_with_inspiration_never_sends_a_reference_image(
+def test_end_to_end_generation_with_inspiration_sends_signed_reference_urls(
     settings, monkeypatch, inmemory_storage
 ):
-    """Phase 13: an inspiration selected through the full async pipeline still
-    reaches Replicate with an empty ``reference_image_urls`` tuple, the
-    persisted DesignVersion carries the exact snapshot, and zero catalogue
-    storage reads occur outside asset approval/ingest."""
+    """Phase 16B (ADR 0019, overriding ADR 0014): an inspiration selected
+    through the full async pipeline now reaches the IMAGE provider as a
+    short-TTL signed URL. The metadata snapshot Phase 13 built is unchanged and
+    still the only thing Anthropic sees; nothing about the reference is
+    persisted on the version."""
     from sitara.catalogue.tests.utils import make_eligible_asset
     from sitara.designs.models import DesignInspiration
     from sitara.generation.inspiration_context import build_inspiration_context_snapshot
 
     settings.CELERY_TASK_ALWAYS_EAGER = True
     _open_all_gates(settings)
+    # A reachable https signing origin — the local plaintext MinIO default
+    # fails closed at the request boundary (see the test below).
+    settings.S3_SIGNED_URL_ENDPOINT_URL = "https://storage.example.test"
     storage = InMemoryStorage()
     fake_image = FakeImageProvider()
     _inject_fakes(monkeypatch, storage, image=fake_image)
@@ -147,10 +151,68 @@ def test_end_to_end_generation_with_inspiration_never_sends_a_reference_image(
     assert attempt.status == _Status.SUCCEEDED
 
     assert fake_image.last_request is not None
-    assert fake_image.last_request.reference_image_urls == ()
+    urls = fake_image.last_request.reference_image_urls
+    assert len(urls) == 1
+    assert urls[0].startswith("https://storage.example.test/")
+    # A signed URL, not a bare object path: the signature is what makes the
+    # private object readable at all.
+    assert "X-Amz-Signature=" in urls[0]
 
     version = DesignVersion.objects.get(design=design)
     assert version.inspiration_context == expected_snapshot.model_dump(mode="json")
+    # The bearer URL is transient: nothing about it is persisted anywhere.
+    assert urls[0] not in str(version.inspiration_context)
+    assert urls[0] not in (attempt.image_parameters or {}).values()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_plaintext_signing_origin_fails_before_any_provider_submission(
+    settings, monkeypatch, inmemory_storage
+):
+    """A presigned URL is a bearer credential. If the configured signing origin
+    is plaintext — the local MinIO default — the request boundary refuses it and
+    the attempt ends BEFORE create_prediction, so nothing is submitted or
+    billed."""
+    from sitara.catalogue.tests.utils import make_eligible_asset
+    from sitara.designs.models import DesignInspiration
+
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    _open_all_gates(settings)
+    settings.S3_SIGNED_URL_ENDPOINT_URL = "http://localhost:9000"
+    storage = InMemoryStorage()
+    fake_image = FakeImageProvider()
+    _inject_fakes(monkeypatch, storage, image=fake_image)
+
+    design = make_complete_design()
+    DesignInspiration.objects.create(
+        design=design, inspiration_asset=make_eligible_asset(), position=1
+    )
+
+    attempt, _ = enqueue_design_generation(design, idempotency_key=uuid.uuid4())
+    attempt.refresh_from_db()
+    assert attempt.status == _Status.FAILED
+    assert fake_image.create_calls == 0
+    # No stranded in-flight marker: a later resume must not read this as spend
+    # that may already have happened.
+    assert attempt.image_submission_in_flight is False
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_design_without_inspiration_still_generates_on_a_plaintext_origin(settings, monkeypatch):
+    """The boundary check must only bite when there is something to sign — a
+    plain design has no references and must generate exactly as before."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    _open_all_gates(settings)
+    settings.S3_SIGNED_URL_ENDPOINT_URL = "http://localhost:9000"
+    storage = InMemoryStorage()
+    fake_image = FakeImageProvider()
+    _inject_fakes(monkeypatch, storage, image=fake_image)
+
+    design = make_complete_design()
+    attempt, _ = enqueue_design_generation(design, idempotency_key=uuid.uuid4())
+    attempt.refresh_from_db()
+    assert attempt.status == _Status.SUCCEEDED
+    assert fake_image.last_request.reference_image_urls == ()
 
 
 @pytest.mark.django_db(transaction=True)

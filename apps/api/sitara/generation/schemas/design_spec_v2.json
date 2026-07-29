@@ -1,0 +1,491 @@
+{
+  "$defs": {
+    "ColourStory": {
+      "additionalProperties": false,
+      "properties": {
+        "palette_summary": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Palette Summary",
+          "type": "string"
+        },
+        "placement": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Placement",
+          "type": "string"
+        },
+        "rationale": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "palette_summary",
+        "placement",
+        "rationale"
+      ],
+      "title": "ColourStory",
+      "type": "object"
+    },
+    "CoverageAndDrape": {
+      "additionalProperties": false,
+      "properties": {
+        "back_and_midriff": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Back And Midriff",
+          "type": "string"
+        },
+        "dupatta_or_saree_drape": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Dupatta Or Saree Drape",
+          "type": "string"
+        },
+        "head_covering": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Head Covering",
+          "type": "string"
+        },
+        "neckline": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Neckline",
+          "type": "string"
+        },
+        "sleeves": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Sleeves",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sleeves",
+        "neckline",
+        "back_and_midriff",
+        "head_covering",
+        "dupatta_or_saree_drape"
+      ],
+      "title": "CoverageAndDrape",
+      "type": "object"
+    },
+    "CulturalContext": {
+      "additionalProperties": false,
+      "properties": {
+        "interpretation_notes": {
+          "items": {
+            "maxLength": 400,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Interpretation Notes",
+          "type": "array"
+        },
+        "regional_direction": {
+          "anyOf": [
+            {
+              "maxLength": 400,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Regional Direction"
+        },
+        "safeguards": {
+          "items": {
+            "maxLength": 400,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Safeguards",
+          "type": "array"
+        }
+      },
+      "required": [
+        "regional_direction",
+        "interpretation_notes",
+        "safeguards"
+      ],
+      "title": "CulturalContext",
+      "type": "object"
+    },
+    "EmbellishmentPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "density": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Density",
+          "type": "string"
+        },
+        "motifs": {
+          "items": {
+            "maxLength": 400,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Motifs",
+          "type": "array"
+        },
+        "placement": {
+          "items": {
+            "maxLength": 400,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Placement",
+          "type": "array"
+        },
+        "restraint_notes": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Restraint Notes",
+          "type": "string"
+        },
+        "techniques": {
+          "items": {
+            "maxLength": 400,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Techniques",
+          "type": "array"
+        }
+      },
+      "required": [
+        "techniques",
+        "density",
+        "placement",
+        "motifs",
+        "restraint_notes"
+      ],
+      "title": "EmbellishmentPlan",
+      "type": "object"
+    },
+    "FabricEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "fabric": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Fabric",
+          "type": "string"
+        },
+        "finish_and_movement": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Finish And Movement",
+          "type": "string"
+        },
+        "placement": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Placement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fabric",
+        "placement",
+        "finish_and_movement"
+      ],
+      "title": "FabricEntry",
+      "type": "object"
+    },
+    "GarmentBreakdown": {
+      "additionalProperties": false,
+      "properties": {
+        "drape_or_layering": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Drape Or Layering",
+          "type": "string"
+        },
+        "garment_components": {
+          "items": {
+            "maxLength": 400,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Garment Components",
+          "type": "array"
+        },
+        "key_proportions": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Key Proportions",
+          "type": "string"
+        },
+        "overall_form": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Overall Form",
+          "type": "string"
+        },
+        "silhouette": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Silhouette",
+          "type": "string"
+        }
+      },
+      "required": [
+        "overall_form",
+        "garment_components",
+        "silhouette",
+        "drape_or_layering",
+        "key_proportions"
+      ],
+      "title": "GarmentBreakdown",
+      "type": "object"
+    },
+    "SourceSelectionsV2": {
+      "additionalProperties": false,
+      "description": "Version-2 source selections: adds the dedicated canonical neckline.\n\n``neckline_style`` is now the single authoritative neckline decision (the\nold ``high_neckline`` coverage value is retired from the questionnaire).\n``None`` means the user expressed no neckline preference. Every other field\nis inherited unchanged; ``extra=\"forbid\"`` still rejects any unknown key.",
+      "properties": {
+        "ceremony": {
+          "pattern": "^[a-z][a-z0-9_]{1,63}$",
+          "title": "Ceremony",
+          "type": "string"
+        },
+        "colour_palette": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Colour Palette",
+          "type": "array"
+        },
+        "coverage_preferences": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+            "type": "string"
+          },
+          "maxItems": 12,
+          "title": "Coverage Preferences",
+          "type": "array"
+        },
+        "dupatta_style": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dupatta Style"
+        },
+        "embellishment_density": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Embellishment Density"
+        },
+        "embellishment_styles": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Embellishment Styles",
+          "type": "array"
+        },
+        "fabrics": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Fabrics",
+          "type": "array"
+        },
+        "garment_type": {
+          "pattern": "^[a-z][a-z0-9_]{1,63}$",
+          "title": "Garment Type",
+          "type": "string"
+        },
+        "neckline_style": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Neckline Style"
+        },
+        "regional_style": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Regional Style"
+        },
+        "saree_drape": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Saree Drape"
+        },
+        "silhouette": {
+          "pattern": "^[a-z][a-z0-9_]{1,63}$",
+          "title": "Silhouette",
+          "type": "string"
+        }
+      },
+      "required": [
+        "garment_type",
+        "ceremony",
+        "regional_style",
+        "silhouette",
+        "colour_palette",
+        "fabrics",
+        "embellishment_styles",
+        "embellishment_density",
+        "coverage_preferences",
+        "dupatta_style",
+        "saree_drape",
+        "neckline_style"
+      ],
+      "title": "SourceSelectionsV2",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Version-2 DesignSpec: identical narrative structure to version 1 with a\ndedicated canonical neckline in ``source_selections``.\n\nOverriding ``schema_version`` and ``source_selections`` keeps their\noriginal field positions (Pydantic preserves the base declaration order for\noverridden fields), and the two inherited validators — the boolean\nschema-version guard and the semantic-invariant model validator — continue\nto apply.",
+  "properties": {
+    "colour_story": {
+      "$ref": "#/$defs/ColourStory"
+    },
+    "concept_summary": {
+      "maxLength": 700,
+      "minLength": 80,
+      "title": "Concept Summary",
+      "type": "string"
+    },
+    "construction_caveats": {
+      "items": {
+        "maxLength": 400,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 6,
+      "minItems": 1,
+      "title": "Construction Caveats",
+      "type": "array"
+    },
+    "coverage_and_drape": {
+      "$ref": "#/$defs/CoverageAndDrape"
+    },
+    "cultural_context": {
+      "$ref": "#/$defs/CulturalContext"
+    },
+    "embellishment_plan": {
+      "$ref": "#/$defs/EmbellishmentPlan"
+    },
+    "fabrics_and_texture": {
+      "items": {
+        "$ref": "#/$defs/FabricEntry"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "title": "Fabrics And Texture",
+      "type": "array"
+    },
+    "garment_breakdown": {
+      "$ref": "#/$defs/GarmentBreakdown"
+    },
+    "image_alt_text": {
+      "maxLength": 300,
+      "minLength": 40,
+      "title": "Image Alt Text",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 2,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "source_selections": {
+      "$ref": "#/$defs/SourceSelectionsV2"
+    },
+    "styling_notes": {
+      "items": {
+        "maxLength": 400,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "title": "Styling Notes",
+      "type": "array"
+    },
+    "title": {
+      "maxLength": 120,
+      "minLength": 3,
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "source_selections",
+    "title",
+    "concept_summary",
+    "garment_breakdown",
+    "colour_story",
+    "fabrics_and_texture",
+    "embellishment_plan",
+    "coverage_and_drape",
+    "cultural_context",
+    "styling_notes",
+    "construction_caveats",
+    "image_alt_text"
+  ],
+  "title": "DesignSpecV2",
+  "type": "object"
+}

@@ -39,6 +39,9 @@ EXPECTED_OPERATIONS = frozenset(
         ("/api/v1/designs/{design_id}/validate/", "post"),
         ("/api/v1/designs/{design_id}/generate/", "post"),
         ("/api/v1/designs/{design_id}/refine/", "post"),
+        ("/api/v1/designs/{design_id}/inspiration-uploads/", "post"),
+        ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/", "delete"),
+        ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/image/", "get"),
         ("/api/v1/designs/{design_id}/versions/{version_id}/images/", "get"),
         ("/api/v1/designs/{design_id}/versions/{version_id}/result/", "get"),
         ("/api/v1/jobs/{job_id}/", "get"),
@@ -60,6 +63,8 @@ UNSAFE_OPERATIONS = frozenset(
         ("/api/v1/designs/{design_id}/validate/", "post"),
         ("/api/v1/designs/{design_id}/generate/", "post"),
         ("/api/v1/designs/{design_id}/refine/", "post"),
+        ("/api/v1/designs/{design_id}/inspiration-uploads/", "post"),
+        ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/", "delete"),
     }
 )
 
@@ -236,7 +241,18 @@ def test_questionnaire_schema_is_structurally_typed(committed_schema):
     action = schemas["RuleActionSchema"]["properties"]
     assert {"action", "question_id"} <= set(action)
 
-    assert set(schemas["TypeEnum"]["enum"]) == {"single_choice", "multi_choice", "text"}
+    # Deliberately spelled out rather than imported from schema_validation: this
+    # is an independent statement of the wire contract, so widening the question
+    # vocabulary must be a conscious edit here, not something a source change
+    # silently drags along. colour_choice/colour_list arrived with schema v4's
+    # split of the single colour_palette into per-role colour questions.
+    assert set(schemas["TypeEnum"]["enum"]) == {
+        "single_choice",
+        "multi_choice",
+        "text",
+        "colour_choice",
+        "colour_list",
+    }
     assert set(schemas["OperatorEnum"]["enum"]) == {"equals", "in", "not_in"}
     assert set(schemas["ActionEnum"]["enum"]) == {"show", "hide", "require", "restrict_options"}
 

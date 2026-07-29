@@ -13,14 +13,21 @@
 // browser — check that bound before changing this value.
 export const REQUEST_TIMEOUT_MS = 5000;
 
+// Uploading up to USER_UPLOAD_MAX_BYTES of image over a slow connection cannot
+// fit the 5s budget above, which exists to stop a JSON round-trip hanging the
+// UI. This is the ONLY exception, it is still a hard bound, and it applies to
+// nothing else — a request body is the reason, never a slow server.
+export const UPLOAD_TIMEOUT_MS = 60_000;
+
 export async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit = {},
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
   // Abort half-open connections so the UI can never hang forever; timeouts,
   // network errors and malformed JSON all surface as thrown errors.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     // Merge headers deterministically: any already present on an incoming
     // Request first, then init.headers override them, then an Accept default

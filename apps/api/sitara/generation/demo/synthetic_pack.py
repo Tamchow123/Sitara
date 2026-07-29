@@ -41,6 +41,7 @@ class _SyntheticAssetSpec:
     embellishment_styles: list[str]
     embellishment_densities: list[str]
     coverage_preferences: list[str]
+    necklines: list[str]
     dupatta_styles: list[str]
     saree_drapes: list[str]
     rgb_primary: tuple[int, int, int]
@@ -58,6 +59,7 @@ _SPECS: tuple[_SyntheticAssetSpec, ...] = (
         embellishment_styles=["zardozi", "sequins"],
         embellishment_densities=["heavy"],
         coverage_preferences=["full_sleeves"],
+        necklines=["sweetheart_neck", "curved_scoop"],
         dupatta_styles=["head_drape"],
         saree_drapes=[],
         rgb_primary=(150, 20, 30),
@@ -73,6 +75,7 @@ _SPECS: tuple[_SyntheticAssetSpec, ...] = (
         embellishment_styles=["gota_patti"],
         embellishment_densities=["balanced"],
         coverage_preferences=["full_sleeves", "high_neckline"],
+        necklines=["high_neck", "boat_neck"],
         dupatta_styles=[],
         saree_drapes=["nivi_drape"],
         rgb_primary=(230, 222, 200),
@@ -88,6 +91,7 @@ _SPECS: tuple[_SyntheticAssetSpec, ...] = (
         embellishment_styles=["mirror_work"],
         embellishment_densities=["minimal"],
         coverage_preferences=["three_quarter_sleeves"],
+        necklines=["v_neck"],
         dupatta_styles=["one_shoulder"],
         saree_drapes=[],
         rgb_primary=(40, 120, 60),
@@ -103,6 +107,7 @@ _SPECS: tuple[_SyntheticAssetSpec, ...] = (
         embellishment_styles=["resham_threadwork"],
         embellishment_densities=["minimal"],
         coverage_preferences=["elbow_sleeves"],
+        necklines=["square_neck"],
         dupatta_styles=["both_shoulders"],
         saree_drapes=[],
         rgb_primary=(230, 150, 110),
@@ -118,6 +123,7 @@ _SPECS: tuple[_SyntheticAssetSpec, ...] = (
         embellishment_styles=["crystals", "sequins"],
         embellishment_densities=["balanced"],
         coverage_preferences=["full_sleeves", "full_back"],
+        necklines=["classic_crew", "high_neck"],
         dupatta_styles=["front_drape"],
         saree_drapes=[],
         rgb_primary=(20, 30, 70),
@@ -133,10 +139,33 @@ _SPECS: tuple[_SyntheticAssetSpec, ...] = (
         embellishment_styles=["dabka"],
         embellishment_densities=["heavy"],
         coverage_preferences=["full_sleeves", "head_drape_preferred"],
+        necklines=["band_collar", "high_neck"],
         dupatta_styles=["double_dupatta"],
         saree_drapes=[],
         rgb_primary=(120, 20, 40),
         rgb_secondary=(190, 150, 50),
+    ),
+    # Phase 16B: a synthetic Anand Karaj asset covering satin, a ruby palette, a
+    # high neckline, full midriff coverage and a covered head — so the demo
+    # pipeline can satisfy the new fail-closed constraints for an Anand Karaj
+    # design in development. Production requires an operator-supplied,
+    # culturally-reviewed Anand Karaj asset (this synthetic one is never
+    # production-eligible).
+    _SyntheticAssetSpec(
+        asset_id="lehenga-anand-karaj-dev-007",
+        garment_types=["lehenga"],
+        ceremonies=["anand_karaj"],
+        silhouettes=["flared_lehenga", "a_line_lehenga"],
+        colours=["ruby", "gold"],
+        fabrics=["satin", "organza"],
+        embellishment_styles=["zardozi"],
+        embellishment_densities=["balanced"],
+        coverage_preferences=["full_sleeves", "full_midriff", "full_back", "head_drape_preferred"],
+        necklines=["high_neck", "classic_crew"],
+        dupatta_styles=["double_dupatta", "head_drape"],
+        saree_drapes=[],
+        rgb_primary=(150, 20, 40),
+        rgb_secondary=(200, 160, 60),
     ),
 )
 
@@ -201,6 +230,7 @@ def build_synthetic_demo_pack() -> tuple[DemoManifest, dict[str, bytes]]:
                 embellishment_styles=spec.embellishment_styles,
                 embellishment_densities=spec.embellishment_densities,
                 coverage_preferences=spec.coverage_preferences,
+                necklines=spec.necklines,
                 dupatta_styles=spec.dupatta_styles,
                 saree_drapes=spec.saree_drapes,
                 regional_styles=[],
@@ -208,5 +238,5 @@ def build_synthetic_demo_pack() -> tuple[DemoManifest, dict[str, bytes]]:
             )
         )
 
-    manifest = DemoManifest(schema_version=1, pack_id=SYNTHETIC_PACK_ID, assets=assets)
+    manifest = DemoManifest(schema_version=2, pack_id=SYNTHETIC_PACK_ID, assets=assets)
     return manifest, images

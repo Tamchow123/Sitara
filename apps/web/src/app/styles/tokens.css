@@ -1,0 +1,150 @@
+/* ==================================================================== */
+/* Design tokens — the "Organic" system from the Sitara design handoff. */
+/*                                                                      */
+/* design/sitara-handoff/_ds/organic-styles.css is the source of truth  */
+/* for these values; they are transcribed here (rather than imported)   */
+/* because that file also ships prototype component classes we do not   */
+/* use, and because its Google-Fonts @import would violate our          */
+/* `font-src 'self'` CSP. The three faces are self-hosted through       */
+/* next/font in app/layout.tsx, which exposes them as the               */
+/* --font-caprasimo / --font-figtree / --font-cormorant variables       */
+/* consumed below.                                                      */
+/*                                                                      */
+/* CONTRAST RULE (measured against the --color-bg cream ground):        */
+/*   --color-accent      #c67139  3.03:1  decorative ONLY — fills,      */
+/*                                        borders, selection rings      */
+/*   --color-accent-600  #b2622d  3.77:1  large text / icons only       */
+/*   --color-accent-700  #8c491a  5.72:1  AA — body text, focus rings,  */
+/*                                        and primary-button ground     */
+/*   --color-neutral-700 #645c50  5.53:1  AA — meta and helper text     */
+/*   --color-neutral-800 #474238  8.38:1  AAA — body copy               */
+/*   --color-accent-2-700 #56633f 5.43:1  AA — limit and status notes   */
+/* The handoff's own .btn-primary (accent ground + bg text) measures    */
+/* 3.03:1, below AA, so we deliberately use accent-700 there instead.   */
+/* Never put small text on --color-accent or --color-accent-600.        */
+/* ==================================================================== */
+:root {
+  /* Ground, ink and accents */
+  --color-bg: #f5ead8;
+  --color-surface: #ebddc5;
+  --color-text: #201e1d;
+  --color-accent: #c67139;
+  --color-accent-2: #7a8a5e;
+  /* Declared twice on purpose: an engine without color-mix() keeps the rgba()
+     line, one with it takes the second. Without the fallback the custom
+     property would be invalid at computed-value time, so `background:
+     var(--color-divider)` would silently resolve to `transparent` and
+     `box-shadow: var(--shadow-md)` to `none` — dividers and elevation would
+     vanish rather than degrade. Each pair is the same ink at the same alpha. */
+  --color-divider: rgba(32, 30, 29, 0.16);
+  --color-divider: color-mix(in srgb, #201e1d 16%, transparent);
+
+  /* Tonal ramps — one shared lightness scale, so the same step of any
+     role matches the others in visual value. */
+  --color-neutral-100: #f9f4ed;
+  --color-neutral-200: #eee7db;
+  --color-neutral-300: #dcd3c4;
+  --color-neutral-400: #c0b6a5;
+  --color-neutral-500: #a19786;
+  --color-neutral-600: #82796a;
+  --color-neutral-700: #645c50;
+  --color-neutral-800: #474238;
+  --color-neutral-900: #2e2b25;
+
+  --color-accent-100: #fff2eb;
+  --color-accent-200: #ffe1d0;
+  --color-accent-300: #ffc6a5;
+  --color-accent-400: #f6a06b;
+  --color-accent-500: #d67f48;
+  --color-accent-600: #b2622d;
+  --color-accent-700: #8c491a;
+  --color-accent-800: #643312;
+  --color-accent-900: #402310;
+
+  --color-accent-2-100: #f0fae1;
+  --color-accent-2-200: #e1eecc;
+  --color-accent-2-300: #ccdbb2;
+  --color-accent-2-400: #aebf92;
+  --color-accent-2-500: #8fa073;
+  --color-accent-2-600: #728157;
+  --color-accent-2-700: #56633f;
+  --color-accent-2-800: #3d472b;
+  --color-accent-2-900: #272e1b;
+
+  /* Status roles (kept from the pre-handoff palette; both clear AA on
+     the cream ground — #1d6b3c 5.48:1 and #a4262c 6.10:1). */
+  --color-ok: #1d6b3c;
+  --color-bad: #a4262c;
+
+  /* Type. --font-display carries the Sitara wordmark and page h1s;
+     --font-heading is the Organic display face for legends, card
+     titles and drawer headings; --font-body is everything else. */
+  --font-display: var(--font-cormorant), Georgia, "Times New Roman", serif;
+  --font-heading: var(--font-caprasimo), Georgia, serif;
+  --font-heading-weight: 400;
+  --font-body: var(--font-figtree), system-ui, -apple-system, sans-serif;
+
+  /* Spacing — a 4.4px step. The handoff ships 1,2,3,4,6,8; 5 and 7 are
+     interpolated on the same step so the scale has no gaps. */
+  --space-1: 4.4px;
+  --space-2: 8.8px;
+  --space-3: 13.2px;
+  --space-4: 17.6px;
+  --space-5: 22px;
+  --space-6: 26.4px;
+  --space-7: 30.8px;
+  --space-8: 35.2px;
+
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 28px;
+  --radius-pill: 999px;
+
+  /* Elevation — soft ink-tinted shadows on the light ground. Same
+     declared-twice fallback pattern as --color-divider above. */
+  --shadow-sm: 0 1px 2px rgba(46, 43, 37, 0.14);
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #2e2b25 14%, transparent);
+  --shadow-md: 0 3px 10px rgba(46, 43, 37, 0.16);
+  --shadow-md: 0 3px 10px color-mix(in srgb, #2e2b25 16%, transparent);
+  --shadow-lg: 0 12px 32px rgba(46, 43, 37, 0.22);
+  --shadow-lg: 0 12px 32px color-mix(in srgb, #2e2b25 22%, transparent);
+
+  /* Motion — every duration below is zeroed by the reduced-motion
+     block at the end of this file, so animations need only reference
+     these variables to honour the user's preference. */
+  --motion-fast: 180ms;
+  --motion-drawer: 280ms;
+  --motion-screen: 350ms;
+
+  /* ---------------------------------------------------------------- */
+  /* Legacy aliases. The pre-handoff stylesheet below still refers to  */
+  /* these seven names; they now resolve onto the Organic ramp so the  */
+  /* whole app moves to the new palette in one place. Prefer the       */
+  /* --color-* tokens in new rules.                                    */
+  /* ---------------------------------------------------------------- */
+  --ink: var(--color-text);
+  --paper: var(--color-bg);
+  --accent: var(--color-accent-700);
+  --ok: var(--color-ok);
+  --bad: var(--color-bad);
+  --muted: var(--color-neutral-700);
+  --line: var(--color-neutral-300);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Zero the duration tokens as well as the declarations themselves, so a
+     rule (or an inline style) that references var(--motion-*) collapses to
+     an instant change rather than relying on the blanket override below.
+     The blanket rule is !important, so it still wins over every later
+     partial even though this is the first sheet imported. */
+  :root {
+    --motion-fast: 0ms;
+    --motion-drawer: 0ms;
+    --motion-screen: 0ms;
+  }
+  * {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -44,6 +44,25 @@ defined by its drape over a fitted blouse; never quietly convert it into a \
 stitched gown.
 - Preserve every stated coverage preference (sleeves, neckline, back, midriff \
 and head covering) faithfully.
+- When a specific neckline is selected, honour it exactly, and describe \
+complete coverage concretely (for example, a fully closed high neckline \
+covering the collarbone and upper chest) rather than vaguely as "modest". \
+Head covering means fabric drawn up over the head, never merely jewellery, a \
+maang tikka or a head ornament.
+- When the ceremony is the Anand Karaj, treat it as the Sikh marriage \
+ceremony centred on the Anand Karaj rites; never conflate it with a Nikah, \
+the Hindu pheras, a walima or a generic reception, and never present one \
+community's custom as universal.
+- Treat satin as a distinct fabric — a smooth weave with a lustrous face — \
+never a synonym for silk or raw silk.
+- Colour may be given per garment role — "fabric_colour", "embroidery_colour" \
+and "dupatta_colour" — rather than as one palette. Keep each colour on the \
+part of the garment it was chosen for and never move it elsewhere. A value \
+beginning with "#" is a literal six-digit hex colour the wearer supplied; \
+describe it as that colour rather than renaming it. A "dupatta_colour" of \
+"match_fabric" means the dupatta takes the main fabric's colour. \
+"custom_colours" is the wearer's saved palette, not a selection: never treat \
+a colour there as chosen unless a role names it.
 - Do not sexualise or objectify the wearer.
 - Do not conflate distinct religious, regional or community traditions, and \
 do not make unsupported historical claims.
@@ -152,4 +171,4 @@ def prompt_template_fingerprint() -> str:
 
 
 # Bump SPEC_TEMPLATE_VERSION deliberately whenever this changes.
-PROMPT_TEMPLATE_HASH = "b050ef5585ce0c6f4240b7721355b5935324f487b5370395412179e1e322d0be"
+PROMPT_TEMPLATE_HASH = "d1e32a6ebe287e999b87cc794eef5a6bd3d117a84806bde3ec191d8f91ee7c4c"

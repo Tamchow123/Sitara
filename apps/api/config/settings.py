@@ -2,8 +2,8 @@
 
 Committed defaults keep the application safe by construction:
 
-    DEFAULT_IMAGE_MODEL = black-forest-labs/flux-1.1-pro   (Phase 2 decision)
-    FAST_IMAGE_MODEL    = black-forest-labs/flux-1.1-pro
+    DEFAULT_IMAGE_MODEL = black-forest-labs/flux-2-max     (ADR 0019)
+    FAST_IMAGE_MODEL    = black-forest-labs/flux-1.1-pro   (ADR 0001)
     DEMO_MODE           = true    (no Anthropic / Replicate calls)
     ALLOW_PAID_AI_CALLS = false   (a present token never enables paid calls)
 
@@ -606,7 +606,12 @@ ALLOW_PAID_AI_CALLS = env_bool("ALLOW_PAID_AI_CALLS", default=False)
 # Stripped at assignment so validation, persistence and provider submission
 # all use ONE canonical value (a padded env value can never diverge from the
 # value that was validated).
-DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro").strip()
+# ADR 0019: the DEFAULT tier must accept reference images (``input_images``) —
+# a design carrying inspiration references fails at submission otherwise. The
+# fast tier does not need them and stays on the ADR 0001 model. Changing either
+# MUST bump LIVE_GENERATION_PRICING_PROFILE: the per-image price differs, and a
+# stale profile would under-reserve every call.
+DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "black-forest-labs/flux-2-max").strip()
 FAST_IMAGE_MODEL = os.getenv("FAST_IMAGE_MODEL", "black-forest-labs/flux-1.1-pro").strip()
 
 # Tokens may be present in the environment; their presence NEVER enables
@@ -779,6 +784,16 @@ GENERATION_STUCK_BATCH_SIZE = env_positive_int("GENERATION_STUCK_BATCH_SIZE", 50
 # How often (seconds) Celery Beat runs each maintenance task.
 DESIGN_PURGE_INTERVAL_SECONDS = env_positive_int("DESIGN_PURGE_INTERVAL_SECONDS", 3600)
 GENERATION_STUCK_INTERVAL_SECONDS = env_positive_int("GENERATION_STUCK_INTERVAL_SECONDS", 120)
+# A user-upload object younger than this is NEVER swept: an upload writes its
+# object before it can create the row naming it, so a young unreferenced object
+# may simply be a request still in flight. Generous by design — the cost of
+# waiting is one stale object for an hour; the cost of being wrong is deleting
+# an image a user just uploaded.
+USER_UPLOAD_ORPHAN_GRACE_SECONDS = env_positive_int("USER_UPLOAD_ORPHAN_GRACE_SECONDS", 3600)
+# Objects EXAMINED per sweep run (not objects deleted): the bound is on the
+# listing walk, because orphans are rare and the scan is the real cost.
+USER_UPLOAD_SWEEP_BATCH_SIZE = env_positive_int("USER_UPLOAD_SWEEP_BATCH_SIZE", 500)
+USER_UPLOAD_SWEEP_INTERVAL_SECONDS = env_positive_int("USER_UPLOAD_SWEEP_INTERVAL_SECONDS", 3600)
 
 # ---------------------------------------------------------------------------
 # Deterministic zero-cost demo pipeline (Phase 15). The active demo manifest
@@ -806,17 +821,47 @@ else:
     DEMO_STAGE_DELAY_MS = int(_stripped_demo_stage_delay_ms)
 
 # ---------------------------------------------------------------------------
-# Inspiration catalogue (Phase 5B) — staff-only image ingestion bounds.
+# Inspiration catalogue (Phase 5B) — STAFF-ONLY image ingestion bounds.
 # Strict positive integers; invalid values refuse startup in EVERY
 # environment. Uploads above INSPIRATION_MAX_UPLOAD_BYTES are rejected
 # before decoding; images above INSPIRATION_MAX_IMAGE_PIXELS are rejected
 # before full decode (decompression-bomb guard).
+#
+# These govern the staff catalogue path ONLY. The public user-upload endpoint
+# has its own bounds below, deliberately separate so tightening one trust
+# boundary never silently changes the other.
 # ---------------------------------------------------------------------------
 
 INSPIRATION_MAX_UPLOAD_BYTES = env_positive_int("INSPIRATION_MAX_UPLOAD_BYTES", 15_000_000)
 INSPIRATION_MAX_IMAGE_PIXELS = env_positive_int("INSPIRATION_MAX_IMAGE_PIXELS", 40_000_000)
 INSPIRATION_OUTPUT_MAX_EDGE = env_positive_int("INSPIRATION_OUTPUT_MAX_EDGE", 2048)
 INSPIRATION_THUMBNAIL_EDGE = env_positive_int("INSPIRATION_THUMBNAIL_EDGE", 512)
+
+# ---------------------------------------------------------------------------
+# User inspiration uploads (Phase 16B) — bounds for the PUBLIC, anonymous
+# multipart endpoint. Deliberately its OWN settings rather than reusing the
+# staff catalogue bounds above: the two paths have different trust levels, and
+# an operator tightening the public endpoint after an abuse incident must not
+# also shrink what staff may catalogue.
+#
+# The pixel bound gates a decompression bomb before its pixels are allocated;
+# the byte bound is enforced twice — once at the wire level from Content-Length
+# before the multipart parser reads the body, and again on the bytes actually
+# read. A reverse proxy body-size limit in front of the API remains
+# recommended defence in depth, not a substitute.
+#
+# The throttle is session- and IP-scoped over the shared Redis cache, with
+# hashed identifiers, exactly like the auth and live-generation throttles. A
+# cache outage fails CLOSED.
+# ---------------------------------------------------------------------------
+
+USER_UPLOAD_MAX_BYTES = env_positive_int("USER_UPLOAD_MAX_BYTES", 15_000_000)
+USER_UPLOAD_MAX_IMAGE_PIXELS = env_positive_int("USER_UPLOAD_MAX_IMAGE_PIXELS", 40_000_000)
+USER_UPLOAD_OUTPUT_MAX_EDGE = env_positive_int("USER_UPLOAD_OUTPUT_MAX_EDGE", 2048)
+USER_UPLOAD_SESSION_LIMIT = env_positive_int("USER_UPLOAD_SESSION_LIMIT", 30)
+USER_UPLOAD_SESSION_WINDOW_SECONDS = env_positive_int("USER_UPLOAD_SESSION_WINDOW_SECONDS", 3600)
+USER_UPLOAD_IP_LIMIT = env_positive_int("USER_UPLOAD_IP_LIMIT", 60)
+USER_UPLOAD_IP_WINDOW_SECONDS = env_positive_int("USER_UPLOAD_IP_WINDOW_SECONDS", 3600)
 
 # ---------------------------------------------------------------------------
 # Authentication (Phase 3B) — Django sessions only. No JWT, no token

@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from sitara.generation.design_spec import DesignSpec
+from sitara.generation.design_spec import DesignSpec, validate_design_spec
 from sitara.generation.prompt_builder import (
     _COMPOSITION,
     IMAGE_PROMPT_MAX_CHARS,
@@ -32,8 +32,9 @@ FIXTURES = fixture_names()
 
 
 def _load_spec(name: str) -> DesignSpec:
+    # Version-dispatched: both v1 and v2 golden fixtures load correctly.
     with (FIXTURE_DIR / f"{name}.json").open(encoding="utf-8") as handle:
-        return DesignSpec.model_validate(json.load(handle))
+        return validate_design_spec(json.load(handle))
 
 
 def _spec_dict(name: str) -> dict:

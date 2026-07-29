@@ -659,6 +659,42 @@ In `DEMO_MODE=true`, with no provider keys configured:
 
 ## Non-goals
 
+> **Addendum, 2026-07-29 — authorised scope change.** Three items below were
+> deliberately reopened by the maintainer's design handoff after this spec was
+> written, and are now in scope: **user-uploaded inspiration images** (private,
+> per-design, sanitised, rights-affirmed, sharing the existing three-reference
+> budget with curated presets), **a new FLUX model** (`flux-2-max`), and
+> **reference-image conditioning** (lifting `ReferenceImagesNotEnabled` so
+> user uploads *and* curated presets are sent to the image provider). The
+> rationale, the model/lifecycle/rights-acknowledgement design, its deliberate
+> distance from ADR 0006's staff rights model, and the ADR 0014 override that
+> provider-facing work requires are recorded in
+> `../decisions/0018-questionnaire-feedback-and-visual-choice-ux.md`. Note that
+> "user-uploaded questionnaire visuals" below still means *option-card artwork
+> for questionnaire choices* and remains a non-goal — that is a different thing
+> from a user's own inspiration photograph.
+>
+> **A fourth item, recorded 2026-07-29.** The same handoff also replaced the
+> single `colour_palette` question with three per-role colour questions
+> (`fabric_colour`, `embroidery_colour`, `dupatta_colour`) **plus a bounded
+> bride-supplied palette** (`custom_colours`), so that someone matching a
+> keepsake sari can name a colour the curated set does not hold. That makes
+> **custom colours** in-scope, and supersedes two lines written above: "use
+> curated swatches, not an unrestricted colour picker" and "do not send hex
+> values to Anthropic or Replicate as the canonical answer". What survives is
+> the word *unrestricted*: the palette is capped and deduplicated, only a
+> six-digit lower-case hex is accepted, a per-role answer is refused unless
+> that exact value is in the design's own declared palette, and the curated
+> vocabulary itself remains source-controlled. A custom hex is a canonical
+> answer and is rendered into the image prompt as a literal colour code; the
+> rationale is in
+> `../decisions/0018-questionnaire-feedback-and-visual-choice-ux.md` under
+> "Colour grouping". The same handoff's additive questionnaire **v4** and the
+> **DesignSpec v3** and one-question-per-screen work it required are likewise
+> in scope, and are recorded in that ADR.
+>
+> Every other entry below stands unchanged.
+
 Do not implement:
 
 - stylist annotation tools;
@@ -666,13 +702,14 @@ Do not implement:
 - user-uploaded questionnaire visuals;
 - arbitrary remote image URLs;
 - a generic CMS or media-management framework;
-- unrestricted custom colours;
+- ~~unrestricted custom colours~~ (a *bounded* bride-supplied palette is now in
+  scope — see the addendum above; an unrestricted one is still refused);
 - additional Sikh events without reviewed definitions;
 - internationalisation;
 - sharing or public galleries;
 - image-to-image refinement;
-- a new FLUX model;
-- reference-image conditioning;
+- ~~a new FLUX model~~ (superseded — see the addendum above);
+- ~~reference-image conditioning~~ (superseded — see the addendum above);
 - extra refinements;
 - a sewing pattern, measurement or fit system;
 - paid provider calls during implementation.

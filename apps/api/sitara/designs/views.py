@@ -19,15 +19,18 @@ atomic, row-locked transaction); views stay thin. Inaccessible designs are
 
 import logging
 import uuid
+from functools import wraps
 
+from django.core.files.storage import default_storage
 from django.db import transaction
+from django.http import HttpResponse, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.exceptions import ParseError
-from rest_framework.parsers import JSONParser
+from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -72,7 +75,7 @@ from sitara.schema import (
 )
 
 from .jobs import _iso, public_job_payload
-from .models import Design, DesignVersion, GenerationAttempt
+from .models import Design, DesignInspirationUpload, DesignVersion, GenerationAttempt
 from .openapi import (
     DesignDetailResponseSerializer,
     DesignListResponseSerializer,
@@ -80,6 +83,8 @@ from .openapi import (
     DesignValidationSuccessSerializer,
     DesignVersionImagesResponseSerializer,
     GenerationJobResponseSerializer,
+    InspirationUploadResponseSerializer,
+    InspirationUploadWriteSerializer,
 )
 from .ownership import accessible_designs, accessible_generation_attempts
 from .result import (
@@ -95,6 +100,7 @@ from .serializers import (
     RefinementWriteSerializer,
     design_detail_payload,
     design_list_item_payload,
+    inspiration_upload_payload,
 )
 from .services import (
     DraftUpdateError,
@@ -102,6 +108,14 @@ from .services import (
     design_completion_errors,
     resolve_current_design_session,
     update_design_draft,
+)
+from .upload_service import (
+    InspirationUploadError,
+    InspirationUploadThrottled,
+    create_inspiration_upload,
+    delete_inspiration_upload,
+    enforce_upload_throttle,
+    reject_oversized_body,
 )
 
 _DESIGN_TAGS = ["Designs"]
@@ -185,6 +199,23 @@ def _enforce_admission(request, design, source_version_id=None) -> Response | No
             "Generation is not currently available. Please try again shortly.",
             status.HTTP_503_SERVICE_UNAVAILABLE,
         )
+
+
+def _upload_error(exc: InspirationUploadError) -> Response:
+    """One place mapping an upload service code onto an HTTP status.
+
+    Every message is the service's own generic sentence — never a filename,
+    storage key or exception text."""
+    http_status = {
+        "rights_not_acknowledged": status.HTTP_400_BAD_REQUEST,
+        "invalid_image": status.HTTP_400_BAD_REQUEST,
+        "duplicate_image": status.HTTP_409_CONFLICT,
+        "inspiration_limit_reached": status.HTTP_409_CONFLICT,
+        "storage_unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
+        "upload_throttle_unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
+        "upload_too_large": status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    }.get(exc.code, status.HTTP_400_BAD_REQUEST)
+    return _error(exc.code, exc.message, http_status)
 
 
 def _validation_failed(errors: dict) -> Response:
@@ -1007,3 +1038,236 @@ class GenerationJobView(APIView):
         if attempt is None:
             return _not_found()
         return Response(public_job_payload(attempt), headers=NO_STORE)
+
+
+def _reject_oversized_upload(view_func):
+    """Wire-level body-size gate, deliberately applied OUTSIDE ``csrf_protect``.
+
+    The ordering is load-bearing, not cosmetic. Django's CSRF check reads
+    ``request.POST`` first and only falls back to the ``X-CSRFToken`` header,
+    and touching ``POST`` fully receives and parses the multipart body (spooling
+    anything over ``FILE_UPLOAD_MAX_MEMORY_SIZE`` to disk). Any check inside the
+    view therefore runs *after* the body has already been taken, so this has to
+    be the outermost dispatch wrapper.
+
+    It returns the response itself rather than raising: an exception here is
+    outside DRF's dispatch and would render a Django HTML error page. The check
+    reads only ``Content-Length`` — no session, no database — so its answer is
+    identical for an owned, a foreign and a nonexistent design and cannot be
+    used to probe for one."""
+
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        try:
+            reject_oversized_body(request)
+        except InspirationUploadError as exc:
+            return JsonResponse(
+                {"error": {"code": exc.code, "message": exc.message}},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                headers=NO_STORE,
+            )
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
+
+@method_decorator(_reject_oversized_upload, name="dispatch")
+@method_decorator(csrf_protect, name="dispatch")
+class DesignInspirationUploadView(APIView):
+    """Upload one of the user's OWN inspiration images to their design.
+
+    Multipart, anonymous-session-owned and CSRF-protected like every other
+    unsafe design endpoint. The client's filename and declared content type are
+    never read: ``designs.upload_processing`` trusts only the decoded image, and
+    the storage key is server-generated. The upload shares the design's
+    ``MAX_INSPIRATION_IMAGES`` budget with its curated catalogue selections."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+    # Multipart only — a user upload is a file, and keeping the parser list
+    # narrow keeps the documented contract honest.
+    parser_classes = [MultiPartParser]
+
+    @extend_schema(
+        operation_id="designs_inspiration_upload_create",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request={"multipart/form-data": InspirationUploadWriteSerializer},
+        responses={
+            201: InspirationUploadResponseSerializer,
+            400: ValidationErrorEnvelopeSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="The design's inspiration limit is already reached.",
+            ),
+            413: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="The request body is too large."
+            ),
+            429: OpenApiResponse(ErrorEnvelopeSerializer, description="Too many uploads for now."),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="The image could not be stored, or uploads are briefly unavailable.",
+            ),
+        },
+        summary="Upload an inspiration image",
+        description=(
+            "Sanitises one uploaded image (JPEG, PNG or single-frame WebP) into "
+            "a clean WebP: EXIF orientation applied, then all EXIF/GPS/XMP/ICC "
+            "metadata stripped. The original bytes are never stored. The user "
+            "must affirm they hold the rights to the image. Uploads and curated "
+            "selections share one limit. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def post(self, request, design_id: str):
+        # The body-size gate already ran outside csrf_protect (see
+        # _reject_oversized_upload). The throttle runs here instead, AFTER CSRF
+        # and ownership, so a cross-origin page cannot burn a victim's quota and
+        # a rate-limited caller still cannot tell an owned design from one that
+        # does not exist. Both precede request.data, so nothing is decoded or
+        # stored for a refused request.
+        design = accessible_designs(request).filter(pk=design_id).first()
+        if design is None:
+            return _not_found()
+        try:
+            enforce_upload_throttle(request)
+        except InspirationUploadThrottled as exc:
+            return _error(
+                "upload_rate_limited",
+                "Too many uploads for now. Please try again shortly.",
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Cache-Control": "no-store", "Retry-After": str(int(exc.retry_after))},
+            )
+        except InspirationUploadError as exc:
+            # The throttle cache itself is unreachable: refused, but as an
+            # infrastructure fault (503), never as the caller's own abuse.
+            return _upload_error(exc)
+        serializer = InspirationUploadWriteSerializer(data=request.data)
+        if not serializer.is_valid():
+            return _validation_failed(serializer.errors)
+        try:
+            upload = create_inspiration_upload(
+                design,
+                serializer.validated_data["image"],
+                rights_acknowledged=serializer.validated_data["rights_acknowledged"],
+            )
+        except InspirationUploadError as exc:
+            return _upload_error(exc)
+        return Response(
+            {"upload": inspiration_upload_payload(upload)},
+            status=status.HTTP_201_CREATED,
+            headers=NO_STORE,
+        )
+
+
+class _OwnedUploadMixin:
+    """Shared ownership resolution for the two per-upload endpoints.
+
+    A mixin rather than a base view, deliberately: inheriting one endpoint from
+    the other would also inherit its HTTP methods, so the image URL would
+    silently accept DELETE."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    def _get_owned(self, request, design_id: str, upload_id: str):
+        # Ownership filter FIRST, UUID lookup second — never the reverse, and
+        # an upload belonging to somebody else's design is the same 404 as one
+        # that does not exist.
+        return DesignInspirationUpload.objects.filter(
+            pk=upload_id, design__in=accessible_designs(request), design_id=design_id
+        ).first()
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class DesignInspirationUploadDetailView(_OwnedUploadMixin, APIView):
+    """Remove one of the design's own uploaded inspirations."""
+
+    @extend_schema(
+        operation_id="designs_inspiration_upload_delete",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        responses={
+            204: OpenApiResponse(description="Removed."),
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="The image could not be removed."
+            ),
+        },
+        summary="Remove an uploaded inspiration image",
+        description=("Deletes the private object and then the row. " + _OWNERSHIP_NOTE),
+    )
+    def delete(self, request, design_id: str, upload_id: str):
+        upload = self._get_owned(request, design_id, upload_id)
+        if upload is None:
+            return _not_found()
+        try:
+            delete_inspiration_upload(upload.design, upload)
+        except InspirationUploadError as exc:
+            return _upload_error(exc)
+        return Response(status=status.HTTP_204_NO_CONTENT, headers=NO_STORE)
+
+
+class DesignInspirationUploadImageView(_OwnedUploadMixin, APIView):
+    """Stream one uploaded inspiration's sanitised bytes to its owner.
+
+    A streaming, ownership-checked endpoint rather than a signed URL: these are
+    private user images with no rights record, so no bearer URL to them should
+    exist at all. No storage key or storage URL is ever exposed."""
+
+    @extend_schema(
+        operation_id="designs_inspiration_upload_image",
+        tags=_DESIGN_TAGS,
+        responses={
+            200: OpenApiResponse(description="The sanitised WebP image bytes."),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="The image is temporarily unreadable."
+            ),
+        },
+        summary="An uploaded inspiration image",
+        description=(
+            "Streams the sanitised WebP for one of the design's own uploads. "
+            "No storage keys or storage URLs are exposed. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def get(self, request, design_id: str, upload_id: str):
+        upload = self._get_owned(request, design_id, upload_id)
+        if upload is None:
+            return _not_found()
+        try:
+            with default_storage.open(upload.storage_key, "rb") as handle:
+                data = handle.read()
+        except Exception as exc:
+            # An owned upload whose private object is unexpectedly unreadable:
+            # a safe 503 logging only the row UUIDs and the exception type —
+            # never the key, the storage endpoint or the exception text.
+            logger.error(
+                "design inspiration upload unreadable design_id=%s upload_id=%s "
+                "exception_type=%s",
+                design_id,
+                upload.pk,
+                type(exc).__name__,
+            )
+            return _error(
+                "image_unavailable",
+                "The image is temporarily unavailable.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        response = HttpResponse(data, content_type="image/webp")
+        response["Content-Disposition"] = "inline"
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "no-store"
+        return response

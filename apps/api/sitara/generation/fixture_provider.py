@@ -14,17 +14,21 @@ from sitara.ai_gateway.structured_design import (
 from sitara.generation.design_spec import NO_REGIONAL_DIRECTION
 
 
-def build_fixture_spec(source_selections: dict) -> dict:
+def build_fixture_spec(source_selections: dict, schema_version: int = 1) -> dict:
     """A valid DesignSpec payload echoing ``source_selections`` exactly.
 
     All narrative text is generic, safe (no designer/brand references; caveats
-    are negated) and clearly labelled as an offline placeholder."""
+    are negated) and clearly labelled as an offline placeholder. ``schema_version``
+    selects the target DesignSpec structure (1, or 2 when ``source_selections``
+    carries the dedicated ``neckline_style``); the whole ``source_selections``
+    dict — including any neckline — is echoed verbatim so verification always
+    matches."""
     garment = source_selections.get("garment_type") or "outfit"
     ceremony = source_selections.get("ceremony") or "ceremony"
     regional_style = source_selections.get("regional_style")
     has_regional_direction = bool(regional_style) and regional_style != NO_REGIONAL_DIRECTION
     return {
-        "schema_version": 1,
+        "schema_version": schema_version,
         "source_selections": source_selections,
         "title": f"Offline placeholder concept for a {garment}",
         "concept_summary": (
@@ -112,7 +116,7 @@ class FixtureStructuredDesignProvider:
                 stop_reason="invalid",
             )
         return StructuredDesignResult(
-            payload=build_fixture_spec(request.source_selections),
+            payload=build_fixture_spec(request.source_selections, request.schema_version),
             provider=self.name,
             model=f"fixture:{self.fixture_name}",
             input_tokens=None,

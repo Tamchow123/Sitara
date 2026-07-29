@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="_ds/organic-ccb06f12-17fe-45b2-9248-ebf010085646/styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+  <script src="_ds/organic-ccb06f12-17fe-45b2-9248-ebf010085646/_ds_bundle.js"></script>
+  <script src="image-slot.js"></script>
+  <style>
+    html, body { margin: 0; background: var(--color-bg); }
+    a { color: var(--color-accent-700); } a:hover { color: var(--color-accent-800); }
+    @keyframes sitaraUp { from { transform: translateY(18px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  </style>
+</helmet>
+<div style="min-height:100vh;font-family:var(--font-body);color:var(--color-text);font-size:16px">
+  <header style="max-width:1020px;margin:0 auto;padding:var(--space-6) var(--space-4) 0;display:flex;align-items:center;gap:var(--space-2)">
+    <a href="Sitara Home.dc.html" aria-label="Sitara — back to start" style="display:inline-flex;align-items:center;gap:var(--space-2);text-decoration:none;color:var(--color-text);border-radius:999px;padding:4px 14px 4px 4px;transition:background .15s" style-hover="background:var(--color-accent-100)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">
+      <span style="width:40px;height:40px;border-radius:999px;background:var(--color-accent);color:var(--color-bg);display:grid;place-items:center;flex:none">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 L14.4 9.6 L22 12 L14.4 14.4 L12 22 L9.6 14.4 L2 12 L9.6 9.6 Z"></path></svg>
+      </span>
+      <span style="font-family:'Cormorant Garamond',serif;font-weight:600;letter-spacing:.04em;font-size:30px">Sitara</span>
+    </a>
+  </header>
+  <main style="max-width:1020px;margin:0 auto;padding:0 var(--space-4) var(--space-8)">
+    <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:var(--space-6);align-items:center;padding:var(--space-8) 0;animation:sitaraUp .4s both">
+      <div>
+        <p style="margin:0 0 var(--space-2);font-size:13px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--color-accent-700)">AI-assisted bridalwear concepts</p>
+        <h1 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:clamp(42px,6vw,66px);line-height:1.05;margin:0;text-wrap:pretty">Your bridal vision, <em style="font-style:italic">sketched by Sitara</em></h1>
+        <p style="margin:var(--space-4) 0 var(--space-6);font-size:17px;line-height:1.6;color:var(--color-neutral-800);max-width:46ch">Tell us about your ceremony, your heritage and the details you love — Sitara turns your answers into original bridalwear concepts made just for you.</p>
+        <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+          <a href="Sitara Questionnaire.dc.html" class="btn btn-primary" style="font-size:17px;padding:14px 34px;text-decoration:none">Start designing</a>
+          <span style="font-size:14px;color:var(--color-neutral-700)">About 5 minutes · skip anything</span>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)">
+        <div class="washed" style="aspect-ratio:2/3;border-radius:var(--radius-lg);overflow:hidden;margin-top:var(--space-6)"><image-slot id="home-hero-1" src="uploads/images/02-ceremonies/sitara__ceremonies__baraat__v2.jpg" shape="rounded" radius="16" placeholder="Bridal lehenga photo"></image-slot></div>
+        <div class="washed" style="aspect-ratio:2/3;border-radius:var(--radius-lg);overflow:hidden"><image-slot id="home-hero-2" src="uploads/images/02-ceremonies/sitara__ceremonies__walima__v1.jpg" shape="rounded" radius="16" placeholder="Saree drape photo"></image-slot></div>
+      </div>
+    </section>
+    <section style="padding:var(--space-6) 0">
+      <h2 style="font-family:var(--font-heading);font-weight:400;font-size:clamp(26px,3.5vw,34px);margin:0 0 var(--space-6)">How it works</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--space-4)">
+        <sc-for list="{{ hiw }}" as="h" hint-placeholder-count="3">
+          <div style="background:var(--color-neutral-100);border-radius:var(--radius-lg);padding:var(--space-6)">
+            <span style="width:40px;height:40px;border-radius:999px;background:var(--color-accent-2-100);color:var(--color-accent-2-800);display:grid;place-items:center;font-family:var(--font-heading);font-size:18px">{{ h.n }}</span>
+            <h3 style="font-family:var(--font-heading);font-weight:400;font-size:21px;margin:var(--space-3) 0 var(--space-1)">{{ h.t }}</h3>
+            <p style="margin:0;font-size:15px;line-height:1.55;color:var(--color-neutral-800)">{{ h.body }}</p>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+    <section style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-4);background:var(--color-accent-100);border-radius:var(--radius-lg);padding:var(--space-8) var(--space-6);margin-top:var(--space-6)">
+      <h2 style="font-family:var(--font-heading);font-weight:400;font-size:clamp(26px,3.5vw,34px);margin:0;text-wrap:pretty">Ready to see your vision take shape?</h2>
+      <p style="margin:0;font-size:16px;color:var(--color-neutral-800);max-width:48ch">Answer as much or as little as you like — anything you leave open, Sitara will imagine for you.</p>
+      <a href="Sitara Questionnaire.dc.html" class="btn btn-primary" style="font-size:17px;padding:14px 34px;text-decoration:none">Start designing</a>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    return { hiw: [
+      { n: '1', t: 'Tell us your vision', body: 'Nine guided, visual steps — skip anything you’re unsure of. Tap the i on any card to learn unfamiliar terms.' },
+      { n: '2', t: 'Sitara sketches', body: 'Your answers become a design brief, and Sitara drafts original concepts that honour your traditions and taste.' },
+      { n: '3', t: 'Refine together', body: 'React to each concept, adjust details, and arrive at a design you can take to a tailor or bridal designer.' }
+    ] };
+  }
+}
+</script>
+</body>
+</html>

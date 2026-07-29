@@ -34,7 +34,7 @@ from sitara.questionnaire.answer_validation import normalise_text
 from sitara.questionnaire.models import QuestionnaireVersion
 from sitara.questionnaire.rules import build_selected, questions_by_id, visible_questions
 
-from .design_spec import SourceSelections
+from .design_spec import SourceSelections, SourceSelectionsV2, SourceSelectionsV3
 from .input_safety import scan_user_text
 from .inspiration_context import (
     InspirationAssetIneligible,
@@ -47,6 +47,8 @@ from .inspiration_context import (
 # The DesignSpec.source_selections fields map 1:1 onto questionnaire question
 # ids of the same name. This is a fixed CONTRACT mapping, not conditional UI
 # logic — the DesignSpec is the structured brief for exactly this questionnaire.
+# One explicit field list per supported DesignSpec version; each is a closed
+# tuple, never derived from whatever questions a schema happens to declare.
 _SCALAR_SELECTION_FIELDS = (
     "garment_type",
     "ceremony",
@@ -62,6 +64,50 @@ _LIST_SELECTION_FIELDS = (
     "embellishment_styles",
     "coverage_preferences",
 )
+
+# The dedicated canonical neckline (Phase 16B). It exists only in questionnaire
+# versions that declare a ``neckline_style`` question; when present the design
+# targets at least DesignSpec schema version 2 (which carries the field),
+# otherwise the design targets version 1 exactly as before.
+_NECKLINE_FIELD = "neckline_style"
+
+# Questionnaire v4 replaced the single colour_palette question with a colour per
+# garment role, and the coverage_preferences multi-select with one question per
+# body area. A schema declaring ALL of them targets DesignSpec schema version 3.
+# Requiring the whole set (not any one member) means a partially-migrated schema
+# fails the contract check loudly rather than producing half a version-3 brief.
+_V3_SCALAR_FIELDS = (
+    "fabric_colour",
+    "embroidery_colour",
+    "dupatta_colour",
+    "sleeves",
+    "back_coverage",
+    "midriff",
+    "head_covering",
+)
+_V3_LIST_FIELDS = ("custom_colours", "fabrics", "embellishment_styles")
+_V3_REQUIRED_QUESTIONS = frozenset(_V3_SCALAR_FIELDS) | {"custom_colours"}
+
+
+def _questionnaire_declares_neckline(schema: dict) -> bool:
+    return _NECKLINE_FIELD in questions_by_id(schema)
+
+
+def _questionnaire_declares_per_role_colour(schema: dict) -> bool:
+    return _V3_REQUIRED_QUESTIONS <= set(questions_by_id(schema))
+
+
+def _target_design_spec_version(schema: dict) -> int:
+    """The DesignSpec structure this questionnaire targets.
+
+    A small, explicit capability ladder over KNOWN versions — never a generic
+    framework (ADR 0009 / Phase 16B). Version 3 also requires the dedicated
+    neckline, because its contract carries ``neckline_style`` too."""
+    if _questionnaire_declares_neckline(schema):
+        if _questionnaire_declares_per_role_colour(schema):
+            return 3
+        return 2
+    return 1
 
 
 class DesignNotReady(Exception):
@@ -85,6 +131,11 @@ class GenerationContext:
     untrusted_texts: list[dict]
     inspiration_context: InspirationContextSnapshot
     inspiration_cues: list[dict]
+    # The DesignSpec structure this questionnaire targets: 1 (default), 2
+    # (Phase 16B, a dedicated neckline) or 3 (questionnaire v4, per-role colour
+    # and per-area coverage). The provider stages, demo engine and persistence
+    # read this to produce and store the correct version.
+    design_spec_schema_version: int = 1
 
 
 def _option_labels(schema: dict) -> dict[str, dict[str, str]]:
@@ -136,14 +187,18 @@ def build_generation_context(design) -> GenerationContext:
     visibility = visible_questions(schema, build_selected(schema, answers))
     option_labels = _option_labels(schema)
 
-    source_selections = _build_source_selections(answers, visibility)
+    target_version = _target_design_spec_version(schema)
+    source_selections = _build_source_selections(answers, visibility, version=target_version)
     # The DesignSpec contract must be satisfiable by this questionnaire BEFORE
     # any provider is selected or any client is constructed. A schema that does
     # not supply the required source fields (or supplies an unusable shape) is a
     # controlled DesignNotReady, never a Pydantic traceback — and neither the
-    # Pydantic input nor questionnaire contents are surfaced.
+    # Pydantic input nor questionnaire contents are surfaced. Each version's
+    # contract additionally requires its own fields (the dedicated neckline for
+    # version 2; per-role colour and per-area coverage for version 3).
+    selections_model = _SELECTION_MODELS[target_version]
     try:
-        SourceSelections.model_validate(source_selections)
+        selections_model.model_validate(source_selections)
     except ValidationError:
         raise DesignNotReady(
             "unsupported_questionnaire_contract",
@@ -220,20 +275,45 @@ def build_generation_context(design) -> GenerationContext:
         untrusted_texts=untrusted_texts,
         inspiration_context=inspiration_context,
         inspiration_cues=provider_inspiration_cues(inspiration_context),
+        design_spec_schema_version=target_version,
     )
 
 
-def _build_source_selections(answers: dict, visibility: dict) -> dict:
+def _build_source_selections(answers: dict, visibility: dict, *, version: int) -> dict:
     """The canonical machine-value echo — only currently-visible answers, with
-    optional questions null/empty as appropriate."""
+    optional questions null/empty as appropriate.
+
+    The field set is chosen by the target DesignSpec ``version``: version 2 adds
+    the dedicated ``neckline_style`` scalar, and version 3 replaces
+    ``colour_palette``/``coverage_preferences`` with the per-role colour and
+    per-area coverage questions. A scalar is null, and a list empty, whenever the
+    question is unanswered, currently hidden or answered with an unusable
+    shape."""
+    scalars = _SCALAR_SELECTION_FIELDS
+    lists = _LIST_SELECTION_FIELDS
+    if version >= 2:
+        scalars += (_NECKLINE_FIELD,)
+    if version >= 3:
+        scalars += _V3_SCALAR_FIELDS
+        lists = _V3_LIST_FIELDS
+
     selections: dict = {}
-    for field in _SCALAR_SELECTION_FIELDS:
+    for field in scalars:
         value = answers.get(field)
         selections[field] = value if (visibility.get(field) and isinstance(value, str)) else None
-    for field in _LIST_SELECTION_FIELDS:
+    for field in lists:
         value = answers.get(field)
         if visibility.get(field) and isinstance(value, list):
             selections[field] = [item for item in value if isinstance(item, str)]
         else:
             selections[field] = []
     return selections
+
+
+# One SourceSelections model per supported DesignSpec version — the same small
+# explicit registry pattern as design_spec._DESIGN_SPEC_MODELS.
+_SELECTION_MODELS: dict[int, type] = {
+    1: SourceSelections,
+    2: SourceSelectionsV2,
+    3: SourceSelectionsV3,
+}

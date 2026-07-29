@@ -10,7 +10,11 @@
 
 import { apiClient } from "@/api/client";
 import type { components } from "@/api/schema";
-import { REQUEST_TIMEOUT_MS, fetchWithTimeout } from "@/lib/transport";
+import {
+  REQUEST_TIMEOUT_MS,
+  UPLOAD_TIMEOUT_MS,
+  fetchWithTimeout,
+} from "@/lib/transport";
 
 export { REQUEST_TIMEOUT_MS };
 
@@ -832,4 +836,182 @@ export async function fetchDesignResult(
     };
   }
   return toDraftFailure(response.status, body as ErrorBody);
+}
+
+
+// --- User inspiration uploads (Phase 16B) -----------------------------------
+//
+// Multipart, so these cannot use sendJson: the browser must set its own
+// multipart boundary, and a Content-Type header we chose would corrupt the
+// body. Everything else about the policy is identical — same-origin, no-store,
+// in-memory CSRF token, at most one retry on a stale-token 403 — and the
+// timeout is the upload budget rather than the JSON one.
+//
+// The response NEVER carries a storage key, hash, byte size or filename; the
+// bytes come back only through the ownership-checked image endpoint.
+
+export type InspirationUpload = components["schemas"]["InspirationUpload"];
+
+export type UploadSuccess = { ok: true; upload: InspirationUpload };
+export type UploadFailure = {
+  ok: false;
+  status: number;
+  code: string;
+  message: string;
+  retryAfterSeconds?: number;
+};
+export type UploadResult = UploadSuccess | UploadFailure;
+
+// Every backend rejection code, mapped once to text a person can act on. The
+// server's own message is deliberately NOT shown: it is written for an API
+// consumer, and a few codes carry wording we would rather phrase gently.
+const UPLOAD_MESSAGES: Record<string, string> = {
+  rights_not_acknowledged:
+    "Confirm you have the right to use this image before uploading it.",
+  invalid_image:
+    "That file could not be read as a JPEG, PNG or single-frame WebP image.",
+  image_too_large: "That image is too large. Try one under 15 MB.",
+  duplicate_image: "You have already added this image to this design.",
+  inspiration_limit_reached:
+    "You have used all of your inspiration slots. Remove one to add another.",
+  upload_throttled: "That is a lot of uploads at once. Please wait a moment.",
+  upload_throttle_unavailable:
+    "Uploads are temporarily unavailable. Please try again shortly.",
+  storage_unavailable: "The image could not be stored. Please try again.",
+  csrf_failed: "Your session expired. Reload the page and try again.",
+};
+
+function toUploadFailure(status: number, body: ErrorBody): UploadFailure {
+  const code = body?.error?.code ?? "upload_failed";
+  return {
+    ok: false,
+    status,
+    code,
+    message:
+      UPLOAD_MESSAGES[code] ??
+      "The image could not be added. Please try again.",
+  };
+}
+
+async function sendUpload(
+  designId: string,
+  file: File,
+  rightsAcknowledged: boolean,
+  hasRetried = false,
+): Promise<UploadResult> {
+  const token = await ensureCsrfToken();
+  const form = new FormData();
+  form.append("image", file);
+  form.append("rights_acknowledged", rightsAcknowledged ? "true" : "false");
+  const response = await fetchWithTimeout(
+    `/api/v1/designs/${designId}/inspiration-uploads/`,
+    // No Content-Type: the browser must supply the multipart boundary.
+    { method: "POST", headers: { "X-CSRFToken": token }, body: form },
+    UPLOAD_TIMEOUT_MS,
+  );
+  let body: (ErrorBody & { upload?: unknown }) | null = null;
+  try {
+    body = (await response.json()) as ErrorBody & { upload?: unknown };
+  } catch {
+    // A 413 can arrive from a proxy as HTML, with no JSON at all.
+    return toUploadFailure(response.status, {});
+  }
+  if (response.status === 403 && body?.error?.code === "csrf_failed" && !hasRetried) {
+    csrfToken = null;
+    return sendUpload(designId, file, rightsAcknowledged, true);
+  }
+  const upload = response.status === 201 ? parseInspirationUpload(body?.upload) : null;
+  if (upload) {
+    return { ok: true, upload };
+  }
+  if (response.ok) {
+    return {
+      ok: false,
+      status: response.status,
+      code: "invalid_response",
+      message: "The service returned an unexpected response.",
+    };
+  }
+  const failure = toUploadFailure(response.status, body ?? {});
+  const retryAfter = Number(response.headers.get("Retry-After"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    failure.retryAfterSeconds = retryAfter;
+  }
+  return failure;
+}
+
+// Projects the response onto exactly the six fields the contract declares,
+// rather than passing the parsed body through by reference. Anything the server
+// ever adds — a storage key, a hash, the client's own filename — is dropped
+// here by construction rather than by the backend's continued good behaviour,
+// and can never reach component state or the DOM.
+function parseInspirationUpload(value: unknown): InspirationUpload | null {
+  if (typeof value !== "object" || value === null) return null;
+  const upload = value as Record<string, unknown>;
+  if (
+    typeof upload.id !== "string" ||
+    typeof upload.position !== "number" ||
+    typeof upload.width !== "number" ||
+    typeof upload.height !== "number" ||
+    typeof upload.rights_acknowledged_at !== "string" ||
+    typeof upload.created_at !== "string"
+  ) {
+    return null;
+  }
+  return {
+    id: upload.id,
+    position: upload.position,
+    width: upload.width,
+    height: upload.height,
+    rights_acknowledged_at: upload.rights_acknowledged_at,
+    created_at: upload.created_at,
+  };
+}
+
+export function uploadInspirationImage(
+  designId: string,
+  file: File,
+  rightsAcknowledged: boolean,
+): Promise<UploadResult> {
+  return sendUpload(designId, file, rightsAcknowledged);
+}
+
+export type RemoveUploadResult = { ok: true } | UploadFailure;
+
+async function sendUploadDelete(
+  designId: string,
+  uploadId: string,
+  hasRetried = false,
+): Promise<RemoveUploadResult> {
+  const token = await ensureCsrfToken();
+  const response = await fetchWithTimeout(
+    `/api/v1/designs/${designId}/inspiration-uploads/${uploadId}/`,
+    { method: "DELETE", headers: { "X-CSRFToken": token } },
+  );
+  if (response.status === 204) return { ok: true };
+  let body: ErrorBody = {};
+  try {
+    body = (await response.json()) as ErrorBody;
+  } catch {
+    body = {};
+  }
+  if (response.status === 403 && body?.error?.code === "csrf_failed" && !hasRetried) {
+    csrfToken = null;
+    return sendUploadDelete(designId, uploadId, true);
+  }
+  // A removed upload that is already gone is a success from the user's point
+  // of view — the thing they asked to remove is not there.
+  if (response.status === 404) return { ok: true };
+  return toUploadFailure(response.status, body);
+}
+
+export function removeInspirationUpload(
+  designId: string,
+  uploadId: string,
+): Promise<RemoveUploadResult> {
+  return sendUploadDelete(designId, uploadId);
+}
+
+export function inspirationUploadImageUrl(designId: string, uploadId: string): string {
+  return `/api/v1/designs/${designId}/inspiration-uploads/${uploadId}/image/`;
 }

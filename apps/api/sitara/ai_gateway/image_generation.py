@@ -11,9 +11,12 @@ prediction id, provider/model identity, a lifecycle status and, once
 succeeded, a single output URL. It NEVER carries an API token, the prompt, a
 raw provider error body, logs, request headers or a dashboard URL.
 
-Reference-image conditioning is reserved for a later phase: the request field
-exists (default empty tuple) but a non-empty collection must be rejected before
-any provider call — never silently ignored.
+Reference-image conditioning is ENABLED (Phase 16B, ADR 0019, deliberately
+overriding ADR 0014). ``reference_image_urls`` carries short-TTL presigned GET
+URLs for the references the user selected, minted inside the generation job by
+:mod:`sitara.generation.reference_images` and never persisted, cached or
+logged. They are bounds-checked here, before any provider call: a malformed or
+over-long reference is rejected outright rather than silently dropped.
 
 This ASYNCHRONOUS prediction contract (``ImageProvider``) is the authoritative
 image-generation boundary for any real/live path from Phase 10 onward, and
@@ -39,11 +42,22 @@ PENDING_STATES = frozenset({PREDICTION_STARTING, PREDICTION_PROCESSING})
 TERMINAL_FAILURE_STATES = frozenset({PREDICTION_FAILED, PREDICTION_CANCELED, PREDICTION_ABORTED})
 
 
-class ReferenceImagesNotEnabled(Exception):
-    """A request carried reference images, which are not enabled yet.
+# The provider's ceiling on reference images. Sitara sends at most
+# MAX_INSPIRATION_IMAGES (3); this is the backstop that a future cap increase
+# cannot silently exceed.
+MAX_REFERENCE_IMAGES = 8
 
-    Raised BEFORE any provider call so a supplied reference is never silently
-    dropped. Safe message; carries no user data."""
+# Generous, but bounded: a presigned S3/MinIO GET URL carries a signature and
+# several query parameters, so it is long — an unbounded one is not.
+_MAX_REFERENCE_URL_LENGTH = 4096
+
+
+class ReferenceImagesRejected(Exception):
+    """A request's reference images failed the bounds check.
+
+    Raised BEFORE any provider call, so a malformed or over-long reference is
+    never sent and never silently dropped. Safe message; carries no user data
+    and never echoes a URL — a presigned URL is a bearer credential."""
 
 
 @dataclass(frozen=True)
@@ -52,8 +66,14 @@ class ImageGenerationRequest:
 
     ``prompt`` is the exact persisted ``DesignVersion.image_prompt``; ``seed``
     is generated and persisted once before submission. The remaining fields are
-    the reviewed Phase 2 rendering profile. ``reference_image_urls`` is reserved
-    for a later phase and must be empty."""
+    the rendering profile.
+
+    ``reference_image_urls`` carries the short-TTL presigned URLs of the
+    references the user selected (ADR 0019). It is validated here, at the
+    boundary, rather than trusted from the caller: bounded in number, https
+    only, bounded in length. ``prompt_upsampling`` is ``None`` for a model that
+    does not accept the parameter, and is then omitted from the payload
+    entirely rather than sent as a default the model would reject."""
 
     prompt: str
     model: str
@@ -62,14 +82,26 @@ class ImageGenerationRequest:
     output_format: str
     output_quality: int
     safety_tolerance: int
-    prompt_upsampling: bool
+    prompt_upsampling: bool | None
     reference_image_urls: tuple[str, ...] = field(default=())
 
     def __post_init__(self):
-        if self.reference_image_urls:
-            raise ReferenceImagesNotEnabled(
-                "reference_images_not_enabled: reference-image conditioning is not available yet"
+        if len(self.reference_image_urls) > MAX_REFERENCE_IMAGES:
+            raise ReferenceImagesRejected(
+                f"reference_images_rejected: at most {MAX_REFERENCE_IMAGES} references"
             )
+        for url in self.reference_image_urls:
+            # https only: a signed URL is a bearer credential and must never be
+            # handed to a provider over plaintext, nor be some other scheme
+            # (file://, s3://) that could point at something local.
+            if (
+                not isinstance(url, str)
+                or not url.startswith("https://")
+                or len(url) > _MAX_REFERENCE_URL_LENGTH
+            ):
+                raise ReferenceImagesRejected(
+                    "reference_images_rejected: a reference URL is malformed or too long"
+                )
 
 
 @dataclass(frozen=True)

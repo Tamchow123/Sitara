@@ -12,6 +12,7 @@ function design(overrides: Partial<DesignDraft> = {}): DesignDraft {
     questionnaire: null,
     answers: {},
     selected_inspirations: [],
+    inspiration_uploads: [],
     latest_job: null,
     created_at: "t",
     updated_at: "t",

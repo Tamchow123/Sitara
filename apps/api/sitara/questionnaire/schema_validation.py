@@ -23,9 +23,33 @@ SUPPORTED_SCHEMA_VERSION = 1
 # Stable machine identifiers: persisted answers will reference these forever.
 MACHINE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 
-QUESTION_TYPES = frozenset({"single_choice", "multi_choice", "text"})
+QUESTION_TYPES = frozenset(
+    {"single_choice", "multi_choice", "text", "colour_choice", "colour_list"}
+)
 RULE_OPERATORS = frozenset({"equals", "in", "not_in"})
 RULE_ACTIONS = frozenset({"show", "hide", "require", "restrict_options"})
+
+# Question types that declare an options list.
+OPTION_QUESTION_TYPES = frozenset({"single_choice", "multi_choice", "colour_choice"})
+
+# Question types a rule may READ (a `when` condition) or narrow
+# (`restrict_options`). Deliberately excludes the colour types: a
+# ``colour_choice`` answer may be a custom hex that is not a declared option,
+# so letting a rule intersect its allowed set would create a value the
+# restriction could never describe. Colour questions can still be shown,
+# hidden or required by a rule — only reading and narrowing are barred.
+RULE_REFERENCEABLE_TYPES = frozenset({"single_choice", "multi_choice"})
+
+# Custom colours are stored as normalised six-digit lower-case hex. The
+# pattern is deliberately strict: no 3-digit shorthand, no named colours, no
+# rgb()/hsl() functions, no alpha — exactly what a native <input type="color">
+# produces, so nothing else can reach persistence or the prompt builder.
+HEX_COLOUR_PATTERN = re.compile(r"^#[0-9a-f]{6}$")
+
+# Ceiling on a colour_list question's declared max_items. A bride curating a
+# palette needs a handful, not an unbounded list that would balloon the
+# persisted answers or the review screen.
+MAX_CUSTOM_COLOURS_LIMIT = 12
 
 # Structural bounds. Generous for a real questionnaire, tight enough that a
 # malformed or hostile schema cannot balloon storage or responses.
@@ -45,12 +69,14 @@ _STEP_KEYS = frozenset({"id", "title", "description", "questions"})
 _QUESTION_KEYS = frozenset(
     {"id", "type", "label", "help_text", "required", "options", "constraints"}
 )
-_OPTION_KEYS = frozenset({"value", "label", "description"})
+_OPTION_KEYS = frozenset({"value", "label", "description", "visual_key", "group"})
 _RULE_KEYS = frozenset({"id", "when", "then"})
 _WHEN_KEYS = frozenset({"question_id", "operator", "values"})
 _THEN_KEYS = frozenset({"action", "question_id", "values"})
 _MULTI_CHOICE_CONSTRAINT_KEYS = frozenset({"min_items", "max_items", "exclusive_values"})
 _TEXT_CONSTRAINT_KEYS = frozenset({"min_length", "max_length"})
+_COLOUR_CHOICE_CONSTRAINT_KEYS = frozenset({"allow_custom"})
+_COLOUR_LIST_CONSTRAINT_KEYS = frozenset({"max_items"})
 
 
 class QuestionnaireSchemaError(ValidationError):
@@ -163,6 +189,16 @@ def _validate_options(question: dict, path: str) -> list[str]:
                 f"{option_path}.description",
                 max_length=MAX_OPTION_DESCRIPTION_LENGTH,
             )
+        # Optional presentation metadata (Phase 16B): both are bounded lower-case
+        # machine identifiers only — never URLs, file paths, colours, HTML, CSS
+        # or Markdown. ``visual_key`` maps to a frontend-owned explanatory visual;
+        # ``group`` buckets options for compact grouped rendering (e.g. colours).
+        # The machine-id pattern rejects slashes, dots, uppercase and angle
+        # brackets, so an option cannot smuggle presentation payloads.
+        if "visual_key" in option:
+            _require_machine_id(option["visual_key"], f"{option_path}.visual_key")
+        if "group" in option:
+            _require_machine_id(option["group"], f"{option_path}.group")
         if value in values:
             _fail(f"{option_path}.value", f"duplicate option value '{value}'")
         values.append(value)
@@ -195,6 +231,28 @@ def _validate_multi_choice_constraints(constraints: dict, option_values: list[st
                     f"{path}.exclusive_values[{index}]",
                     "references an option value that does not exist on this question",
                 )
+
+
+def _validate_colour_choice_constraints(constraints: dict, path: str) -> bool:
+    """A colour_choice takes one optional flag; returns whether custom is allowed."""
+    _require_known_keys(constraints, _COLOUR_CHOICE_CONSTRAINT_KEYS, path)
+    allow_custom = constraints.get("allow_custom", False)
+    if not isinstance(allow_custom, bool):
+        _fail(f"{path}.allow_custom", "must be true or false")
+    return allow_custom
+
+
+def _validate_colour_list_constraints(constraints: dict, path: str) -> None:
+    _require_known_keys(constraints, _COLOUR_LIST_CONSTRAINT_KEYS, path)
+    if "max_items" not in constraints:
+        # Always capped, for the same reason free text always declares a
+        # max_length: an uncapped list could not be safely persisted.
+        _fail(f"{path}.max_items", "colour_list questions must declare a max_items")
+    max_items = _require_bounded_int(
+        constraints["max_items"], f"{path}.max_items", maximum=MAX_CUSTOM_COLOURS_LIMIT
+    )
+    if max_items < 1:
+        _fail(f"{path}.max_items", "must be at least 1")
 
 
 def _validate_text_constraints(constraints: dict, path: str) -> None:
@@ -245,12 +303,20 @@ def _validate_question(question, path: str, seen_question_ids: set[str]) -> tupl
         if question.get("options"):
             _fail(f"{path}.options", "text questions must not declare options")
         _validate_text_constraints(constraints, f"{path}.constraints")
+    elif question_type == "colour_list":
+        # The design's own palette: values are user-supplied hex, so there is
+        # nothing to declare and an options list would be meaningless.
+        if question.get("options"):
+            _fail(f"{path}.options", "colour_list questions must not declare options")
+        _validate_colour_list_constraints(constraints, f"{path}.constraints")
     else:
         option_values = _validate_options(question, path)
         if question_type == "single_choice":
             # A single choice is constrained BY its declared options.
             if constraints:
                 _fail(f"{path}.constraints", "single_choice questions take no constraints")
+        elif question_type == "colour_choice":
+            _validate_colour_choice_constraints(constraints, f"{path}.constraints")
         else:
             _validate_multi_choice_constraints(constraints, option_values, f"{path}.constraints")
     return question_id, question
@@ -275,8 +341,11 @@ def _validate_rule(rule, path: str, questions_by_id: dict[str, dict], seen_rule_
     condition_question = questions_by_id.get(condition_question_id)
     if condition_question is None:
         _fail(f"{path}.when.question_id", "references a question that does not exist")
-    if condition_question["type"] == "text":
-        _fail(f"{path}.when.question_id", "conditions may only reference choice questions")
+    if condition_question["type"] not in RULE_REFERENCEABLE_TYPES:
+        _fail(
+            f"{path}.when.question_id",
+            f"conditions may only reference {sorted(RULE_REFERENCEABLE_TYPES)} questions",
+        )
 
     operator = _require_allowed_string(
         when.get("operator"), f"{path}.when.operator", RULE_OPERATORS
@@ -305,8 +374,11 @@ def _validate_rule(rule, path: str, questions_by_id: dict[str, dict], seen_rule_
         _fail(f"{path}.then.question_id", "references a question that does not exist")
 
     if action == "restrict_options":
-        if target_question["type"] == "text":
-            _fail(f"{path}.then.question_id", "restrict_options must target a choice question")
+        if target_question["type"] not in RULE_REFERENCEABLE_TYPES:
+            _fail(
+                f"{path}.then.question_id",
+                f"restrict_options may only target {sorted(RULE_REFERENCEABLE_TYPES)} questions",
+            )
         restricted = _require_machine_id_list(then.get("values"), f"{path}.then.values")
         target_options = _option_values(target_question)
         for index, value in enumerate(restricted):
@@ -387,6 +459,22 @@ def validate_questionnaire_schema(schema: object) -> None:
                 question, question_path, set(questions_by_id)
             )
             questions_by_id[question_id] = validated
+
+    # A schema has at most ONE custom palette, and that single colour_list is
+    # implicitly the palette every allow_custom colour_choice draws from. This
+    # keeps the link structural rather than a question-id reference that could
+    # dangle, and needs no new rule vocabulary.
+    colour_lists = [qid for qid, q in questions_by_id.items() if q["type"] == "colour_list"]
+    if len(colour_lists) > 1:
+        _fail("schema", "must declare at most one colour_list question")
+    for question_id, question in questions_by_id.items():
+        if question["type"] != "colour_choice":
+            continue
+        if question.get("constraints", {}).get("allow_custom") and not colour_lists:
+            _fail(
+                f"schema.questions['{question_id}'].constraints.allow_custom",
+                "requires the schema to declare a colour_list question to draw custom colours from",
+            )
 
     rules = schema["rules"]
     if not isinstance(rules, list):

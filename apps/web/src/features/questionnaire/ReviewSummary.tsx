@@ -20,10 +20,14 @@ import { answerLabels } from "./answer-utils";
 import { visibleQuestions } from "./rules";
 import { resolveDesignLifecycleTarget } from "@/lib/design-lifecycle";
 import { generationSubmitErrorMessage } from "@/features/generation/submit-errors";
-import type { PublicConfig } from "@/lib/api";
-import type { Answers, DesignDraft, QuestionnaireSchema } from "./types";
+import { inspirationUploadImageUrl, type PublicConfig } from "@/lib/api";
+import type { Answers, DesignDraft, Question, QuestionnaireSchema } from "./types";
 
 type Props = { designId: string };
+
+// What an unanswered row says. The handoff's phrasing, kept verbatim: it frames
+// an absent answer as a deliberate gift of freedom rather than an omission.
+const UNANSWERED_TEXT = "Left to Sitara's imagination";
 
 type State =
   | { phase: "loading" }
@@ -241,6 +245,9 @@ export function ReviewSummary({ designId }: Props) {
   }
 
   const { design, schema, valid, errors, generationEnabled, demoMode, generationMode } = state;
+  // Read straight from the design the server returned — a resumed review must
+  // show the uploads that are actually attached, never a client-side guess.
+  const uploads = design.inspiration_uploads ?? [];
   const answers = (design.answers ?? {}) as Answers;
   const visibility = visibleQuestions(schema, answers);
   const editHref = `/design/${design.id}`;
@@ -271,21 +278,44 @@ export function ReviewSummary({ designId }: Props) {
       )}
 
       {schema.steps.map((step) => {
-        const answered = step.questions.filter(
-          (question) => visibility[question.id] && answerLabels(question, answers[question.id]).length > 0,
-        );
-        if (answered.length === 0) return null;
+        // EVERY visible question gets a row (Phase 16B): an answered one shows
+        // its labels, an unanswered one says so in the handoff's own words
+        // rather than vanishing. A silently missing row reads as "I never
+        // asked" — the opposite of the reassurance this screen is for.
+        const rows = step.questions
+          .filter((question) => visibility[question.id])
+          .map((question: Question) => {
+            const labels = answerLabels(question, answers[question.id]);
+            return {
+              question,
+              text: labels.length > 0 ? labels.join(", ") : UNANSWERED_TEXT,
+              answered: labels.length > 0,
+            };
+          });
+        if (rows.length === 0) return null;
         return (
           <section key={step.id} aria-labelledby={`review-${step.id}`}>
             <div className="review-section-head">
               <h2 id={`review-${step.id}`}>{step.title}</h2>
-              <Link href={editHref}>Edit</Link>
             </div>
             <dl>
-              {answered.map((question) => (
+              {rows.map(({ question, text, answered }) => (
                 <div key={question.id} className="review-row">
                   <dt>{question.label}</dt>
-                  <dd>{answerLabels(question, answers[question.id]).join(", ")}</dd>
+                  <dd className={answered ? undefined : "review-unanswered"}>{text}</dd>
+                  {/* Per-row Edit, deep-linked to that one question's screen —
+                      the wizard resolves ?q= to a screen index and still
+                      refuses to skip past what has been reached. */}
+                  <Link
+                    className="review-edit"
+                    href={`${editHref}?q=${encodeURIComponent(question.id)}`}
+                    // Named for assistive technology through aria-label rather
+                    // than a visually-hidden span, so the question's text
+                    // appears exactly once in the row.
+                    aria-label={`Edit ${question.label}`}
+                  >
+                    Edit
+                  </Link>
                 </div>
               ))}
             </dl>
@@ -298,14 +328,15 @@ export function ReviewSummary({ designId }: Props) {
           <h2 id="review-inspirations">Inspiration images</h2>
           <Link href={editHref}>Edit</Link>
         </div>
-        {design.selected_inspirations.length === 0 ? (
+        {design.selected_inspirations.length === 0 && uploads.length === 0 ? (
           <p>No inspiration images selected.</p>
         ) : (
           <>
             <p className="field-help">
-              Selected inspirations guide compatible details only — your garment, ceremony,
-              colour, embellishment and coverage answers always take priority. Images are used
-              through staff-written descriptions, not direct image matching.
+              Your references guide compatible details only — your garment, ceremony,
+              colour, embellishment and coverage answers always take priority. The images
+              below are sent to the external AI image provider that draws your concept, and
+              the concept will not be an exact copy of any of them.
             </p>
             <ul className="review-inspirations">
               {design.selected_inspirations.map((selection) => (
@@ -340,6 +371,30 @@ export function ReviewSummary({ designId }: Props) {
                 </li>
               ))}
             </ul>
+            {uploads.length > 0 && (
+              <>
+                <h3 className="review-uploads-heading">Your own photographs</h3>
+                <ul className="review-inspirations">
+                  {uploads.map((upload, index) => (
+                    <li key={upload.id}>
+                      <figure>
+                        {/* Plain <img>, never next/image: ownership-checked,
+                            no-store bytes must not be proxied or cached. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          className="upload-thumb"
+                          src={inspirationUploadImageUrl(design.id, upload.id)}
+                          alt={`Your uploaded inspiration image ${index + 1}`}
+                          width={upload.width}
+                          height={upload.height}
+                        />
+                        <figcaption>Uploaded by you</figcaption>
+                      </figure>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </>
         )}
       </section>

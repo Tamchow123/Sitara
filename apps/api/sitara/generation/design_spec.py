@@ -26,8 +26,12 @@ from pydantic import (
 
 from .input_safety import contains_phrase
 
-# Versions the persisted JSON STRUCTURE of a DesignSpec. Bump only with a new
-# schema file (schemas/design_spec_vN.json) and a migration strategy.
+# Versions the persisted JSON STRUCTURE of a DesignSpec. This is the DEFAULT
+# (version 1) structure; Phase 16B adds version 2 (a dedicated canonical
+# neckline) and version 3 (questionnaire v4: colour chosen per garment role and
+# coverage chosen per body area). New schema versions ship as an additional
+# model + committed schema file (schemas/design_spec_vN.json) with a migration
+# strategy — never a rewrite of an already-persisted historical version.
 DESIGN_SPEC_SCHEMA_VERSION = 1
 
 # The canonical "no broad regional direction" machine value. When the user
@@ -64,8 +68,10 @@ def _any_caveat_mentions(caveats: list[str], phrases: tuple[str, ...]) -> bool:
 # prompt + context builder). It must change whenever the system prompt, the
 # context layout or the generation semantics materially change; a prompt-hash
 # test guards it. Defined here so the contract and the prompt version live
-# together.
-SPEC_TEMPLATE_VERSION = "2.1.0"
+# together. Bumped to 2.3.0 for Phase 16B (Anand Karaj ceremony guidance, the
+# dedicated canonical neckline, the satin-vs-silk distinction and the
+# per-garment-role colour guidance the questionnaire v4 contract needs).
+SPEC_TEMPLATE_VERSION = "2.3.0"
 
 _MODEL_CONFIG = ConfigDict(
     extra="forbid",
@@ -195,9 +201,10 @@ class DesignSpec(BaseModel):
     @classmethod
     def _reject_boolean_schema_version(cls, value: object) -> object:
         # bool is an int subclass (True == 1); a schema saying ``true`` is a
-        # mistake, not the integer 1.
+        # mistake, not a version number. Inherited by every version's model, so
+        # the message names no single version.
         if isinstance(value, bool):
-            raise ValueError("schema_version must be the integer 1, not a boolean")
+            raise ValueError("schema_version must be an integer version, not a boolean")
         return value
 
     @model_validator(mode="after")
@@ -229,6 +236,168 @@ class DesignSpec(BaseModel):
         return self
 
 
-def design_spec_json_schema() -> dict:
-    """The DesignSpec JSON Schema (also written to the committed file)."""
-    return DesignSpec.model_json_schema()
+# --- Version 2 (Phase 16B): a dedicated canonical neckline -----------------
+
+
+class SourceSelectionsV2(SourceSelections):
+    """Version-2 source selections: adds the dedicated canonical neckline.
+
+    ``neckline_style`` is now the single authoritative neckline decision (the
+    old ``high_neckline`` coverage value is retired from the questionnaire).
+    ``None`` means the user expressed no neckline preference. Every other field
+    is inherited unchanged; ``extra="forbid"`` still rejects any unknown key."""
+
+    neckline_style: MachineValue | None
+
+
+class DesignSpecV2(DesignSpec):
+    """Version-2 DesignSpec: identical narrative structure to version 1 with a
+    dedicated canonical neckline in ``source_selections``.
+
+    Overriding ``schema_version`` and ``source_selections`` keeps their
+    original field positions (Pydantic preserves the base declaration order for
+    overridden fields), and the two inherited validators — the boolean
+    schema-version guard and the semantic-invariant model validator — continue
+    to apply."""
+
+    schema_version: Literal[2]
+    source_selections: SourceSelectionsV2
+
+
+# --- Version 3 (Phase 16B): per-role colour and per-area coverage ----------
+
+# A colour SELECTION. Questionnaire v4's ``colour_choice`` answer accepts either
+# a canonical option value or a bride-supplied six-digit lower-case hex triple,
+# so the DesignSpec contract accepts exactly those two shapes — an explicit
+# alternation, never a free string. The questionnaire remains the authority over
+# WHICH option values exist; this only constrains the shape.
+ColourValue = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        pattern=r"^(?:[a-z][a-z0-9_]{1,63}|#[0-9a-f]{6})$",
+    ),
+]
+# A bride-supplied colour, always normalised to a six-digit lower-case hex.
+HexColour = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^#[0-9a-f]{6}$")]
+_CustomColourList = Annotated[list[HexColour], Field(max_length=8)]
+
+# The canonical dupatta-colour value meaning "the same colour as the main
+# fabric" — a relationship, not a colour of its own.
+COLOUR_MATCH_FABRIC = "match_fabric"
+
+
+class SourceSelectionsV3(BaseModel):
+    """Version-3 source selections: the questionnaire v4 contract.
+
+    Two deliberate replacements, both driven by questionnaire feedback:
+
+    - colour is chosen per GARMENT ROLE (``fabric_colour`` / ``embroidery_colour``
+      / ``dupatta_colour``) plus the bride's own ``custom_colours`` palette,
+      instead of one unordered ``colour_palette``;
+    - coverage is chosen per BODY AREA (``sleeves`` / ``back_coverage`` /
+      ``midriff`` / ``head_covering``) instead of one ``coverage_preferences``
+      multi-select.
+
+    Every replacement field is OPTIONAL in the questionnaire, so every one is
+    nullable here — "no preference" is a first-class answer and must never be
+    silently turned into a default. Nothing is derived: this echoes exactly what
+    the questionnaire supplied. The version-independent projections the prompt
+    builder, demo engine and demo selector need live in
+    :mod:`sitara.generation.selection_semantics`.
+
+    Deliberately NOT a subclass of :class:`SourceSelections`: version 3 does not
+    carry ``colour_palette`` or ``coverage_preferences`` at all, and
+    ``extra="forbid"`` must reject them so a v1/v2 payload can never be
+    mis-persisted as version 3."""
+
+    model_config = _MODEL_CONFIG
+
+    garment_type: MachineValue
+    ceremony: MachineValue
+    regional_style: MachineValue | None
+    silhouette: MachineValue
+    fabric_colour: ColourValue | None
+    embroidery_colour: ColourValue | None
+    dupatta_colour: ColourValue | None
+    custom_colours: _CustomColourList
+    fabrics: _FabricValueList
+    embellishment_styles: _EmbellishmentList
+    embellishment_density: MachineValue | None
+    neckline_style: MachineValue | None
+    sleeves: MachineValue | None
+    back_coverage: MachineValue | None
+    midriff: MachineValue | None
+    head_covering: MachineValue | None
+    dupatta_style: MachineValue | None
+    saree_drape: MachineValue | None
+
+
+class DesignSpecV3(DesignSpec):
+    """Version-3 DesignSpec: identical narrative structure to versions 1 and 2
+    with the questionnaire v4 source selections.
+
+    The narrative sections are unchanged on purpose — ``coverage_and_drape``
+    already has a slot per body area, and ``colour_story`` already describes
+    placement — so only the canonical selections needed a new version. The two
+    inherited validators (the boolean schema-version guard and the semantic
+    invariants) continue to apply."""
+
+    schema_version: Literal[3]
+    source_selections: SourceSelectionsV3
+
+
+# Explicit alias so call sites can name the version-1 model unambiguously.
+DesignSpecV1 = DesignSpec
+
+# The registry of every supported persisted DesignSpec structure. Deliberately
+# a small, explicit mapping for KNOWN versions — never a generic schema
+# framework (ADR 0009 / Phase 16B).
+_DESIGN_SPEC_MODELS: dict[int, type[DesignSpec]] = {
+    1: DesignSpecV1,
+    2: DesignSpecV2,
+    3: DesignSpecV3,
+}
+SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS = frozenset(_DESIGN_SPEC_MODELS)
+
+
+class UnsupportedDesignSpecVersion(Exception):
+    """The requested or persisted DesignSpec schema version is not supported.
+
+    Generic, safe message — never echoes the offending payload."""
+
+
+def design_spec_model_for_version(version: object) -> type[DesignSpec]:
+    """The DesignSpec model class for a schema version.
+
+    Total over arbitrary input: a boolean, a non-integer or an unknown integer
+    raises :class:`UnsupportedDesignSpecVersion`, never a ``KeyError`` — so the
+    dispatch is safe on untrusted persisted data."""
+    # bool is an int subclass; a stored ``true`` is a mistake, not version 1.
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise UnsupportedDesignSpecVersion("design spec schema version is not supported")
+    model = _DESIGN_SPEC_MODELS.get(version)
+    if model is None:
+        raise UnsupportedDesignSpecVersion("design spec schema version is not supported")
+    return model
+
+
+def validate_design_spec(payload: object) -> DesignSpec:
+    """Validate a persisted/parsed DesignSpec, dispatching on its
+    ``schema_version``.
+
+    Total over arbitrary input: a non-object payload or an unknown/malformed
+    ``schema_version`` raises :class:`UnsupportedDesignSpecVersion`; a
+    structurally invalid body raises Pydantic ``ValidationError``. Returns the
+    validated version-specific model instance (a :class:`DesignSpec` subclass
+    for version 2)."""
+    if not isinstance(payload, dict):
+        raise UnsupportedDesignSpecVersion("design spec payload is not an object")
+    model = design_spec_model_for_version(payload.get("schema_version"))
+    return model.model_validate(payload)
+
+
+def design_spec_json_schema(version: int = 1) -> dict:
+    """The DesignSpec JSON Schema for a supported version (also written to the
+    committed ``schemas/design_spec_vN.json`` file)."""
+    return design_spec_model_for_version(version).model_json_schema()

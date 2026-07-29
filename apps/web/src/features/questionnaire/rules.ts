@@ -27,6 +27,21 @@ import type {
   QuestionnaireSchema,
 } from "./types";
 
+// Whether a question counts as ANSWERED. The one definition: both the derived
+// Zod validation (which mirrors the backend's own required check) and the
+// wizard's screen gating read it, so "the button says go but the form says no"
+// cannot arise from two copies drifting apart.
+//
+// An array-valued answer needs at least one entry; every other type needs a
+// non-empty string. Nothing here decides whether the answer is VALID — only
+// whether the user has given one.
+export function isAnswered(question: Question, value: AnswerValue | undefined): boolean {
+  if (question.type === "multi_choice" || question.type === "colour_list") {
+    return Array.isArray(value) && value.length > 0;
+  }
+  return typeof value === "string" && value !== "";
+}
+
 export function allQuestions(schema: QuestionnaireSchema): Question[] {
   return schema.steps.flatMap((step) => step.questions);
 }

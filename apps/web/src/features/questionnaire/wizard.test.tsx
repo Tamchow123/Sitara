@@ -146,9 +146,29 @@ afterEach(() => {
 describe("QuestionnaireWizard", () => {
   it("renders questions and options from the schema with accessible names", async () => {
     render(<QuestionnaireWizard />);
-    expect(await screen.findByRole("heading", { name: "Garment step" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Garment" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Lehenga" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Saree" })).toBeInTheDocument();
+  });
+
+  it("prints a single-question screen's label once, without leaving the group unnamed", async () => {
+    // The screen heading IS the question. Printing the fieldset legend as well
+    // put the same sentence on screen twice, immediately under itself. The
+    // legend still has to EXIST — remove it and the radio group loses its
+    // accessible name — so it is hidden visually only.
+    render(<QuestionnaireWizard />);
+    const heading = await screen.findByRole("heading", { name: "Garment" });
+    expect(heading).toBeInTheDocument();
+
+    // Exactly one VISIBLE occurrence of the label...
+    const visible = screen
+      .getAllByText("Garment", { ignore: "script, style" })
+      .filter((node) => !node.className.includes("visually-hidden"));
+    expect(visible).toHaveLength(1);
+    expect(visible[0]).toBe(heading);
+
+    // ...and the group is still named for assistive technology.
+    expect(screen.getByRole("group", { name: "Garment" })).toBeInTheDocument();
   });
 
   it("creates the design on the first successful save (partial autosave)", async () => {
@@ -179,15 +199,69 @@ describe("QuestionnaireWizard", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
-  it("blocks advancing past a step with a missing required answer and focuses the error summary", async () => {
+  it("keeps Continue unavailable, and says why, until the screen's required answer exists", async () => {
     render(<QuestionnaireWizard />);
     await screen.findByRole("radio", { name: "Lehenga" });
+
+    const forward = screen.getByRole("button", { name: "Continue" });
+    expect(forward).toBeDisabled();
+    // The reason is named, not left to be inferred from a greyed-out button,
+    // and it is attached to the button for assistive technology.
+    expect(forward).toHaveAccessibleDescription("Choose an option to continue.");
+    fireEvent.click(forward);
+    expect(screen.getByRole("heading", { name: "Garment" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Lehenga" }));
+    await waitFor(() => expect(forward).not.toBeDisabled());
+    expect(forward).toHaveAccessibleDescription("");
+  });
+
+  it("offers Skip only on a screen with nothing required", async () => {
+    render(<QuestionnaireWizard />);
+    await screen.findByRole("radio", { name: "Lehenga" });
+    // The garment screen is required: no Skip.
+    expect(screen.queryByRole("button", { name: "Skip" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Lehenga" }));
+    await screen.findByText("Saved");
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    const summary = await screen.findByRole("alert", { name: "There is a problem" });
-    expect(summary).toHaveTextContent(/Please review your answers/i);
-    expect(summary).toHaveFocus();
-    // Still on the garment step.
-    expect(screen.getByRole("heading", { name: "Garment step" })).toBeInTheDocument();
+    // Silhouette is required too.
+    expect(await screen.findByRole("heading", { name: "Silhouette" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Flared" }));
+    await waitFor(() => expect(mocks.updateDesignDraft).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    // The dupatta screen is optional — Skip appears, and leaves no answer
+    // behind for it.
+    expect(await screen.findByRole("heading", { name: "Dupatta" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    await screen.findByRole("heading", { name: "Inspiration images" });
+    const lastCall = mocks.updateDesignDraft.mock.calls.at(-1);
+    expect(lastCall?.[1].answers).not.toHaveProperty("dupatta_style");
+  });
+
+  it("shows one question per screen, with a kicker locating it in its category", async () => {
+    render(<QuestionnaireWizard />);
+    expect(await screen.findByRole("heading", { name: "Garment" })).toBeInTheDocument();
+    // The step title is the CATEGORY, shown by the progress nav — never the
+    // heading, which is the question itself.
+    expect(screen.getByText(/Step 1 of 3 — Garment step/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Garment step" })).not.toBeInTheDocument();
+    // One screen in that category, so there is nothing for the kicker to add.
+    expect(screen.queryByText(/Question \d+ of/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Lehenga" }));
+    await screen.findByText("Saved");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    // The detail step contributes several screens, so the kicker counts them.
+    expect(await screen.findByRole("heading", { name: "Silhouette" })).toBeInTheDocument();
+    expect(screen.getByText(/Step 2 of 3 — Detail step/)).toBeInTheDocument();
+    expect(screen.getByText("Question 1 of 2")).toBeInTheDocument();
+    // Only this screen's control is present.
+    expect(screen.queryByText("Dupatta")).not.toBeInTheDocument();
   });
 
   it("applies show/hide rules and restricts options immediately", async () => {
@@ -196,12 +270,78 @@ describe("QuestionnaireWizard", () => {
     await screen.findByText("Saved");
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-    // On the detail step: saree_drape visible, dupatta hidden.
-    expect(await screen.findByText("Saree drape")).toBeInTheDocument();
-    expect(screen.queryByText("Dupatta")).not.toBeInTheDocument();
-    // Silhouette restricted to the saree option only.
+    // The silhouette screen comes first, restricted to the saree option only.
+    expect(await screen.findByRole("heading", { name: "Silhouette" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Draped" })).toBeInTheDocument();
     expect(screen.queryByRole("radio", { name: "Flared" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Draped" }));
+    await waitFor(() => expect(mocks.updateDesignDraft).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    // The hidden dupatta question has no screen at all; the saree drape does.
+    expect(await screen.findByRole("heading", { name: "Saree drape" })).toBeInTheDocument();
+    expect(screen.queryByText("Dupatta")).not.toBeInTheDocument();
+  });
+
+  it("stays coherent when a whole category disappears behind the user", async () => {
+    // The hardest case for the screen/category bookkeeping: the user advances
+    // PAST a category, then changes an earlier answer that hides its only
+    // question, so the category vanishes from a plan the user has already been
+    // credited with completing.
+    const VANISHING: QuestionnaireSchema = {
+      schema_version: 1,
+      key: "test",
+      title: "Test",
+      steps: [
+        SCHEMA.steps[0],
+        {
+          id: "lehenga_only",
+          title: "Lehenga step",
+          questions: [
+            {
+              id: "dupatta_style",
+              type: "single_choice",
+              label: "Dupatta",
+              required: false,
+              options: [{ value: "head_drape", label: "Head drape" }],
+            },
+          ],
+        },
+      ],
+      rules: [
+        {
+          id: "saree_hides_dupatta",
+          when: { question_id: "garment_type", operator: "equals", values: ["saree"] },
+          then: { action: "hide", question_id: "dupatta_style" },
+        },
+      ],
+    };
+    mocks.fetchActiveQuestionnaire.mockResolvedValue({ id: "v1", version: 1, schema: VANISHING });
+    render(<QuestionnaireWizard />);
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
+    await screen.findByText("Saved");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByRole("heading", { name: "Dupatta" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    await screen.findByRole("heading", { name: "Inspiration images" });
+    expect(screen.getByRole("button", { name: /Lehenga step/ })).not.toBeDisabled();
+
+    // Back to the garment and switch to saree: the whole Lehenga step goes.
+    fireEvent.click(screen.getByRole("button", { name: /Garment step/ }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Saree" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /Lehenga step/ })).not.toBeInTheDocument(),
+    );
+
+    // The nav renumbers honestly and the user is still on a real screen.
+    expect(screen.getByText(/Step 1 of 2 — Garment step/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Garment" })).toBeInTheDocument();
+    // Every category's jump target was recomputed against the SHORTER plan:
+    // a stale first-screen index would land somewhere else entirely.
+    fireEvent.click(screen.getByRole("button", { name: /Inspiration/ }));
+    expect(await screen.findByRole("heading", { name: "Inspiration images" })).toBeInTheDocument();
   });
 
   it("clears stale answers when the controlling answer changes", async () => {
@@ -220,6 +360,57 @@ describe("QuestionnaireWizard", () => {
     });
   });
 
+  it("jumps back through the progress nav but never past the furthest step reached", async () => {
+    render(<QuestionnaireWizard />);
+    fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
+    await screen.findByText("Saved");
+
+    // Unreached categories are shown but locked, so the nav can never carry the
+    // user past a screen whose required answers have not been validated. This
+    // is also the handoff's "locked until the opening answers exist" rule:
+    // ANSWERING the garment does not unlock anything by itself…
+    expect(screen.getByRole("button", { name: /Detail step/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Inspiration/ })).toBeDisabled();
+
+    // …only moving through Continue does.
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByRole("heading", { name: "Silhouette" })).toBeInTheDocument();
+
+    // The step just left is navigable again, and returning keeps the answer.
+    fireEvent.click(screen.getByRole("button", { name: /Garment step/ }));
+    expect(await screen.findByRole("heading", { name: "Garment" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Lehenga" })).toBeChecked();
+    expect(screen.getByRole("button", { name: /Inspiration/ })).toBeDisabled();
+  });
+
+  it("locks every navigation control while a step change is in flight", async () => {
+    // Two navigations that each await a save flush would otherwise be resolved
+    // in promise order rather than click order, landing the user on a step
+    // they did not ask for. Only one may be outstanding at a time.
+    let resolveCreate: (value: unknown) => void = () => {};
+    mocks.createDesignDraft.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    render(<QuestionnaireWizard />);
+    fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled());
+    // The pill for the step being left is inert too, so it cannot start a
+    // second flush-then-navigate behind the first.
+    expect(screen.getByRole("button", { name: /Garment step/ })).toBeDisabled();
+
+    resolveCreate({ ok: true, data: detail() });
+    expect(await screen.findByRole("heading", { name: "Silhouette" })).toBeInTheDocument();
+    // The controls are live again once the navigation settles. Continue stays
+    // unavailable for its own reason — the new screen is required and empty —
+    // so Back and the pill are what prove the in-flight lock has lifted.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Back" })).not.toBeDisabled());
+    expect(screen.getByRole("button", { name: /Garment step/ })).not.toBeDisabled();
+  });
+
   it("never persists answers to browser storage", async () => {
     render(<QuestionnaireWizard />);
     fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
@@ -233,16 +424,47 @@ describe("QuestionnaireWizard", () => {
       detail({ answers: { garment_type: "lehenga" } }),
     );
     render(<QuestionnaireWizard initialDesignId="d1" />);
-    // Resumes on the first incomplete step (detail) with the saved answer.
-    expect(await screen.findByRole("heading", { name: "Detail step" })).toBeInTheDocument();
+    // Resumes on the first incomplete SCREEN — the exact unanswered question,
+    // not the top of its category.
+    expect(await screen.findByRole("heading", { name: "Silhouette" })).toBeInTheDocument();
     expect(mocks.fetchDesign).toHaveBeenCalledWith("d1");
+  });
+
+  it("opens the screen a review Edit link asks for", async () => {
+    window.history.replaceState({}, "", "/design/d1?q=dupatta_style");
+    mocks.fetchDesign.mockResolvedValue(
+      detail({ answers: { garment_type: "lehenga", silhouette: "flared_lehenga" } }),
+    );
+    render(<QuestionnaireWizard initialDesignId="d1" />);
+    expect(await screen.findByRole("heading", { name: "Dupatta" })).toBeInTheDocument();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("ignores an Edit link for a question that is no longer shown", async () => {
+    // The saree answer hides dupatta_style entirely, so its deep link has no
+    // screen to open: the wizard resumes normally instead of guessing.
+    window.history.replaceState({}, "", "/design/d1?q=dupatta_style");
+    mocks.fetchDesign.mockResolvedValue(detail({ answers: { garment_type: "saree" } }));
+    render(<QuestionnaireWizard initialDesignId="d1" />);
+    expect(await screen.findByRole("heading", { name: "Silhouette" })).toBeInTheDocument();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("never lets an Edit link skip past the furthest screen reached", async () => {
+    // Nothing is answered, so only the first screen has been reached; a link
+    // deeper into the questionnaire must not carry the user there.
+    window.history.replaceState({}, "", "/design/d1?q=dupatta_style");
+    mocks.fetchDesign.mockResolvedValue(detail({ answers: {} }));
+    render(<QuestionnaireWizard initialDesignId="d1" />);
+    expect(await screen.findByRole("heading", { name: "Garment" })).toBeInTheDocument();
+    window.history.replaceState({}, "", "/");
   });
 
   describe("lifecycle navigation", () => {
     it("renders the wizard for a draft design", async () => {
       mocks.fetchDesign.mockResolvedValue(detail({ status: "draft" }));
       render(<QuestionnaireWizard initialDesignId="d1" />);
-      expect(await screen.findByRole("heading", { name: "Garment step" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Garment" })).toBeInTheDocument();
       expect(mocks.replace).not.toHaveBeenCalledWith(expect.stringContaining("/generation/"));
     });
 
@@ -267,7 +489,7 @@ describe("QuestionnaireWizard", () => {
       await waitFor(() =>
         expect(mocks.replace).toHaveBeenCalledWith("/design/d1/generation/job-1"),
       );
-      expect(screen.queryByRole("heading", { name: "Garment step" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Garment" })).not.toBeInTheDocument();
     });
 
     it("redirects to the result route for a generated design", async () => {
@@ -309,7 +531,7 @@ describe("QuestionnaireWizard", () => {
         }),
       );
       render(<QuestionnaireWizard initialDesignId="d1" />);
-      expect(await screen.findByRole("heading", { name: "Garment step" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Garment" })).toBeInTheDocument();
       expect(mocks.replace).not.toHaveBeenCalledWith(expect.stringContaining("/generation/"));
     });
 
@@ -375,6 +597,9 @@ describe("QuestionnaireWizard", () => {
       fireEvent.click(await screen.findByRole("radio", { name: "Flared" }));
       await waitFor(() => expect(mocks.updateDesignDraft).toHaveBeenCalled());
       fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      // The dupatta question is its own screen now, and it is optional.
+      await screen.findByRole("heading", { name: "Dupatta" });
+      fireEvent.click(screen.getByRole("button", { name: "Skip" }));
       await screen.findByRole("heading", { name: "Inspiration images" });
     }
 
@@ -410,6 +635,117 @@ describe("QuestionnaireWizard", () => {
       );
       expect(
         await screen.findByText(/No inspiration images are available yet/i),
+      ).toBeInTheDocument();
+    });
+
+    it("restores uploads made in an earlier visit, and counts them against the budget", async () => {
+      // Uploads live on the server, not in the wizard's own state. If a resume
+      // did not restore them, the user would see an empty upload list for
+      // images that ARE still attached — and the picker would offer three more
+      // references than the server will accept.
+      mocks.fetchDesign.mockResolvedValue(
+        detail({
+          answers: {
+            garment_type: "lehenga",
+            silhouette: "flared_lehenga",
+            dupatta_style: "head_drape",
+          },
+          inspiration_uploads: [
+            {
+              id: "u1",
+              position: 1,
+              width: 900,
+              height: 1200,
+              rights_acknowledged_at: "2026-07-29T00:00:00Z",
+              created_at: "2026-07-29T00:00:00Z",
+            },
+          ],
+        }),
+      );
+      render(<QuestionnaireWizard initialDesignId="d1" />);
+
+      await screen.findByRole("heading", { name: "Inspiration images" });
+      expect(await screen.findByAltText(/uploaded inspiration image 1/i)).toHaveAttribute(
+        "src",
+        "/api/v1/designs/d1/inspiration-uploads/u1/image/",
+      );
+      expect(document.getElementById("inspiration-help")).toHaveTextContent(/1 of 3 used/i);
+      expect(screen.getByText(/2 of your inspiration slots are free/i)).toBeInTheDocument();
+    });
+
+    it("wires the upload control to the design created during the questionnaire", async () => {
+      // The design id only exists after the first autosave; the upload control
+      // has to pick it up, or an upload would have nothing to attach to.
+      render(<QuestionnaireWizard />);
+      await goToInspirationStep();
+      expect(
+        await screen.findByRole("heading", { name: /Your own photographs/i }),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText(/Choose an image/i)).toBeDisabled();
+      expect(screen.getByText(/3 of your inspiration slots are free/i)).toBeInTheDocument();
+    });
+
+    it("will not carry the user to review once a later change clears an answer", async () => {
+      // The reported defect. Reaching the end and being told there are missing
+      // answers is too late: the user was never stopped on the question. It
+      // happens because `maxReached` is monotonic — it records how far they
+      // GOT, not whether the screens behind them are still answered. Switching
+      // the garment restricts the silhouette options, clearStaleAnswers drops
+      // the now-disallowed answer, and the progress nav still offered a jump
+      // straight over the reopened gap to the review screen.
+      render(<QuestionnaireWizard />);
+      await goToInspirationStep();
+
+      // Back to the garment and change it, which invalidates the silhouette.
+      fireEvent.click(screen.getByRole("button", { name: "Garment step" }));
+      fireEvent.click(await screen.findByRole("radio", { name: "Saree" }));
+      await waitFor(() => expect(mocks.updateDesignDraft).toHaveBeenCalled());
+
+      // The defect in one line: this pill was still offered, and taking it
+      // jumped straight over the reopened silhouette question to the end, from
+      // where Continue pushed to review and the server reported the miss.
+      fireEvent.click(screen.getByRole("button", { name: /^Inspiration/ }));
+      expect(
+        screen.queryByRole("heading", { name: "Inspiration images" }),
+      ).not.toBeInTheDocument();
+
+      // Continue must land on the reopened question, NOT the review screen.
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      expect(await screen.findByRole("heading", { name: "Silhouette" })).toBeInTheDocument();
+      expect(mocks.push).not.toHaveBeenCalled();
+
+      // ...and answering it restores the way forward. A saree swaps the dupatta
+      // question out for the drape question, so that is the next screen.
+      fireEvent.click(await screen.findByRole("radio", { name: "Draped" }));
+      await waitFor(() => expect(mocks.updateDesignDraft).toHaveBeenCalled());
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      expect(await screen.findByRole("heading", { name: "Saree drape" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+      expect(
+        await screen.findByRole("heading", { name: "Inspiration images" }),
+      ).toBeInTheDocument();
+    });
+
+    it("re-locks the categories beyond a reopened gap", async () => {
+      // The nav must not keep claiming a category is complete when the answer
+      // that completed it has gone — a ticked pill offering a jump over the
+      // gap is how the user got past it in the first place.
+      render(<QuestionnaireWizard />);
+      await goToInspirationStep();
+      // Matched loosely: a locked pill appends a visually-hidden
+      // "(not yet available)" to its accessible name, which is the announcement
+      // this assertion is really about.
+      expect(screen.getByRole("button", { name: /^Inspiration/ })).toBeEnabled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Garment step" }));
+      fireEvent.click(await screen.findByRole("radio", { name: "Saree" }));
+      await waitFor(() => expect(mocks.updateDesignDraft).toHaveBeenCalled());
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /^Inspiration/ })).toBeDisabled(),
+      );
+      expect(
+        screen.getByRole("button", { name: /Inspiration \(not yet available\)/ }),
       ).toBeInTheDocument();
     });
 

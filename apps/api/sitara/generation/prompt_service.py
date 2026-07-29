@@ -12,7 +12,7 @@ from django.db import transaction
 
 from sitara.designs.models import DesignVersion
 
-from .design_spec import DESIGN_SPEC_SCHEMA_VERSION, DesignSpec
+from .design_spec import SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS, validate_design_spec
 from .prompt_builder import (
     PROMPT_BUILDER_VERSION,
     ImagePromptBuildError,
@@ -55,13 +55,14 @@ def build_and_store_image_prompt(design_version: DesignVersion) -> DesignVersion
 
         if version.design_spec is None:
             raise ImagePromptBuildError("design version has no design spec")
-        if version.design_spec_schema_version != DESIGN_SPEC_SCHEMA_VERSION:
+        if version.design_spec_schema_version not in SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS:
             raise ImagePromptBuildError("design version has an unsupported design spec schema")
 
-        # Revalidate the stored JSON before building (defence in depth); a
-        # ValidationError is surfaced as a controlled, contents-free error.
+        # Revalidate the stored JSON before building (defence in depth),
+        # dispatching on its schema version; a validation or unsupported-version
+        # error is surfaced as a controlled, contents-free error.
         try:
-            spec = DesignSpec.model_validate(version.design_spec)
+            spec = validate_design_spec(version.design_spec)
         except Exception as exc:
             raise ImagePromptBuildError("stored design spec failed validation") from exc
 

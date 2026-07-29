@@ -18,11 +18,25 @@ context fingerprint used for variant selection but is never reproduced.
 import hashlib
 import json
 
-from sitara.generation.design_spec import NO_REGIONAL_DIRECTION
+from sitara.generation.design_spec import COLOUR_MATCH_FABRIC, NO_REGIONAL_DIRECTION
+from sitara.generation.selection_semantics import (
+    COLOUR_ROLE_LABELS,
+    colour_role_values,
+    coverage_area_values,
+    head_covering_answer,
+    is_per_area_coverage,
+    legacy_coverage_values,
+    ordered_colour_values,
+)
 
 from . import phrases
 
-DEMO_SPEC_TEMPLATE_VERSION = "1.0.0"
+# 3.0.0 (Phase 16B): produces DesignSpec v3 (questionnaire v4 — colour chosen
+# per garment role, coverage chosen per body area) when the context targets it,
+# rendering each body area's own answer instead of the retired
+# coverage_preferences multi-select. Version 1 and version 2 contexts produce
+# byte-identical output to 2.0.0.
+DEMO_SPEC_TEMPLATE_VERSION = "3.0.0"
 
 
 class DemoGarmentUnsupported(Exception):
@@ -100,8 +114,22 @@ def _variant_index(fingerprint: str, modulus: int, salt: str) -> int:
     return int(digest[:8], 16) % modulus
 
 
-def _phrase_list(values: list[str], mapping: dict[str, str]) -> list[str]:
+def _phrase_list(values, mapping: dict[str, str]) -> list[str]:
     return [mapping[v] for v in values if v in mapping]
+
+
+def _sentence_case(text: str) -> str:
+    return text[:1].upper() + text[1:] if text else text
+
+
+def _colour_role_phrase(field: str, value: str) -> str:
+    """One version-3 colour role as narrative, e.g. ``ivory across the main
+    fabric``. ``match_fabric`` names the relationship, never a colour."""
+    where = COLOUR_ROLE_LABELS[field]
+    if value == COLOUR_MATCH_FABRIC:
+        return f"{where} takes the main fabric's colour"
+    phrase = phrases.COLOUR_PHRASES.get(value, f"the colour {value}")
+    return f"{phrase} across {where}"
 
 
 def build_demo_design_spec(context) -> dict:
@@ -115,11 +143,16 @@ def build_demo_design_spec(context) -> dict:
     ceremony = selections["ceremony"]
     silhouette = selections["silhouette"]
     regional_style = selections.get("regional_style")
-    colour_palette = selections.get("colour_palette") or []
+    # Colour and coverage are read through the version-independent adapter, so
+    # one code path serves both the v1/v2 palette-and-multi-select contract and
+    # the v3 per-role / per-body-area contract.
+    colour_values = ordered_colour_values(selections)
     fabrics = selections.get("fabrics") or []
     embellishment_styles = selections.get("embellishment_styles") or []
     embellishment_density = selections.get("embellishment_density")
-    coverage_preferences = selections.get("coverage_preferences") or []
+    coverage_preferences = legacy_coverage_values(selections)
+    coverage_areas = dict(coverage_area_values(selections))
+    neckline_style = selections.get("neckline_style")
     dupatta_style = selections.get("dupatta_style")
     saree_drape = selections.get("saree_drape")
 
@@ -135,9 +168,13 @@ def build_demo_design_spec(context) -> dict:
     )
     style_hint = _style_keyword_hint(context.untrusted_texts)
 
-    colour_phrases = _phrase_list(colour_palette, phrases.COLOUR_PHRASES) or [
-        "a considered palette"
-    ]
+    # A bride-supplied hex has no curated phrase, so it is described by its own
+    # code rather than dropped — the colour she chose must still reach the brief.
+    colour_phrases = [
+        phrases.COLOUR_PHRASES[value] if value in phrases.COLOUR_PHRASES else f"the colour {value}"
+        for value in colour_values
+        if value in phrases.COLOUR_PHRASES or value.startswith("#")
+    ] or ["a considered palette"]
     lead_colour = colour_phrases[0]
     accent_colours = colour_phrases[1:]
 
@@ -194,14 +231,25 @@ def build_demo_design_spec(context) -> dict:
 
     garment_components = [c.strip() for c in garment["components"].split("|")]
 
-    colour_placement = (
-        f"{lead_colour.capitalize()} leads across the main body of the {garment_noun}"
-        + (
-            f", with {', '.join(accent_colours)} carried through as accents."
-            if accent_colours
-            else "."
+    # Version 3 knows which garment role each colour was chosen for, so the
+    # placement narrative names them instead of guessing lead-and-accents.
+    colour_roles = colour_role_values(selections)
+    if colour_roles:
+        colour_placement = (
+            _sentence_case(
+                ", ".join(_colour_role_phrase(field, value) for field, value in colour_roles)
+            )
+            + "."
         )
-    )
+    else:
+        colour_placement = (
+            f"{lead_colour.capitalize()} leads across the main body of the {garment_noun}"
+            + (
+                f", with {', '.join(accent_colours)} carried through as accents."
+                if accent_colours
+                else "."
+            )
+        )
     colour_rationale = (
         f"{lead_colour.capitalize()} was chosen to suit {ceremony_phrase} while keeping the look "
         f"{mood_adjective} rather than overstated."
@@ -241,26 +289,62 @@ def build_demo_design_spec(context) -> dict:
             ),
         }
 
-    sleeves_coverage = next((c for c in coverage_phrases if "sleeve" in c), None)
+    # Sleeves: a dedicated v3 answer is authoritative; a v1/v2 design falls back
+    # to whichever sleeve value its coverage multi-select carried.
+    sleeves_coverage = phrases.SLEEVE_PHRASES.get(coverage_areas.get("sleeves")) or next(
+        (c for c in coverage_phrases if "sleeve" in c), None
+    )
     sleeves_line = (
         f"Sleeve length is {sleeves_coverage}."
         if sleeves_coverage
         else "Sleeve length is left to styling preference."
     )
-    neckline_phrase = (
-        phrases.COVERAGE_PHRASES["high_neckline"]
-        if "high_neckline" in coverage_preferences
-        else "a neckline that suits the silhouette"
-    )
-    back_midriff_phrase = (
-        ", ".join(c for c in coverage_phrases if "back" in c or "midriff" in c)
-        or "styled to the wearer's comfort"
-    )
-    head_covering_phrase = (
-        phrases.COVERAGE_PHRASES["head_drape_preferred"]
-        if "head_drape_preferred" in coverage_preferences
-        else "left uncovered unless the drape naturally covers it"
-    )
+    # Neckline: the dedicated canonical neckline (DesignSpec v2 and v3) is
+    # authoritative; a v1 design falls back to the old high_neckline coverage
+    # value, then to a neutral default.
+    if neckline_style and neckline_style in phrases.NECKLINE_PHRASES:
+        neckline_phrase = phrases.NECKLINE_PHRASES[neckline_style]
+    elif "high_neckline" in coverage_preferences:
+        neckline_phrase = phrases.COVERAGE_PHRASES["high_neckline"]
+    else:
+        neckline_phrase = "a neckline that suits the silhouette"
+    # Back and midriff derived from canonical machine values, not by
+    # substring-matching rendered phrase text. Version 3 answers each area
+    # explicitly (including a deliberately less-covered answer); versions 1 and 2
+    # can only say when something is fully covered.
+    covered_parts = []
+    if is_per_area_coverage(selections):
+        for field, phrase_map in (
+            ("back_coverage", phrases.BACK_COVERAGE_PHRASES),
+            ("midriff", phrases.MIDRIFF_PHRASES),
+        ):
+            phrase = phrase_map.get(coverage_areas.get(field))
+            if phrase:
+                covered_parts.append(phrase)
+    else:
+        if "full_back" in coverage_preferences:
+            covered_parts.append("given full back coverage")
+        if "full_midriff" in coverage_preferences:
+            covered_parts.append("given full midriff coverage, with no bare skin at the waist")
+    back_midriff_phrase = ", ".join(covered_parts) or "styled to the wearer's comfort"
+    # Head covering: a dedicated v3 answer is authoritative (an explicit
+    # "uncovered" is honoured even beside a head-draped dupatta), exactly as in
+    # the deterministic prompt builder. Otherwise the head is covered when the
+    # coverage preference asks for it OR the dupatta is worn over the head (a
+    # single head drape or a double dupatta with a head layer).
+    head_answer = head_covering_answer(selections)
+    if head_answer in phrases.HEAD_COVERING_PHRASES:
+        head_covering_phrase = phrases.HEAD_COVERING_PHRASES[head_answer]
+    else:
+        wants_head_covered = "head_drape_preferred" in coverage_preferences or dupatta_style in (
+            "head_drape",
+            "double_dupatta",
+        )
+        head_covering_phrase = (
+            "kept covered, with the drape drawn up and over it so the hair is not visible"
+            if wants_head_covered
+            else "left uncovered unless the drape naturally covers it"
+        )
 
     coverage_and_drape = {
         "sleeves": sleeves_line,
@@ -306,8 +390,13 @@ def build_demo_design_spec(context) -> dict:
         image_alt_text = image_alt_text + " Generated as a deterministic demo concept."
     image_alt_text = image_alt_text[:300]
 
+    # The demo engine produces exactly the DesignSpec structure the context
+    # targets (v1, or v2 when the questionnaire declares a dedicated neckline).
+    # ``source_selections`` already carries neckline_style for a v2 context.
+    schema_version = getattr(context, "design_spec_schema_version", 1)
+
     return {
-        "schema_version": 1,
+        "schema_version": schema_version,
         "source_selections": dict(selections),
         "title": title,
         "concept_summary": concept_summary,

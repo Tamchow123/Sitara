@@ -398,3 +398,64 @@ class TestRuleValueTypes:
         schema["rules"][0]["then"]["values"] = ["zardozi", "zardozi"]
         with pytest.raises(QuestionnaireSchemaError, match="duplicate"):
             validate_questionnaire_schema(schema)
+
+
+class TestOptionPresentationMetadata:
+    """Phase 16B option ``visual_key``/``group`` presentation fields are
+    OPTIONAL, bounded lower-case machine identifiers — never URLs, paths,
+    colours, HTML/CSS or Markdown. Options without them stay valid."""
+
+    def _first_option(self, schema: dict) -> dict:
+        return _question(schema, "garment_type")["options"][0]
+
+    def test_options_without_presentation_fields_remain_valid(self):
+        # The base valid schema declares no visual_key/group anywhere.
+        validate_questionnaire_schema(valid_schema())
+
+    def test_valid_visual_key_and_group_are_accepted(self):
+        schema = valid_schema()
+        option = self._first_option(schema)
+        option["visual_key"] = "garment_lehenga"
+        option["group"] = "lehengas"
+        validate_questionnaire_schema(schema)
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "https://example.com/a.png",
+            "/etc/passwd",
+            "assets/img.svg",
+            "Garment-Lehenga",
+            "UPPER",
+            "<script>alert(1)</script>",
+            "#ff0000",
+            "a",
+            "",
+            "x" * 65,
+        ],
+    )
+    def test_invalid_visual_key_is_rejected(self, bad):
+        schema = valid_schema()
+        self._first_option(schema)["visual_key"] = bad
+        with pytest.raises(QuestionnaireSchemaError):
+            validate_questionnaire_schema(schema)
+
+    @pytest.mark.parametrize("bad", ["Neck-Lines", "necklines/1", "#group", "a", ""])
+    def test_invalid_group_is_rejected(self, bad):
+        schema = valid_schema()
+        self._first_option(schema)["group"] = bad
+        with pytest.raises(QuestionnaireSchemaError):
+            validate_questionnaire_schema(schema)
+
+    @pytest.mark.parametrize("bad", [{}, [], 1, 1.0, True, None])
+    def test_non_string_presentation_fields_are_rejected(self, bad):
+        schema = valid_schema()
+        self._first_option(schema)["visual_key"] = bad
+        with pytest.raises(QuestionnaireSchemaError):
+            validate_questionnaire_schema(schema)
+
+    def test_unknown_option_key_is_still_rejected(self):
+        schema = valid_schema()
+        self._first_option(schema)["image_url"] = "https://example.com/a.png"
+        with pytest.raises(QuestionnaireSchemaError, match="unsupported keys"):
+            validate_questionnaire_schema(schema)

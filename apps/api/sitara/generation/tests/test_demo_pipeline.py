@@ -68,7 +68,7 @@ class TestFullDemoPipeline:
         version = DesignVersion.objects.get(pk=result.design_version_id)
         assert version.is_demo is True
         assert version.design_spec_provider == "demo"
-        assert version.design_spec_model == "demo-spec-1.0.0"
+        assert version.design_spec_model == "demo-spec-3.0.0"
         assert version.has_permanent_image
         # The final image lives under the normal design_images key, never the
         # private demo-source namespace.
@@ -118,6 +118,58 @@ class TestFullDemoPipeline:
         ):
             result = run_generation_attempt(attempt.id, config=_FAST)
         assert result.status == _Status.SUCCEEDED
+
+    def test_demo_pipeline_never_signs_a_reference_image(self, settings):
+        """ADR 0019 sends selected inspiration bytes to a live IMAGE provider.
+        Demo mode must be untouched by that: with an inspiration selected it
+        still signs nothing, so no bearer URL is minted and nothing about the
+        zero-cost guarantee changes."""
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        _install_synthetic_pack()
+        design = make_complete_design()
+        DesignInspiration.objects.create(
+            design=design, inspiration_asset=make_eligible_asset(), position=1
+        )
+        attempt = _queued_demo_attempt(design)
+        assert attempt.is_demo is True  # the FROZEN flag the guard reads
+
+        def _boom(*args, **kwargs):
+            raise AssertionError(
+                "SAFETY CONSTRAINT (ADR 0019 / CLAUDE.md §7): the demo path must "
+                "never mint a reference URL. If this fired, the "
+                "`if not attempt.is_demo` guard in _ensure_prediction was "
+                "removed — restore the guard, do not delete this patch."
+            )
+
+        with (
+            mock.patch("sitara.generation.pipeline.reference_image_urls", side_effect=_boom),
+            mock.patch("sitara.media.delivery.S3DesignImageSigner", side_effect=_boom),
+        ):
+            result = run_generation_attempt(attempt.id, config=_FAST)
+        assert result.status == _Status.SUCCEEDED
+        result.refresh_from_db()
+        # The mode stayed frozen for the whole run — the guard read a demo
+        # attempt, not a live one that merely happened to skip signing.
+        assert result.is_demo is True
+
+    def test_a_demo_attempt_is_unaffected_by_a_plaintext_signing_origin(self, settings):
+        # The live path fails closed on a plaintext origin. Demo mode signs
+        # nothing, so the same configuration must not affect it at all.
+        settings.S3_SIGNED_URL_ENDPOINT_URL = "http://localhost:9000"
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        _install_synthetic_pack()
+        design = make_complete_design()
+        DesignInspiration.objects.create(
+            design=design, inspiration_asset=make_eligible_asset(), position=1
+        )
+        attempt = _queued_demo_attempt(design)
+        result = run_generation_attempt(attempt.id, config=_FAST)
+        assert result.status == _Status.SUCCEEDED
+        assert result.is_demo is True
 
 
 class TestDemoSeedDeterminism:
