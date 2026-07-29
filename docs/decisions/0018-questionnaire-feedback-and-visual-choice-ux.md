@@ -426,11 +426,29 @@ fail-closed coverage constraints (below).
 The curated colours expand into a bounded, source-controlled `group` per option
 (neutrals, reds, pinks, yellows/metallics, greens, blues/teals, purples) within
 the schema's option limit, keeping stable lower-case machine ids and the
-existing maximum of four ordered lead colours. Swatches are curated (never an
-unrestricted native colour picker), rendered from the frontend visual manifest's
-project-owned hex values; hex is never a canonical answer and never sent to a
-provider. Prompt and result text use human-readable colour names derived from
-the canonical machine values.
+existing maximum of four ordered lead colours. The curated swatches are rendered
+from the frontend visual manifest's project-owned hex values; that hex is
+presentation only — never an answer, never sent anywhere.
+
+Two kinds of hex exist here and only one of them is presentational. The
+maintainer's design handoff of 2026-07-28 also asked for a small bride-supplied
+palette (`custom_colours`), so that someone matching a keepsake sari or a
+mother's dupatta can name a colour the curated set does not contain. That hex
+**is** a canonical answer: a per-role colour question accepts a value from the
+design's own `custom_colours` list, and `PROMPT_BUILDER_VERSION` 7.0.0 renders
+it into the image prompt as a literal colour code, which does reach the
+provider. It is bounded rather than unrestricted — a six-digit lower-case hex,
+deduplicated, count-capped, and rejected outright unless that exact value is in
+the design's palette.
+
+That reopens the spec's "unrestricted custom colours" non-goal and its
+"do not send hex values to a provider as the canonical answer" requirement.
+It is recorded as authorised scope in a dated addendum to
+`../phases/phases-16b.md`, in the same form as this phase's three other handoff
+changes; the rule that survives is that the *curated* vocabulary stays curated,
+and a colour outside the bride's own declared palette is still refused.
+Everywhere a canonical machine value exists, prompt and result text use its
+human-readable name rather than a code.
 
 ### Demo fail-closed requirements
 
@@ -531,9 +549,13 @@ stands.
   explicit registry for the two known versions is simpler and safer.
 - **A persisted `no_preference` option value.** Rejected: null/absence is the
   honest representation and avoids polluting the canonical answer vocabulary.
-- **Colour swatches as downloaded/licensed images or a native colour picker.**
-  Rejected: project-owned hex values are rights-clean and accessible; an
-  unrestricted picker is explicitly out of scope.
+- **Colour swatches as downloaded/licensed images, or a picker in place of the
+  curated set.** Rejected: project-owned hex values are rights-clean and
+  accessible, and the curated vocabulary stays curated. *(Amended 2026-07-29:
+  this rejection covers the swatch set itself. A native picker IS used, in
+  addition to it, to build the bounded bride-supplied `custom_colours` palette
+  — see "Colour grouping" above. An unrestricted one, replacing or bypassing
+  the curated vocabulary, remains out of scope.)*
 - **Soft-scoring Anand Karaj / covered-head / full-midriff in the demo.**
   Rejected: a culturally-distinct ceremony or a mandatory coverage requirement
   must fail closed rather than show a misleading nearest image.

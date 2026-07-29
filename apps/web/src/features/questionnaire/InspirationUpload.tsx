@@ -157,7 +157,9 @@ export function InspirationUpload({
       </div>
 
       <p className="field-help" id={helpId}>
-        JPEG, PNG or WebP, up to 15 MB.{" "}
+        {/* The affirmation stays ticked between uploads, so it has to be clear
+            it covers each image and not just the first one. */}
+        This applies to every image you choose. JPEG, PNG or WebP, up to 15 MB.{" "}
         {full
           ? "You have used all of your inspiration slots."
           : `${slotsRemaining} of your inspiration slots ${

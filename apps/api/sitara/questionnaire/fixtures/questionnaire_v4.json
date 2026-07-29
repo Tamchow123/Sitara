@@ -1513,6 +1513,86 @@
               "action": "hide",
               "question_id": "dupatta_colour"
             }
+          },
+          {
+            "id": "uncovered_head_excludes_head_drapes",
+            "when": {
+              "question_id": "head_covering",
+              "operator": "in",
+              "values": [
+                "uncovered"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "dupatta_style",
+              "values": [
+                "one_shoulder",
+                "front_drape",
+                "trail_dupatta"
+              ]
+            }
+          },
+          {
+            "id": "dupatta_over_head_requires_head_drape",
+            "when": {
+              "question_id": "head_covering",
+              "operator": "in",
+              "values": [
+                "dupatta_over_head"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "dupatta_style",
+              "values": [
+                "head_drape",
+                "double_dupatta"
+              ]
+            }
+          },
+          {
+            "id": "veil_style_requires_crown_pinned_drape",
+            "when": {
+              "question_id": "head_covering",
+              "operator": "in",
+              "values": [
+                "veil_style"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "dupatta_style",
+              "values": [
+                "head_drape",
+                "double_dupatta",
+                "trail_dupatta"
+              ]
+            }
+          },
+          {
+            "id": "covered_midriff_excludes_deep_v_neck",
+            "when": {
+              "question_id": "midriff",
+              "operator": "in",
+              "values": [
+                "covered_midriff"
+              ]
+            },
+            "then": {
+              "action": "restrict_options",
+              "question_id": "neckline_style",
+              "values": [
+                "classic_crew",
+                "curved_scoop",
+                "v_neck",
+                "boat_neck",
+                "square_neck",
+                "sweetheart_neck",
+                "high_neck",
+                "band_collar"
+              ]
+            }
           }
         ]
       }

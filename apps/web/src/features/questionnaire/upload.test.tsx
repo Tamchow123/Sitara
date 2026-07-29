@@ -95,6 +95,13 @@ describe("InspirationUpload — consent", () => {
     );
   });
 
+  it("says the affirmation covers every image, not just the first", () => {
+    // It stays ticked between uploads, so a second photo is covered by a box
+    // the user ticked while thinking about the first one.
+    renderUpload();
+    expect(screen.getByText(/applies to every image you choose/i)).toBeInTheDocument();
+  });
+
   it("keeps the file picker disabled until the affirmation is given", () => {
     renderUpload();
     expect(chooser()).toBeDisabled();

@@ -313,6 +313,78 @@ COVERAGE = [
     ),
 ]
 
+# --- compatibility rules the coverage split has to re-express -------------
+# v3 carried two of these against the old multi-select `coverage_preferences`.
+# Splitting that list into four independent questions dropped both conditions
+# (they named a question v4 no longer has), so they are restated here against
+# the new question ids — the phase requires that a bypassed contradictory
+# submission is REJECTED by the server, not merely discouraged by the UI.
+#
+# The distinction that matters culturally: a restriction applies only when the
+# DUPATTA ITSELF is doing the covering. A hijab covers the hair independently,
+# so a bride wearing one may still style her dupatta any way she likes —
+# restricting her to a head drape would be the app inventing a rule no
+# community holds.
+HEAD_COVERING_RULES = [
+    {
+        # "The dupatta stays on the shoulders" cannot also frame the face.
+        "id": "uncovered_head_excludes_head_drapes",
+        "when": {"question_id": "head_covering", "operator": "in", "values": ["uncovered"]},
+        "then": {
+            "action": "restrict_options",
+            "question_id": "dupatta_style",
+            "values": ["one_shoulder", "front_drape", "trail_dupatta"],
+        },
+    },
+    {
+        # The dupatta is the covering, so it has to be over the head.
+        "id": "dupatta_over_head_requires_head_drape",
+        "when": {
+            "question_id": "head_covering",
+            "operator": "in",
+            "values": ["dupatta_over_head"],
+        },
+        "then": {
+            "action": "restrict_options",
+            "question_id": "dupatta_style",
+            "values": ["head_drape", "double_dupatta"],
+        },
+    },
+    {
+        # Pinned from the crown and trailing — a trail drape satisfies this one
+        # too, which a plain head drape does not.
+        "id": "veil_style_requires_crown_pinned_drape",
+        "when": {"question_id": "head_covering", "operator": "in", "values": ["veil_style"]},
+        "then": {
+            "action": "restrict_options",
+            "question_id": "dupatta_style",
+            "values": ["head_drape", "double_dupatta", "trail_dupatta"],
+        },
+    },
+]
+
+# Mirrors v3's `full_midriff_excludes_deep_v_neck` exactly, including its
+# judgement that a sweetheart neckline is NOT a contradiction — only the
+# plunging deep V is.
+MIDRIFF_NECKLINE_RULE = {
+    "id": "covered_midriff_excludes_deep_v_neck",
+    "when": {"question_id": "midriff", "operator": "in", "values": ["covered_midriff"]},
+    "then": {
+        "action": "restrict_options",
+        "question_id": "neckline_style",
+        "values": [
+            "classic_crew",
+            "curved_scoop",
+            "v_neck",
+            "boat_neck",
+            "square_neck",
+            "sweetheart_neck",
+            "high_neck",
+            "band_collar",
+        ],
+    },
+}
+
 SAREE_DRAPES = [
     (
         "nivi_drape",
@@ -540,6 +612,8 @@ def build():
             "then": {"action": "hide", "question_id": "dupatta_colour"},
         }
     )
+    rules.extend(HEAD_COVERING_RULES)
+    rules.append(MIDRIFF_NECKLINE_RULE)
 
     schema["steps"] = steps
     schema["rules"] = rules

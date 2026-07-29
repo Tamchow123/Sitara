@@ -72,10 +72,18 @@ def reject_oversized_body(request) -> None:
     or ``request.data`` (the view wraps it outside ``csrf_protect`` for exactly
     that reason — Django's CSRF check reads ``POST`` first).
 
-    It deliberately trusts nothing: a missing or unparsable ``Content-Length``
-    is allowed through, because the in-process gate still bounds what is
-    actually read. A reverse-proxy body-size limit remains the recommended
-    outer layer."""
+    A missing or unparsable ``Content-Length`` is allowed through, and that is
+    safe rather than a hole worth patching: ``WSGIRequest`` wraps the input in a
+    ``LimitedStream`` bounded by exactly that header, treating an absent or
+    unparsable one as ZERO. So a chunked or length-less body yields no bytes to
+    the parser at all, and an understated one is truncated at the figure it
+    declared. Overstating it is the only way to make Django read something
+    large, and that is what this check refuses. An in-process handler counting
+    received bytes would therefore be unreachable code — the ceiling is already
+    enforced before the parser is handed anything.
+
+    A reverse-proxy body-size limit is still worth having: it stops an absurd
+    body at the edge instead of paying for a Python request to reject it."""
     raw = request.META.get("CONTENT_LENGTH")
     try:
         declared = int(raw)

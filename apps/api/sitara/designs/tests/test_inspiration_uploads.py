@@ -568,6 +568,37 @@ class TestAbuseBounds:
 
         assert answers == {413}
 
+    def test_a_body_that_understates_its_length_is_read_only_that_far(self, settings):
+        """The header gate refuses an OVERSTATED length; this pins the other
+        direction.
+
+        Django wraps the input in a ``LimitedStream`` bounded by
+        ``Content-Length``, treating an absent or unparsable one as zero — so a
+        length-less (chunked) or understating body cannot make the parser
+        receive, or spool to disk, more than it declared. That is what makes the
+        header check sufficient rather than merely advisory, and it is a Django
+        internal, so it is asserted rather than assumed."""
+        settings.USER_UPLOAD_MAX_BYTES = 1_000_000
+        client = csrf_client()
+        design_id = create_owned_design_id(client)
+
+        response = client.post(
+            uploads_url(design_id),
+            data=b"x" * 5_000_000,
+            content_type="multipart/form-data; boundary=zzz",
+            HTTP_X_CSRFTOKEN=bootstrap_csrf(client),
+            REMOTE_ADDR=unique_ip(),
+            # Declares nothing, so nothing may be read — the 5 MB never
+            # reaches the parser, let alone a temporary file.
+            CONTENT_LENGTH="",
+        )
+
+        # Refused for having no image at all, which is the proof: the bytes
+        # were never received.
+        assert response.status_code == 400, response.content
+        assert response.json()["error"]["code"] == "validation_failed"
+        assert not DesignInspirationUpload.objects.exists()
+
     def test_a_missing_content_length_still_reaches_the_in_process_gate(self, settings):
         # The wire-level gate deliberately trusts nothing: without a usable
         # Content-Length the request proceeds and the byte gate on the bytes

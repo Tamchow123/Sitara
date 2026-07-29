@@ -315,6 +315,76 @@ class TestV4CoverageQuestions:
     def test_a_body_area_takes_only_one_answer(self, v4):
         _rejects(v4, {"sleeves": ["full_sleeve", "cap_sleeve"]}, "sleeves")
 
+    def test_an_uncovered_head_cannot_also_be_framed_by_the_dupatta(self, v4):
+        # "The dupatta stays on the shoulders" and "framing the face from the
+        # crown" are the same piece of fabric in two places at once.
+        _rejects(
+            v4,
+            {"head_covering": "uncovered", "dupatta_style": "head_drape"},
+            "dupatta_style",
+        )
+        _rejects(
+            v4,
+            {"head_covering": "uncovered", "dupatta_style": "double_dupatta"},
+            "dupatta_style",
+        )
+
+    def test_a_covered_head_cannot_take_a_non_head_drape(self, v4):
+        # The requirement the coverage split has to keep: a non-head drape
+        # must not contradict a covered-head selection when the DUPATTA is
+        # what covers the head.
+        _rejects(
+            v4,
+            {"head_covering": "dupatta_over_head", "dupatta_style": "one_shoulder"},
+            "dupatta_style",
+        )
+        _rejects(
+            v4,
+            {"head_covering": "veil_style", "dupatta_style": "front_drape"},
+            "dupatta_style",
+        )
+
+    @pytest.mark.parametrize(
+        ("head_covering", "dupatta_style"),
+        [
+            ("dupatta_over_head", "head_drape"),
+            ("dupatta_over_head", "double_dupatta"),
+            ("veil_style", "head_drape"),
+            # Pinned from the crown and trailing: the veil IS a trail drape.
+            ("veil_style", "trail_dupatta"),
+            ("uncovered", "one_shoulder"),
+        ],
+    )
+    def test_accepts_a_coherent_head_and_dupatta_pairing(self, v4, head_covering, dupatta_style):
+        result = _answer(v4, {"head_covering": head_covering, "dupatta_style": dupatta_style})
+        assert result["dupatta_style"] == dupatta_style
+
+    @pytest.mark.parametrize("dupatta_style", ["one_shoulder", "front_drape", "head_drape"])
+    def test_a_hijab_leaves_the_dupatta_free(self, v4, dupatta_style):
+        # A hijab covers the hair by itself. Restricting the dupatta here
+        # would be the app inventing a rule no community holds — and it would
+        # make the most modest head option the most constrained one.
+        result = _answer(v4, {"head_covering": "hijab", "dupatta_style": dupatta_style})
+        assert result["dupatta_style"] == dupatta_style
+
+    def test_a_covered_midriff_cannot_take_a_plunging_neckline(self, v4):
+        _rejects(
+            v4,
+            {"midriff": "covered_midriff", "neckline_style": "deep_v_neck"},
+            "neckline_style",
+        )
+
+    @pytest.mark.parametrize("neckline", ["sweetheart_neck", "v_neck", "high_neck"])
+    def test_a_covered_midriff_still_allows_every_other_neckline(self, v4, neckline):
+        # v3 drew the line at the plunging V only; a sweetheart neckline above
+        # a long bodice is an ordinary bridal look, not a contradiction.
+        result = _answer(v4, {"midriff": "covered_midriff", "neckline_style": neckline})
+        assert result["neckline_style"] == neckline
+
+    def test_a_bare_midriff_leaves_every_neckline_open(self, v4):
+        result = _answer(v4, {"midriff": "bare_midriff", "neckline_style": "deep_v_neck"})
+        assert result["neckline_style"] == "deep_v_neck"
+
     def test_rejects_a_value_from_a_different_body_area(self, v4):
         _rejects(v4, {"sleeves": "modest_back"}, "sleeves")
 
