@@ -547,6 +547,14 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
 
   return (
     <div className="wizard">
+      {/* The handoff opens the questionnaire with one line of reassurance,
+          before the progress nav and before the first question. It is the
+          answer to the question a bride actually arrives with — "do I have to
+          know all of this?" — so it is page copy, not a tooltip. */}
+      <p className="wizard-reassurance">
+        Answer as much or as little as you like — anything you leave open, Sitara will imagine
+        for you.
+      </p>
       <ProgressNav
         categories={categories}
         activeIndex={activeCategoryIndex}

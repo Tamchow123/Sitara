@@ -93,18 +93,27 @@ jobs:
             --validate \
             --fail-on-warn
           git diff --exit-code -- openapi/schema.json
-      - name: Questionnaire visuals freshness (generated-asset drift check)
+      - name: Generated image freshness (asset drift check)
         # Rebuilt here rather than in the frontend job because Pillow arrives
         # pinned and hash-verified with the backend lock above, which is what
         # makes the rebuild reproducible. `git add` first so a NEW or DELETED
         # asset is caught too, not only a modified one.
+        #
+        # Both pipelines, in one step: they share the crop-and-encode helpers in
+        # apps/web/scripts/imagekit.py, so a change there can drift either set
+        # of assets and neither may be left unchecked.
         working-directory: .
         run: |
           python apps/web/scripts/build-questionnaire-images.py
+          python apps/web/scripts/build-landing-images.py
           git add -A -- apps/web/public/questionnaire-visuals \
-            apps/web/src/features/questionnaire/visuals/asset-integrity.json
+            apps/web/src/features/questionnaire/visuals/asset-integrity.json \
+            apps/web/public/landing \
+            apps/web/src/app/landing-hero.json
           git diff --cached --exit-code -- apps/web/public/questionnaire-visuals \
-            apps/web/src/features/questionnaire/visuals/asset-integrity.json
+            apps/web/src/features/questionnaire/visuals/asset-integrity.json \
+            apps/web/public/landing \
+            apps/web/src/app/landing-hero.json
       - name: Tests
         run: pytest
 

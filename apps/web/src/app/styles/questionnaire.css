@@ -6,6 +6,14 @@
    from 700px the bar is hidden and the same list becomes the pill row.
    Nothing is duplicated in the DOM, so assistive technology sees each step
    exactly once at every width. */
+/* One line of reassurance above the progress nav, as in the handoff. */
+.wizard-reassurance {
+  margin: 0 0 var(--space-4);
+  max-width: 58ch;
+  font-size: 15px;
+  color: var(--color-neutral-800);
+}
+
 .progress-nav {
   margin: 0 0 1.5rem;
 }
@@ -106,15 +114,10 @@
   margin: 0 0 1.25rem;
 }
 
-/* The handoff's questionnaire column is 1020px; base.css's `main` rule gives
-   every page 46rem (736px), and `.wizard` had no rule of its own at all, so
-   the card grids were laid out in 72% of the width they were designed for.
-   A class beats the element selector, and this file is imported after base. */
-.wizard,
-.review {
-  max-width: 63.75rem;
-  padding-inline: var(--space-4);
-}
+/* The 1020px column and its gutter now belong to AppShell's `.container`,
+   which every route renders into — the wizard must NOT set them again or the
+   padding is applied twice and the card grid loses 35px of the width it was
+   designed for. */
 
 /* A 1020px column would otherwise run prose to ~120 characters a line. Only
    the running text is capped — never the card grids or the review rows. */
@@ -124,12 +127,12 @@
   max-width: 62ch;
 }
 
-/* The wizard body is the cream ground. base.css paints every bare <section>
-   in --color-neutral-100, which is the OPTION CARD's own colour — so a card
-   sat on a panel of itself at 1.00:1 and only its photograph read as a card.
-   The handoff puts the kicker, heading and fields straight onto --color-bg.
-   Scoped to the wizard rather than rescoping the global rule, which the home,
-   auth, account and design-brief pages all rely on. */
+/* The handoff puts the kicker, heading and fields straight onto the cream
+   ground, with no panel behind them. Kept as an explicit declaration rather
+   than relying on a bare <section> having no styling of its own: a panel here
+   would be --color-neutral-100, which is the OPTION CARD's own colour, so
+   every card would sit on a ground of itself at 1.00:1 and only its
+   photograph would read as a card. */
 .wizard > section {
   border: 0;
   border-radius: 0;
@@ -142,7 +145,12 @@
    loudest edge on the screen. `min-inline-size: auto` is the declaration a
    <fieldset> needs to stop being pinned to its content's min-content width;
    without it a card grid inside cannot shrink below its widest option. */
-.field {
+/* Scoped: base.css's `.field` is the generic label-above-control wrapper the
+   auth forms use, and this is the questionnaire's <fieldset>. Same word, two
+   different components — without the scope the second silently retunes the
+   first's spacing. */
+.wizard .field,
+.review .field {
   border: none;
   padding: 0;
   margin: 0 0 var(--space-8);
@@ -163,12 +171,6 @@
   font-size: 0.95rem;
 }
 
-.field-error {
-  color: var(--bad);
-  font-weight: bold;
-  margin: 0.5rem 0 0;
-}
-
 /* Live "n of m chosen" note for a bounded multi-choice question. */
 .field-limit {
   margin: 0 0 var(--space-2);
@@ -184,19 +186,6 @@
   border: 1px solid var(--line);
   border-radius: 6px;
   resize: vertical;
-}
-
-/* Accessible utility: visually hidden but available to assistive tech. */
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }
 
 /* Phase 16B: the handoff's option cards (with optional explanatory visuals and

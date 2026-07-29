@@ -259,10 +259,12 @@ describe("QuestionField single_choice with visuals and no-preference", () => {
         onChange={vi.fn()}
       />,
     );
-    // The neckline visuals are square, so the whole grid frames 720/720 — a
-    // per-question value, never a per-card one.
+    // Phase 17 gave each question the handoff's own frame shape; a neckline is
+    // 5:4, wide enough to hold both shoulders around the neckline. The value is
+    // per-question, never per-card. Which shape belongs to which question is
+    // pinned in visuals/manifest.test.ts; this asserts the wiring.
     const grid = container.querySelector(".choice-grid-visual");
-    expect(grid).toHaveStyle({ "--choice-card-aspect": "720 / 720" });
+    expect(grid).toHaveStyle({ "--choice-card-aspect": "720 / 576" });
   });
 
   it("marks a card with no resolvable visual so the grid does not stretch it", () => {

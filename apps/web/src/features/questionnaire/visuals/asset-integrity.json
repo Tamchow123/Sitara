@@ -1,83 +1,83 @@
 {
   "back_coverage_deep_cut_back": {
     "path": "/questionnaire-visuals/back-coverage/back_coverage_deep_cut_back.webp",
-    "width": 540,
+    "width": 576,
     "height": 720,
-    "sha256": "d225bee82fdb9cca22db4cba1e1d70206ae6cfba66b7c81982c0f981b5dd2b86",
+    "sha256": "975a5af96d739f730e49d728f216c2123b2d294eefb3248578e89565a21cac8e",
     "alt": "A deep-cut back dipping low between the shoulder blades.",
     "source": "10-back-coverage/sitara__back_coverage__deep_cut_back__v1.jpg"
   },
   "back_coverage_modest_back": {
     "path": "/questionnaire-visuals/back-coverage/back_coverage_modest_back.webp",
-    "width": 540,
+    "width": 576,
     "height": 720,
-    "sha256": "f62a2bc9b102237f5c2f65fdf0599e3fffe5d7e4e51a34d1250182595702a418",
+    "sha256": "32a6f7613c541c255bbce5a2255f35ccad62b372cef2437a89882e4b04d52ec4",
     "alt": "A modest back covered high across the shoulders.",
     "source": "10-back-coverage/sitara__back_coverage__modest_back__v1.jpg"
   },
   "back_coverage_open_back": {
     "path": "/questionnaire-visuals/back-coverage/back_coverage_open_back.webp",
-    "width": 540,
+    "width": 576,
     "height": 720,
-    "sha256": "376dd82927d037f8c6fc042e487338b0fc2e60b87ba4086b7bc91468d42fc786",
+    "sha256": "c5d33729db224578400313a0e513f131817115c2cfbb1eb84ded755d5114d1a6",
     "alt": "An open back leaving most of the back uncovered.",
     "source": "10-back-coverage/sitara__back_coverage__open_back__v1.jpg"
   },
   "ceremony_anand_karaj": {
     "path": "/questionnaire-visuals/ceremonies/ceremony_anand_karaj.webp",
-    "width": 540,
-    "height": 720,
-    "sha256": "41b33aa8e9c1100764a195c97623ab967e37112c9848c81e9e655b5be50b712c",
-    "alt": "Bridalwear for an anand karaj, the Sikh marriage ceremony.",
-    "source": "02-ceremonies/sitara__ceremonies__anand_karaj.jpg"
+    "width": 720,
+    "height": 480,
+    "sha256": "de4e381032c517ed2c35b81d84074e88d861d492013c08fa6edcf3ad8febbb8b",
+    "alt": "An anand karaj: the congregation seated on the floor of a gurdwara before the canopied Guru Granth Sahib, with the couple at the front.",
+    "source": "gaps/Anand Karaj.png"
   },
   "ceremony_baraat": {
     "path": "/questionnaire-visuals/ceremonies/ceremony_baraat.webp",
-    "width": 540,
-    "height": 720,
-    "sha256": "f3834d122c052e496ed3f9b451abe2b73e2840c9cb68df3fcf7052dc742aca91",
-    "alt": "Bridalwear for the baraat, when the groom's wedding procession arrives.",
-    "source": "02-ceremonies/sitara__ceremonies__baraat__v1.jpg"
+    "width": 720,
+    "height": 480,
+    "sha256": "9aa59e257a6e4e0b9a36432c0c3f1bbc8cb163f7e258d27f38e238878249d0d4",
+    "alt": "A baraat: the groom's procession arriving on horseback at night through drummers, dancing guests and falling petals.",
+    "source": "02-ceremonies/Baraat.png"
   },
   "ceremony_mehndi": {
     "path": "/questionnaire-visuals/ceremonies/ceremony_mehndi.webp",
-    "width": 540,
-    "height": 720,
-    "sha256": "d6b328f0395f50da574015edd310ee693413a9729ec14472ab1c8f17325ad9ac",
-    "alt": "Bridalwear for a mehndi, the henna celebration held before the wedding day.",
-    "source": "02-ceremonies/sitara__ceremonies__mehndi.jpg"
+    "width": 720,
+    "height": 480,
+    "sha256": "4295be37c66c4a41c784c6402195c4bcabed6f27114044058cb62544ddb7e107",
+    "alt": "A mehndi: henna being applied to the bride's hand under a marigold-strung canopy while guests look on.",
+    "source": "02-ceremonies/mendhi.png"
   },
   "ceremony_nikah": {
     "path": "/questionnaire-visuals/ceremonies/ceremony_nikah.webp",
-    "width": 540,
-    "height": 720,
-    "sha256": "4dd9d70cde65b0566e0d6aa7fc6750a3d3a40ffff47020820082feaf89b30a74",
-    "alt": "Bridalwear for a nikah, the Islamic marriage ceremony.",
-    "source": "02-ceremonies/sitara__ceremonies__nikah__v1.jpg"
+    "width": 720,
+    "height": 480,
+    "sha256": "e4655bed6060dea3428a08d4bf9ee64e39bcba261f451267f5d6bf0c52466804",
+    "alt": "A nikah: the marriage contract open on a table before a flower-dressed stage, with the two families seated on either side.",
+    "source": "02-ceremonies/Nikah.png"
   },
   "ceremony_pheras": {
     "path": "/questionnaire-visuals/ceremonies/ceremony_pheras.webp",
-    "width": 540,
-    "height": 720,
-    "sha256": "2a15cd97d8e8ca6bea69a3577f225d9de4dbc4d909a80b4a1ab8a59b9005da85",
-    "alt": "Bridalwear for the pheras, the Hindu ceremony of circling the sacred fire.",
-    "source": "02-ceremonies/sitara__ceremonies__pheras.jpg"
+    "width": 720,
+    "height": 480,
+    "sha256": "5a85f97bd83b96d3a86f6e0db01fd09dc96ba4fdae93a00903d0c10e6aa9e448",
+    "alt": "The pheras: a marigold-draped garden mandap with the sacred fire lit at its centre.",
+    "source": "02-ceremonies/Pheras.png"
   },
   "ceremony_reception": {
     "path": "/questionnaire-visuals/ceremonies/ceremony_reception.webp",
-    "width": 540,
-    "height": 720,
-    "sha256": "98c3d8cda0e5a6fafe4228994a1bd8eedab24acfafcb888ad0e509c274ee4781",
-    "alt": "Bridalwear for a wedding reception.",
-    "source": "02-ceremonies/sitara__ceremonies__reception.jpg"
+    "width": 720,
+    "height": 480,
+    "sha256": "22a2b3c08adbcabb079f6da17a3161f98d8cecf941dee4f519f4c7a96bb75f94",
+    "alt": "A wedding reception: guests dancing on a lit floor between banquet tables.",
+    "source": "02-ceremonies/Reception.png"
   },
   "ceremony_walima": {
     "path": "/questionnaire-visuals/ceremonies/ceremony_walima.webp",
-    "width": 540,
-    "height": 720,
-    "sha256": "697f3c0d3847fafb948f69181b32ba8984aec39fd660cc7fda6605b5fcfeabe2",
-    "alt": "Bridalwear for a walima, the celebration hosted after a nikah.",
-    "source": "02-ceremonies/sitara__ceremonies__walima__v1.jpg"
+    "width": 720,
+    "height": 480,
+    "sha256": "a45fde795307c7d2f4d7e518da23825d25876aa872640ff44e9d0c87f27f9516",
+    "alt": "A walima: a chandelier-lit banquet hall of seated guests facing a floral stage.",
+    "source": "02-ceremonies/Walima.png"
   },
   "density_balanced": {
     "path": "/questionnaire-visuals/embellishment-density/density_balanced.webp",
@@ -123,9 +123,9 @@
     "path": "/questionnaire-visuals/dupatta/dupatta_head_drape.webp",
     "width": 540,
     "height": 720,
-    "sha256": "ff6c46e93a54e42ac6d5b19217d711ed2ef554e7149471e1e3dcbd131687c809",
-    "alt": "A dupatta taken over the head and down across the shoulders.",
-    "source": "12-head-covering/sitara__head_covering__dupatta_over_head__v1.jpg"
+    "sha256": "8fd1ba93e863d3026c706807c6a81ec85a3d58fb43d84977c7934d4cb20f85af",
+    "alt": "A soft, unembellished dupatta taken over the head from the crown and wound once around the neck.",
+    "source": "gaps/Dupatta Over the head.png"
   },
   "dupatta_one_shoulder": {
     "path": "/questionnaire-visuals/dupatta/dupatta_one_shoulder.webp",
@@ -242,96 +242,96 @@
   "fabric_brocade": {
     "path": "/questionnaire-visuals/fabrics/fabric_brocade.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "8daa26f66efb53ffe6e96573a79c16eda78e5b6a978104fe17cba5fb75e2a463",
+    "height": 480,
+    "sha256": "aacb61b6103023e4d8e7d1811e6180232d89d27b209701990911454a60a7479c",
     "alt": "Brocade: a heavy fabric with the pattern woven into the cloth in raised relief.",
     "source": "06-fabrics/sitara__fabrics__brocade.jpg"
   },
   "fabric_chiffon": {
     "path": "/questionnaire-visuals/fabrics/fabric_chiffon.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "6e231b7c36f5d6b27f5efec7c6c2b28846c4c8321a1addbe922edc808ff2914f",
+    "height": 480,
+    "sha256": "271bd9eb1df1645774bc2cd43d625fe7d3726a874ed03b4056fa324914db4ecb",
     "alt": "Chiffon: a sheer, weightless fabric that falls in soft ripples.",
     "source": "06-fabrics/sitara__fabrics__chiffon.jpg"
   },
   "fabric_cotton_silk": {
     "path": "/questionnaire-visuals/fabrics/fabric_cotton_silk.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "b6d14b83d5fac526b245a2d047bb53d5b81972f407a57b9188ea78b8b76913ba",
+    "height": 480,
+    "sha256": "051a191738ce9b4a3ab42730d1687f3a414e4c0316da086b39543917ecad963b",
     "alt": "Cotton silk: a breathable blend with a gentle sheen and a lighter hand than pure silk.",
     "source": "06-fabrics/sitara__fabrics__cotton_silk__v1.jpg"
   },
   "fabric_georgette": {
     "path": "/questionnaire-visuals/fabrics/fabric_georgette.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "79314b3be56c196197f9b29dee9fad2a7f70e68c7409cb18c0cf9d1fa9ed7147",
+    "height": 480,
+    "sha256": "6bd51ed0c921dfd0967192b8ca227253eb88d6b66291a6b5adfbfb02c56e8e1d",
     "alt": "Georgette: a lightly crinkled fabric with a matte finish and a flowing fall.",
     "source": "06-fabrics/sitara__fabrics__georgette__v1.jpg"
   },
   "fabric_jamawar": {
     "path": "/questionnaire-visuals/fabrics/fabric_jamawar.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "530f0b75d92d7805a4ed9d1d2b28bfc9a5b51ae2aa256c3a56e8518e7d0d165d",
+    "height": 480,
+    "sha256": "b38c9758fd694614fc92caeb6f930b1325d6ad0fa111c4a5a888b50bc3fc45df",
     "alt": "Jamawar: a richly woven fabric patterned with dense traditional motifs.",
     "source": "06-fabrics/sitara__fabrics__jamawar__v1.jpg"
   },
   "fabric_net": {
     "path": "/questionnaire-visuals/fabrics/fabric_net.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "117f1b7cf96d29655e1e20465b6348478a0a8b5fa4f4d15ef372ab9cf977f226",
+    "height": 480,
+    "sha256": "f61673b0166ea51aa54dcd5d8660f3a3cf20f1f0d5511ec6f02c47b0d55f0aa2",
     "alt": "Net: an open mesh fabric, often layered to build volume.",
     "source": "06-fabrics/sitara__fabrics__net__v1.jpg"
   },
   "fabric_organza": {
     "path": "/questionnaire-visuals/fabrics/fabric_organza.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "82c9475394e2247f8642a998d3f2228818ff7457b17023a339ccca4d1c09d768",
+    "height": 480,
+    "sha256": "7218d05ad618531942744f5811904c649537a3acc3bbece2f88d870ec84a43cf",
     "alt": "Organza: a sheer, crisp fabric that holds its shape and stands away from the body.",
     "source": "06-fabrics/sitara__fabrics__organza.jpg"
   },
   "fabric_raw_silk": {
     "path": "/questionnaire-visuals/fabrics/fabric_raw_silk.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "5d0b332e03cc8c1c1e6258e834b9cb9f89f86901ae0293a2846503b1ec545793",
+    "height": 480,
+    "sha256": "36cda583acf44fea9db7be968a6ae4d1536eb23ebd3d3050a260d4a90f81d97c",
     "alt": "Raw silk: a crisp fabric with a slubbed, irregular texture and a matte surface.",
     "source": "06-fabrics/sitara__fabrics__raw_silk__v1.jpg"
   },
   "fabric_satin": {
     "path": "/questionnaire-visuals/fabrics/fabric_satin.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "046858ef6e467533923751a7e9837fde1df23b2b2cb051cfa357a1efbfff7ad8",
+    "height": 480,
+    "sha256": "3ee2d3fb988d8652535fbb14f4095e77affd93270de9fc752b3224dd766c5838",
     "alt": "Satin: a weave with a high-gloss face and a dull reverse.",
     "source": "06-fabrics/sitara__fabrics__satin.jpg"
   },
   "fabric_silk": {
     "path": "/questionnaire-visuals/fabrics/fabric_silk.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "2b30533e426f9d7466837a093ab847f03fb98b12411d2b06f3867a6fd5485366",
+    "height": 480,
+    "sha256": "8413e87ef02826e6c76954dd0300d9a852bd5dd4881e163adddae7c50ee45d8a",
     "alt": "Silk: a smooth fabric with a fluid drape and a soft sheen.",
     "source": "06-fabrics/sitara__fabrics__silk.jpg"
   },
   "fabric_tissue": {
     "path": "/questionnaire-visuals/fabrics/fabric_tissue.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "f03dff0f055b7e51ab652b1e79f21a9bb7129873509b5fce7f46f714ebe57e05",
+    "height": 480,
+    "sha256": "76d6b1731f6d458a66c5eb2731513da8d0d036c07f0d3eb4da989186c675ee43",
     "alt": "Tissue: a fine, translucent fabric shot through with metallic thread.",
     "source": "06-fabrics/sitara__fabrics__tissue__v1.jpg"
   },
   "fabric_velvet": {
     "path": "/questionnaire-visuals/fabrics/fabric_velvet.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "a3f21446a724321eadc1129f7be5802866b4c195628f2dc4f2f653b59e7ea61b",
+    "height": 480,
+    "sha256": "c79e5a65a21fb7de9c5c442531c196473bc9d468701419ad56eb7f981ac1aeec",
     "alt": "Velvet: a dense pile fabric with deep colour and a soft, shifting nap.",
     "source": "06-fabrics/sitara__fabrics__velvet.jpg"
   },
@@ -347,17 +347,17 @@
     "path": "/questionnaire-visuals/garments/garment_gharara.webp",
     "width": 540,
     "height": 720,
-    "sha256": "b23f8c41d36525a30424c973a89fff31a90bd9af2089a3e0cd2c3f08f5e75b31",
+    "sha256": "4a37b1f8008069b8ea77c454a4bd64406fd1af2108293264be3f27c6770c030c",
     "alt": "A gharara: a short kameez over trousers fitted to the knee that flare widely below it.",
-    "source": "03-garments/sitara__garments__gharara__v1.jpg"
+    "source": "03-garments/sitara__garments__gharara__v2.jpg"
   },
   "garment_lehenga": {
     "path": "/questionnaire-visuals/garments/garment_lehenga.webp",
     "width": 540,
     "height": 720,
-    "sha256": "ec59f6243a9f6f8dff890bc82b31d06929d8c66b2eadcf7d28801a6ca065db7d",
+    "sha256": "7b1b0d00270c653608736c89a2580f6cc49295eaf4a8d25fbbb2aae2f1d446c7",
     "alt": "A bridal lehenga: a fitted blouse with a separate full-length flared skirt and dupatta.",
-    "source": "03-garments/sitara__garments__lehenga__v1.jpg"
+    "source": "03-garments/sitara__garments__lehenga__v2.jpg"
   },
   "garment_saree": {
     "path": "/questionnaire-visuals/garments/garment_saree.webp",
@@ -379,455 +379,455 @@
     "path": "/questionnaire-visuals/garments/garment_sharara.webp",
     "width": 540,
     "height": 720,
-    "sha256": "b946267bb44683be4bf4ebcaa1a229671b6253d2f3e90cffd1ea929e698fe4cf",
+    "sha256": "1f6c708b131739dbbd401dc14344d5afe6758c56e45003ee7a3bb815629885a7",
     "alt": "A sharara: a kameez over wide trousers that flare from the waist.",
-    "source": "03-garments/sitara__garments__sharara__v1.jpg"
+    "source": "03-garments/sitara__garments__sharara__v3.jpg"
   },
   "head_covering_dupatta_over_head": {
     "path": "/questionnaire-visuals/head-covering/head_covering_dupatta_over_head.webp",
-    "width": 720,
+    "width": 576,
     "height": 720,
-    "sha256": "d5f7dffe4d834f38cad86befb6454fcd29a9153876e1295852aa7d401f50379d",
-    "alt": "A dupatta drawn up over the head and framing the face.",
-    "source": "gaps/Dupatta Over the head.png"
+    "sha256": "029537c852c91df86cf109d5fe55e3504b7a55be94f22a19a5fb1dd0fcb5e3fb",
+    "alt": "An embellished bridal dupatta drawn up over the head and falling either side of the face.",
+    "source": "12-head-covering/sitara__head_covering__dupatta_over_head__v1.jpg"
   },
   "head_covering_hijab": {
     "path": "/questionnaire-visuals/head-covering/head_covering_hijab.webp",
-    "width": 720,
+    "width": 576,
     "height": 720,
-    "sha256": "a133d290622346ddf3fe863a21c5cd3603594890a7977b27906d15758106da0f",
+    "sha256": "a83c4b5b2acc292d2c4cba8c01cfa2f88ec00c28a2e3505ded9808703cbf5f2d",
     "alt": "A hijab covering the hair, neck and shoulders completely.",
-    "source": "gaps/Hijab — full coverage, no hair shown.png"
+    "source": "12-head-covering/Hijab — full coverage, no hair shown.png"
   },
   "head_covering_uncovered": {
     "path": "/questionnaire-visuals/head-covering/head_covering_uncovered.webp",
-    "width": 720,
+    "width": 576,
     "height": 720,
-    "sha256": "169daf644f7f75ccb4d6bc2789270afd4fefc3294fa54f7168babaec91e1af8a",
+    "sha256": "409dffd30ca39a3f52756f7f2b6bb891e3519e6f2d5d59f530148a906bf949bd",
     "alt": "Hair left uncovered with no veil or dupatta over the head.",
     "source": "12-head-covering/sitara__head_covering__uncovered__v1.jpg"
   },
   "head_covering_veil_style": {
     "path": "/questionnaire-visuals/head-covering/head_covering_veil_style.webp",
-    "width": 720,
+    "width": 576,
     "height": 720,
-    "sha256": "f6a59cec32053374c5a6e80705a9b13c9fd6cf962d70e53e3ff27a28af73107d",
+    "sha256": "b3357447125f26140c34beedcc2ea864a64dc6d1e97e896a8b9e0be83e45932d",
     "alt": "A veil-style head covering falling over the head and shoulders.",
     "source": "12-head-covering/sitara__head_covering__veil_style__v2.jpg"
   },
   "midriff_bare_midriff": {
     "path": "/questionnaire-visuals/midriff/midriff_bare_midriff.webp",
-    "width": 540,
+    "width": 576,
     "height": 720,
-    "sha256": "ac39aa61d90a8d4a49a726546ce4f72de768148006f38c2420455e8105319225",
+    "sha256": "1f19532dfe7c3c58631712e82d02559a7de0b76d02bfe3c883673be0334f2d3b",
     "alt": "A bare midriff between a cropped blouse and the skirt waistline.",
     "source": "11-midriff/sitara__midriff__bare__v1.jpg"
   },
   "midriff_covered_midriff": {
     "path": "/questionnaire-visuals/midriff/midriff_covered_midriff.webp",
-    "width": 540,
+    "width": 576,
     "height": 720,
-    "sha256": "151f0f3551e2214e19b903e052d99f21334f71dfcca5f15a74cc5e8a28689d63",
+    "sha256": "3fba0fd98d56bdd5b5e4ce3c131498758a9858a621af818e993bef8604b6972b",
     "alt": "A fully covered midriff with no gap between blouse and skirt.",
-    "source": "11-midriff/sitara__midriff__covered__v2.jpg"
+    "source": "11-midriff/sitara__midriff__covered__v1.jpg"
   },
   "midriff_semi_sheer_midriff": {
     "path": "/questionnaire-visuals/midriff/midriff_semi_sheer_midriff.webp",
-    "width": 540,
+    "width": 576,
     "height": 720,
-    "sha256": "63e3b61dfa2b2361c0c46fc39affb7c2c8edc5b6c2b90847986202edc447ce15",
+    "sha256": "b7f4931f0268cfd1b588dbbbb91ea938bff6e599697648a7242a3bf5c6662802",
     "alt": "A semi-sheer midriff panel veiling the waist in translucent fabric.",
-    "source": "gaps/Semi-sheer midriff.png"
+    "source": "11-midriff/Semi-sheer midriff.png"
   },
   "neckline_band_collar": {
     "path": "/questionnaire-visuals/necklines/neckline_band_collar.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "067477ba70f800093e648429eb2b64d6381b2dda23e32b9689ce4b97f0529f5e",
+    "height": 576,
+    "sha256": "fc6eb80655a21daa87d9669256e5a06326761512dd34f05a63637ccc99412f38",
     "alt": "An upright band or mandarin collar standing at the neck with a centre opening.",
-    "source": "08-necklines/sitara__necklines__band_mandarin_collar__v3.jpg"
+    "source": "08-necklines/sitara__necklines__band_mandarin_collar__v1.jpg"
   },
   "neckline_boat_neck": {
     "path": "/questionnaire-visuals/necklines/neckline_boat_neck.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "2c0cd2da67d2ef2b79278cb22d000c105e751de7149d98a785b479ff3fd63d45",
+    "height": 576,
+    "sha256": "18443ace73c815351470cba07202246e49b75e810751361994969823c9d77d52",
     "alt": "A boat neckline running wide and shallow across the collarbones.",
     "source": "08-necklines/sitara__necklines__boat__v1.jpg"
   },
   "neckline_classic_crew": {
     "path": "/questionnaire-visuals/necklines/neckline_classic_crew.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "0445ddfa6648f2edc749ca9a292dc30734a239118b169e09d4cabb388a4e8728",
+    "height": 576,
+    "sha256": "bd37b7beff99a89bd9106658a536f0ee00701f8542fe7b1749e72f4b0346dd21",
     "alt": "A classic crew neckline sitting round and high at the base of the neck.",
     "source": "08-necklines/sitara__necklines__crew__v1.jpg"
   },
   "neckline_curved_scoop": {
     "path": "/questionnaire-visuals/necklines/neckline_curved_scoop.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "35479391c387140bf4b8ba629d91e3200f0219211567e24b756bae7bae78b895",
+    "height": 576,
+    "sha256": "4a1acfe3bd24d9dbb544c36950ac72028dd113822a7ffcc63132002c3efd576a",
     "alt": "A curved scoop neckline dipping in a wide U below the collarbone.",
     "source": "08-necklines/sitara__necklines__scoop__v1.jpg"
   },
   "neckline_deep_v_neck": {
     "path": "/questionnaire-visuals/necklines/neckline_deep_v_neck.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "449396619733e514e994930e2162d47cd15a32f949b15bcb23c57a3b5167d6c5",
+    "height": 576,
+    "sha256": "87f1852e18288a0cc4ac7ef8489b5888e9713a8b93ecb3ebb1a61f87b350de95",
     "alt": "A deep V-shaped neckline plunging well below the collarbone.",
     "source": "08-necklines/sitara__necklines__deep_v__v1.jpg"
   },
   "neckline_high_neck": {
     "path": "/questionnaire-visuals/necklines/neckline_high_neck.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "dc8f6c39edfda016f0f3e0bd2a9ea49baabd0b286401cef47f664d7a466343ff",
+    "height": 576,
+    "sha256": "1bd5fa097da0af331882d45642e74de03f0139a7e04ebb9570880ca0da17f296",
     "alt": "A high neckline rising to sit close around the neck.",
-    "source": "08-necklines/sitara__necklines__high_neck__v3.jpg"
+    "source": "08-necklines/sitara__necklines__high_neck__v2.jpg"
   },
   "neckline_square_neck": {
     "path": "/questionnaire-visuals/necklines/neckline_square_neck.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "7cddd64b2d47af0ec115d990697ae8f7018a22e58f73d9bb5c8a15bb8e562820",
+    "height": 576,
+    "sha256": "b30a9487226415a9deb13ceffc866a87d163bcd67af5678cf8d6b3933792c7c3",
     "alt": "A square neckline cut straight across with right-angled corners.",
     "source": "08-necklines/sitara__necklines__square__v1.jpg"
   },
   "neckline_sweetheart_neck": {
     "path": "/questionnaire-visuals/necklines/neckline_sweetheart_neck.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "944679977b3b05240c67ead1593a2e9fd91bbd710f0bc95b65b259d7ba4978c4",
+    "height": 576,
+    "sha256": "42377d6cf7ec0eca4d084d8ed3babd9524274666d819297edcbdbb804a4d6c18",
     "alt": "A sweetheart neckline curved into two soft lobes like the top of a heart.",
     "source": "08-necklines/sitara__necklines__sweetheart__v1.jpg"
   },
   "neckline_v_neck": {
     "path": "/questionnaire-visuals/necklines/neckline_v_neck.webp",
     "width": 720,
-    "height": 720,
-    "sha256": "f51c675943186572cc6c6963035ceb3d3ea4eb372f1e4ce0823be711b6d0c92a",
+    "height": 576,
+    "sha256": "c31d921f706ef6231e5cf2024ab05b006dd0c02f21a3752956b452df25d46483",
     "alt": "A moderate V-shaped neckline meeting in a point on the chest.",
     "source": "08-necklines/sitara__necklines__v_neck__v1.jpg"
   },
   "regional_bangladeshi": {
     "path": "/questionnaire-visuals/cultural-styling/regional_bangladeshi.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "cadf6af36ad4847f2a5fb91e52c59394cfb65b373e6383cc635cdbe200bcb3b6",
+    "sha256": "4b819ae0848b550d465c98461e4a32d816e7914c7f4b630026ff9ef312898690",
     "alt": "Bridalwear drawing on Bangladeshi influences.",
     "source": "04-cultural-styling/sitara__cultural_styling__bangladeshi__v2.jpg"
   },
   "regional_gujarati": {
     "path": "/questionnaire-visuals/cultural-styling/regional_gujarati.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "07c2b9371a4fd2ef7dbf35eac3fe056aea04b627a25e4f9c49eb6d083f5650fb",
+    "sha256": "2529af2ca9af8666297282b54022bbe74a9f6162e8e781af47dba45668588bfe",
     "alt": "Bridalwear drawing on Gujarati influences.",
     "source": "04-cultural-styling/sitara__cultural_styling__gujarati__v2.jpg"
   },
   "regional_hyderabadi": {
     "path": "/questionnaire-visuals/cultural-styling/regional_hyderabadi.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "a1844b163d0f99ae005f990a79024ea0541399f1c98090867990c39dc7ddd50d",
+    "sha256": "5fcc834ba6c2fbe733dfcc9852ebfe4a4d8afe4a7c51d7af7ed7f86227c1a343",
     "alt": "Bridalwear drawing on Hyderabadi influences.",
     "source": "04-cultural-styling/sitara__cultural_styling__hyderabadi__v1.jpg"
   },
   "regional_north_indian": {
     "path": "/questionnaire-visuals/cultural-styling/regional_north_indian.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "4b6fdb15180b5d40d5b99fa76c3e1faac47ed22b8d1fa548d669bedc6566fae8",
+    "sha256": "0a80ce948852f84faacd43df1143372ccf0ef03675830d08bd448c6d92db5962",
     "alt": "Bridalwear drawing on North Indian influences.",
     "source": "04-cultural-styling/sitara__cultural_styling__north_indian__v2.jpg"
   },
   "regional_pakistani": {
     "path": "/questionnaire-visuals/cultural-styling/regional_pakistani.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "251c5306f1d3351426658106ab3ad18004e1549519d7026d95b2c8911b86f0fe",
+    "sha256": "61492dfe5ad8fb3c3a0bcf9cd6f5e5477752f3fcc09345db7adb7e99c409a758",
     "alt": "Bridalwear drawing on Pakistani influences.",
     "source": "04-cultural-styling/sitara__cultural_styling__pakistani__v2.jpg"
   },
   "regional_punjabi": {
     "path": "/questionnaire-visuals/cultural-styling/regional_punjabi.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "1bbabff8a40e9e21863544411141f72e81ed6e75c1ec3bf5c4d989d94c988354",
+    "sha256": "e50b94d7092f54d4e55fd9a21b7ae4abd69f3066cec849bf19c48e8c9b022ffe",
     "alt": "Bridalwear drawing on Punjabi influences.",
     "source": "04-cultural-styling/sitara__cultural_styling__punjabi__v2.jpg"
   },
   "regional_rajasthani": {
     "path": "/questionnaire-visuals/cultural-styling/regional_rajasthani.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "83754f40115712f4714318b68d52493a9ecfa5d59fbc7f9ec1e52a557f6ef5c6",
+    "sha256": "22c4b3bbd32fad83deb8c260fbf4829565aec8fa73970b3b9547df2d7e691b94",
     "alt": "Bridalwear drawing on Rajasthani influences.",
     "source": "04-cultural-styling/sitara__cultural_styling__rajasthani__v1.jpg"
   },
   "regional_south_indian": {
     "path": "/questionnaire-visuals/cultural-styling/regional_south_indian.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "9b0ba70c6c92d18c4f3ca274448db57a104b295fd66374be7f89ef193c2d123c",
+    "sha256": "05b8de545de26487ccbfd317e6b89793c18a7fbc7e3a8f4e96c2b30d6bda8016",
     "alt": "Bridalwear drawing on South Indian influences.",
     "source": "04-cultural-styling/sitara__cultural_styling__south_indian__v2.jpg"
   },
   "saree_drape_bengali_drape": {
     "path": "/questionnaire-visuals/saree-drapes/saree_drape_bengali_drape.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "135fe3b767ecd1835f33deb32d818d27e83b5512857c216cb1b9d2974d0e3efa",
+    "sha256": "0836a5fec2e7818ae2b01fa205ad8ec9482cd2a41a4e8f10e31fe031f9e789d3",
     "alt": "A Bengali drape with broad box pleats and the pallu brought over the shoulder.",
     "source": "13-saree-drapes/sitara__saree_drapes__bengali_drape__v1.jpg"
   },
   "saree_drape_lehenga_drape": {
     "path": "/questionnaire-visuals/saree-drapes/saree_drape_lehenga_drape.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "a83acdc0d3b72569105d4585b04d7c06520ba8b03a737b0b596885c1678ad7ee",
-    "alt": "A lehenga-style saree drape worn over a flared skirt.",
-    "source": "05-silhouettes/saree/sitara__silhouettes_saree__lehenga_style_saree__v2.jpg"
+    "sha256": "d65f2f7160a1aaa8dbd571877a0143ddbd93ed7005ed340757dc34963787ed5c",
+    "alt": "A saree drape with the waist pleats pinned flat so the skirt falls smoothly, the pallu set over the left shoulder.",
+    "source": "13-saree-drapes/sitara__saree_drapes__pinned_pleats__v1.jpg"
   },
   "saree_drape_nivi_drape": {
     "path": "/questionnaire-visuals/saree-drapes/saree_drape_nivi_drape.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "536be1599b5ac6dea16b1adc3856aee76dcc742987e0dfe59fd156ba9b1d2f56",
+    "sha256": "8e65ecaef7f81deefdf6560f2cfba88eb1ed25cfd2e6773fe70122d2d239a187",
     "alt": "A nivi drape with waist pleats and the pallu over the left shoulder.",
     "source": "13-saree-drapes/sitara__saree_drapes__nivi_drape__v1.jpg"
   },
   "saree_drape_seedha_pallu": {
     "path": "/questionnaire-visuals/saree-drapes/saree_drape_seedha_pallu.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "50c76d6f8dfc6970132e6504f5df61be4a487a4f0cef2031f55d5913adae7beb",
+    "sha256": "f31b58f3b88992bad36fdbd6a039911ac0b692ef6ba47741cc6704d4ae1649b6",
     "alt": "A seedha pallu drape bringing the pallu forward over the right shoulder.",
     "source": "13-saree-drapes/sitara__saree_drapes__seedha_pallu__v1.jpg"
   },
   "silhouette_a_line_kameez": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_a_line_kameez.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "ace196d5bd6e1e2afda707f1c467fa701d863db3549f6303a72437839e2e8b58",
+    "sha256": "cccd9bfc6a9766ccb55f2cb8428f115b6776ce4323bdde3dc9d88442a38543c7",
     "alt": "An A-line kameez widening gradually from the shoulders to the hem.",
     "source": "05-silhouettes/shalwar-kameez/sitara__silhouettes_shalwar_kameez__a_line_kameez__v1.jpg"
   },
   "silhouette_a_line_lehenga": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_a_line_lehenga.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "cc2d1a445998dfe7885352bc12e8a6f3778f354c421fd02fc9eee68bed609464",
+    "sha256": "c790c892d517867ad27b6d7a66f25eb448252285da4c004cb7dca856df51ce26",
     "alt": "An A-line lehenga skirt widening gently and evenly from the waist to the hem.",
     "source": "05-silhouettes/lehenga/sitara__silhouettes_lehenga__a_line_lehenga__v1.jpg"
   },
   "silhouette_angrakha_kameez": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_angrakha_kameez.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "5507e19bc9bc99c3d6834a68182f4fc57c2b153cace7aa1fead72e8115189d4f",
+    "sha256": "e59098819d14a8b8ac007a487394f6e1febdb009214835ab83d5b9b21526db59",
     "alt": "An angrakha kameez with an overlapping wrapped front fastened to one side.",
-    "source": "gaps/Angrakha kameez.png"
+    "source": "02-ceremonies/Angrakha kameez.png"
   },
   "silhouette_classic_gharara": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_classic_gharara.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "7dd7bdc7105decb4fd3b4153a53d2fe4a5971e1b1361ebe0562d92bd1e026a13",
+    "sha256": "e4f4ff0b7289d138262c56e83399a8f20297023ab35aa2f3fd1e634d452e35eb",
     "alt": "A classic gharara fitted to the knee with a joined seam there and a wide flare below.",
     "source": "05-silhouettes/gharara/sitara__silhouettes_gharara__gharara_construction__v1.jpg"
   },
   "silhouette_classic_saree_drape": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_classic_saree_drape.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "87da97f1cfcbcc8859acc1239307774ab8da515bbbc0c0d3dabc2c5e7b5c19a0",
+    "sha256": "5f03d21f2b4b92a84d98f0c103752fe420fcfadcb5c8f718ccd8c8e389d40966",
     "alt": "A classic saree drape with pleats at the waist and the pallu over one shoulder.",
     "source": "05-silhouettes/saree/sitara__silhouettes_saree__classic_saree_drape__v1.jpg"
   },
   "silhouette_classic_sharara": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_classic_sharara.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "57ba7ebeb7ffa2cf452b1e4014c0035e84d64a59755ae5ade278b39457c2b76c",
+    "sha256": "9994197cb0f71f355c0b9c9d1fe56a3ff1f94054ca1c79f398b11afbd1bbaef2",
     "alt": "A classic sharara: wide trousers flaring evenly from the waist, worn with a kameez.",
     "source": "gaps/Sharara — Classic flare.png"
   },
   "silhouette_farshi_gharara": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_farshi_gharara.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "b7b7d3c2419159fa1e8f943d5f8c548acf6d0593c68f21b81993ade18ea0416e",
+    "sha256": "253e2e0bd004cb24118de6eaf4fde48cda10aa7579eb2189d14b9b7ddec5b27d",
     "alt": "A farshi gharara whose flare below the knee joint extends into a floor-pooling train.",
     "source": "gaps/Gharara — Farshi.png"
   },
   "silhouette_farshi_sharara": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_farshi_sharara.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "5a92ecc981135116387b1bda10b42971f4c153338983d5fa9ab694cfb73432d4",
+    "sha256": "836869ceba8e6f84709b1c7a2d30df8c5cb4764274becca7de6817cf0d77ab67",
     "alt": "A farshi sharara: a waist-flared sharara long enough to pool and trail on the floor.",
     "source": "gaps/Farshi.png"
   },
   "silhouette_flared_lehenga": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_flared_lehenga.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "c3b2330f92f5c75cae1643c7afc57a3e9d90c9eb18dfc6b0e0e56ff4a721d32d",
+    "sha256": "b329f319eb3b24598978bd9c1d347797b01a9724fdc865b4f8440fdca90fd6c4",
     "alt": "A full-flare lehenga skirt with dramatic volume at the hem.",
     "source": "05-silhouettes/lehenga/sitara__silhouettes_lehenga__flared_lehenga__v1.jpg"
   },
   "silhouette_floor_length_anarkali": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_floor_length_anarkali.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "668f28e9d7572a98094820057dbe262d512aafe79a3c14ac107857bdea36c4e0",
+    "sha256": "4bbd571de253073b2902558f6107b9a3af31dbeeae0dcb8d03cdd2fdbfb4901f",
     "alt": "A floor-length anarkali flaring from a fitted bodice to the floor.",
     "source": "05-silhouettes/anarkali/sitara__silhouettes_anarkali__floor_length_anarkali__v1.jpg"
   },
   "silhouette_front_open_anarkali": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_front_open_anarkali.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "720eeed3fc10864965a917eb745b9111e1ef6ff49cab222236c1dc40e4709a21",
+    "sha256": "43cfe1cda76756e1e4334c54842f87fea16ffe7481eb960ac1407b8838dbba2a",
     "alt": "A front-open anarkali split down the centre front over trousers.",
-    "source": "gaps/Anarkali — Front-open.png"
+    "source": "gaps/front-open.png"
   },
   "silhouette_half_saree": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_half_saree.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "b4fdfc994f6f45c75900f2ddd2363b59d522f04437b0ce4a8acf67a6d8b8a962",
+    "sha256": "315c5488dfa591a63495859a6aba92e1b42f048605057098e98546b4098052c7",
     "alt": "A half saree, or langa voni: a long skirt with a blouse and a separate draped dupatta.",
     "source": "gaps/Saree — Half saree (langa voni).png"
   },
   "silhouette_high_waisted_sharara": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_high_waisted_sharara.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "10f982716c8f20f9c5459cf363965026e2232b720ee0434443ebdf23305d4e18",
+    "sha256": "40428e75f3a88a07e4f1e50d8c3a9e81beab05a0bc67edf083ab9de1041c1398",
     "alt": "A high-waisted sharara whose flare begins at a raised waistline under a short kameez.",
     "source": "05-silhouettes/sharara/sitara__silhouettes_sharara__sharara_construction__v1.jpg"
   },
   "silhouette_jacket_style_anarkali": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_jacket_style_anarkali.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "9dce1c47842d7eb649734380de47bd3d141bdec3d7ff41ae153e57f6d7dae51b",
+    "sha256": "5c26c14479c7f0489dc0ca494698bb3eb7df38eceb12dd465ce8287c6660d531",
     "alt": "A jacket-style anarkali worn as an open layer over an inner garment.",
-    "source": "gaps/Anarkali — Jacket style.png"
+    "source": "gaps/jacket-style.png"
   },
   "silhouette_kalidar_anarkali": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_kalidar_anarkali.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "b4a10e3f9f9fe29b7f7e2ed29e17cd40e3e11d1046c937f9e53df5ad966e5e03",
+    "sha256": "034b366f6536d268f81867fc0b2f93b5405618c75d6f498edefe622892ce2c98",
     "alt": "A kalidar anarkali built from many triangular panels giving an even all-round flare.",
     "source": "gaps/Anarkali — Kalidar.png"
   },
   "silhouette_lehenga_style_saree": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_lehenga_style_saree.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "a4735d2ecd349e11caf9b7937fb69203ab28ee829e3844500a6e64eec5e6dae2",
+    "sha256": "bf90f0db95d54f07c099328098506d8ac054ac139f5ad320cb914e119abf41ec",
     "alt": "A lehenga-style saree combining a flared skirt with a draped pallu.",
     "source": "05-silhouettes/saree/sitara__silhouettes_saree__lehenga_style_saree__v1.jpg"
   },
   "silhouette_long_line_kameez": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_long_line_kameez.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "0640e3ce19e04113bbea0a0ce089650a412b97f01c7a5695f6b99219e557a502",
+    "sha256": "b131725a1e46b8a23a0d00ef2b9ce0fca659ad78417d60791d22092467bb6054",
     "alt": "A long-line kameez cut well below the knee over slim trousers.",
     "source": "gaps/Long-line kameez.png"
   },
   "silhouette_mermaid_lehenga": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_mermaid_lehenga.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "5f480612408aaafe86f75bcb6ca166e59b9383f1952a3909702cee8eaf643e7a",
+    "sha256": "d703dfdf2fca5905c6096b87fc937188ed42312a9c73da7f1b73fcd8e592a45d",
     "alt": "A mermaid lehenga skirt shaped close to the hip and thigh, flaring below the knee.",
     "source": "05-silhouettes/lehenga/sitara__silhouettes_lehenga__mermaid_lehenga__v1.jpg"
   },
   "silhouette_panelled_kali_lehenga": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_panelled_kali_lehenga.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "5904faa5255c62ae4b35dd590b7572c82c6f9e71deb8086b1ff931e0c78090f3",
+    "sha256": "78697ea410030c5880897f8d0cef2f1f1c2361b9a22c2540d22f351f689bb4af",
     "alt": "A panelled kali lehenga skirt built from tapering vertical panels.",
     "source": "gaps/Lehenga — Panelled kali.png"
   },
   "silhouette_pre_stitched_saree": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_pre_stitched_saree.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "af340ace2d5455f885e55262f2f8c69e29da69b6dc77df9058532f85d0044a91",
+    "sha256": "9ccd57860a10dc146fc81f3d8fa4e2e1f57f6d4554a8ef13824db2955c4e4dae",
     "alt": "A pre-stitched saree with the pleats and pallu sewn in place ready to wear.",
     "source": "gaps/Pre-stitched saree.png"
   },
   "silhouette_slim_modern_gharara": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_slim_modern_gharara.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "06c3a5024b0d781a88b836e18ff42a526f15cc42422d4406341236dd833266b7",
+    "sha256": "d953f06bfb1e7f717bff2dae6cb109b461a37998bb849bfbdeb7c05a6143e0ee",
     "alt": "A slim modern gharara keeping the knee joint with a narrower flare below it.",
     "source": "05-silhouettes/gharara/sitara__silhouettes_gharara__gharara_construction__v2.jpg"
   },
   "silhouette_straight_kameez": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_straight_kameez.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "1e0d70d94d1e3ff0032200360e20c3617625dab0e780359740c5ea352606b51e",
+    "sha256": "2264cd629bd33c8db7946b6193f1b1e26a03ad51ad7ba803987a03ae0740b7c9",
     "alt": "A straight-cut kameez falling in a narrow line from shoulder to hem.",
     "source": "05-silhouettes/shalwar-kameez/sitara__silhouettes_shalwar_kameez__straight_kameez__v1.jpg"
   },
   "silhouette_straight_lehenga": {
     "path": "/questionnaire-visuals/silhouettes/silhouette_straight_lehenga.webp",
-    "width": 540,
+    "width": 480,
     "height": 720,
-    "sha256": "aa66ef8163a5fc52b60591471f854e6385d3af177d5e91a6053efb89d928748f",
+    "sha256": "43af89824af619b437c987e99518753c94d2f9d91f98aecd5128e5ffd2bfab48",
     "alt": "A straight-cut lehenga skirt falling in a narrow column from the waist.",
     "source": "gaps/Straight-cut lehenga.png"
   },
   "sleeves_cap_sleeve": {
     "path": "/questionnaire-visuals/sleeves/sleeves_cap_sleeve.webp",
-    "width": 540,
+    "width": 576,
     "height": 720,
-    "sha256": "4f571c85c9936ba3fd402bb5b5d8b81b2672a99eb0a9beff67afbfc93ff0bb1c",
-    "alt": "A cap sleeve covering just the top of the shoulder.",
-    "source": "gaps/Cap sleeve.png"
+    "sha256": "1a39c0864568cee92541e71ec1a614d4de5080b6a7e97574b6ada93c69210d15",
+    "alt": "A cap sleeve on a dress form: a short lace sleeve covering the top of the shoulder and no more.",
+    "source": "09-sleeves/sitara__sleeves__short_sleeves__v2.jpg"
   },
   "sleeves_elbow_sleeve": {
     "path": "/questionnaire-visuals/sleeves/sleeves_elbow_sleeve.webp",
-    "width": 540,
+    "width": 576,
     "height": 720,
-    "sha256": "8e2ba99a242ebecf91540ef7eaacae3f4b21bce10bdd414c0225c840229abbbf",
+    "sha256": "fe9eb48055d4a2e9ed4df82728211af3ba6b0c8dcc0bc388495a72c3bf360756",
     "alt": "An elbow-length sleeve ending at the elbow.",
     "source": "09-sleeves/sitara__sleeves__elbow_sleeves__v1.jpg"
   },
   "sleeves_full_sleeve": {
     "path": "/questionnaire-visuals/sleeves/sleeves_full_sleeve.webp",
-    "width": 540,
+    "width": 576,
     "height": 720,
-    "sha256": "adb1593efbff79b0b7ec8ce1afefda9c7de162a13c8559a7cd7e911eb037798f",
+    "sha256": "a8bbcd5a6fa748d0fa3d3c9b3af22bc4209fec780c12b48d50259e84a78b4ec2",
     "alt": "A full-length sleeve reaching the wrist.",
     "source": "09-sleeves/sitara__sleeves__full_sleeve__v1.jpg"
   },
   "sleeves_sleeveless": {
     "path": "/questionnaire-visuals/sleeves/sleeves_sleeveless.webp",
-    "width": 540,
+    "width": 576,
     "height": 720,
-    "sha256": "aa4ff2c5498d83fd41a18797f43da9da32f3df98d925d0630b7eb83b7744d37d",
+    "sha256": "4083a7d5d08f00aa4caee81f0ab65403e7276fc250aa831f21e969124d29ecda",
     "alt": "A sleeveless bodice leaving the shoulders and arms bare.",
     "source": "09-sleeves/sitara__sleeves__sleeveless__v1.jpg"
   },
   "sleeves_three_quarter_sleeve": {
     "path": "/questionnaire-visuals/sleeves/sleeves_three_quarter_sleeve.webp",
-    "width": 540,
+    "width": 576,
     "height": 720,
-    "sha256": "678e11221b8448b5275d676dbd8c83ad50fb9c73c25f92ce78bb38cc503cfd91",
+    "sha256": "c7af19557cb646f2270b4ac914aa3b651b81a9379b1a50fd58ac802f7ea55f0a",
     "alt": "A three-quarter sleeve ending partway down the forearm.",
     "source": "09-sleeves/sitara__sleeves__three_quarter_sleeves__v1.jpg"
   }

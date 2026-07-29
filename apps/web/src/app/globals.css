@@ -12,6 +12,7 @@
 /*   styles/base.css           element defaults, layout containers and  */
 /*                             the shared primitives every route uses   */
 /*   styles/shell.css          brand lockup, application header/footer  */
+/*   styles/landing.css        the landing page                         */
 /*   styles/questionnaire.css  wizard, choices, inspiration, review     */
 /*   styles/generation.css     progress, result, refinement, compare    */
 /*   styles/demo.css           deterministic demo-mode labelling        */
@@ -25,6 +26,7 @@
 @import "./styles/tokens.css";
 @import "./styles/base.css";
 @import "./styles/shell.css";
+@import "./styles/landing.css";
 @import "./styles/questionnaire.css";
 @import "./styles/generation.css";
 @import "./styles/demo.css";

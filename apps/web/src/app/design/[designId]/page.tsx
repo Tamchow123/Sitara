@@ -15,7 +15,7 @@ export default function DesignPage() {
     // The Home hint matters here: the draft is saved on the server as the user
     // answers, so going Home is not "throw this away". "Start over" is the
     // separate, confirmed, destructive action.
-    <AppShell homeHint="Your answers are saved as you go — leaving this page keeps them.">
+    <AppShell homeHint="Your answers are saved as you go.">
       <QuestionnaireWizard initialDesignId={designId} />
     </AppShell>
   );

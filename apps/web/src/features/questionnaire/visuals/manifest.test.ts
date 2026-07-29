@@ -123,6 +123,99 @@ describe("questionnaire visual manifest", () => {
       }
     });
 
+    it("frames each question at the aspect the handoff chose for it", () => {
+      // Phase 17 Part C/8. Before this, the build script offered only 3:4 and
+      // 1:1, so a room-sized ceremony scene was cropped to a portrait plate and
+      // a neckline lost the shoulders either side of it. The served asset is cut
+      // to exactly these shapes and ChoiceOptionGrid reads the ratio straight
+      // off the manifest, so pinning the numbers here pins what the cards look
+      // like — a silent revert to one shape for everything fails right here.
+      const EXPECTED: Record<string, string> = {
+        // 3:2 — scene shots and fields of cloth.
+        ceremonies: "720x480",
+        fabrics: "720x480",
+        // 3:4 — a whole figure.
+        garments: "540x720",
+        dupatta: "540x720",
+        // 2:3 — full length, where the silhouette is the answer.
+        "cultural-styling": "480x720",
+        silhouettes: "480x720",
+        "saree-drapes": "480x720",
+        // 1:1 — a surface with no orientation of its own.
+        embroidery: "720x720",
+        "embellishment-density": "720x720",
+        // 5:4 — wide enough to hold both shoulders.
+        necklines: "720x576",
+        // 4:5 — an upright band of the body.
+        sleeves: "576x720",
+        "back-coverage": "576x720",
+        midriff: "576x720",
+        "head-covering": "576x720",
+      };
+      const actual: Record<string, string> = {};
+      for (const entry of Object.values(VISUAL_MANIFEST)) {
+        actual[entry.path.split("/")[2]] = `${entry.width}x${entry.height}`;
+      }
+      expect(actual).toEqual(EXPECTED);
+    });
+
+    it("uses the source photograph the design handoff chose for each corrected option", () => {
+      // Phase 17 Part C/7. The baseline commit reorganised `images/` and left
+      // 26 options pointing at a different photograph from the one the handoff's
+      // own imgMap() names — and 15 of those sources at no file at all, which is
+      // why the visuals build could not run. Each entry below was opened and
+      // checked against what the card has to explain, not inferred from its
+      // filename. Pinning the SOURCE (recorded in sourceNote) rather than the
+      // hash means this test states an intent a reader can check against the
+      // prototype, and survives a re-encode.
+      const CORRECTED: Record<string, string> = {
+        // Ceremony cards are scene shots in the handoff, not bride portraits.
+        ceremony_nikah: "images/02-ceremonies/Nikah.png",
+        ceremony_mehndi: "images/02-ceremonies/mendhi.png",
+        ceremony_baraat: "images/02-ceremonies/Baraat.png",
+        ceremony_walima: "images/02-ceremonies/Walima.png",
+        ceremony_pheras: "images/02-ceremonies/Pheras.png",
+        ceremony_anand_karaj: "images/gaps/Anand Karaj.png",
+        ceremony_reception: "images/02-ceremonies/Reception.png",
+        // Later takes of the same garment.
+        garment_lehenga: "images/03-garments/sitara__garments__lehenga__v2.jpg",
+        garment_gharara: "images/03-garments/sitara__garments__gharara__v2.jpg",
+        garment_sharara: "images/03-garments/sitara__garments__sharara__v3.jpg",
+        // Sources the reorganisation moved or renamed.
+        silhouette_front_open_anarkali: "images/gaps/front-open.png",
+        silhouette_jacket_style_anarkali: "images/gaps/jacket-style.png",
+        silhouette_angrakha_kameez: "images/02-ceremonies/Angrakha kameez.png",
+        neckline_high_neck: "images/08-necklines/sitara__necklines__high_neck__v2.jpg",
+        neckline_band_collar: "images/08-necklines/sitara__necklines__band_mandarin_collar__v1.jpg",
+        midriff_semi_sheer_midriff: "images/11-midriff/Semi-sheer midriff.png",
+        midriff_covered_midriff: "images/11-midriff/sitara__midriff__covered__v1.jpg",
+        head_covering_hijab: "images/12-head-covering/Hijab — full coverage, no hair shown.png",
+        sleeves_cap_sleeve: "images/09-sleeves/sitara__sleeves__short_sleeves__v2.jpg",
+        saree_drape_lehenga_drape:
+          "images/13-saree-drapes/sitara__saree_drapes__pinned_pleats__v1.jpg",
+        // These two were SWAPPED: each question showed the other's photograph.
+        // The embellished bridal shot belongs to head covering; the plain wrap
+        // belongs to dupatta styling.
+        head_covering_dupatta_over_head:
+          "images/12-head-covering/sitara__head_covering__dupatta_over_head__v1.jpg",
+        dupatta_head_drape: "images/gaps/Dupatta Over the head.png",
+      };
+      for (const [key, source] of Object.entries(CORRECTED)) {
+        expect(VISUAL_MANIFEST[key], `${key} is missing from the manifest`).toBeDefined();
+        expect(VISUAL_MANIFEST[key].sourceNote, `${key} uses the wrong source`).toContain(source);
+      }
+    });
+
+    it("describes a ceremony card as the occasion it photographs, not as an outfit", () => {
+      // The handoff's ceremony photographs show a room, a procession or a pair
+      // of hands — no bride is the subject. Alt text that said "bridalwear for
+      // a nikah" would describe something the image does not contain.
+      for (const [key, entry] of entries) {
+        if (!key.startsWith("ceremony_")) continue;
+        expect(entry.alt.toLowerCase()).not.toContain("bridalwear");
+      }
+    });
+
     it("keeps the gharara and sharara alt text describing distinct constructions", () => {
       // Cultural accuracy: a gharara is fitted to the knee and flares from a
       // joint there; a sharara flares from the waist. These must never be
