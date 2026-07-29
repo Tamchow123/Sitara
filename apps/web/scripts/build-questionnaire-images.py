@@ -58,10 +58,17 @@ ASPECTS = {
 
 # The aspect is a property of the GROUP, never of an individual entry, so every
 # card within one question's grid is necessarily the same shape. Full-figure
-# questions are portrait; close neckline and head-covering detail is square.
+# questions are portrait; close neckline and head-covering detail is square, as
+# is anything whose subject is a surface rather than a person — a woven cloth,
+# a worked panel, a density of handwork.
 GROUP_ASPECT = {
     "garments": "portrait",
     "silhouettes": "portrait",
+    "ceremonies": "portrait",
+    "cultural-styling": "portrait",
+    "fabrics": "square",
+    "embroidery": "square",
+    "embellishment-density": "square",
     "necklines": "square",
     "sleeves": "portrait",
     "back-coverage": "portrait",
@@ -439,6 +446,232 @@ VISUALS: dict[str, Visual] = {
         "saree-drapes",
         "05-silhouettes/saree/sitara__silhouettes_saree__lehenga_style_saree__v2.jpg",
         "A lehenga-style saree drape worn over a flared skirt.",
+    ),
+    # --- ceremony ---
+    # These are distinct occasions belonging to distinct traditions, not
+    # interchangeable "events": a nikah and an anand karaj are the marriage
+    # ceremonies of different faiths, and a walima and a reception are the
+    # celebrations that follow different ones. Each alt text names the occasion
+    # rather than describing a generic bride.
+    "ceremony_nikah": full_figure(
+        "ceremonies",
+        "02-ceremonies/sitara__ceremonies__nikah__v1.jpg",
+        "Bridalwear for a nikah, the Islamic marriage ceremony.",
+    ),
+    "ceremony_mehndi": full_figure(
+        "ceremonies",
+        "02-ceremonies/sitara__ceremonies__mehndi.jpg",
+        "Bridalwear for a mehndi, the henna celebration held before the wedding day.",
+    ),
+    "ceremony_baraat": full_figure(
+        "ceremonies",
+        "02-ceremonies/sitara__ceremonies__baraat__v1.jpg",
+        "Bridalwear for the baraat, when the groom's wedding procession arrives.",
+    ),
+    "ceremony_walima": full_figure(
+        "ceremonies",
+        "02-ceremonies/sitara__ceremonies__walima__v1.jpg",
+        "Bridalwear for a walima, the celebration hosted after a nikah.",
+    ),
+    "ceremony_pheras": full_figure(
+        "ceremonies",
+        "02-ceremonies/sitara__ceremonies__pheras.jpg",
+        "Bridalwear for the pheras, the Hindu ceremony of circling the sacred fire.",
+    ),
+    "ceremony_anand_karaj": full_figure(
+        "ceremonies",
+        "02-ceremonies/sitara__ceremonies__anand_karaj.jpg",
+        "Bridalwear for an anand karaj, the Sikh marriage ceremony.",
+    ),
+    "ceremony_reception": full_figure(
+        "ceremonies",
+        "02-ceremonies/sitara__ceremonies__reception.jpg",
+        "Bridalwear for a wedding reception.",
+    ),
+    # --- regional_style ---
+    # Regional influence is optional and non-prescriptive (CLAUDE.md section
+    # 12), so each alt text says what the photograph SHOWS and attributes it as
+    # an influence — never "this is what a Punjabi bride wears". No option
+    # claims to represent a whole community's practice.
+    "regional_pakistani": full_figure(
+        "cultural-styling",
+        "04-cultural-styling/sitara__cultural_styling__pakistani__v2.jpg",
+        "Bridalwear drawing on Pakistani influences.",
+    ),
+    "regional_bangladeshi": full_figure(
+        "cultural-styling",
+        "04-cultural-styling/sitara__cultural_styling__bangladeshi__v2.jpg",
+        "Bridalwear drawing on Bangladeshi influences.",
+    ),
+    "regional_north_indian": full_figure(
+        "cultural-styling",
+        "04-cultural-styling/sitara__cultural_styling__north_indian__v2.jpg",
+        "Bridalwear drawing on North Indian influences.",
+    ),
+    "regional_south_indian": full_figure(
+        "cultural-styling",
+        "04-cultural-styling/sitara__cultural_styling__south_indian__v2.jpg",
+        "Bridalwear drawing on South Indian influences.",
+    ),
+    "regional_punjabi": full_figure(
+        "cultural-styling",
+        "04-cultural-styling/sitara__cultural_styling__punjabi__v2.jpg",
+        "Bridalwear drawing on Punjabi influences.",
+    ),
+    "regional_gujarati": full_figure(
+        "cultural-styling",
+        "04-cultural-styling/sitara__cultural_styling__gujarati__v2.jpg",
+        "Bridalwear drawing on Gujarati influences.",
+    ),
+    "regional_rajasthani": full_figure(
+        "cultural-styling",
+        "04-cultural-styling/sitara__cultural_styling__rajasthani__v1.jpg",
+        "Bridalwear drawing on Rajasthani influences.",
+    ),
+    "regional_hyderabadi": full_figure(
+        "cultural-styling",
+        "04-cultural-styling/sitara__cultural_styling__hyderabadi__v1.jpg",
+        "Bridalwear drawing on Hyderabadi influences.",
+    ),
+    # --- fabrics (the cloth itself, close enough to read weave and weight) ---
+    "fabric_silk": detail(
+        "fabrics",
+        "06-fabrics/sitara__fabrics__silk.jpg",
+        "Silk: a smooth fabric with a fluid drape and a soft sheen.",
+    ),
+    "fabric_raw_silk": detail(
+        "fabrics",
+        "06-fabrics/sitara__fabrics__raw_silk__v1.jpg",
+        "Raw silk: a crisp fabric with a slubbed, irregular texture and a matte surface.",
+    ),
+    "fabric_satin": detail(
+        "fabrics",
+        "06-fabrics/sitara__fabrics__satin.jpg",
+        "Satin: a weave with a high-gloss face and a dull reverse.",
+    ),
+    "fabric_velvet": detail(
+        "fabrics",
+        "06-fabrics/sitara__fabrics__velvet.jpg",
+        "Velvet: a dense pile fabric with deep colour and a soft, shifting nap.",
+    ),
+    "fabric_organza": detail(
+        "fabrics",
+        "06-fabrics/sitara__fabrics__organza.jpg",
+        "Organza: a sheer, crisp fabric that holds its shape and stands away from the body.",
+    ),
+    "fabric_chiffon": detail(
+        "fabrics",
+        "06-fabrics/sitara__fabrics__chiffon.jpg",
+        "Chiffon: a sheer, weightless fabric that falls in soft ripples.",
+    ),
+    "fabric_georgette": detail(
+        "fabrics",
+        "06-fabrics/sitara__fabrics__georgette__v1.jpg",
+        "Georgette: a lightly crinkled fabric with a matte finish and a flowing fall.",
+    ),
+    "fabric_net": detail(
+        "fabrics",
+        "06-fabrics/sitara__fabrics__net__v1.jpg",
+        "Net: an open mesh fabric, often layered to build volume.",
+    ),
+    "fabric_brocade": detail(
+        "fabrics",
+        "06-fabrics/sitara__fabrics__brocade.jpg",
+        "Brocade: a heavy fabric with the pattern woven into the cloth in raised relief.",
+    ),
+    "fabric_jamawar": detail(
+        "fabrics",
+        "06-fabrics/sitara__fabrics__jamawar__v1.jpg",
+        "Jamawar: a richly woven fabric patterned with dense traditional motifs.",
+    ),
+    "fabric_tissue": detail(
+        "fabrics",
+        "06-fabrics/sitara__fabrics__tissue__v1.jpg",
+        "Tissue: a fine, translucent fabric shot through with metallic thread.",
+    ),
+    "fabric_cotton_silk": detail(
+        "fabrics",
+        "06-fabrics/sitara__fabrics__cotton_silk__v1.jpg",
+        "Cotton silk: a breathable blend with a gentle sheen and a lighter hand than pure silk.",
+    ),
+    # --- embellishment_styles (the handwork, close enough to read technique) ---
+    "embellishment_zardozi": detail(
+        "embroidery",
+        "07-embroidery/sitara__embroidery__zardozi__v1.jpg",
+        "Zardozi: raised metallic embroidery worked in gold and silver thread.",
+    ),
+    "embellishment_dabka": detail(
+        "embroidery",
+        "07-embroidery/sitara__embroidery__dabka__v1.jpg",
+        "Dabka: coiled metallic wire couched onto the fabric in dense, textured lines.",
+    ),
+    "embellishment_nakshi": detail(
+        "embroidery",
+        "07-embroidery/sitara__embroidery__nakshi__v1.jpg",
+        "Nakshi: fine figurative needlework building detailed motifs.",
+    ),
+    "embellishment_gota_patti": detail(
+        "embroidery",
+        "07-embroidery/sitara__embroidery__gota_patti__v1.jpg",
+        "Gota patti: flat metallic ribbon folded and appliqued into shapes and borders.",
+    ),
+    "embellishment_mirror_work": detail(
+        "embroidery",
+        "07-embroidery/sitara__embroidery__mirror_work__v3.jpg",
+        "Mirror work: small mirrors stitched into the cloth within embroidered frames.",
+    ),
+    "embellishment_resham_threadwork": detail(
+        "embroidery",
+        "07-embroidery/sitara__embroidery__resham__v2.jpg",
+        "Resham threadwork: silk-thread embroidery in flat, lustrous colour.",
+    ),
+    "embellishment_chikankari": detail(
+        "embroidery",
+        "07-embroidery/sitara__embroidery__chikankari__v1.jpg",
+        "Chikankari: fine white-on-white shadow embroidery worked in subtle relief.",
+    ),
+    "embellishment_sequins": detail(
+        "embroidery",
+        "07-embroidery/sitara__embroidery__sequins__v1.jpg",
+        "Sequins: small flat discs stitched across the surface to catch the light.",
+    ),
+    "embellishment_pearls": detail(
+        "embroidery",
+        "07-embroidery/sitara__embroidery__pearls__v1.jpg",
+        "Pearls: rounded beads stitched in clusters and trails for a soft lustre.",
+    ),
+    "embellishment_crystals": detail(
+        "embroidery",
+        "07-embroidery/sitara__embroidery__crystals__v1.jpg",
+        "Crystals: faceted stones set into the work for sharp, bright sparkle.",
+    ),
+    "embellishment_beads": detail(
+        "embroidery",
+        "07-embroidery/sitara__embroidery__beadwork__v2.jpg",
+        "Beadwork: small beads stitched into patterns with a fine granular texture.",
+    ),
+    "embellishment_applique": detail(
+        "embroidery",
+        "07-embroidery/sitara__embroidery__applique__v1.jpg",
+        "Applique: shaped pieces of fabric laid onto the ground cloth and stitched down.",
+    ),
+    # --- embellishment_density ---
+    # One consistent garment photographed at three levels of work, so the cards
+    # compare the DENSITY rather than three different dresses.
+    "density_minimal": detail(
+        "embellishment-density",
+        "gaps/sitara-minimal.png",
+        "Minimal embellishment: sparse work leaving most of the fabric plain.",
+    ),
+    "density_balanced": detail(
+        "embellishment-density",
+        "gaps/sitara-balanced.png",
+        "Balanced embellishment: worked areas set against clear stretches of fabric.",
+    ),
+    "density_heavy": detail(
+        "embellishment-density",
+        "gaps/sitara-heavy.png",
+        "Heavy embellishment: dense work covering almost the whole surface.",
     ),
 }
 

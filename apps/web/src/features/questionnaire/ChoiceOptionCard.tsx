@@ -54,8 +54,15 @@ export function ChoiceOptionCard({
   ]
     .filter(Boolean)
     .join(" ");
+  // A card with no photograph inside a photograph-led grid must not be stretched
+  // to the frame height its neighbours get — it would render as a tall empty
+  // box with a label floating at the top. The modifier goes on the wrap (the
+  // grid's direct child, so `align-self` applies to it) and is driven by the
+  // resolved `visual`, not by `option.visual_key`, so the runtime image-failure
+  // path above is covered too.
+  const wrapClassName = visual ? "choice-card-wrap" : "choice-card-wrap choice-card-wrap-textonly";
   return (
-    <div className="choice-card-wrap">
+    <div className={wrapClassName}>
       <label className={className}>
         <input
           className="visually-hidden"

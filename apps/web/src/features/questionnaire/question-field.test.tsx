@@ -265,6 +265,35 @@ describe("QuestionField single_choice with visuals and no-preference", () => {
     expect(grid).toHaveStyle({ "--choice-card-aspect": "720 / 720" });
   });
 
+  it("marks a card with no resolvable visual so the grid does not stretch it", () => {
+    // Several v4 questions mix photographic options with one that names an
+    // ABSENCE and has nothing to photograph ("No specific regional direction",
+    // "No embellishment"). Without the modifier the grid stretches that card to
+    // the photo frame's height and it renders as a tall empty box.
+    //
+    // `mystery` carries a visual_key that is not in the manifest, so it also
+    // stands in for the runtime image-failure path: the modifier is driven by
+    // the RESOLVED visual, not by whether a visual_key was declared.
+    const { container } = render(
+      <QuestionField
+        question={necklineQuestion}
+        value={undefined}
+        allowed={allOf(necklineQuestion)}
+        onChange={vi.fn()}
+      />,
+    );
+    const textOnly = container.querySelectorAll(".choice-card-wrap-textonly");
+    expect(textOnly).toHaveLength(1);
+    expect(textOnly[0]?.textContent).toContain("Mystery");
+    // The options that do resolve a photograph keep the plain wrap.
+    const wraps = container.querySelectorAll(".choice-card-wrap");
+    expect(wraps.length).toBeGreaterThan(1);
+    for (const wrap of wraps) {
+      const isTextOnly = wrap.classList.contains("choice-card-wrap-textonly");
+      expect(isTextOnly).toBe(wrap.querySelector("img") === null);
+    }
+  });
+
   it("has no axe violations", async () => {
     const { container } = render(
       <QuestionField

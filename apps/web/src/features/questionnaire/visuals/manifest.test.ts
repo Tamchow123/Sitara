@@ -46,8 +46,20 @@ describe("questionnaire visual manifest", () => {
   describe("photographic option visuals", () => {
     const entries = Object.entries(VISUAL_MANIFEST);
 
+    // A bare count, deliberately. The authoritative bidirectional contract —
+    // every v4 option with a `visual_key` has a shipped asset and vice versa —
+    // lives in the package that owns the schema
+    // (apps/api/sitara/questionnaire/tests/test_visual_keys.py), because this
+    // package cannot read the Django fixture. This is the frontend's canary: it
+    // fails if the manifest is regenerated without the schema moving with it.
+    //
+    // 104 = the original 62 plus the 42 that ceremony, regional_style, fabrics,
+    // embellishment_styles and embellishment_density gained. Those five
+    // questions shipped text-only while their source photography sat unused
+    // under images/. Two options stay text-only on purpose — "No specific
+    // regional direction" and "No embellishment" describe an absence.
     it("declares the full v4 option set", () => {
-      expect(entries.length).toBe(62);
+      expect(entries.length).toBe(104);
     });
 
     it.each(entries)("%s is a safe, local, existing, integrity-checked asset", (_key, entry) => {

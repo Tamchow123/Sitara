@@ -220,6 +220,14 @@
   position: relative;
   display: flex;
 }
+/* An option with no photograph sitting in a photograph-led grid: size it to its
+   own label instead of letting the grid stretch it to the card frame's height.
+   Two options are deliberately text-only because they name an ABSENCE — "No
+   specific regional direction" and "No embellishment" — and the same rule
+   catches any card whose image fails to load at runtime. */
+.choice-grid-visual .choice-card-wrap-textonly {
+  align-self: start;
+}
 .choice-card {
   display: flex;
   flex: 1;

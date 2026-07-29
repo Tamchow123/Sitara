@@ -536,6 +536,31 @@ def build():
     dupatta_style = questions["dupatta_style"]
     dupatta_style["options"] = choice_options(DUPATTA_STYLES, "dupatta")
 
+    # --- option visuals for the five questions v3 left text-only -----------
+    # v3 carried these questions with no ``visual_key`` on any option, so every
+    # card rendered as bare text while the project's own source photography for
+    # them already sat unused under ``images/``. This attaches it.
+    #
+    # Two options stay deliberately text-only because they describe an ABSENCE
+    # and there is nothing to photograph: "No specific regional direction" and
+    # "No embellishment". A card with no visual renders as text inside the same
+    # grid, so the mixed group is a supported shape, not a gap.
+    text_only = {
+        ("regional_style", "no_specific_direction"),
+        ("embellishment_styles", "none"),
+    }
+    for question_id, visual_prefix in (
+        ("ceremony", "ceremony"),
+        ("regional_style", "regional"),
+        ("fabrics", "fabric"),
+        ("embellishment_styles", "embellishment"),
+        ("embellishment_density", "density"),
+    ):
+        for option in questions[question_id]["options"]:
+            if (question_id, option["value"]) in text_only:
+                continue
+            option["visual_key"] = f"{visual_prefix}_{option['value']}"
+
     steps = [
         questions_step
         for questions_step in (

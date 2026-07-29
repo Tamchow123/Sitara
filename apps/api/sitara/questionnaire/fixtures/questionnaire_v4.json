@@ -28,37 +28,44 @@
                   {
                     "value": "nikah",
                     "label": "Nikah",
-                    "description": "The Islamic marriage ceremony."
+                    "description": "The Islamic marriage ceremony.",
+                    "visual_key": "ceremony_nikah"
                   },
                   {
                     "value": "mehndi",
                     "label": "Mehndi",
-                    "description": "The henna celebration before the wedding."
+                    "description": "The henna celebration before the wedding.",
+                    "visual_key": "ceremony_mehndi"
                   },
                   {
                     "value": "baraat",
                     "label": "Baraat",
-                    "description": "The main wedding day, welcoming the groom's procession."
+                    "description": "The main wedding day, welcoming the groom's procession.",
+                    "visual_key": "ceremony_baraat"
                   },
                   {
                     "value": "walima",
                     "label": "Walima",
-                    "description": "The celebration hosted after the nikah."
+                    "description": "The celebration hosted after the nikah.",
+                    "visual_key": "ceremony_walima"
                   },
                   {
                     "value": "pheras",
                     "label": "Pheras",
-                    "description": "The Hindu wedding rites around the sacred fire."
+                    "description": "The Hindu wedding rites around the sacred fire.",
+                    "visual_key": "ceremony_pheras"
                   },
                   {
                     "value": "anand_karaj",
                     "label": "Anand Karaj",
-                    "description": "The Sikh marriage ceremony centred on the Anand Karaj rites."
+                    "description": "The Sikh marriage ceremony centred on the Anand Karaj rites.",
+                    "visual_key": "ceremony_anand_karaj"
                   },
                   {
                     "value": "reception",
                     "label": "Reception",
-                    "description": "The reception celebration with family and friends."
+                    "description": "The reception celebration with family and friends.",
+                    "visual_key": "ceremony_reception"
                   }
                 ]
               },
@@ -125,35 +132,43 @@
                   },
                   {
                     "value": "pakistani",
-                    "label": "Pakistani bridal influences"
+                    "label": "Pakistani bridal influences",
+                    "visual_key": "regional_pakistani"
                   },
                   {
                     "value": "bangladeshi",
-                    "label": "Bangladeshi bridal influences"
+                    "label": "Bangladeshi bridal influences",
+                    "visual_key": "regional_bangladeshi"
                   },
                   {
                     "value": "north_indian",
-                    "label": "North Indian bridal influences"
+                    "label": "North Indian bridal influences",
+                    "visual_key": "regional_north_indian"
                   },
                   {
                     "value": "south_indian",
-                    "label": "South Indian bridal influences"
+                    "label": "South Indian bridal influences",
+                    "visual_key": "regional_south_indian"
                   },
                   {
                     "value": "punjabi",
-                    "label": "Punjabi bridal influences"
+                    "label": "Punjabi bridal influences",
+                    "visual_key": "regional_punjabi"
                   },
                   {
                     "value": "gujarati",
-                    "label": "Gujarati bridal influences"
+                    "label": "Gujarati bridal influences",
+                    "visual_key": "regional_gujarati"
                   },
                   {
                     "value": "rajasthani",
-                    "label": "Rajasthani bridal influences"
+                    "label": "Rajasthani bridal influences",
+                    "visual_key": "regional_rajasthani"
                   },
                   {
                     "value": "hyderabadi",
-                    "label": "Hyderabadi bridal influences"
+                    "label": "Hyderabadi bridal influences",
+                    "visual_key": "regional_hyderabadi"
                   }
                 ]
               }
@@ -887,52 +902,64 @@
                 "options": [
                   {
                     "value": "silk",
-                    "label": "Silk"
+                    "label": "Silk",
+                    "visual_key": "fabric_silk"
                   },
                   {
                     "value": "raw_silk",
-                    "label": "Raw silk"
+                    "label": "Raw silk",
+                    "visual_key": "fabric_raw_silk"
                   },
                   {
                     "value": "satin",
                     "label": "Satin",
-                    "description": "A smooth fabric with a lustrous face that catches light cleanly."
+                    "description": "A smooth fabric with a lustrous face that catches light cleanly.",
+                    "visual_key": "fabric_satin"
                   },
                   {
                     "value": "velvet",
-                    "label": "Velvet"
+                    "label": "Velvet",
+                    "visual_key": "fabric_velvet"
                   },
                   {
                     "value": "organza",
-                    "label": "Organza"
+                    "label": "Organza",
+                    "visual_key": "fabric_organza"
                   },
                   {
                     "value": "chiffon",
-                    "label": "Chiffon"
+                    "label": "Chiffon",
+                    "visual_key": "fabric_chiffon"
                   },
                   {
                     "value": "georgette",
-                    "label": "Georgette"
+                    "label": "Georgette",
+                    "visual_key": "fabric_georgette"
                   },
                   {
                     "value": "net",
-                    "label": "Net"
+                    "label": "Net",
+                    "visual_key": "fabric_net"
                   },
                   {
                     "value": "brocade",
-                    "label": "Brocade"
+                    "label": "Brocade",
+                    "visual_key": "fabric_brocade"
                   },
                   {
                     "value": "jamawar",
-                    "label": "Jamawar"
+                    "label": "Jamawar",
+                    "visual_key": "fabric_jamawar"
                   },
                   {
                     "value": "tissue",
-                    "label": "Tissue"
+                    "label": "Tissue",
+                    "visual_key": "fabric_tissue"
                   },
                   {
                     "value": "cotton_silk",
-                    "label": "Cotton silk"
+                    "label": "Cotton silk",
+                    "visual_key": "fabric_cotton_silk"
                   }
                 ],
                 "constraints": {
@@ -948,51 +975,63 @@
                 "options": [
                   {
                     "value": "zardozi",
-                    "label": "Zardozi"
+                    "label": "Zardozi",
+                    "visual_key": "embellishment_zardozi"
                   },
                   {
                     "value": "dabka",
-                    "label": "Dabka"
+                    "label": "Dabka",
+                    "visual_key": "embellishment_dabka"
                   },
                   {
                     "value": "nakshi",
-                    "label": "Nakshi"
+                    "label": "Nakshi",
+                    "visual_key": "embellishment_nakshi"
                   },
                   {
                     "value": "gota_patti",
-                    "label": "Gota patti"
+                    "label": "Gota patti",
+                    "visual_key": "embellishment_gota_patti"
                   },
                   {
                     "value": "mirror_work",
-                    "label": "Mirror work"
+                    "label": "Mirror work",
+                    "visual_key": "embellishment_mirror_work"
                   },
                   {
                     "value": "resham_threadwork",
-                    "label": "Resham threadwork"
+                    "label": "Resham threadwork",
+                    "visual_key": "embellishment_resham_threadwork"
                   },
                   {
                     "value": "chikankari",
-                    "label": "Chikankari"
+                    "label": "Chikankari",
+                    "visual_key": "embellishment_chikankari"
                   },
                   {
                     "value": "sequins",
-                    "label": "Sequins"
+                    "label": "Sequins",
+                    "visual_key": "embellishment_sequins"
                   },
                   {
                     "value": "pearls",
-                    "label": "Pearls"
+                    "label": "Pearls",
+                    "visual_key": "embellishment_pearls"
                   },
                   {
                     "value": "crystals",
-                    "label": "Crystals"
+                    "label": "Crystals",
+                    "visual_key": "embellishment_crystals"
                   },
                   {
                     "value": "beads",
-                    "label": "Beadwork"
+                    "label": "Beadwork",
+                    "visual_key": "embellishment_beads"
                   },
                   {
                     "value": "applique",
-                    "label": "Appliqué"
+                    "label": "Appliqué",
+                    "visual_key": "embellishment_applique"
                   },
                   {
                     "value": "none",
@@ -1015,15 +1054,18 @@
                 "options": [
                   {
                     "value": "minimal",
-                    "label": "Minimal and airy"
+                    "label": "Minimal and airy",
+                    "visual_key": "density_minimal"
                   },
                   {
                     "value": "balanced",
-                    "label": "Balanced"
+                    "label": "Balanced",
+                    "visual_key": "density_balanced"
                   },
                   {
                     "value": "heavy",
-                    "label": "Rich and heavily worked"
+                    "label": "Rich and heavily worked",
+                    "visual_key": "density_heavy"
                   }
                 ]
               }
