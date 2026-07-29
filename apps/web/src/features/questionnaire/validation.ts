@@ -18,6 +18,7 @@ import {
   allowedOptions,
   buildSelected,
   declaredOptionValues,
+  isAnswered,
   questionsById,
   requiredQuestions,
   visibleQuestions,
@@ -146,14 +147,6 @@ function structuralValue(
     return { value: normaliseText(value) };
   }
   return { message: MSG.wrongText };
-}
-
-function isAnswered(question: Question, value: AnswerValue | undefined): boolean {
-  if (question.type === "multi_choice" || question.type === "colour_list") {
-    return Array.isArray(value) && value.length > 0;
-  }
-  if (question.type === "text") return typeof value === "string" && value !== "";
-  return typeof value === "string" && value !== "";
 }
 
 function checkMulti(

@@ -612,11 +612,37 @@
   font-weight: bold;
 }
 
+/* The handoff's kicker above the question: which category this is, and where
+   the question sits inside it. */
+.wizard-kicker {
+  margin: 0 0 0.35rem;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--color-accent-700, var(--accent));
+}
+
 .wizard-nav {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
+  align-items: center;
   gap: 1rem;
   margin-top: 1.5rem;
+  border-top: 1px solid var(--color-neutral-200, var(--line));
+  padding-top: 1rem;
+}
+/* Back sits at the far left; the hint absorbs the space between it and the
+   Skip/Continue pair. */
+.wizard-nav > button:first-child {
+  margin-right: auto;
+}
+.wizard-hint {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.wizard-nav .wizard-skip {
+  border-color: transparent;
 }
 .wizard-nav button,
 .wizard-nav a {
@@ -741,8 +767,18 @@
 }
 .review-row {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  grid-template-columns: max-content 1fr max-content;
   gap: 0.4rem 1.25rem;
+  align-items: baseline;
+}
+/* An unanswered row is a deliberate choice, not an error: it reads in the
+   softer accent rather than the warning colour. */
+.review-unanswered {
+  color: var(--color-accent-2-700, var(--muted));
+  font-style: italic;
+}
+.review-edit {
+  font-size: 0.9rem;
 }
 .review figure {
   margin: 0;

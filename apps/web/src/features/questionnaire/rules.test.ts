@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { clearStaleAnswers, resumeStepIndex } from "./answer-utils";
-import { allowedOptions, requiredQuestions, visibleQuestions } from "./rules";
-import type { QuestionnaireSchema } from "./types";
+import { clearStaleAnswers } from "./answer-utils";
+import { allowedOptions, isAnswered, requiredQuestions, visibleQuestions } from "./rules";
+import type { AnswerValue, Question, QuestionnaireSchema } from "./types";
 
 // Compact schema exercising show/hide/require/restrict — the SAME semantics
 // the backend enforces, interpreted generically from the data.
@@ -209,14 +209,31 @@ describe("none embellishment hides density", () => {
   });
 });
 
-describe("resumeStepIndex", () => {
-  it("returns the first incomplete step", () => {
-    expect(resumeStepIndex(schema, {})).toBe(0);
-    expect(resumeStepIndex(schema, { garment_type: "lehenga" })).toBe(1);
+// One predicate now backs BOTH the wizard's Continue/Skip gating and the
+// derived-Zod required check, so it is pinned per question type here rather
+// than only where the current schema happens to exercise it. v4 marks every
+// colour question optional today; nothing should depend on that staying true.
+describe("isAnswered", () => {
+  const cases: { type: Question["type"]; answered: AnswerValue; unanswered: AnswerValue }[] = [
+    { type: "single_choice", answered: "lehenga", unanswered: "" },
+    { type: "colour_choice", answered: "#c22b33", unanswered: "" },
+    { type: "text", answered: "a note", unanswered: "" },
+    { type: "multi_choice", answered: ["zari"], unanswered: [] },
+    { type: "colour_list", answered: ["#c22b33"], unanswered: [] },
+  ];
+
+  it.each(cases)("treats $type correctly whether or not it has a value", (entry) => {
+    const question = { id: "q", type: entry.type, label: "Q", required: true } as Question;
+    expect(isAnswered(question, entry.answered)).toBe(true);
+    expect(isAnswered(question, entry.unanswered)).toBe(false);
+    expect(isAnswered(question, undefined)).toBe(false);
   });
 
-  it("returns steps.length when every step is complete", () => {
-    const complete = { garment_type: "lehenga", silhouette: "flared_lehenga" };
-    expect(resumeStepIndex(schema, complete)).toBe(schema.steps.length);
+  it("never treats the wrong container shape as an answer", () => {
+    const multi = { id: "m", type: "multi_choice", label: "M", required: true } as Question;
+    const single = { id: "s", type: "single_choice", label: "S", required: true } as Question;
+    // A string where a list belongs, and a list where a string belongs.
+    expect(isAnswered(multi, "zari")).toBe(false);
+    expect(isAnswered(single, ["lehenga"])).toBe(false);
   });
 });

@@ -50,6 +50,26 @@ const SCHEMA: QuestionnaireSchema = {
   rules: [],
 };
 
+// The same schema plus an optional question the user did not answer.
+const SCHEMA_WITH_OPTIONAL: QuestionnaireSchema = {
+  ...SCHEMA,
+  steps: [
+    {
+      ...SCHEMA.steps[0],
+      questions: [
+        ...SCHEMA.steps[0].questions,
+        {
+          id: "regional_style",
+          type: "single_choice",
+          label: "Regional direction",
+          required: false,
+          options: [{ value: "punjabi", label: "Punjabi" }],
+        },
+      ],
+    },
+  ],
+};
+
 function design(overrides: Record<string, unknown> = {}) {
   return {
     id: "d1",
@@ -89,6 +109,28 @@ describe("ReviewSummary", () => {
     expect(await screen.findByText("Lehenga")).toBeInTheDocument();
     expect(screen.getByText("Which garment?")).toBeInTheDocument();
     expect(mocks.validateDesignDraft).toHaveBeenCalledWith("d1");
+  });
+
+  it("shows an unanswered question as left to Sitara rather than omitting it", async () => {
+    mocks.fetchDesign.mockResolvedValue(
+      design({ questionnaire: { id: "v1", version: 1, schema: SCHEMA_WITH_OPTIONAL } }),
+    );
+    render(<ReviewSummary designId="d1" />);
+
+    // The row is present — a silently missing one would read as "never asked".
+    expect(await screen.findByText("Regional direction")).toBeInTheDocument();
+    expect(screen.getByText("Left to Sitara's imagination")).toBeInTheDocument();
+    // ...and it can still be edited from here.
+    expect(screen.getByRole("link", { name: "Edit Regional direction" })).toHaveAttribute(
+      "href",
+      "/design/d1?q=regional_style",
+    );
+  });
+
+  it("gives each row its own Edit link, deep-linked to that question's screen", async () => {
+    render(<ReviewSummary designId="d1" />);
+    const edit = await screen.findByRole("link", { name: "Edit Which garment?" });
+    expect(edit).toHaveAttribute("href", "/design/d1?q=garment_type");
   });
 
   it("16a: an HTTP 400 routes the user back to complete the incomplete draft", async () => {

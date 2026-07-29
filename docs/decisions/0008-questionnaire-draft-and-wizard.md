@@ -100,6 +100,13 @@ unsaved values visible on failure, and offers retry — all announced through
 view), and resume reconstructs the wizard from the persisted answers and the
 design's linked questionnaire, landing on the first incomplete step.
 
+**Amended by ADR 0018 (Phase 16B, 2026-07-29):** the wizard now shows one
+QUESTION per screen rather than one step, with the schema's steps becoming the
+progress categories; resume lands on the first incomplete SCREEN, and Continue is
+disabled until the current screen's required questions have values. See
+"Wizard navigation: one question per screen, steps become categories" in ADR 0018.
+Everything above about drafts, saving, transport and CSRF is unchanged.
+
 ### Frontend transport unchanged; unsafe mutations stay CSRF-aware
 
 Reads use the generated GET-only typed client (ADR 0007). The three unsafe

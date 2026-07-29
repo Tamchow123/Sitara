@@ -25,6 +25,10 @@ import type { Answers, DesignDraft, Question, QuestionnaireSchema } from "./type
 
 type Props = { designId: string };
 
+// What an unanswered row says. The handoff's phrasing, kept verbatim: it frames
+// an absent answer as a deliberate gift of freedom rather than an omission.
+const UNANSWERED_TEXT = "Left to Sitara's imagination";
+
 type State =
   | { phase: "loading" }
   | { phase: "redirecting" }
@@ -271,32 +275,44 @@ export function ReviewSummary({ designId }: Props) {
       )}
 
       {schema.steps.map((step) => {
-        // A visible answered question shows its labels; a visible OPTIONAL
-        // single_choice with no answer shows "No preference" explicitly rather
-        // than being silently omitted (Phase 16B). Everything else is skipped.
+        // EVERY visible question gets a row (Phase 16B): an answered one shows
+        // its labels, an unanswered one says so in the handoff's own words
+        // rather than vanishing. A silently missing row reads as "I never
+        // asked" — the opposite of the reassurance this screen is for.
         const rows = step.questions
           .filter((question) => visibility[question.id])
           .map((question: Question) => {
             const labels = answerLabels(question, answers[question.id]);
-            if (labels.length > 0) return { question, text: labels.join(", ") };
-            if (question.type === "single_choice" && !question.required) {
-              return { question, text: "No preference" };
-            }
-            return null;
-          })
-          .filter((row): row is { question: Question; text: string } => row !== null);
+            return {
+              question,
+              text: labels.length > 0 ? labels.join(", ") : UNANSWERED_TEXT,
+              answered: labels.length > 0,
+            };
+          });
         if (rows.length === 0) return null;
         return (
           <section key={step.id} aria-labelledby={`review-${step.id}`}>
             <div className="review-section-head">
               <h2 id={`review-${step.id}`}>{step.title}</h2>
-              <Link href={editHref}>Edit</Link>
             </div>
             <dl>
-              {rows.map(({ question, text }) => (
+              {rows.map(({ question, text, answered }) => (
                 <div key={question.id} className="review-row">
                   <dt>{question.label}</dt>
-                  <dd>{text}</dd>
+                  <dd className={answered ? undefined : "review-unanswered"}>{text}</dd>
+                  {/* Per-row Edit, deep-linked to that one question's screen —
+                      the wizard resolves ?q= to a screen index and still
+                      refuses to skip past what has been reached. */}
+                  <Link
+                    className="review-edit"
+                    href={`${editHref}?q=${encodeURIComponent(question.id)}`}
+                    // Named for assistive technology through aria-label rather
+                    // than a visually-hidden span, so the question's text
+                    // appears exactly once in the row.
+                    aria-label={`Edit ${question.label}`}
+                  >
+                    Edit
+                  </Link>
                 </div>
               ))}
             </dl>

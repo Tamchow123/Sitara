@@ -253,9 +253,63 @@ For an optional single-choice question, "No preference" is represented by the
 never an empty string. The reversible control clears the answer to `""`, which
 the wizard's stale-answer clean-up drops (and the derived Zod treats an optional
 empty single-choice as valid), so the persisted `answers` object simply omits
-the key. The review screen shows "No preference" for a visible optional
-single-choice with no answer rather than silently omitting the question. Required
-questions never expose the control. Server answer-validation stays authoritative.
+the key. Required questions never expose the control. Server answer-validation
+stays authoritative.
+
+**Amended 2026-07-29 (wizard restructure, below):** the review screen originally
+showed "No preference" for a visible optional single-choice with no answer, and
+omitted every other unanswered question. It now gives EVERY visible question a
+row, and an unanswered one — of any type, optional or not — reads "Left to
+Sitara's imagination", the handoff's own phrasing. The persistence rule above is
+unchanged; only what the review screen says about an absent answer changed. A
+silently missing row reads as "I never asked", which is the opposite of what that
+screen is for.
+
+### Wizard navigation: one question per screen, steps become categories
+
+**Added 2026-07-29.** The handoff asks a bride one thing at a time: 16
+single-question screens grouped into 9 progress categories. The wizard until now
+rendered one schema STEP per screen. Rather than reshape the schema — steps are
+its persistence and grouping unit, and published versions are immutable (ADR
+0005) — the mapping is derived in the frontend, in one module
+(`apps/web/src/features/questionnaire/screens.ts`):
+
+- each schema step becomes a progress CATEGORY; each of its visible questions
+  becomes its own SCREEN. The plan is derived from schema + current answers, so a
+  question the rules hide loses its screen immediately and nothing extra is
+  persisted — the wizard holds a screen index, answers remain the only state.
+- **One grouping exception:** a step's `colour_choice` and `colour_list`
+  questions share a single screen, because they are answered against one shared
+  swatch grid and splitting them would ask the same question three times with the
+  same controls. The rule is keyed on question TYPE, never on an id, so a further
+  colour role needs no code change.
+- A step whose every question is hidden contributes no screens and therefore no
+  category: an unreachable pill would make "Step n of m" a lie. When that happens
+  behind the user, the screen index and the furthest-reached marker are clamped
+  to the nearest surviving screen rather than jumping to the start.
+- Resume is screen-based: a returning user lands on the exact unanswered required
+  question, not the top of its category.
+- **Continue is disabled until the current screen's required questions have
+  values**, with the reason named through `aria-describedby` rather than left to
+  be inferred from a greyed-out button. The derived Zod resolver remains the
+  second line of defence: a screen can be answered and still invalid (a bounded
+  multi-choice below `min_items`), and that path still raises the error summary.
+- **Skip** appears only on a screen with nothing required. It advances without
+  validating and is deliberately NON-destructive — it never clears an answer.
+  Clearing is what the reversible "No preference" control above is for; a Skip
+  that discarded a just-made choice would be a data-loss trap.
+- The handoff's "locked until the ceremony and garment are answered" rule needs
+  no separate state: the furthest-reached marker only advances through Continue,
+  and Continue is unavailable while a required question in front of the user is
+  unanswered — so nothing beyond the opening category can have been reached until
+  they are answered.
+- The review screen's per-row Edit links deep-link to a single question
+  (`?q=<question id>`), clamped to the furthest screen reached, so an Edit link
+  can never skip a user ahead. An unknown or now-hidden question id resolves to
+  nothing and the wizard resumes normally rather than guessing.
+
+`ProgressNav` was not changed: the wizard supplies the current screen's category
+index and each category's first screen as its jump target.
 
 ### Anand Karaj cultural handling
 

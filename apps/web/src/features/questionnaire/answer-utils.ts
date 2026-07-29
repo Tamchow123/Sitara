@@ -1,17 +1,19 @@
 // Pure helpers for manipulating answers against the schema: clearing answers
-// that became hidden or disallowed, resolving option labels for display, and
-// deciding where to resume. All derived from the schema — no question id is
-// treated as a business rule.
+// that became hidden or disallowed, and resolving option labels for display.
+// All derived from the schema — no question id is treated as a business rule.
+//
+// Deciding where the wizard resumes, and whether a screen's required questions
+// are answered, belongs to `screens.ts` (Phase 16B): navigation is measured in
+// SCREENS, not steps, and one definition of "answered" is enough.
 
 import {
   allowedOptions,
   declaredOptionValues,
   questionsById,
-  requiredQuestions,
   visibleQuestions,
 } from "./rules";
 import { HEX_COLOUR_INPUT } from "./validation";
-import type { Answers, Question, QuestionnaireSchema, Step } from "./types";
+import type { Answers, Question, QuestionnaireSchema } from "./types";
 
 // The design's own colours, as they will SURVIVE this clean-up: the schema's
 // single colour_list answer, but only while that question is still visible.
@@ -94,49 +96,6 @@ export function clearStaleAnswers(
     if (typeof value === "string" && value !== "") cleaned[key] = value;
   }
   return cleaned;
-}
-
-export function visibleStepQuestions(
-  schema: QuestionnaireSchema,
-  step: Step,
-  answers: Answers,
-): Question[] {
-  const visibility = visibleQuestions(schema, answers);
-  return step.questions.filter((question) => visibility[question.id]);
-}
-
-// A step is complete when every visible required question in it is answered.
-export function isStepComplete(
-  schema: QuestionnaireSchema,
-  step: Step,
-  answers: Answers,
-): boolean {
-  const visibility = visibleQuestions(schema, answers);
-  const required = requiredQuestions(schema, answers, visibility);
-  for (const question of step.questions) {
-    if (!required[question.id]) continue;
-    const value = answers[question.id];
-    const answered =
-      question.type === "multi_choice" || question.type === "colour_list"
-        ? Array.isArray(value) && value.length > 0
-        : typeof value === "string" && value !== "";
-    if (!answered) return false;
-  }
-  return true;
-}
-
-// The first step (0-based) whose required visible questions are not all
-// answered, so a resumed draft lands where the user left off. Returns
-// steps.length when every questionnaire step is complete (i.e. proceed to the
-// inspiration step).
-export function resumeStepIndex(
-  schema: QuestionnaireSchema,
-  answers: Answers,
-): number {
-  for (let index = 0; index < schema.steps.length; index += 1) {
-    if (!isStepComplete(schema, schema.steps[index], answers)) return index;
-  }
-  return schema.steps.length;
 }
 
 // The human label for a stored option value, resolved from the schema — never
