@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import ConceptsPage from "./page";
+import { axeViolations } from "@/test-utils/axe";
 
 function pageText(): string {
   return document.body.textContent ?? "";
@@ -57,5 +58,10 @@ describe("concepts page", () => {
     expect(
       screen.getByRole("link", { name: /happens to a reference image you select/i }),
     ).toHaveAttribute("href", "/privacy");
+  });
+
+  it("has no axe violations", async () => {
+    const { container } = render(<ConceptsPage />);
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });

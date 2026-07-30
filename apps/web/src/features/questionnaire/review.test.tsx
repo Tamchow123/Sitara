@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReviewSummary } from "./ReviewSummary";
 import type { QuestionnaireSchema } from "./types";
+import { axeViolations } from "@/test-utils/axe";
 
 const mocks = vi.hoisted(() => ({
   fetchDesign: vi.fn(),
@@ -595,6 +596,27 @@ describe("ReviewSummary", () => {
       await vi.waitFor(() =>
         expect(mocks.replace).toHaveBeenCalledWith("/design/d1/result/v-y"),
       );
+    });
+  });
+
+  describe("accessibility", () => {
+    it("has no axe violations on the ready-to-generate review", async () => {
+      const { container } = render(<ReviewSummary designId="d1" />);
+      await screen.findByRole("button", { name: /Generate my concept/i });
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations when the draft is incomplete and the error summary is shown", async () => {
+      mocks.validateDesignDraft.mockResolvedValue({
+        ok: false,
+        status: 400,
+        code: "validation_failed",
+        message: "bad",
+        fields: { garment_type: ["This question needs an answer."] },
+      });
+      const { container } = render(<ReviewSummary designId="d1" />);
+      await screen.findByText(/still need attention/i);
+      expect(await axeViolations(container)).toHaveNoViolations();
     });
   });
 });

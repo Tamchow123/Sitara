@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import PrivacyPage from "./page";
+import { axeViolations } from "@/test-utils/axe";
 
 // This page is the one place a bride can go to find out what happens to an
 // image she uploads. Most of what follows tests for the ABSENCE of comfortable
@@ -99,5 +100,10 @@ describe("privacy page", () => {
       "href",
       "/concepts",
     );
+  });
+
+  it("has no axe violations", async () => {
+    const { container } = render(<PrivacyPage />);
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });

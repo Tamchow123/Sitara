@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DesignResult } from "./DesignResult";
 import type { DesignDraft, DesignImages, DesignResult as DesignResultType } from "@/lib/api";
+import { axeViolations } from "@/test-utils/axe";
 
 const mocks = vi.hoisted(() => ({
   fetchDesignResult: vi.fn(),
@@ -853,5 +854,87 @@ describe("DesignResult — concept masthead (Phase 17)", () => {
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
+
+  describe("accessibility", () => {
+    it("has no axe violations with the image present, cards closed and expanded", async () => {
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      const { container } = renderResult();
+      await screen.findByRole("heading", { name: /Ivory and gold/i });
+      // Closed is the arrival state; expanded is a structurally different DOM
+      // (every disclosure body now rendered), so both are worth a run.
+      expect(await axeViolations(container)).toHaveNoViolations();
+      expandWholeBrief();
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations when the image is unavailable but the brief is present", async () => {
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({
+        ok: false,
+        status: 503,
+        code: "design_image_delivery_unavailable",
+        message: "Design images are temporarily unavailable.",
+      });
+      const { container } = renderResult();
+      await screen.findByRole("heading", { name: /Ivory and gold/i });
+      // The image query retries once before settling into its error state.
+      await screen.findByText(/temporarily unavailable/i, {}, { timeout: 3000 });
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations with the refinement panel available", async () => {
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      mocks.fetchDesign.mockResolvedValue(design({ status: "generated", latest_job: null }));
+      mocks.fetchPublicConfig.mockResolvedValue(publicConfig(true));
+      const { container } = renderResult();
+      await screen.findByRole("heading", { name: /what would you change/i });
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations in the refinement-used locked state", async () => {
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      mocks.fetchDesign.mockResolvedValue(
+        design({
+          status: "generated",
+          latest_job: {
+            id: "j1",
+            design_id: "d1",
+            design_version_id: "v2",
+            status: "succeeded",
+            error_code: null,
+            generation_kind: "refinement",
+            is_demo: false,
+            created_at: "t",
+            updated_at: "t",
+            started_at: "t",
+            completed_at: "t",
+          },
+        }),
+      );
+      mocks.fetchPublicConfig.mockResolvedValue(publicConfig(true));
+      const { container } = renderResult();
+      await screen.findByRole("heading", { name: /Ivory and gold/i });
+      await waitFor(() =>
+        expect(screen.queryByRole("heading", { name: /what would you change/i })).toBeNull(),
+      );
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations on the route-level result error", async () => {
+      mocks.fetchDesignResult.mockResolvedValue({
+        ok: false,
+        status: 503,
+        code: "unavailable",
+        message: "unused — the component substitutes its own copy",
+      });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      const { container } = renderResult();
+      await screen.findByRole("alert");
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
   });
 });

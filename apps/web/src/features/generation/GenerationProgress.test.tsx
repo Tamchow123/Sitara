@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GenerationProgress } from "./GenerationProgress";
 import { GenerationJobNotFoundError, GenerationJobUnavailableError } from "@/lib/api";
 import type { GenerationJob } from "@/lib/api";
+import { axeViolations } from "@/test-utils/axe";
 
 const mocks = vi.hoisted(() => ({
   fetchGenerationJob: vi.fn(),
@@ -401,6 +402,78 @@ describe("GenerationProgress", () => {
       renderProgress();
       await screen.findByRole("alert");
       expect(screen.queryByRole("link", { name: /original concept/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it("never advances a stage on a timer — only new server data moves it", async () => {
+    // The handoff's prototype cycled its stages on a setInterval. Doing that
+    // here would tell a bride her image was being drawn while the job was in
+    // fact still queued (or already dead), so the current stage must follow the
+    // job status and nothing else.
+    vi.useFakeTimers();
+    mocks.fetchGenerationJob.mockResolvedValue(job({ status: "queued" }));
+    const { container } = renderProgress();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const currentStage = () => container.querySelector('[aria-current="step"]')?.textContent ?? "";
+    expect(currentStage()).toMatch(/Preparing \(in progress\)/i);
+
+    // Two full minutes of polling, with the server still saying "queued".
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(currentStage()).toMatch(/Preparing \(in progress\)/i);
+    // Exactly one stage is ever current — the timer never lights a second.
+    expect(container.querySelectorAll('[aria-current="step"]')).toHaveLength(1);
+
+    // Only a changed status moves it.
+    mocks.fetchGenerationJob.mockResolvedValue(job({ status: "running_image" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(currentStage()).toMatch(/Visual concept \(in progress\)/i);
+    vi.useRealTimers();
+  });
+
+  describe("accessibility", () => {
+    // Each narrated stage is a genuinely different DOM — a different stage is
+    // marked current, and the live region carries different text — so one axe
+    // run over one stage would not stand in for the others.
+    it.each([
+      ["queued", /Preparing your concept/i],
+      ["running_text", /Creating your design brief/i],
+      ["running_image", /Creating your visual concept/i],
+    ] as const)("has no axe violations in the %s stage", async (status, marker) => {
+      mocks.fetchGenerationJob.mockResolvedValue(job({ status }));
+      const { container } = renderProgress();
+      await screen.findByText(marker);
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations in the failure state", async () => {
+      mocks.fetchGenerationJob.mockResolvedValue(
+        job({ status: "failed", error_code: "image_ingest_failed" }),
+      );
+      const { container } = renderProgress();
+      await screen.findByRole("alert");
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations in the progress-unavailable retry state", async () => {
+      // The bounded retry/backoff (1s + 2s + 4s) has to be exhausted before the
+      // query settles into its error state, so this drives it with fake timers
+      // exactly as the behavioural test above does — then hands the clock back
+      // before axe runs, since axe-core schedules its own real timeouts.
+      vi.useFakeTimers();
+      mocks.fetchGenerationJob.mockRejectedValue(new GenerationJobUnavailableError());
+      const { container } = renderProgress();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(screen.getByRole("alert")).toHaveTextContent(/temporarily unavailable/i);
+      vi.useRealTimers();
+      expect(await axeViolations(container)).toHaveNoViolations();
     });
   });
 });

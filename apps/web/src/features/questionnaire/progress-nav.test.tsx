@@ -1,13 +1,9 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { axe, toHaveNoViolations } from "jest-axe";
 import { describe, expect, it, vi } from "vitest";
 
 import { ProgressNav } from "./ProgressNav";
 import type { ProgressCategory } from "./ProgressNav";
-
-expect.extend(toHaveNoViolations);
-
-const AXE_CONFIG = { rules: { "color-contrast": { enabled: false } } };
+import { axeViolations } from "@/test-utils/axe";
 
 const categories: ProgressCategory[] = [
   { id: "occasion", label: "Occasion", step: 0, complete: true, locked: false },
@@ -99,6 +95,6 @@ describe("ProgressNav", () => {
 
   it("has no axe violations", async () => {
     const { container } = renderNav();
-    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });

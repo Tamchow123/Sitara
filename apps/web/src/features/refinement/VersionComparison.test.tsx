@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { VersionComparison } from "./VersionComparison";
 import type { DesignImages, DesignResult as DesignResultType } from "@/lib/api";
+import { axeViolations } from "@/test-utils/axe";
 
 const mocks = vi.hoisted(() => ({
   fetchDesignResult: vi.fn(),
@@ -298,5 +299,27 @@ describe("VersionComparison", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/temporarily unavailable/i);
     expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+  });
+
+  describe("accessibility", () => {
+    it("has no axe violations with both versions present", async () => {
+      const { container } = renderComparison();
+      await screen.findByRole("heading", { name: /previous design/i });
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations when the original's brief cannot be loaded", async () => {
+      // The asymmetric state: one side is a full concept, the other an alert.
+      // Worth its own run — a heading level or label can only go wrong here.
+      mocks.fetchDesignResult.mockResolvedValue({
+        ok: false,
+        status: 503,
+        code: "design_result_unavailable",
+        message: "unavailable",
+      });
+      const { container } = renderComparison();
+      await screen.findByRole("alert");
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
   });
 });

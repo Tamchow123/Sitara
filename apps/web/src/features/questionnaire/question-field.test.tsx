@@ -1,13 +1,9 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { axe, toHaveNoViolations } from "jest-axe";
 import { describe, expect, it, vi } from "vitest";
 
 import { QuestionField } from "./QuestionField";
 import type { Question } from "./types";
-
-expect.extend(toHaveNoViolations);
-
-const AXE_CONFIG = { rules: { "color-contrast": { enabled: false } } };
+import { axeViolations } from "@/test-utils/axe";
 
 const necklineQuestion: Question = {
   id: "neckline_style",
@@ -109,7 +105,7 @@ describe("QuestionField labelHidden", () => {
         labelHidden
       />,
     );
-    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });
 
@@ -305,7 +301,7 @@ describe("QuestionField single_choice with visuals and no-preference", () => {
         onChange={vi.fn()}
       />,
     );
-    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });
 
@@ -465,7 +461,7 @@ describe("QuestionField colour swatch selector", () => {
         onChange={vi.fn()}
       />,
     );
-    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });
 
@@ -563,7 +559,7 @@ describe("QuestionField colour_choice (schema v4)", () => {
       customColours: ["#7f2b4a"],
       onAddCustomColour: vi.fn(),
     });
-    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });
 

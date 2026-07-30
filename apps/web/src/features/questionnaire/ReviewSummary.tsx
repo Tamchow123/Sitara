@@ -324,20 +324,26 @@ export function ReviewSummary({ designId }: Props) {
               {rows.map(({ question, text, answered }) => (
                 <div key={question.id} className="review-row">
                   <dt>{question.label}</dt>
-                  <dd className={answered ? undefined : "review-unanswered"}>{text}</dd>
-                  {/* Per-row Edit, deep-linked to that one question's screen —
-                      the wizard resolves ?q= to a screen index and still
-                      refuses to skip past what has been reached. */}
-                  <Link
-                    className="review-edit"
-                    href={`${editHref}?q=${encodeURIComponent(question.id)}`}
-                    // Named for assistive technology through aria-label rather
-                    // than a visually-hidden span, so the question's text
-                    // appears exactly once in the row.
-                    aria-label={`Edit ${question.label}`}
-                  >
-                    Edit
-                  </Link>
+                  {/* The Edit link lives INSIDE the <dd>, not beside it: a
+                      <dl>'s wrapper <div> may contain only <dt> and <dd>, so a
+                      sibling <a> there is invalid and axe rightly rejects it.
+                      The row's three-column look is rebuilt inside the <dd>. */}
+                  <dd>
+                    <span className={answered ? undefined : "review-unanswered"}>{text}</span>
+                    {/* Per-row Edit, deep-linked to that one question's screen —
+                        the wizard resolves ?q= to a screen index and still
+                        refuses to skip past what has been reached. */}
+                    <Link
+                      className="review-edit"
+                      href={`${editHref}?q=${encodeURIComponent(question.id)}`}
+                      // Named for assistive technology through aria-label rather
+                      // than a visually-hidden span, so the question's text
+                      // appears exactly once in the row.
+                      aria-label={`Edit ${question.label}`}
+                    >
+                      Edit
+                    </Link>
+                  </dd>
                 </div>
               ))}
             </dl>

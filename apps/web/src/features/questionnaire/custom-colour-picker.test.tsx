@@ -1,12 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { axe, toHaveNoViolations } from "jest-axe";
 import { describe, expect, it, vi } from "vitest";
 
 import { CustomColourPicker } from "./CustomColourPicker";
-
-expect.extend(toHaveNoViolations);
-
-const AXE_CONFIG = { rules: { "color-contrast": { enabled: false } } };
+import { axeViolations } from "@/test-utils/axe";
 
 const open = () => {
   fireEvent.click(screen.getByRole("button", { name: /Any colour/ }));
@@ -81,7 +77,7 @@ describe("CustomColourPicker", () => {
   it("has no axe violations with the panel open", async () => {
     const { container } = render(<CustomColourPicker colours={[]} max={8} onAdd={vi.fn()} />);
     open();
-    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });
 

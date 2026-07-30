@@ -296,6 +296,31 @@ describe("design tokens: motion honours reduced-motion", () => {
       expect(block![0]).toContain(`${name}: 0ms`);
     }
   });
+
+  it("also stops animation and transition outright, for rules that hard-code a duration", () => {
+    // Zeroing the tokens only helps a rule that USES them. A partial that
+    // writes `transition: opacity 200ms ease` directly would still animate, so
+    // the blanket override is the actual guarantee and must not be dropped.
+    const block = CSS.match(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\n\}/);
+    expect(block![0]).toMatch(/\*\s*\{[^}]*transition:\s*none\s*!important/);
+    expect(block![0]).toMatch(/\*\s*\{[^}]*animation:\s*none\s*!important/);
+    expect(block![0]).toMatch(/scroll-behavior:\s*auto\s*!important/);
+  });
+
+  it("references no motion token that is never declared", () => {
+    // A var(--motion-page) that does not exist fails silently: the declaration
+    // is dropped, the animation never runs, AND the reduced-motion block has
+    // nothing to zero. That exact typo shipped once in generation.css, so it
+    // gets a guard rather than another manual read-through.
+    const declared = new Set(Array.from(CSS.matchAll(/(--motion-[\w-]+)\s*:/g), (m) => m[1]));
+    const referenced = new Set(
+      Array.from(CSS.matchAll(/var\(\s*(--motion-[\w-]+)/g), (m) => m[1]),
+    );
+    const dangling = [...referenced].filter((name) => !declared.has(name)).sort();
+    expect(dangling, `motion tokens referenced but never declared: ${dangling.join(", ")}`).toEqual(
+      [],
+    );
+  });
 });
 
 describe("design tokens: no third-party font requests", () => {

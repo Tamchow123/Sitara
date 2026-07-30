@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RefinementPanel } from "./RefinementPanel";
 import { REFINEMENT_NOTE_MAX_LENGTH } from "./refinement-options";
+import { axeViolations } from "@/test-utils/axe";
 
 const mocks = vi.hoisted(() => ({
   startDesignRefinement: vi.fn(),
@@ -266,5 +267,27 @@ describe("RefinementPanel — submission", () => {
     await vi.waitFor(() => expect(mocks.startDesignRefinement).toHaveBeenCalled());
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
+  });
+
+  describe("accessibility", () => {
+    it("has no axe violations on arrival and once a change is chosen", async () => {
+      const { container } = render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
+      // Arrival: submit disabled, nothing acknowledged. Then the enabled state,
+      // which turns aria-describedby hints and the acknowledgement on.
+      expect(await axeViolations(container)).toHaveNoViolations();
+      selectChip(/colour story/i);
+      acknowledge();
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations in the note-too-long error state", async () => {
+      const { container } = render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
+      selectChip(/colour story/i);
+      fireEvent.change(screen.getByLabelText(/optional note/i), {
+        target: { value: "x".repeat(REFINEMENT_NOTE_MAX_LENGTH + 1) },
+      });
+      await screen.findByText(/please shorten your note/i);
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
   });
 });

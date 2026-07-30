@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Home from "./page";
 import heroes from "./landing-hero.json";
+import { axeViolations } from "@/test-utils/axe";
 
 // The landing page is the one screen a bride sees before she trusts us with
 // anything, so these tests are as much about what is NOT on it — infrastructure
@@ -191,5 +192,22 @@ describe("landing page", () => {
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     const h2s = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
     expect(h2s).toEqual(["How it works", "Ready to see your vision take shape?", "Before you start"]);
+  });
+
+  it("has no axe violations once the public config has resolved", async () => {
+    mockConfig(CONFIG_DEMO);
+    const { container } = render(<Home />);
+    await waitFor(() => expect(screen.getByRole("status")).not.toHaveTextContent(/checking/i));
+    expect(await axeViolations(container)).toHaveNoViolations();
+  });
+
+  it("has no axe violations in the bounded config-unavailable state", async () => {
+    // The state a bride actually hits when the backend is down, so it is worth
+    // asserting separately: a notice that appears late must not arrive with a
+    // broken label or an orphaned live region.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+    const { container } = render(<Home />);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/could not confirm/i));
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });

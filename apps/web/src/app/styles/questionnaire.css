@@ -804,11 +804,35 @@
   align-items: baseline;
   gap: 1rem;
 }
+/* Two columns, not three: the Edit link is inside the <dd> because a <dl>'s
+   wrapper <div> may only contain <dt> and <dd>. The <dd> then lays the answer
+   and its Edit out as the third column used to look. */
 .review-row {
   display: grid;
-  grid-template-columns: max-content 1fr max-content;
-  gap: 0.4rem 1.25rem;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-5);
   align-items: baseline;
+}
+
+.review-row dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+/* A flex item defaults to min-width: auto, so a long unbroken answer would
+   refuse to shrink and push Edit out of the row. Edit is the only way to
+   correct one answer from here, so it must never be the thing that overflows:
+   the answer wraps, and the link keeps its width. */
+.review-row dd > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.review-row .review-edit {
+  flex-shrink: 0;
 }
 /* An unanswered row is a deliberate choice, not an error: it reads in the
    softer accent rather than the warning colour. */

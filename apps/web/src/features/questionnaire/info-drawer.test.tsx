@@ -1,13 +1,9 @@
 import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { axe, toHaveNoViolations } from "jest-axe";
 import { describe, expect, it } from "vitest";
 
 import { InfoDrawer } from "./InfoDrawer";
-
-expect.extend(toHaveNoViolations);
-
-const AXE_CONFIG = { rules: { "color-contrast": { enabled: false } } };
+import { axeViolations } from "@/test-utils/axe";
 
 // jsdom's fireEvent.click does not move focus the way a real pointer press
 // does, so each test focuses the trigger explicitly first. Without that the
@@ -122,6 +118,6 @@ describe("InfoDrawer", () => {
   it("has no axe violations while open", async () => {
     const { container } = render(<Harness />);
     openDrawer();
-    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });
