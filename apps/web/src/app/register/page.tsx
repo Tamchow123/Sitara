@@ -12,7 +12,7 @@ type FieldErrors = Record<string, string[]>;
 function FieldError({ id, errors }: { id: string; errors?: string[] }) {
   if (!errors?.length) return null;
   return (
-    <ul id={id} role="alert" className="status-bad field-errors">
+    <ul id={id} role="alert" className="field-error field-errors">
       {errors.map((message) => (
         <li key={message}>{message}</li>
       ))}
@@ -112,9 +112,9 @@ export default function RegisterPage() {
             />
           </div>
           {error && (
-            <p role="alert" className="status-bad">
-              {error}
-            </p>
+            <div role="alert" className="alert alert-error">
+              <p>{error}</p>
+            </div>
           )}
           <button type="submit" className="btn btn-primary" disabled={submitting}>
             {submitting ? "Creating account…" : "Create account"}

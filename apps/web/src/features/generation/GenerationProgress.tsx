@@ -100,7 +100,11 @@ export function GenerationProgress({ designId, jobId }: Props) {
         <div role="alert" className="generation-unavailable">
           <h1>Progress temporarily unavailable</h1>
           <p>We could not check your generation progress just now.</p>
-          <button type="button" onClick={() => void query.refetch()}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => void query.refetch()}
+          >
             Try again
           </button>
         </div>

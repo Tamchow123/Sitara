@@ -111,7 +111,7 @@ export function DesignResult({ designId, versionId }: Props) {
 
   if (resultQuery.isPending) {
     return (
-      <p role="status" aria-live="polite">
+      <p role="status" aria-live="polite" className="loading-note">
         Loading your result…
       </p>
     );
@@ -121,11 +121,18 @@ export function DesignResult({ designId, versionId }: Props) {
     const kind = classifyResultError(resultQuery.error);
     const copy = resultErrorCopy(kind);
     return (
-      <div role="alert">
+      <div role="alert" className="route-error">
         <h1>{copy.heading}</h1>
         <p>{copy.message}</p>
+        {/* A not-found is final — there is nothing to retry, and offering a
+            button would invite the user to keep asking a question already
+            answered. Everything else gets one clear next action. */}
         {kind !== "not_found" && (
-          <button type="button" onClick={() => void resultQuery.refetch()}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => void resultQuery.refetch()}
+          >
             Try again
           </button>
         )}

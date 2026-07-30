@@ -78,9 +78,12 @@ function LoginForm() {
             />
           </div>
           {error && (
-            <p role="alert" className="status-bad">
-              {error}
-            </p>
+            // A form-level failure, so it gets the alert block rather than a
+            // bare red line. The message stays the generic one the auth layer
+            // produces — it must not reveal whether the address is registered.
+            <div role="alert" className="alert alert-error">
+              <p>{error}</p>
+            </div>
           )}
           <button type="submit" className="btn btn-primary" disabled={submitting}>
             {submitting ? "Signing in…" : "Sign in"}

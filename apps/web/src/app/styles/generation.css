@@ -169,7 +169,7 @@
   align-items: flex-end;
   flex-wrap: wrap;
   gap: var(--space-4);
-  animation: sitara-up var(--motion-page) both;
+  animation: sitara-up var(--motion-screen) both;
 }
 
 .result-header-text {
@@ -223,10 +223,19 @@
   }
   /* Sticky only where there are two columns to be sticky beside. In the
      single-column fallback the same element is a normal block, so nothing
-     needs unsetting and nothing can pin over the content below it. */
+     needs unsetting and nothing can pin over the content below it.
+
+     The height cap is not cosmetic. A sticky element taller than the
+     viewport pins at `top` and its lower part then never comes back into
+     view, however far the page is scrolled — which would put the download
+     link and the concept disclaimer permanently out of reach on a short
+     laptop screen. Capping the column and letting it scroll keeps every
+     control reachable by mouse, wheel and keyboard. */
   .concept-render {
     position: sticky;
     top: var(--space-4);
+    max-height: calc(100vh - var(--space-8));
+    overflow-y: auto;
   }
 }
 
@@ -268,7 +277,6 @@
 .result-image-actions {
   display: flex;
   justify-content: flex-start;
-  padding: 0;
 }
 
 .result-image-actions a {
@@ -310,7 +318,7 @@
 
 .brief-toolbar {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-3);
   margin-top: var(--space-2);
 }
@@ -320,9 +328,12 @@
   margin: 0;
 }
 
+/* The handoff draws this as bare accent text. It keeps `.btn`'s 44px target
+   height regardless — the visual weight comes off, the touch target does
+   not. Only the horizontal padding is trimmed, so it sits flush with the
+   column edge the way the prototype does. */
 .brief-expand-all {
-  min-height: 0;
-  padding: 4px 0;
+  padding-inline: var(--space-2);
   font-size: 13.5px;
 }
 
@@ -409,7 +420,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  padding: var(--space-5) var(--space-5);
+  padding: var(--space-5);
   border-radius: var(--radius-lg);
   background: var(--color-neutral-100);
   scroll-margin-top: var(--space-4);
@@ -418,6 +429,12 @@
 .refinement-panel h2 {
   margin: 0;
   font-size: clamp(26px, 3.4vw, 34px);
+}
+
+/* The locked state is a short explanation, not an invitation, so its heading
+   stays at section scale rather than the form's display scale. */
+.refinement-locked h2 {
+  font-size: 22px;
 }
 
 .refinement-lede {
@@ -614,7 +631,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  animation: sitara-up var(--motion-page) both;
+  animation: sitara-up var(--motion-screen) both;
 }
 
 .version-comparison h1 {

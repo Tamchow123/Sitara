@@ -108,9 +108,8 @@
 /*                                                                     */
 /* Two honest sentences on every screen: what a concept is, and that    */
 /* designs are private. No operational status, no analytics, no         */
-/* marketing. Phase 17 commit 4 adds the links to the fuller privacy    */
-/* and concept pages once those pages exist — a footer link to a route  */
-/* that has not shipped yet is worse than no link.                      */
+/* marketing. The two links carry the fuller versions of exactly those  */
+/* two sentences, and nothing else lives down here.                     */
 /* ------------------------------------------------------------------ */
 .shell-footer {
   padding-block: var(--space-6) var(--space-8);
@@ -131,4 +130,14 @@
   flex-wrap: wrap;
   gap: var(--space-4);
   margin-top: var(--space-3);
+}
+
+/* These are standalone controls in a nav, not links inside a sentence, so
+   the 24px minimum target applies to them. 13px text alone would not
+   reach it. */
+.shell-footer-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  font-weight: 600;
 }

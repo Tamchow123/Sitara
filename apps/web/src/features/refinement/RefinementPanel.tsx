@@ -17,6 +17,7 @@ import {
 } from "./refinement-options";
 import {
   REFINEMENT_SUBMIT_CODES_REQUIRING_RECHECK,
+  REFINEMENT_SUBMIT_TERMINAL_CODES,
   refinementSubmitErrorMessage,
 } from "./refinement-errors";
 import { startDesignRefinement } from "@/lib/api";
@@ -41,7 +42,12 @@ const DEMO_DRIFT_WARNING =
   "image itself is not edited, and your original image is never sent anywhere. Visual " +
   "differences from your original concept may still be substantial.";
 
-type SubmitState = { status: "idle" } | { status: "submitting" } | { status: "error"; message: string };
+type SubmitState =
+  | { status: "idle" }
+  | { status: "submitting" }
+  // See REFINEMENT_SUBMIT_TERMINAL_CODES: false where an immediate retry
+  // cannot succeed, so no retry control is rendered.
+  | { status: "error"; message: string; retryable: boolean };
 
 export function RefinementPanel({
   designId,
@@ -93,7 +99,7 @@ export function RefinementPanel({
       // Transport failure or malformed response: genuinely ambiguous whether
       // the server received the request — keep the SAME key for the retry.
       submittingRef.current = false;
-      setSubmit({ status: "error", message: result.message });
+      setSubmit({ status: "error", message: result.message, retryable: true });
       return;
     }
 
@@ -101,7 +107,11 @@ export function RefinementPanel({
     // deliberate click (if any) mints a fresh key.
     idempotencyKeyRef.current = null;
     submittingRef.current = false;
-    setSubmit({ status: "error", message: refinementSubmitErrorMessage(result.code, result.message) });
+    setSubmit({
+      status: "error",
+      message: refinementSubmitErrorMessage(result.code, result.message),
+      retryable: !REFINEMENT_SUBMIT_TERMINAL_CODES.has(result.code),
+    });
 
     if (REFINEMENT_SUBMIT_CODES_REQUIRING_RECHECK.has(result.code)) {
       onRequiresRecheck?.();
@@ -221,9 +231,11 @@ export function RefinementPanel({
       {submit.status === "error" && (
         <div className="refinement-error" role="alert">
           <p>{submit.message}</p>
-          <button type="button" className="btn btn-secondary" onClick={() => void handleSubmit()}>
-            Try again
-          </button>
+          {submit.retryable && (
+            <button type="button" className="btn btn-secondary" onClick={() => void handleSubmit()}>
+              Try again
+            </button>
+          )}
         </div>
       )}
     </section>

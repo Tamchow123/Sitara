@@ -54,14 +54,16 @@ export default function AccountPage() {
       <section className="panel" aria-labelledby="account-heading">
         <h2 id="account-heading">Account details</h2>
         <div role="status" aria-live="polite">
-          {status === "loading" && <p>Checking your session…</p>}
+          {status === "loading" && <p className="loading-note">Checking your session…</p>}
           {status === "unavailable" && (
-            <p className="status-bad">
-              Backend unavailable — your account details cannot be loaded right
-              now.
-            </p>
+            <div className="alert alert-error">
+              {/* The session check itself is what failed, so this says nothing
+                  about whether the user is still signed in — we do not know. */}
+              <p className="alert-title">Your account details cannot be loaded right now</p>
+              <p>Please try again shortly.</p>
+            </div>
           )}
-          {status === "anonymous" && <p>Redirecting to sign in…</p>}
+          {status === "anonymous" && <p className="loading-note">Redirecting to sign in…</p>}
           {status === "authenticated" && user && (
             <>
               <dl>
@@ -72,9 +74,9 @@ export default function AccountPage() {
                 {signingOut ? "Signing out…" : "Sign out"}
               </button>
               {logoutError && (
-                <p role="alert" className="status-bad">
-                  {logoutError}
-                </p>
+                <div role="alert" className="alert alert-error">
+                  <p>{logoutError}</p>
+                </div>
               )}
             </>
           )}

@@ -6,7 +6,10 @@
 // exception message; falls back to the server's own safe message text for
 // any code this map does not recognise.
 
-import { GENERATION_SUBMIT_MESSAGES } from "@/features/generation/submit-errors";
+import {
+  GENERATION_SUBMIT_MESSAGES,
+  GENERATION_SUBMIT_TERMINAL_CODES,
+} from "@/features/generation/submit-errors";
 
 const REFINEMENT_SUBMIT_MESSAGES: Record<string, string> = {
   // Shared admission copy (Phase 16): live_generation_disabled,
@@ -28,6 +31,17 @@ export const REFINEMENT_SUBMIT_CODES_REQUIRING_RECHECK: ReadonlySet<string> = ne
   "design_not_refinable",
   "refinement_in_progress",
   "refinement_limit_reached",
+]);
+
+// Codes after which an immediate "Try again" cannot succeed, so the panel must
+// not offer one: the shared Phase 16 admission states (generation turned off,
+// per-user limit reached, daily budget exhausted) plus this design's own
+// already-concluded refinement states. The latter also trigger an eligibility
+// recheck, but the button must be gone in the same render — not one round trip
+// later.
+export const REFINEMENT_SUBMIT_TERMINAL_CODES: ReadonlySet<string> = new Set([
+  ...GENERATION_SUBMIT_TERMINAL_CODES,
+  ...REFINEMENT_SUBMIT_CODES_REQUIRING_RECHECK,
 ]);
 
 export function refinementSubmitErrorMessage(code: string, fallback: string): string {

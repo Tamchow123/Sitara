@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 import { fetchActiveQuestionnaire, fetchCatalogue, fetchDesign } from "./api";
 import type { InspirationUpload } from "@/lib/api";
@@ -447,24 +448,39 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
   // -- Render ---------------------------------------------------------------
   if (load === "loading" || load === "redirecting") {
     return (
-      <p role="status" aria-live="polite">
+      <p role="status" aria-live="polite" className="loading-note">
         Loading the questionnaire…
       </p>
     );
   }
   if (load === "notfound") {
+    // Deliberately says nothing about whether a design with this id exists —
+    // the backend returns the same 404 for absent and foreign designs, and the
+    // copy must not undo that. Starting a new design is the only honest next
+    // action, so it is the only one offered.
     return (
-      <div role="alert">
+      <div role="alert" className="route-error">
         <h1>Design not found</h1>
         <p>This design is not available. It may belong to a different session.</p>
+        <Link className="btn btn-secondary" href="/">
+          Start a new design
+        </Link>
       </div>
     );
   }
   if (load === "unavailable" || schema === null || plan === null) {
     return (
-      <div role="alert" className="wizard-unavailable">
-        <p>The questionnaire is temporarily unavailable.</p>
-        <button type="button" onClick={() => setReloadCounter((count) => count + 1)}>
+      <div role="alert" className="route-error">
+        <h1>Questionnaire temporarily unavailable</h1>
+        {/* No claim about saved answers here: this branch is reached before the
+            design is known to have loaded, so there is nothing we can honestly
+            promise about them. */}
+        <p>We could not load the questionnaire just now.</p>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => setReloadCounter((count) => count + 1)}
+        >
           Try again
         </button>
       </div>
@@ -585,14 +601,19 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
         <section aria-labelledby="inspiration-heading">
           <h1 id="inspiration-heading">Inspiration images</h1>
           {catalogue.status === "loading" || catalogue.status === "idle" ? (
-            <p role="status" aria-live="polite">
+            <p role="status" aria-live="polite" className="loading-note">
               Loading inspiration images…
             </p>
           ) : catalogue.status === "unavailable" ? (
-            <div role="alert" className="wizard-unavailable">
-              <p>Inspiration images are temporarily unavailable.</p>
+            // An in-page alert, not a route error: the questionnaire around it
+            // is fine and inspiration images are optional, so this must not
+            // read as though the design itself failed.
+            <div role="alert" className="alert alert-error">
+              <p className="alert-title">Inspiration images are temporarily unavailable</p>
+              <p>You can continue without them, or try loading them again.</p>
               <button
                 type="button"
+                className="btn btn-secondary"
                 onClick={() => setCatalogueAttempt((attempt) => attempt + 1)}
               >
                 Try again

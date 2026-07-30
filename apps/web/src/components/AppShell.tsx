@@ -108,6 +108,13 @@ export function AppShell({
           and not a guarantee that a garment can be made exactly as shown.
         </p>
         <p>Your designs are private by default.</p>
+        {/* The two sentences above are the short version; these are where the
+            long version lives. Both are static content pages, so they are safe
+            to reach from every screen including mid-questionnaire. */}
+        <nav aria-label="About Sitara" className="shell-footer-links">
+          <Link href="/privacy">Privacy</Link>
+          <Link href="/concepts">About concepts</Link>
+        </nav>
       </footer>
     </div>
   );

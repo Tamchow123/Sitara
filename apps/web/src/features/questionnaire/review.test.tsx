@@ -439,6 +439,39 @@ describe("ReviewSummary", () => {
       expect(secondKey).toBe(firstKey);
     });
 
+    it.each([
+      ["live_generation_disabled", /currently turned off/i],
+      ["generation_limit_reached", /reached the limit/i],
+      ["live_generation_budget_exhausted", /daily limit/i],
+    ])(
+      "offers no retry control for %s, which an immediate retry cannot clear",
+      async (code, expected) => {
+        mocks.startDesignGeneration.mockResolvedValue({
+          ok: false,
+          status: 429,
+          code,
+          message: "unused — the page substitutes its own copy",
+        });
+        render(<ReviewSummary designId="d1" />);
+        fireEvent.click(await screen.findByRole("button", { name: /Generate my concept/i }));
+        expect(await screen.findByText(expected)).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Try again/i })).not.toBeInTheDocument();
+      },
+    );
+
+    it("still offers a retry for a transient admission outage", async () => {
+      mocks.startDesignGeneration.mockResolvedValue({
+        ok: false,
+        status: 503,
+        code: "queue_unavailable",
+        message: "unused — the page substitutes its own copy",
+      });
+      render(<ReviewSummary designId="d1" />);
+      fireEvent.click(await screen.findByRole("button", { name: /Generate my concept/i }));
+      await screen.findByText(/queue is temporarily unavailable/i);
+      expect(screen.getByRole("button", { name: /Try again/i })).toBeInTheDocument();
+    });
+
     it("an in-progress conflict uses latest_job to resume the progress route", async () => {
       mocks.startDesignGeneration.mockResolvedValue({
         ok: false,

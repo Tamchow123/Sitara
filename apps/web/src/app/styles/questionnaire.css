@@ -700,23 +700,26 @@
   cursor: not-allowed;
 }
 
+/* A page-level summary of everything still wrong, as opposed to `.field-error`
+   next to one control. Keeps the heavier full border rather than the `.alert`
+   left rule: this is the one block the user is sent back to, and it has to be
+   findable at a glance after focus moves to it. */
 .error-summary {
-  border: 2px solid var(--bad);
-  border-radius: 8px;
-  padding: 0.75rem 1.1rem;
-  margin-bottom: 1.5rem;
+  border: 2px solid var(--color-bad);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-6);
   background: var(--color-bad-100);
 }
+
 .error-summary h2 {
-  color: var(--bad);
   margin-top: 0;
+  font-size: 18px;
+  color: var(--color-bad);
 }
 
-.wizard-unavailable button {
-  margin-top: 0.75rem;
-  padding: 0.5rem 1.1rem;
-  font: inherit;
-  cursor: pointer;
+.error-summary ul {
+  margin-bottom: 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -930,10 +933,20 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Holds its line height even when empty, so announcing an upload result does
+   not shift the buttons underneath it. */
 .upload-status {
   min-height: 1.4em;
-  margin: 0.6rem 0 0;
-  font-size: 0.9rem;
+  margin: var(--space-3) 0 0;
+  font-size: 14px;
+}
+
+/* A rejected upload reads differently from an accepted one. Colour is the
+   secondary cue only — the message itself already says what went wrong, so
+   this still works without it. */
+.upload-status-error {
+  font-weight: 700;
+  color: var(--color-bad);
 }
 .upload-grid {
   list-style: none;

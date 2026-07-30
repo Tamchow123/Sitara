@@ -183,7 +183,12 @@ export function InspirationUpload({
 
       {/* Announced, not merely displayed: a screen-reader user gets no visual
           cue that an upload finished, failed, or that a slot freed up. */}
-      <p className="upload-status" role="status">
+      <p
+        className={
+          status.kind === "error" ? "upload-status upload-status-error" : "upload-status"
+        }
+        role="status"
+      >
         {status.kind === "uploading" && `Uploading ${status.name}…`}
         {status.kind === "added" && "Image added to your design."}
         {status.kind === "removed" && "Image removed from your design."}
