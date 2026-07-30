@@ -33,11 +33,7 @@ function result(overrides: Partial<DesignResultType> = {}): DesignResultType {
       drape_or_layering: "layered",
       key_proportions: "balanced",
     },
-    colour_story: {
-      palette_summary: "ivory and gold",
-      placement: "all over",
-      rationale: "calm",
-    },
+    colour_story: { palette_summary: "ivory and gold", placement: "all over", rationale: "calm" },
     fabrics_and_texture: [{ fabric: "silk", placement: "skirt", finish_and_movement: "smooth" }],
     embellishment_plan: {
       techniques: ["zardozi"],
@@ -93,20 +89,14 @@ function images(overrides: Partial<DesignImages> = {}): DesignImages {
       width: 1536,
       height: 2048,
     },
-    thumbnail: {
-      url: "https://minio.local/signed-thumbnail",
-      width: 384,
-      height: 512,
-    },
+    thumbnail: { url: "https://minio.local/signed-thumbnail", width: 384, height: 512 },
     expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     ...overrides,
   };
 }
 
 function renderComparison(refinedOverrides: Partial<DesignResultType> = {}) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } },
-  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const refined = refinedResult(refinedOverrides);
   const utils = render(
     <QueryClientProvider client={client}>
@@ -141,10 +131,7 @@ afterEach(() => {
 describe("VersionComparison", () => {
   it("loads version 1 via lineage.parent_version_id and renders both headings", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison();
     expect(mocks.fetchDesignResult).toHaveBeenCalledWith("d1", "v1");
     expect(await screen.findByRole("heading", { name: /original concept/i })).toBeInTheDocument();
@@ -153,23 +140,15 @@ describe("VersionComparison", () => {
 
   it("renders the correct image alt text for each version", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison();
-    expect(
-      await screen.findByRole("img", { name: "Original image alt text." }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Original image alt text." })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Refined image alt text." })).toBeInTheDocument();
   });
 
   it("makes the complete brief available for both versions via a disclosure control", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison();
     await screen.findByRole("heading", { name: /original concept/i });
     const summaries = screen.getAllByText(/view complete brief/i);
@@ -180,10 +159,7 @@ describe("VersionComparison", () => {
 
   it("puts the current (refined) concept first, with the original under Previous design", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison();
     // Wait for BOTH cards to be mounted before reading order — the original
     // side loads asynchronously, so a premature query could otherwise catch
@@ -197,10 +173,7 @@ describe("VersionComparison", () => {
     // leads and earlier ones sit under "Previous design". On a narrow screen
     // the same order stacks, so what a user meets first is the concept they
     // just generated rather than the one they replaced.
-    const headings = screen.getAllByRole("heading", {
-      level: 2,
-      name: /— version \d/,
-    });
+    const headings = screen.getAllByRole("heading", { level: 2, name: /— version \d/ });
     expect(headings[0]).toHaveTextContent(/refined concept/i);
     expect(headings[1]).toHaveTextContent(/original concept/i);
     expect(headings[0]).toHaveTextContent(/current/i);
@@ -208,31 +181,19 @@ describe("VersionComparison", () => {
   });
 
   it("labels each version from its own persisted is_demo, never inferred together", async () => {
-    mocks.fetchDesignResult.mockResolvedValue({
-      ok: true,
-      result: result({ is_demo: true }),
-    });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result({ is_demo: true }) });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison({ is_demo: false });
     await screen.findByRole("heading", { name: /original concept/i });
     // Refined (live) leads; the original (demo) follows it.
-    const headings = screen.getAllByRole("heading", {
-      level: 2,
-      name: /— version \d/,
-    });
+    const headings = screen.getAllByRole("heading", { level: 2, name: /— version \d/ });
     expect(headings[0]).toHaveTextContent(/live/i);
     expect(headings[1]).toHaveTextContent(/demo/i);
   });
 
   it("displays the selected refinement category in human-readable form", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const { container } = renderComparison({
       lineage: {
         kind: "refinement",
@@ -247,10 +208,7 @@ describe("VersionComparison", () => {
 
   it("never renders a raw refinement note (not part of the fetched type at all)", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const { container } = renderComparison();
     await screen.findByRole("heading", { name: /original concept/i });
     expect(container.innerHTML).not.toMatch(/refinement_request/i);
@@ -258,10 +216,7 @@ describe("VersionComparison", () => {
 
   it("shows the drift disclosure near the comparison heading", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison();
     expect(await screen.findByText(/new generation/i)).toBeInTheDocument();
     expect(screen.getByText(/visual drift is expected|drift/i)).toBeInTheDocument();
@@ -279,9 +234,7 @@ describe("VersionComparison", () => {
     renderComparison();
     await screen.findByRole("heading", { name: /original concept/i });
     // Version 1's image failed, but its brief (and version 2's) still show.
-    expect(
-      await screen.findByText(/temporarily unavailable/i, {}, { timeout: 3000 }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/temporarily unavailable/i, {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.getAllByText(/The original concept summary\./i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/The refined concept summary\./i).length).toBeGreaterThan(0);
     expect(screen.getByRole("img", { name: "Refined image alt text." })).toBeInTheDocument();
@@ -290,20 +243,10 @@ describe("VersionComparison", () => {
   it("refreshes the parent version's signed URL independently of the refined side", async () => {
     vi.useFakeTimers();
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    const shortLived = images({
-      expires_at: new Date(Date.now() + 2000).toISOString(),
-    });
-    const refreshed = images({
-      expires_at: new Date(Date.now() + 300_000).toISOString(),
-    });
-    mocks.fetchDesignImageUrls.mockResolvedValueOnce({
-      ok: true,
-      images: shortLived,
-    });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: refreshed,
-    });
+    const shortLived = images({ expires_at: new Date(Date.now() + 2000).toISOString() });
+    const refreshed = images({ expires_at: new Date(Date.now() + 300_000).toISOString() });
+    mocks.fetchDesignImageUrls.mockResolvedValueOnce({ ok: true, images: shortLived });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: refreshed });
 
     renderComparison();
     await act(async () => {
@@ -318,10 +261,7 @@ describe("VersionComparison", () => {
 
   it("clears both queries from the cache on unmount (gcTime: 0)", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const { unmount, client } = renderComparison();
     await screen.findByRole("heading", { name: /original concept/i });
     unmount();
@@ -334,10 +274,7 @@ describe("VersionComparison", () => {
 
   it("touches no browser storage", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison();
     await screen.findByRole("heading", { name: /original concept/i });
     expect(localStorage.length).toBe(0);

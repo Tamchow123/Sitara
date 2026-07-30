@@ -66,9 +66,7 @@ export function DesignBrief({ result }: Props) {
   }
 
   function handleDownloadBrief() {
-    const blob = new Blob([formatDesignBrief(result)], {
-      type: "text/plain;charset=utf-8",
-    });
+    const blob = new Blob([formatDesignBrief(result)], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     try {
       const link = document.createElement("a");

@@ -71,16 +71,8 @@ function result(overrides: Partial<DesignResultType> = {}): DesignResultType {
       rationale: "Calm and bridal.",
     },
     fabrics_and_texture: [
-      {
-        fabric: "Silk",
-        placement: "Skirt",
-        finish_and_movement: "Smooth drape.",
-      },
-      {
-        fabric: "Organza",
-        placement: "Dupatta",
-        finish_and_movement: "Sheer float.",
-      },
+      { fabric: "Silk", placement: "Skirt", finish_and_movement: "Smooth drape." },
+      { fabric: "Organza", placement: "Dupatta", finish_and_movement: "Sheer float." },
     ],
     embellishment_plan: {
       techniques: ["Zardozi", "Dabka"],
@@ -123,11 +115,7 @@ function images(overrides: Partial<DesignImages> = {}): DesignImages {
       width: 1536,
       height: 2048,
     },
-    thumbnail: {
-      url: "https://minio.local/signed-thumbnail",
-      width: 384,
-      height: 512,
-    },
+    thumbnail: { url: "https://minio.local/signed-thumbnail", width: 384, height: 512 },
     expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     ...overrides,
   };
@@ -159,9 +147,7 @@ function publicConfig(generationEnabled: boolean) {
 }
 
 function renderResult(designId = "d1", versionId = "v1") {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } },
-  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const utils = render(
     <QueryClientProvider client={client}>
       <DesignResult designId={designId} versionId={versionId} />
@@ -195,17 +181,10 @@ function expandWholeBrief() {
 describe("DesignResult — result rendering", () => {
   it("renders every documented section from a representative fixture", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
 
-    expect(
-      await screen.findByRole("heading", {
-        name: /Ivory and gold flared lehenga/i,
-      }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Ivory and gold flared lehenga/i })).toBeInTheDocument();
     // The summary leads the column and is never behind a disclosure.
     expect(screen.getByText(/concept summary describing/i)).toBeInTheDocument();
     expandWholeBrief();
@@ -220,10 +199,7 @@ describe("DesignResult — result rendering", () => {
 
   it("renders multiple fabric entries", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     expandWholeBrief();
@@ -242,10 +218,7 @@ describe("DesignResult — result rendering", () => {
         },
       }),
     });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     expandWholeBrief();
@@ -255,10 +228,7 @@ describe("DesignResult — result rendering", () => {
 
   it("renders cultural safeguards and construction caveats", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     expandWholeBrief();
@@ -270,10 +240,7 @@ describe("DesignResult — result rendering", () => {
 
   it("places the generic disclaimer near the heading, before the detailed brief", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const { container } = renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     const disclaimer = container.querySelector(".result-disclaimer");
@@ -292,15 +259,10 @@ describe("DesignResult — result rendering", () => {
 
   it("uses the exact image_alt_text for the image alt attribute", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     expect(
-      await screen.findByRole("img", {
-        name: "A model in an ivory flared lehenga with gold embroidery.",
-      }),
+      await screen.findByRole("img", { name: "A model in an ivory flared lehenga with gold embroidery." }),
     ).toBeInTheDocument();
   });
 
@@ -316,10 +278,7 @@ describe("DesignResult — result rendering", () => {
         design_version_id: "payload-only-version-id",
       }),
     });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const { container } = renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     const raw = container.innerHTML;
@@ -337,10 +296,7 @@ describe("DesignResult — result rendering", () => {
         concept_summary: "<img src=x onerror=alert(1)> a concept summary with markup-looking text.",
       }),
     });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const { container } = renderResult();
     await screen.findByRole("img");
     expect(screen.getByText(/onerror=alert\(1\)/)).toBeInTheDocument();
@@ -433,20 +389,14 @@ describe("DesignResult — signed URL handling", () => {
     renderResult();
     expect(mocks.fetchDesignImageUrls).not.toHaveBeenCalled();
     resolveResult({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     expect(mocks.fetchDesignImageUrls).toHaveBeenCalledWith("d1", "v1");
   });
 
   it("disables background polling for the image query", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     const imageQueryOptions = findCapturedQuery("design-image");
@@ -455,10 +405,7 @@ describe("DesignResult — signed URL handling", () => {
 
   it("declares refetchOnWindowFocus:false on the image query itself, so the near-expiry effect is the only focus-refresh mechanism", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     const imageQueryOptions = findCapturedQuery("design-image");
@@ -467,10 +414,7 @@ describe("DesignResult — signed URL handling", () => {
 
   it("removes signed URLs from the query cache after unmount (gcTime: 0)", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const { unmount, client } = renderResult();
     await screen.findByRole("img");
     unmount();
@@ -509,18 +453,13 @@ describe("DesignResult — signed URL handling", () => {
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     expect(screen.getByText(/concept summary describing/i)).toBeInTheDocument();
     // The image query retries once before settling into its error state.
-    expect(
-      await screen.findByText(/temporarily unavailable/i, {}, { timeout: 3000 }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/temporarily unavailable/i, {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.getByText(/concept summary describing/i)).toBeInTheDocument();
   });
 
   it("touches no browser storage while loading the result and image", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     expect(localStorage.length).toBe(0);
@@ -530,20 +469,10 @@ describe("DesignResult — signed URL handling", () => {
   it("refreshes the image before the signed URL expires, at ~80% of the remaining lifetime", async () => {
     vi.useFakeTimers();
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    const shortLived = images({
-      expires_at: new Date(Date.now() + 2000).toISOString(),
-    });
-    const refreshed = images({
-      expires_at: new Date(Date.now() + 300_000).toISOString(),
-    });
-    mocks.fetchDesignImageUrls.mockResolvedValueOnce({
-      ok: true,
-      images: shortLived,
-    });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: refreshed,
-    });
+    const shortLived = images({ expires_at: new Date(Date.now() + 2000).toISOString() });
+    const refreshed = images({ expires_at: new Date(Date.now() + 300_000).toISOString() });
+    mocks.fetchDesignImageUrls.mockResolvedValueOnce({ ok: true, images: shortLived });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: refreshed });
 
     renderResult();
     await act(async () => {
@@ -594,14 +523,9 @@ describe("DesignResult — signed URL handling", () => {
       ok: true,
       // Near-expiry (well under the 15s threshold), but far enough out that
       // the proactive 80%-lifetime refetchInterval has not fired yet.
-      images: images({
-        expires_at: new Date(Date.now() + 10_000).toISOString(),
-      }),
+      images: images({ expires_at: new Date(Date.now() + 10_000).toISOString() }),
     });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("img");
     expect(mocks.fetchDesignImageUrls).toHaveBeenCalledTimes(1);
@@ -617,9 +541,7 @@ describe("DesignResult — signed URL handling", () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
     mocks.fetchDesignImageUrls.mockResolvedValue({
       ok: true,
-      images: images({
-        expires_at: new Date(Date.now() + 300_000).toISOString(),
-      }),
+      images: images({ expires_at: new Date(Date.now() + 300_000).toISOString() }),
     });
     renderResult();
     await screen.findByRole("img");
@@ -634,14 +556,9 @@ describe("DesignResult — signed URL handling", () => {
 
 describe("DesignResult — copy and download actions", () => {
   it("announces copy success", async () => {
-    Object.assign(navigator, {
-      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
-    });
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     fireEvent.click(screen.getByRole("button", { name: /copy brief/i }));
@@ -653,10 +570,7 @@ describe("DesignResult — copy and download actions", () => {
       clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
     });
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     fireEvent.click(screen.getByRole("button", { name: /copy brief/i }));
@@ -665,10 +579,7 @@ describe("DesignResult — copy and download actions", () => {
 
   it("downloads the brief with the fixed filename and revokes the object URL", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const createObjectURL = vi.fn().mockReturnValue("blob:fake-url");
     const revokeObjectURL = vi.fn();
     vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
@@ -688,10 +599,7 @@ describe("DesignResult — copy and download actions", () => {
 
   it("still revokes the object URL if the download click throws", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const createObjectURL = vi.fn().mockReturnValue("blob:fake-url");
     const revokeObjectURL = vi.fn();
     vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
@@ -716,10 +624,7 @@ describe("DesignResult — copy and download actions", () => {
 describe("DesignResult — refinement (Phase 14)", () => {
   it("shows the refinement panel on an eligible version 1", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     mocks.fetchDesign.mockResolvedValue(design({ status: "generated", latest_job: null }));
     mocks.fetchPublicConfig.mockResolvedValue(publicConfig(true));
     renderResult();
@@ -745,14 +650,9 @@ describe("DesignResult — refinement (Phase 14)", () => {
         },
       }),
     });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult("d1", "v2");
-    expect(
-      await screen.findByRole("heading", { name: /compare your concepts/i }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /compare your concepts/i })).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: /what would you change/i }),
     ).not.toBeInTheDocument();
@@ -760,10 +660,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
 
   it("hides the refinement panel once the limit has been reached (a completed refinement exists)", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     mocks.fetchDesign.mockResolvedValue(
       design({
         status: "generated",
@@ -791,10 +688,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
 
   it("hides the refinement panel when generation is disabled", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     mocks.fetchPublicConfig.mockResolvedValue(publicConfig(false));
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
@@ -805,10 +699,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
 
   it("shows a running-refinement notice with a link to the progress route, and hides the panel", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     mocks.fetchDesign.mockResolvedValue(
       design({
         status: "generating",
@@ -828,9 +719,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
       }),
     );
     renderResult();
-    const link = await screen.findByRole("link", {
-      name: /view refinement progress/i,
-    });
+    const link = await screen.findByRole("link", { name: /view refinement progress/i });
     expect(link).toHaveAttribute("href", "/design/d1/generation/j7");
     expect(
       screen.queryByRole("heading", { name: /what would you change/i }),
@@ -839,10 +728,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
 
   it("shows a controlled failed-refinement notice while keeping version 1 fully readable", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     mocks.fetchDesign.mockResolvedValue(
       design({
         status: "generation_failed",
@@ -875,10 +761,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
   });
   it("says the one refinement has been used, and links to the refined concept", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     mocks.fetchDesign.mockResolvedValue(
       design({
         status: "generated",
@@ -910,10 +793,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
 
   it("gives the unavailable reason, not the used-up one, when generation is disabled", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     mocks.fetchPublicConfig.mockResolvedValue(publicConfig(false));
     renderResult();
     expect(await screen.findByRole("heading", { name: /^Refinement$/ })).toBeInTheDocument();
@@ -923,10 +803,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
 
   it("offers no refinement wording at all while the design's own state is unknown", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     mocks.fetchDesign.mockRejectedValue(new Error("network"));
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
@@ -945,10 +822,7 @@ describe("DesignResult — concept masthead (Phase 17)", () => {
       ok: true,
       result: result({ is_demo: true }),
     });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     expect(screen.getByText("Version 1")).toBeInTheDocument();
@@ -958,10 +832,7 @@ describe("DesignResult — concept masthead (Phase 17)", () => {
 
   it("offers Edit answers back to the owning design, and Refine only when it is offered", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     mocks.fetchDesign.mockResolvedValue(design({ status: "generated", latest_job: null }));
     mocks.fetchPublicConfig.mockResolvedValue(publicConfig(true));
     renderResult();
@@ -978,10 +849,7 @@ describe("DesignResult — concept masthead (Phase 17)", () => {
 
   it("keeps exactly one h1 on the page", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
-    mocks.fetchDesignImageUrls.mockResolvedValue({
-      ok: true,
-      images: images(),
-    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
