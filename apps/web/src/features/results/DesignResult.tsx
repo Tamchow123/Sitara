@@ -28,6 +28,7 @@ import {
   isRefinementUsed,
   refinedVersionId,
 } from "@/features/refinement/refinement-eligibility";
+import { generationIsOffered } from "@/features/generation/generation-availability";
 import { friendlyGenerationError } from "@/features/generation/generation-errors";
 import { fetchDesign, fetchDesignImageUrls, fetchDesignResult, fetchPublicConfig } from "@/lib/api";
 
@@ -165,14 +166,24 @@ export function DesignResult({ designId, versionId }: Props) {
   }
 
   const design = designQuery.data;
-  const generationEnabled = configQuery.data?.generation_enabled === true;
-  const eligible = designQuery.isSuccess && isRefinementEligible(result, design, generationEnabled);
+  // Not config.generation_enabled — that is the LIVE capability flag and is
+  // false in demo mode by design, which withheld refinement from every demo
+  // user. See generation-availability.ts.
+  const generationOffered = generationIsOffered(configQuery.data);
+  // Both queries must have ANSWERED before this section says anything. A
+  // pending config reads as "not offered", which is indistinguishable from a
+  // real no — so gating only on designQuery would state "generation is not
+  // currently available" while the config request was still in flight, then
+  // silently replace it with the refinement form. Saying nothing yet is the
+  // only honest option, and it matches how the design-unknown case already
+  // behaves.
+  const answered = designQuery.isSuccess && configQuery.isSuccess;
+  const eligible = answered && isRefinementEligible(result, design, generationOffered);
   const running = designQuery.isSuccess && isRefinementRunning(design);
   const failed = designQuery.isSuccess && isRefinementFailed(design);
-  // Locked, not merely absent: once the Design's own state is known and the
-  // form is not on offer, the page says which of the two reasons applies.
-  // Until designQuery resolves, nothing is claimed either way.
-  const locked = designQuery.isSuccess && !eligible && !running && !failed;
+  // Locked, not merely absent: once both are known and the form is not on
+  // offer, the page says which of the two reasons applies.
+  const locked = answered && !eligible && !running && !failed;
   const used = isRefinementUsed(design);
   const refinedId = refinedVersionId(design);
 

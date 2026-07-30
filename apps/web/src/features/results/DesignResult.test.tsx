@@ -138,10 +138,17 @@ function design(overrides: Partial<DesignDraft> = {}): DesignDraft {
   };
 }
 
-function publicConfig(generationEnabled: boolean) {
+// Realistic demo payloads. Under DEMO_MODE=true the backend always reports
+// generation_enabled: false — that flag is the LIVE capability — and says
+// whether generation is actually on offer through generation_mode. The
+// earlier fixture set generation_enabled: true alongside demo_mode: true,
+// which the backend never returns, and that hid the fact that refinement was
+// withheld from every demo user.
+function publicConfig(offered: boolean) {
   return {
     demo_mode: true,
-    generation_enabled: generationEnabled,
+    generation_enabled: false,
+    generation_mode: offered ? "demo" : "unavailable",
     max_inspiration_images: 3,
     max_refinements: 1,
   };
@@ -814,6 +821,42 @@ describe("DesignResult — refinement (Phase 14)", () => {
       screen.queryByRole("heading", { name: /what would you change/i }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /^Refinement$/ })).not.toBeInTheDocument();
+  });
+
+  it("claims nothing about refinement while the public config is still in flight", async () => {
+    // The mirror of the test above, for the other input. A pending config
+    // reads as "not offered", which is indistinguishable from a real no — so
+    // gating only on the design query would state "generation is not currently
+    // available" while the config request was still running, then replace it
+    // with the refinement form. The user must never be shown the wrong one
+    // first.
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchDesign.mockResolvedValue(design({ status: "generated", latest_job: null }));
+    let releaseConfig: (value: unknown) => void = () => {};
+    mocks.fetchPublicConfig.mockReturnValue(
+      new Promise((resolve) => {
+        releaseConfig = resolve;
+      }),
+    );
+
+    renderResult();
+    await screen.findByRole("heading", { name: /Ivory and gold/i });
+    // Neither answer yet.
+    expect(
+      screen.queryByRole("heading", { name: /what would you change/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Refinement$/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/not currently available/i)).not.toBeInTheDocument();
+
+    // Once the config answers, the panel appears — having never shown the
+    // opposite claim on the way there.
+    await act(async () => {
+      releaseConfig(publicConfig(true));
+    });
+    expect(
+      await screen.findByRole("heading", { name: /what would you change/i }),
+    ).toBeInTheDocument();
   });
 });
 

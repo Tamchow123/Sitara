@@ -90,9 +90,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.fetchDesign.mockResolvedValue(design());
   mocks.validateDesignDraft.mockResolvedValue({ ok: true, data: { valid: true } });
+  // The exact payload the running stack returns under DEMO_MODE=true. The
+  // earlier fixture paired demo_mode: true with generation_enabled: true,
+  // which the backend never produces — and that impossible combination is
+  // what hid the disabled-in-demo-mode bug from every test in this file.
   mocks.fetchPublicConfig.mockResolvedValue({
     demo_mode: true,
-    generation_enabled: true,
+    generation_enabled: false,
+    generation_mode: "demo",
     max_inspiration_images: 3,
     max_refinements: 1,
   });
@@ -298,16 +303,35 @@ describe("ReviewSummary", () => {
   });
 
   describe("Generate my concept", () => {
-    it("enables the button when valid and generation is enabled", async () => {
+    it("enables the button in demo mode, which the backend admits without the live flag", async () => {
+      // Regression guard for the bug this fixture change exposed: demo mode
+      // reports generation_enabled: false (it means the LIVE capability), so
+      // reading that flag directly disabled demo generation for everyone.
       render(<ReviewSummary designId="d1" />);
       const button = await screen.findByRole("button", { name: /Generate my concept/i });
       expect(button).toBeEnabled();
+      expect(screen.getByText(/ready to generate your concept/i)).toBeInTheDocument();
+    });
+
+    it("enables the button for live generation when the operator has turned it on", async () => {
+      mocks.fetchPublicConfig.mockResolvedValue({
+        demo_mode: false,
+        generation_enabled: true,
+        generation_mode: "live",
+        max_inspiration_images: 3,
+        max_refinements: 1,
+      });
+      render(<ReviewSummary designId="d1" />);
+      expect(await screen.findByRole("button", { name: /Generate my concept/i })).toBeEnabled();
     });
 
     it("keeps the button disabled with accurate copy when generation is disabled", async () => {
+      // Live mode with the capability flag off: the one case where
+      // generation_enabled: false genuinely means "do not offer it".
       mocks.fetchPublicConfig.mockResolvedValue({
-        demo_mode: true,
+        demo_mode: false,
         generation_enabled: false,
+        generation_mode: "unavailable",
         max_inspiration_images: 3,
         max_refinements: 1,
       });
@@ -320,13 +344,6 @@ describe("ReviewSummary", () => {
     });
 
     it("shows the demo disclosure and associates it with the submit button when demo_mode is true", async () => {
-      mocks.fetchPublicConfig.mockResolvedValue({
-        demo_mode: true,
-        generation_enabled: true,
-        generation_mode: "demo",
-        max_inspiration_images: 3,
-        max_refinements: 1,
-      });
       render(<ReviewSummary designId="d1" />);
       const button = await screen.findByRole("button", { name: /Generate my concept/i });
       const disclosure = screen.getByRole("note", { name: /demo disclosure/i });

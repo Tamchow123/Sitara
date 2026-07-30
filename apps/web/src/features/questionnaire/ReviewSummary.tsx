@@ -19,6 +19,7 @@ import { fetchDesign, fetchPublicConfig, startDesignGeneration, validateDesignDr
 import { answerLabels } from "./answer-utils";
 import { visibleQuestions } from "./rules";
 import { resolveDesignLifecycleTarget } from "@/lib/design-lifecycle";
+import { generationIsOffered } from "@/features/generation/generation-availability";
 import {
   GENERATION_SUBMIT_TERMINAL_CODES,
   generationSubmitErrorMessage,
@@ -47,7 +48,7 @@ type State =
       schema: QuestionnaireSchema;
       valid: boolean;
       errors: Record<string, string[]>;
-      generationEnabled: boolean;
+      generationOffered: boolean;
       demoMode: boolean;
       generationMode: PublicConfig["generation_mode"] | null;
     };
@@ -103,7 +104,10 @@ export function ReviewSummary({ designId }: Props) {
           fetchPublicConfig().catch(() => null),
         ]);
         if (cancelled) return;
-        const generationEnabled = config?.generation_enabled === true;
+        // Not config.generation_enabled: that flag is the LIVE capability only
+        // and is false in demo mode by design, which silently disabled this
+        // button for every demo user. See generation-availability.ts.
+        const generationOffered = generationIsOffered(config);
         const demoMode = config?.demo_mode === true;
         const generationMode = config?.generation_mode ?? null;
         if (validation.ok) {
@@ -113,7 +117,7 @@ export function ReviewSummary({ designId }: Props) {
             schema: design.questionnaire.schema,
             valid: true,
             errors: {},
-            generationEnabled,
+            generationOffered,
             demoMode,
             generationMode,
           });
@@ -128,7 +132,7 @@ export function ReviewSummary({ designId }: Props) {
             schema: design.questionnaire.schema,
             valid: false,
             errors: validation.fields ?? {},
-            generationEnabled,
+            generationOffered,
             demoMode,
             generationMode,
           });
@@ -266,7 +270,7 @@ export function ReviewSummary({ designId }: Props) {
     );
   }
 
-  const { design, schema, valid, errors, generationEnabled, demoMode, generationMode } = state;
+  const { design, schema, valid, errors, generationOffered, demoMode, generationMode } = state;
   // Read straight from the design the server returned — a resumed review must
   // show the uploads that are actually attached, never a client-side guess.
   const uploads = design.inspiration_uploads ?? [];
@@ -274,7 +278,7 @@ export function ReviewSummary({ designId }: Props) {
   const visibility = visibleQuestions(schema, answers);
   const editHref = `/design/${design.id}`;
   const submitting = submit.status === "submitting";
-  const canGenerate = valid && generationEnabled && !submitting;
+  const canGenerate = valid && generationOffered && !submitting;
   const demoAssetsUnavailable = demoMode && generationMode === "unavailable";
   const describedBy = demoMode ? "generate-note demo-disclosure" : "generate-note";
 
@@ -457,7 +461,7 @@ export function ReviewSummary({ designId }: Props) {
       <p id="generate-note" className="field-help">
         {!valid
           ? "Complete the highlighted items above before generating."
-          : !generationEnabled
+          : !generationOffered
             ? demoAssetsUnavailable
               ? "Demo generation is temporarily unavailable because its visual library is not ready."
               : "Concept generation is not currently available."
