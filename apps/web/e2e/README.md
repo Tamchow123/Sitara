@@ -10,7 +10,7 @@ assertions are written against the terminal state the server actually produces.
 | `safety.spec.ts` | The stack reports demo mode; no browser request reaches a provider host; the questionnaire stores nothing in browser storage |
 | `journeys.spec.ts` | §25 journeys 1–5 — draft persistence, keyboard-only wizard (choose, Back, Skip), the information drawer, the custom colour picker, inspiration selection and synthetic upload/removal |
 | `generation.spec.ts` | §25 journeys 6–10 — generate, resume mid-flight, a failed image with the brief intact, the one refinement, the two-version history |
-| `visual.spec.ts` | §26 visual regression, 14 baselines per viewport |
+| `visual.spec.ts` | §26 visual regression, 15 baselines per viewport |
 
 ## Safety
 
@@ -55,6 +55,16 @@ spec anchored on `running_text`.
 `localhost` form. Driving the same port by IP makes every unsafe request fail with
 a 403 `csrf_failed` that looks exactly like an application bug and is not one.
 
+**Re-run `docker compose up` with the gate variables every time — including a
+partial recreate.** `docker compose up -d --force-recreate web` also recreates
+the API it depends on, and it does so with whatever environment the shell has.
+Without the three overrides the stack falls back to your local `.env`, which on
+a developer machine may well have live generation ON. This happened during
+Phase 17: the stack came back up reporting `demo_mode: false,
+generation_enabled: true`. Nothing was spent, because `safety.spec.ts` is a
+Playwright project dependency and failed before any journey ran — but the lesson
+is that the gate variables belong on every `up`, not just the first one.
+
 **Rebuild `celery` after any backend change.** Neither `api` nor `celery` mounts
 source — both run code baked into their image — and `docker compose build api`
 does not rebuild the worker. The two then drift silently: a stale worker rejected
@@ -77,7 +87,7 @@ projects failed together and passed individually until this was pinned.
 
 ## Visual baselines
 
-The 28 committed baselines are ~10 MB, because they are full-page shots of
+The 30 committed baselines are ~11 MB, because they are full-page shots of
 photo-heavy questionnaire screens. That is a deliberate, and not free, trade-off:
 a re-record after an intended design change adds roughly that much again to
 history. Re-record only when a change is intended, never to make a red run green.
@@ -118,13 +128,13 @@ On the host the same suite is 48 files / 825 tests green, and CI's `frontend`
 job runs it against a full checkout, which is the authoritative gate.
 `.claude/phase-council.json` therefore runs `npm --prefix apps/web test`.
 
-On typechecking: `.claude/phase-council.json` runs typecheck twice, in the `web`
-container and again on the host. The container entry cannot see `e2e/` (it mounts
-only `src/` and `public/`), so the host entry is what actually checks this
-directory locally. Neither is the authoritative gate — CI's `frontend` job
-typechecks the whole checkout on pinned Node 22, `tsconfig.json` includes
-`**/*.ts`, and that covers `e2e/` reproducibly. The local pair exists only
-because it is cheap to catch the error before pushing.
+The same applies to typecheck, lint and build: the container mounts only `src/`
+and `public/`, so it cannot see `e2e/` or `playwright.config.ts` at all. All four
+frontend commands therefore run on the host in `.claude/phase-council.json`,
+matching CLAUDE.md §20. None of them is the authoritative gate — CI's `frontend`
+job runs them against a full checkout on pinned Node 22, and `tsconfig.json`'s
+`**/*.ts` sweeps in `e2e/` there. The local commands exist because it is cheap to
+catch the error before pushing.
 
 `reducedMotion` must sit under `use.contextOptions`, not directly on `use`.
 Playwright has no top-level option of that name and silently ignores unknown

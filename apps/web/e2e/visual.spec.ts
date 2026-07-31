@@ -139,6 +139,13 @@ test.describe("visual regression: questionnaire screens", () => {
     await advanceUntilQuestion(page, /fabric|cloth/i);
     await shoot(page, "questionnaire-fabric");
 
+    // §26 names "fabric/embroidery" as one required state, and the walk used to
+    // step straight from fabric to coverage — skipping embroidery entirely. It
+    // matters because embroidery and richness are framed SQUARE where fabric is
+    // 3:2, so a regression in that grid had no baseline to fail against.
+    await advanceUntilQuestion(page, /embroidery|embellishment|handwork/i);
+    await shoot(page, "questionnaire-embroidery");
+
     await advanceUntilQuestion(page, /coverage|sleeve|midriff|back/i);
     await shoot(page, "questionnaire-coverage");
 

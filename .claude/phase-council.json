@@ -1,11 +1,13 @@
 {
   "base_branch": "main",
   "remote": "origin",
-  "protected_branches": ["main"],
+  "protected_branches": [
+    "main"
+  ],
   "commands": {
     "build": [
       "docker compose build api",
-      "docker compose exec web npm run build"
+      "npm --prefix apps/web run build"
     ],
     "test": [
       "docker compose exec api pytest",
@@ -13,14 +15,13 @@
     ],
     "lint": [
       "docker compose exec api ruff check .",
-      "docker compose exec web npm run lint"
+      "npm --prefix apps/web run lint"
     ],
     "format_check": [
       "docker compose exec api ruff format --check ."
     ],
     "typecheck": [
-      "docker compose exec web npm run typecheck",
-      "npm --prefix apps/web exec -- tsc --noEmit"
+      "npm --prefix apps/web run typecheck"
     ],
     "e2e": [
       "docker compose exec -T api python manage.py install_demo_asset_pack --dev-synthetic",
