@@ -205,6 +205,12 @@ jobs:
             sleep 5
           done
           echo "web or api never became reachable"; docker compose ps; exit 1
+      - name: Publish the questionnaire
+        # A CI database is built fresh every run and no migration publishes a
+        # questionnaire, so without this `/design/new` renders no questions and
+        # every journey fails on a missing radio. Reads a committed fixture and
+        # hands it to the one service allowed to activate a version.
+        run: docker compose exec -T api python manage.py seed_questionnaire
       - name: Install the deterministic demo fixture pack
         # Locally generated synthetic assets: zero-cost, no provider call, no
         # downloaded or unlicensed image (CLAUDE.md §13).
