@@ -108,6 +108,16 @@ signed URL and is masked, though its frame is still compared.
 - **`networkidle` alone caught neither**, because React renders the resolved
   markup a frame after the response lands.
 
+**The Vitest suite must run on the host, not in the `web` container.**
+`design-tokens.test.ts` reads the vendored design system from
+`design_handoff_sitara_flow/`, which sits at the repository root — outside the
+`apps/web` Docker build context — so the container cannot see it at any point,
+rebuild or not. Running `docker compose exec web npm test` reports 32 failures
+that do not exist: 16 suites cannot resolve the token source or the axe matcher.
+On the host the same suite is 48 files / 825 tests green, and CI's `frontend`
+job runs it against a full checkout, which is the authoritative gate.
+`.claude/phase-council.json` therefore runs `npm --prefix apps/web test`.
+
 On typechecking: `.claude/phase-council.json` runs typecheck twice, in the `web`
 container and again on the host. The container entry cannot see `e2e/` (it mounts
 only `src/` and `public/`), so the host entry is what actually checks this

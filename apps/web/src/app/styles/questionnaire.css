@@ -114,6 +114,27 @@
   margin: 0 0 1.25rem;
 }
 
+/* How many answers the control takes ("Choose one"), set above the option grid
+   exactly as the handoff does. Quieter than the question itself and than any
+   schema help text, because it describes the control rather than the choice. */
+.field-hint {
+  color: var(--muted);
+  font-size: 0.9375rem;
+  margin: 0 0 var(--space-3);
+}
+
+/* The handoff sets the QUESTION heading in the heavy display face — the same
+   one it uses for "How it works" — not the light serif the hero and the
+   generation headings use. Production had it in the light face on every route,
+   so the questionnaire read a weight lighter than the design. Scoped to the
+   wizard heading deliberately: the landing hero and the generation headings are
+   light in the handoff too, and already match. */
+.wizard #screen-heading {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  letter-spacing: -0.015em;
+}
+
 /* The 1020px column and its gutter now belong to AppShell's `.container`,
    which every route renders into — the wizard must NOT set them again or the
    padding is applied twice and the card grid loses 35px of the width it was

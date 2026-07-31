@@ -9,7 +9,7 @@
     ],
     "test": [
       "docker compose exec api pytest",
-      "docker compose exec web npm test -- --run"
+      "npm --prefix apps/web test -- --run"
     ],
     "lint": [
       "docker compose exec api ruff check .",
