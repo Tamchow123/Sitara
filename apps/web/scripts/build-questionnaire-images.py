@@ -107,6 +107,7 @@ GROUP_ASPECT = {
 FULL_FIGURE_FOCUS = 0.42
 CENTRE_FOCUS = 0.5
 
+
 @dataclass(frozen=True)
 class Visual:
     """One questionnaire option visual: which source image, cropped how."""

@@ -15,10 +15,12 @@
     ],
     "lint": [
       "docker compose exec api ruff check .",
+      "docker compose exec api ruff check --config pyproject.toml ../web/scripts",
       "npm --prefix apps/web run lint"
     ],
     "format_check": [
-      "docker compose exec api ruff format --check ."
+      "docker compose exec api ruff format --check .",
+      "docker compose exec api ruff format --check --config pyproject.toml ../web/scripts"
     ],
     "typecheck": [
       "npm --prefix apps/web run typecheck"
