@@ -398,7 +398,8 @@ Standing rules across all phases:
   **unverified** (all default to 0, ceiling defaults to 0), and the budget Redis
   must be persistent + `noeviction` + standalone. The manual budgeted live
   checkpoint remains pending. Demo mode is untouched and stays zero-cost. Marked
-  Phases 1–16 delivered; Phase 17 is next.
+  Phases 1–16 delivered; Phase 17 delivered to a draft PR with two manual
+  checkpoints outstanding; Phase 18 is next.
 
 ## Phase 16-composition — Generated-image composition and framing *(inserted; delivered)*
 - **Scope:** restructure the deterministic `build_image_prompt` so the composition/framing directive (full-length, entire garment head-to-hem, one model standing, plain neutral studio background, even lighting) LEADS the prompt instead of being buried at the end, so FLUX reliably produces the intended catalogue framing rather than a cropped editorial shot. Bump `PROMPT_BUILDER_VERSION`, regenerate + review the golden snapshot/manifest, validate with a few budgeted live generations against the Phase 2 eval references, and amend ADR 0010.
@@ -419,10 +420,14 @@ Standing rules across all phases:
 - **Spec:** see [phases-16b.md](phases-16b.md). A new ADR is recorded on delivery.
 - **Commits:** `feat(questionnaire): extend taxonomy and option presentation metadata`; `feat(generation): add versioned neckline and ceremony semantics`; `feat(demo): support the expanded questionnaire taxonomy`; `feat(frontend): add visual choices, no-preference controls, and compact colours`; `docs(phase-16b): record questionnaire feedback architecture and safeguards`.
 
-## Phase 17 — UI polish and accessibility
-- **Scope:** visual design pass (typography, spacing, colour system suited to bridal aesthetic), responsive behaviour, WCAG 2.1 AA pass on wizard/catalogue/results (focus management in the wizard, aria-live on progress states, alt text everywhere, contrast), empty/loading/error state polish, privacy + disclaimer pages.
+## Phase 17 — High-fidelity UI completion and accessibility *(delivered to draft PR; two manual checkpoints outstanding)*
+- **Delivered:** the handoff design realised across every route (tokens and branded shell, landing, questionnaire, generation, concept, refinement, history), privacy and concept information pages, a full route-state audit, demo-mode generation gating, a Playwright end-to-end and visual-regression tier (§25 journeys 1–10, 14 baselines per viewport at 1440×1000 and 390×844), and the §31/§32 accessibility checkpoints executed as tests rather than asserted by hand.
+- **Evidence:** zero serious/critical axe violations on landing, privacy, concepts, a visual-card question, the open info drawer, colours, review, generation in flight and result; Lighthouse accessibility **100** on `/`, `/privacy`, `/concepts`, `/design/new`; reduced motion honoured, no sideways scroll at 320px or 200% zoom, no focus obscured by sticky UI. The §28 parity matrix cleared all five blocker areas against the served handoff. Reports live in `.claude/review/reports/phase-17/`.
+- **Outstanding, needing a person:** the §30 screen-reader spot check (NVDA or equivalent) has **not** been performed, so acceptance criterion 15 is unmet; and a pixel-by-pixel pass over the secondary §28 rows was not made (structure and copy were adjudicated instead). Both are recorded on the draft PR.
+- **Known divergences from the handoff, deliberate:** one refinement only, so "Refine together"/"Refine again" copy and the history's second-refinement control are not reproduced; no percentage or time estimate on the generation screen, because a real Celery job has no honest percentage; no prototype runtime; the landing heroes use the project's dedicated photography rather than the prototype's reused ceremony shots (owner-confirmed); the questionnaire's descriptive helper sentence is schema content and would need a new questionnaire version, an explicit non-goal.
+- **Original scope:** visual design pass (typography, spacing, colour system suited to bridal aesthetic), responsive behaviour, WCAG 2.1 AA pass on wizard/catalogue/results (focus management in the wizard, aria-live on progress states, alt text everywhere, contrast), empty/loading/error state polish, privacy + disclaimer pages.
 - **Non-goals:** no new features; no i18n beyond string-structure readiness.
-- **Commands:** `docker compose exec web npm test -- --run`; Lighthouse/axe runs (`npx @axe-core/cli` or browser audit).
+- **Commands:** `npm --prefix apps/web test -- --run` (the Vitest suite must run on the HOST — `design-tokens.test.ts` reads `design_handoff_sitara_flow/` from the repository root, outside the `apps/web` Docker build context, so the container reports failures that exist nowhere else); `npm --prefix apps/web run e2e`; `npm --prefix apps/web run e2e:visual`; axe runs inside `e2e/accessibility.spec.ts`; Lighthouse via `npx lighthouse --only-categories=accessibility`.
 - **Automated tests:** axe checks in component tests for wizard, catalogue, results; keyboard-navigation tests for the wizard.
 - **Manual checkpoint:** Lighthouse accessibility ≥ 90 on landing, wizard, results; full keyboard-only journey; screen-reader spot check on the progress screen.
 - **Commit:** `feat(frontend): UI polish, accessibility pass, and legal/disclaimer pages`
