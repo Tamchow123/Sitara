@@ -146,3 +146,84 @@ jobs:
         run: npm test
       - name: Production build
         run: npm run build
+
+  # Phase 17 §25: the §25 journeys driven against the real stack, in demo mode.
+  #
+  # Runs the FUNCTIONAL specs only, never the visual project: Playwright suffixes
+  # every baseline with the recording OS, and the committed set is `-win32`, so a
+  # Linux runner has no reference to compare against. Recording a parallel Linux
+  # set here would be baselining screenshots nobody has ever looked at, which is
+  # worse than not checking them — visual regression stays a local gate, and
+  # apps/web/e2e/README.md says so.
+  e2e:
+    runs-on: ubuntu-latest
+    # Fail fast on the cheap jobs first: this one builds images, boots six
+    # services and runs real Celery work, so there is no sense paying for it
+    # when a lint or unit-test failure already condemns the commit.
+    needs: [backend, frontend]
+    # Comfortably above the ~10-minute local runtime, but far below GitHub's
+    # 360-minute default — a hung compose service should fail, not idle.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Start the stack (gates closed)
+        env:
+          # Explicit and redundant with the compose defaults: this is the one
+          # place a reviewer looks to confirm CI cannot spend money, so it does
+          # not rely on a default several files away. safety.spec.ts then
+          # asserts the RUNNING stack agrees.
+          DEMO_MODE: "true"
+          ALLOW_PAID_AI_CALLS: "false"
+          LIVE_GENERATION_ENABLED: "false"
+          # The maximum the setting allows, so the narrated stages are
+          # observable rather than a blur.
+          DEMO_STAGE_DELAY_MS: "5000"
+        run: docker compose up -d --wait api celery web
+      - name: Wait for the web and API origins to serve
+        # `--wait` above only blocks on services that DEFINE a healthcheck.
+        # `celery` and `web` do not, so it returns as soon as their containers
+        # are "running" — before `next dev` has bound its listener. Without
+        # this, the first page.goto() can hit ERR_CONNECTION_REFUSED, which
+        # Playwright does not retry through, and the run fails on
+        # infrastructure timing.
+        #
+        # This verifies the two HTTP origins only. The Celery worker's queue
+        # subscription is NOT checked here: it is covered incidentally by the
+        # minutes of `npm ci` and browser install that follow, and by the
+        # generation specs' own 150s result wait. Said plainly so nobody reads
+        # this step as a worker-readiness gate that it is not.
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3001/ >/dev/null                && curl -fsS http://localhost:8000/api/v1/health/live >/dev/null; then
+              echo "web and api are serving"; exit 0
+            fi
+            sleep 5
+          done
+          echo "web or api never became reachable"; docker compose ps; exit 1
+      - name: Install the deterministic demo fixture pack
+        # Locally generated synthetic assets: zero-cost, no provider call, no
+        # downloaded or unlicensed image (CLAUDE.md §13).
+        run: docker compose exec -T api python manage.py install_demo_asset_pack --dev-synthetic
+      - name: Install dependencies
+        working-directory: apps/web
+        run: npm ci
+      - name: Install Playwright browser
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end journeys
+        working-directory: apps/web
+        run: npm run e2e
+      - name: Stack logs on failure
+        if: failure()
+        run: docker compose logs --tail 200 api celery web
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7

@@ -19,9 +19,14 @@
       "docker compose exec api ruff format --check ."
     ],
     "typecheck": [
-      "docker compose exec web npm run typecheck"
+      "docker compose exec web npm run typecheck",
+      "npm --prefix apps/web exec -- tsc --noEmit"
     ],
-    "e2e": [],
+    "e2e": [
+      "docker compose exec -T api python manage.py install_demo_asset_pack --dev-synthetic",
+      "npm --prefix apps/web run e2e",
+      "npm --prefix apps/web run e2e:visual"
+    ],
     "extra_checks": [
       "docker compose config",
       "docker compose exec api python manage.py check",
