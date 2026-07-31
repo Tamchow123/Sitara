@@ -65,6 +65,11 @@ generation_enabled: true`. Nothing was spent, because `safety.spec.ts` is a
 Playwright project dependency and failed before any journey ran — but the lesson
 is that the gate variables belong on every `up`, not just the first one.
 
+**Run the whole suite, not one project.** `--project=desktop` is a debugging
+shortcut, not a verification. The focus-obscuring check passed on desktop and
+failed at 390px on the first CI run, because the Next.js dev overlay sits over a
+footer link only at that width. Verify with `npm run e2e`, which runs both.
+
 **Rebuild `celery` after any backend change.** Neither `api` nor `celery` mounts
 source — both run code baked into their image — and `docker compose build api`
 does not rebuild the worker. The two then drift silently: a stale worker rejected

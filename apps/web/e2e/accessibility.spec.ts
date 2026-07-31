@@ -190,6 +190,13 @@ test.describe("§32 reduced motion, zoom and narrow viewports", () => {
         if (box.top < 0 || box.bottom > window.innerHeight) return null;
         const topmost = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
         if (!topmost) return null;
+        // `nextjs-portal` is the dev server's own overlay — the floating
+        // indicator in the corner. It is injected by `next dev`, does not exist
+        // in a production build, and at 390px it sits over a footer link. This
+        // is the ONLY exclusion, and it is named explicitly rather than being a
+        // blanket "ignore overlays": a real sticky header covering a focused
+        // control must still fail.
+        if (topmost.tagName.toLowerCase() === "nextjs-portal") return null;
         const covered = !active.contains(topmost) && !topmost.contains(active);
         return covered ? `${active.tagName.toLowerCase()} covered by ${topmost.tagName.toLowerCase()}.${topmost.className}` : null;
       });
