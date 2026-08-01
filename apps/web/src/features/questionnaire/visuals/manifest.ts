@@ -14,21 +14,26 @@ import colourSwatches from "./colour-swatches.json";
 
 export type RightsStatus = "project_owned" | "development_placeholder";
 
-// A colour group's display heading, keyed by the schema's bounded `group`
-// machine id. Grouping is presentation only. These are the schema v4 groups;
+// The order colour groups are laid out in, by the schema's bounded `group`
+// machine id. Grouping is presentation ORDER only and is never shown as a
+// heading: the handoff draws one flat palette, and these keys are what make it
+// read as a spectrum — matching first, then warm through cool to pastel —
+// instead of following whatever order the schema happens to declare.
+//
+// These are the schema v4 groups;
 // apps/api/sitara/questionnaire/tests/test_visual_keys.py asserts that the
 // swatch data and the fixture agree in both directions, so a group renamed on
-// one side cannot silently lose its heading on the other.
-export const COLOUR_GROUP_LABELS: Record<string, string> = {
-  match: "Matching",
-  reds_maroons: "Reds & maroons",
-  pinks_roses: "Pinks & roses",
-  golds_ivories: "Golds & ivories",
-  greens: "Greens",
-  blues: "Blues",
-  purples_wines: "Purples & wines",
-  silvers_pastels: "Silvers & pastels",
-};
+// one side cannot silently fall to the end of the palette on the other.
+export const COLOUR_GROUP_ORDER: readonly string[] = [
+  "match",
+  "reds_maroons",
+  "pinks_roses",
+  "golds_ivories",
+  "greens",
+  "blues",
+  "purples_wines",
+  "silvers_pastels",
+];
 
 export type ColourSwatch = {
   visualKey: string;
@@ -58,8 +63,10 @@ const SWATCH_SOURCE = "Project-authored colour value; Sitara Phase 16B.";
 // Keyed by the option `visual_key` (colour_<value>). The hex values are the
 // design handoff's own palette, transcribed once into colour-swatches.json so
 // the API-side contract test can read them without parsing TypeScript. Every
-// swatch is paired with a text label in the UI, so a choice never relies on
-// colour alone.
+// swatch carries its colour's name as label text — visually hidden on the
+// circular swatch itself, as the handoff draws it, but present for assistive
+// technology, offered as a tooltip, and spelled out in full once chosen — so a
+// choice never rests on colour alone.
 const COLOUR_MANIFEST: Record<string, ColourSwatch> = Object.fromEntries(
   Object.entries(colourSwatches as Record<string, { hex: string | null; group: string }>).map(
     ([visualKey, entry]) => [
@@ -111,10 +118,6 @@ export function colourSwatch(visualKey: string | undefined): ColourSwatch | null
 export function optionVisual(visualKey: string | undefined): OptionVisual | null {
   if (!visualKey) return null;
   return VISUAL_MANIFEST[visualKey] ?? null;
-}
-
-export function colourGroupLabel(group: string): string {
-  return COLOUR_GROUP_LABELS[group] ?? group;
 }
 
 export const _internal = { COLOUR_MANIFEST, VISUAL_MANIFEST };

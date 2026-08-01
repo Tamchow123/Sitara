@@ -168,9 +168,9 @@ test.describe("journey 4: the custom colour picker", () => {
     await fabric.getByRole("textbox").first().fill("#123456");
     await fabric.getByRole("button", { name: /^add$/i }).click();
 
-    // The added colour becomes a selectable swatch of its own, offered under
-    // "Your colours" in every colour question — not only the one that added it.
-    await expect(fabric.getByRole("group", { name: /your colours/i })).toBeVisible();
+    // The added colour becomes a selectable swatch of its own, in the same flat
+    // palette, in every colour question — not only the one that added it.
+    await expect(fabric.getByRole("radio", { name: "#123456" })).toHaveCount(1);
     await expect(
       page.getByRole("group", { name: "The dupatta" }).getByRole("radio", { name: "#123456" }),
     ).toHaveCount(1);

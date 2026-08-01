@@ -178,10 +178,17 @@
   min-inline-size: auto;
 }
 
+/* On a one-question-per-screen wizard this legend is usually hidden (the screen
+   heading says it), so it is only ever seen where a screen carries several
+   sub-questions — the colours screen's fabric/embroidery/dupatta, and coverage.
+   There the handoff sets it in the display face, as a heading in its own right
+   rather than a bold run of body text. */
 .field-label {
   display: block;
-  font-weight: bold;
-  font-size: 1.05rem;
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
   margin-bottom: 0.4rem;
   padding: 0;
 }
@@ -392,29 +399,54 @@
   cursor: pointer;
   padding: 0;
 }
-.swatch-group {
-  border: none;
-  padding: 0;
-  margin: 0;
-}
-.swatch-group-heading {
-  font-weight: bold;
-  font-size: 0.95rem;
-  padding: 0;
-  margin-bottom: 0.35rem;
-}
+/* One flat wrapping row, never a categorised grid: the handoff shows the whole
+   palette at once so a bride compares hues against each other rather than
+   inside seven boxes. 10px is the handoff's own gap. */
 .swatch-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(5rem, 1fr));
-  gap: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
 .swatch {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.25rem;
+  display: inline-flex;
   cursor: pointer;
-  text-align: center;
+}
+/* An option with no hue ("Match the fabric") is a labelled pill, not a circle:
+   there is nothing to show, so it says what it is instead. */
+.swatch-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-100);
+  color: var(--color-text);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion-fast) ease-out;
+}
+.swatch-pill:hover {
+  background: var(--color-neutral-200);
+}
+.swatch-pill.swatch-selected {
+  background: var(--color-accent-700);
+  color: var(--color-on-accent);
+}
+.swatch-pill-tick {
+  line-height: 1;
+}
+/* The "Any colour" trigger belongs at the end of the same row (`display:
+   contents` lifts the button out of its wrapper and into the flex flow), while
+   its panel and limit note drop onto a line of their own. */
+.swatch-grid .custom-colour {
+  display: contents;
+}
+.swatch-grid .custom-colour-panel,
+.swatch-grid .custom-colour > .field-limit {
+  flex-basis: 100%;
 }
 /* 38px circles, a 19px rank badge and the 56px colour input below are the
    handoff's own component dimensions, quoted deliberately rather than derived
@@ -430,7 +462,6 @@
   width: 38px;
   height: 38px;
   border-radius: var(--radius-pill);
-  box-shadow: inset 0 0 0 1.5px var(--color-swatch-edge);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-text) 22%, transparent);
   transition: transform var(--motion-fast) ease-out;
 }
@@ -466,14 +497,18 @@
   line-height: 19px;
   text-align: center;
 }
-.swatch-label {
-  font-size: 0.82rem;
-}
 .swatch-disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 .swatch input:focus-visible + .swatch-chip {
+  outline: 3px solid var(--color-accent-700);
+  outline-offset: 4px;
+}
+/* The pill has no chip to hang the ring on, so the focus ring goes on the pill
+   itself. Both rules exist because the input is visually hidden — without them
+   a keyboard user would tab through the palette with nothing to see. */
+.swatch-pill:has(input:focus-visible) {
   outline: 3px solid var(--color-accent-700);
   outline-offset: 4px;
 }

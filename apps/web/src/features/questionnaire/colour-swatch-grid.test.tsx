@@ -7,10 +7,14 @@ import type { QuestionOption } from "./types";
 import { axeViolations } from "@/test-utils/axe";
 
 // The colours screen is the one place a bride makes several ordered choices at
-// once, so these cover what the handoff's compact grid has to keep true:
+// once, so these cover what the handoff's flat palette has to keep true:
 // selection order, the bounded limit, "Match the fabric" never pretending to be
 // a colour, removal from the summary, and the fact that every swatch is a real
 // radio or checkbox rather than a div wearing aria-pressed.
+//
+// The palette is ONE row with no category headings — that is the handoff's own
+// design, and the tests assert the absence directly, because a stray fieldset
+// reintroduced by a refactor would look reasonable in a diff.
 
 function option(value: string, label: string, group: string): QuestionOption {
   return { value, label, group, visual_key: `colour_${value}` };
@@ -61,14 +65,22 @@ function summary() {
 }
 
 describe("ColourSwatchGrid — semantics", () => {
-  it("renders a real checkbox per swatch in multi mode, each with a visible text label", () => {
+  it("renders a real checkbox per swatch in multi mode, each named by its colour", () => {
     render(<Harness />);
     const boxes = screen.getAllByRole("checkbox");
     expect(boxes).toHaveLength(OPTIONS.length);
-    // The label text is present, so the choice never rests on the colour chip.
+    // The name comes from label text, not from the chip's background: the text
+    // is hidden from sight on a circular swatch but never from the accessibility
+    // tree, so the choice still never rests on colour alone.
     for (const label of ["Blush", "Scarlet", "Match the fabric", "Deep maroon"]) {
       expect(screen.getByRole("checkbox", { name: label })).toBeInTheDocument();
     }
+  });
+
+  it("offers the colour's name as a tooltip, since the swatch itself shows no text", () => {
+    render(<Harness />);
+    const scarlet = screen.getByRole("checkbox", { name: "Scarlet" }).closest("label")!;
+    expect(scarlet).toHaveAttribute("title", "Scarlet");
   });
 
   it("renders real radios in single mode, so only one colour can be held", () => {
@@ -81,12 +93,22 @@ describe("ColourSwatchGrid — semantics", () => {
     expect(screen.getByRole("radio", { name: "Scarlet" })).not.toBeChecked();
   });
 
-  it("groups swatches under the manifest's own headings, in the manifest's order", () => {
+  it("shows one flat palette with no category headings", () => {
     const { container } = render(<Harness />);
-    const legends = Array.from(container.querySelectorAll("legend"), (el) => el.textContent);
+    // The handoff has no colour categories at all. Any fieldset or heading here
+    // would be a category by another name.
+    expect(container.querySelectorAll("fieldset")).toHaveLength(0);
+    expect(container.querySelectorAll("legend")).toHaveLength(0);
+    expect(container.querySelectorAll(".swatch-grid")).toHaveLength(1);
+  });
+
+  it("orders the flat palette by the manifest's groups, not by declaration order", () => {
+    render(<Harness />);
     // "match" precedes "reds_maroons" precedes "pinks_roses" in the manifest,
-    // regardless of the order the options were declared in above.
-    expect(legends).toEqual(["Matching", "Reds & maroons", "Pinks & roses"]);
+    // so the palette reads as a spectrum even though OPTIONS is declared with
+    // Blush first. Grouping survives as ORDER only — never as a heading.
+    const names = screen.getAllByRole("checkbox").map((box) => box.getAttribute("value"));
+    expect(names).toEqual(["match_fabric", "scarlet", "deep_maroon", "blush"]);
   });
 });
 
@@ -116,10 +138,10 @@ describe("ColourSwatchGrid — selection, order and limits", () => {
 
   it("announces the running count and blocks selection beyond the limit", () => {
     render(<Harness max={2} />);
-    expect(screen.getByRole("status")).toHaveTextContent("0 of 2 selected");
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 2 chosen");
     fireEvent.click(screen.getByRole("checkbox", { name: "Scarlet" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Blush" }));
-    expect(screen.getByRole("status")).toHaveTextContent("2 of 2 selected");
+    expect(screen.getByRole("status")).toHaveTextContent("2 of 2 chosen");
     // At the limit, an unchosen swatch is disabled — but an already-chosen one
     // must stay operable, or the selection could never be undone.
     expect(screen.getByRole("checkbox", { name: "Deep maroon" })).toBeDisabled();
@@ -153,31 +175,31 @@ describe("ColourSwatchGrid — selection, order and limits", () => {
 });
 
 describe("ColourSwatchGrid — Match the fabric and custom colours", () => {
-  it("gives Match the fabric a non-solid chip, because it is not a colour", () => {
-    const { container } = render(<Harness />);
+  it("renders Match the fabric as a labelled pill, never as a coloured circle", () => {
+    render(<Harness />);
     const label = screen.getByRole("checkbox", { name: "Match the fabric" }).closest("label")!;
-    const chip = label.querySelector(".swatch-chip") as HTMLElement;
-    // A gradient, never a flat background colour that would read as a real hue.
-    expect(chip.style.background).toContain("linear-gradient");
-    const scarlet = screen
-      .getByRole("checkbox", { name: "Scarlet" })
-      .closest("label")!
-      .querySelector(".swatch-chip") as HTMLElement;
-    expect(scarlet.style.background).not.toContain("linear-gradient");
-    expect(container).toBeTruthy();
+    // No chip at all: there is no hue to show, so a circle would be a swatch
+    // pretending to be a colour. The pill carries visible text instead.
+    expect(label.querySelector(".swatch-chip")).toBeNull();
+    expect(label).toHaveClass("swatch-pill");
+    expect(label).toHaveTextContent("Match the fabric");
+
+    const scarlet = screen.getByRole("checkbox", { name: "Scarlet" }).closest("label")!;
+    expect(scarlet.querySelector(".swatch-chip")).not.toBeNull();
+    expect(scarlet).not.toHaveClass("swatch-pill");
   });
 
   it("offers the design's own colours in single mode, where the backend accepts a hex", () => {
     render(<Harness mode="single" customColours={["#123456"]} />);
-    const group = screen.getByRole("group", { name: /your colours/i });
-    expect(within(group).getByRole("radio", { name: "#123456" })).toBeInTheDocument();
+    // In the same flat palette as everything else — a custom colour is not a
+    // category either.
+    expect(screen.getByRole("radio", { name: "#123456" })).toBeInTheDocument();
   });
 
   it("does NOT offer custom colours in multi mode, where the backend would reject them", () => {
     // A multi_choice answer is validated against its declared options, so a
     // custom hex there is a swatch whose selection always fails.
     render(<Harness mode="multi" customColours={["#123456"]} />);
-    expect(screen.queryByRole("group", { name: /your colours/i })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "#123456" })).toBeNull();
   });
 

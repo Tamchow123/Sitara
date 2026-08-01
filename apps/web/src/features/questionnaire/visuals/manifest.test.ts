@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { _internal, colourGroupLabel, colourSwatch, optionVisual } from "./manifest";
+import { _internal, COLOUR_GROUP_ORDER, colourSwatch, optionVisual } from "./manifest";
 
 const { COLOUR_MANIFEST, VISUAL_MANIFEST } = _internal;
 
@@ -265,10 +265,13 @@ describe("questionnaire visual manifest", () => {
       }
     });
 
-    it("labels every colour group it declares", () => {
+    it("places every colour group it declares in the display order", () => {
+      // A group missing here does not break — it sorts silently to the end of
+      // the palette, which is exactly the kind of change nobody notices in a
+      // diff and everybody notices on the screen.
       const declared = new Set(Object.values(COLOUR_MANIFEST).map((entry) => entry.group));
       for (const group of declared) {
-        expect(colourGroupLabel(group)).not.toBe(group);
+        expect(COLOUR_GROUP_ORDER).toContain(group);
       }
     });
   });

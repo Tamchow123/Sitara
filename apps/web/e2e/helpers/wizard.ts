@@ -157,9 +157,9 @@ export async function continueScreen(page: Page): Promise<void> {
 
 /**
  * The three-part colours screen: one colour for each of the fabric, the
- * embroidery and the dupatta. Each role is its own named group, and the swatch
- * groups ("Reds & maroons" and friends) nest inside it — so the role has to be
- * named explicitly or a swatch label matches in all three at once.
+ * embroidery and the dupatta. Each role is its own named group holding one flat
+ * palette, and the same colour appears in all three — so the role has to be
+ * named explicitly or a swatch matches three times over.
  */
 export async function answerColours(
   page: Page,
