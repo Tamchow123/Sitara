@@ -89,6 +89,10 @@ function masks(page: Page) {
     page.locator(".comparison-grid img"),
     // The generated concept's own copy varies with the demo selection.
     page.locator(".result-image-state"),
+    // NOT masked: the generation progress bar. Its fill is a CSS animation, and
+    // `animations: "disabled"` (playwright.config.ts) fast-forwards animations
+    // to their end state before the shot — so the bar lands on its stage's band
+    // ceiling every time, and is worth comparing rather than hiding.
   ];
 }
 

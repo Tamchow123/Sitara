@@ -2,9 +2,14 @@
 
 // The generation progress screen (Phase 12 Part B). Polls one owned
 // generation job via TanStack Query with a created_at-derived backoff
-// schedule, renders the durable states honestly (no fake percentage, no
-// invented completion estimate), and hands off to the result route once a
-// job succeeds with a confirmed DesignVersion id.
+// schedule, renders the durable states honestly, and hands off to the result
+// route once a job succeeds with a confirmed DesignVersion id.
+//
+// There is a progress bar, and it is deliberately not a percentage: it eases
+// across a band belonging to the stage the job is actually in, so it moves
+// while you wait without ever claiming a completion figure the job does not
+// have. No number is printed and it is hidden from assistive technology; the
+// stage list and the live region carry the real state.
 
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -30,6 +35,16 @@ const STAGE_LABELS: Record<StageKey, string> = {
   running_text: "Design brief",
   running_image: "Visual concept",
 };
+
+// The share of the bar each stage eases across, in order. The bands leave a
+// gap between them so a stage change is visible as a step, and the last one
+// stops short of 100% because the bar cannot know the image is finished until
+// the job says so.
+const STAGE_BANDS: [number, number][] = [
+  [4, 24],
+  [30, 62],
+  [68, 94],
+];
 
 function stageIndexFor(status: GenerationJob["status"]): number {
   const index = STAGE_KEYS.indexOf(status as StageKey);
@@ -235,6 +250,37 @@ export function GenerationProgress({ designId, jobId }: Props) {
         <h1>{heading}</h1>
         <p>{explanation}</p>
       </div>
+      {/* The handoff's progress bar.
+
+          A durable job reports a STAGE, not a fraction, so the fill is not a
+          measurement and is not presented as one: each stage owns a band, and
+          a CSS animation eases the fill across its own band while that stage
+          runs. It therefore always moves, never runs backwards, and never
+          reaches the end before the job does — but it is an impression of
+          progress, not a percentage, so no number is printed beside it and the
+          whole block is hidden from assistive technology. The stage list above
+          and the live region below carry the state the job actually has.
+
+          `key` restarts the animation when the stage changes; without it the
+          fill would jump to the new band and sit still. */}
+      <div className="generation-estimate" aria-hidden="true">
+        <div className="generation-bar">
+          <span
+            key={job.status}
+            className="generation-bar-fill"
+            style={
+              {
+                "--bar-from": `${STAGE_BANDS[stageIndex]?.[0] ?? 100}%`,
+                "--bar-to": `${STAGE_BANDS[stageIndex]?.[1] ?? 100}%`,
+              } as React.CSSProperties
+            }
+          />
+        </div>
+        <p className="generation-bar-caption">
+          Step {Math.min(stageIndex + 1, STAGE_KEYS.length)} of {STAGE_KEYS.length}
+        </p>
+      </div>
+
       {isRefinement && (
         <ul className="refinement-progress-notes">
           {REFINEMENT_PROGRESS_NOTES.map((note) => (

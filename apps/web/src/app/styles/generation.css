@@ -5,10 +5,13 @@
 /* medallion, the stage title in the display face, and the sentence    */
 /* explaining what is happening now.                                   */
 /*                                                                    */
-/* Deliberately ABSENT: the prototype's 0-100% progress bar. A durable  */
-/* job reports which stage it is in, not how far through it is, so any  */
-/* bar we drew would be an invented number. The pills carry the state   */
-/* the job actually has, and the medallion carries "still working".     */
+/* The prototype's progress bar is here too, but it is an IMPRESSION of  */
+/* movement, not a measurement: a durable job reports which stage it is  */
+/* in, never how far through it is. Each stage eases across its own band */
+/* and stops there, so the bar always moves and never claims more than   */
+/* the job has actually done. No percentage is printed and the block is  */
+/* aria-hidden — the pills carry the real state, the medallion carries   */
+/* "still working", and neither is replaced by the bar.                  */
 /* ------------------------------------------------------------------ */
 .generation-progress {
   display: flex;
@@ -111,6 +114,50 @@
     transform: scale(1.1);
     opacity: 1;
   }
+}
+
+.generation-estimate {
+  width: 100%;
+  max-width: 44ch;
+}
+
+/* 10px track and the pill radius are the handoff's own dimensions. */
+.generation-bar {
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-200);
+  overflow: hidden;
+}
+
+.generation-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-700);
+  /* The resting width is the END of the band, so when tokens.css switches
+     animation off under prefers-reduced-motion the bar still shows this
+     stage's share — it simply arrives there without travelling. */
+  width: var(--bar-to);
+  animation: generation-creep 22s cubic-bezier(0.16, 0.86, 0.32, 1) forwards;
+}
+
+/* Eased, not linear: fast at first so the bar visibly responds, then slowing
+   as it approaches the band's end, which is where a stage that is taking a
+   while should feel like it is still working rather than stuck. */
+@keyframes generation-creep {
+  from {
+    width: var(--bar-from);
+  }
+  to {
+    width: var(--bar-to);
+  }
+}
+
+.generation-bar-caption {
+  margin: var(--space-2) 0 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-accent-700);
 }
 
 .generation-narration h1 {
