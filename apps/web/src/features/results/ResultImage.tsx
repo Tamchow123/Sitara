@@ -53,7 +53,7 @@ export function ResultImage({ images, isPending, isFetching, error, altText, onR
     return (
       <div className="result-image-state" role="alert">
         <p>{imageErrorCopy(kind)}</p>
-        <button type="button" onClick={onRetry}>
+        <button type="button" className="btn btn-secondary" onClick={onRetry}>
           Try again
         </button>
       </div>
@@ -74,7 +74,7 @@ export function ResultImage({ images, isPending, isFetching, error, altText, onR
     return (
       <div className="result-image-state" role="alert">
         <p>Your image link has expired.</p>
-        <button type="button" onClick={onRetry}>
+        <button type="button" className="btn btn-secondary" onClick={onRetry}>
           Refresh image
         </button>
       </div>

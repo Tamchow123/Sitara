@@ -1,0 +1,18 @@
+{
+  "hero-1": {
+    "path": "/landing/hero-1.webp",
+    "width": 720,
+    "height": 1080,
+    "sha256": "306deb9f6a9937740407086edbac37ae2c772262a882557e028eadff2ed9c91e",
+    "alt": "A bridal outfit in deep maroon velvet, worked all over in gold, worn with a sheer red dupatta over the head.",
+    "source": "01-landing-page/image-012.webp"
+  },
+  "hero-2": {
+    "path": "/landing/hero-2.webp",
+    "width": 720,
+    "height": 1080,
+    "sha256": "3f43aaae914327b445a4dcad1621632c4a75c435d90a277ff21787ddaf0f5376",
+    "alt": "A bridal outfit in ivory and blush with soft rose-gold embroidery, worn with a matching dupatta over the head.",
+    "source": "01-landing-page/image-046.webp"
+  }
+}

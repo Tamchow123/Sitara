@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DesignResult } from "./DesignResult";
 import type { DesignDraft, DesignImages, DesignResult as DesignResultType } from "@/lib/api";
+import { axeViolations } from "@/test-utils/axe";
 
 const mocks = vi.hoisted(() => ({
   fetchDesignResult: vi.fn(),
@@ -137,10 +138,17 @@ function design(overrides: Partial<DesignDraft> = {}): DesignDraft {
   };
 }
 
-function publicConfig(generationEnabled: boolean) {
+// Realistic demo payloads. Under DEMO_MODE=true the backend always reports
+// generation_enabled: false — that flag is the LIVE capability — and says
+// whether generation is actually on offer through generation_mode. The
+// earlier fixture set generation_enabled: true alongside demo_mode: true,
+// which the backend never returns, and that hid the fact that refinement was
+// withheld from every demo user.
+function publicConfig(offered: boolean) {
   return {
     demo_mode: true,
-    generation_enabled: generationEnabled,
+    generation_enabled: false,
+    generation_mode: offered ? "demo" : "unavailable",
     max_inspiration_images: 3,
     max_refinements: 1,
   };
@@ -170,6 +178,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// The specification is a stack of cards, all closed on arrival, exactly as the
+// handoff's concept screen shows it. A closed card's body is not rendered, so
+// a test about the CONTENT of the brief opens everything first — the same one
+// click a reader makes to see the whole thing.
+function expandWholeBrief() {
+  fireEvent.click(screen.getByRole("button", { name: /Expand all/i }));
+}
+
 describe("DesignResult — result rendering", () => {
   it("renders every documented section from a representative fixture", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
@@ -177,7 +193,9 @@ describe("DesignResult — result rendering", () => {
     renderResult();
 
     expect(await screen.findByRole("heading", { name: /Ivory and gold flared lehenga/i })).toBeInTheDocument();
+    // The summary leads the column and is never behind a disclosure.
     expect(screen.getByText(/concept summary describing/i)).toBeInTheDocument();
+    expandWholeBrief();
     expect(screen.getByText("Choli")).toBeInTheDocument();
     expect(screen.getByText(/Ivory with gold accents/i)).toBeInTheDocument();
     expect(screen.getByText("Zardozi")).toBeInTheDocument();
@@ -192,6 +210,7 @@ describe("DesignResult — result rendering", () => {
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
+    expandWholeBrief();
     expect(screen.getByText(/Silk/)).toBeInTheDocument();
     expect(screen.getByText(/Organza/)).toBeInTheDocument();
   });
@@ -210,6 +229,7 @@ describe("DesignResult — result rendering", () => {
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
+    expandWholeBrief();
     expect(screen.queryByText(/Regional direction:/i)).not.toBeInTheDocument();
     expect(screen.getByText(/A blended interpretation/i)).toBeInTheDocument();
   });
@@ -219,6 +239,7 @@ describe("DesignResult — result rendering", () => {
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
+    expandWholeBrief();
     expect(screen.getByText(/No specific community presented as universal/i)).toBeInTheDocument();
     expect(
       screen.getByText(/does not guarantee the garment can be constructed exactly as shown/i),
@@ -231,15 +252,16 @@ describe("DesignResult — result rendering", () => {
     const { container } = renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     const disclaimer = container.querySelector(".result-disclaimer");
-    const summarySection = document.getElementById("brief-summary");
+    const specification = document.getElementById("brief-specification");
     expect(disclaimer).not.toBeNull();
+    expect(specification).not.toBeNull();
     expect(disclaimer?.textContent).toMatch(/AI-assisted visual concept/i);
     expect(disclaimer?.textContent).toMatch(/not a photograph/i);
     expect(disclaimer?.textContent).toMatch(/not a sewing pattern/i);
     expect(disclaimer?.textContent).toMatch(/does not guarantee/i);
-    // Disclaimer precedes the detailed brief in document order.
+    // Disclaimer precedes the detailed specification in document order.
     expect(
-      disclaimer!.compareDocumentPosition(summarySection!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      disclaimer!.compareDocumentPosition(specification!) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
@@ -253,7 +275,17 @@ describe("DesignResult — result rendering", () => {
   });
 
   it("never renders source_selections or internal provenance", async () => {
-    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    // Distinct payload identifiers, so this can tell "the response body's ids
+    // leaked into the page" apart from "the page links back to the route the
+    // user is already on" — Phase 17 adds an Edit-answers link that legitimately
+    // carries the route's own design id.
+    mocks.fetchDesignResult.mockResolvedValue({
+      ok: true,
+      result: result({
+        design_id: "payload-only-design-id",
+        design_version_id: "payload-only-version-id",
+      }),
+    });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const { container } = renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
@@ -261,7 +293,8 @@ describe("DesignResult — result rendering", () => {
     expect(raw).not.toMatch(/source_selections/i);
     expect(raw).not.toMatch(/prompt_builder_version/i);
     expect(raw).not.toMatch(/design_spec_provider/i);
-    expect(raw).not.toContain("d1");
+    expect(raw).not.toContain("payload-only-design-id");
+    expect(raw).not.toContain("payload-only-version-id");
   });
 
   it("renders malicious-looking text as plain text, never as HTML", async () => {
@@ -603,7 +636,12 @@ describe("DesignResult — refinement (Phase 14)", () => {
     mocks.fetchDesign.mockResolvedValue(design({ status: "generated", latest_job: null }));
     mocks.fetchPublicConfig.mockResolvedValue(publicConfig(true));
     renderResult();
-    expect(await screen.findByRole("heading", { name: /refine this concept/i })).toBeInTheDocument();
+    // The panel's own heading is the Amendments screen's question. "Refine this
+    // concept" is now the header ACTION that scrolls to it, so the heading is
+    // what proves the form itself is mounted.
+    expect(
+      await screen.findByRole("heading", { name: /what would you change/i }),
+    ).toBeInTheDocument();
   });
 
   it("hides the refinement panel and shows the comparison when viewing version 2", async () => {
@@ -623,7 +661,9 @@ describe("DesignResult — refinement (Phase 14)", () => {
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderResult("d1", "v2");
     expect(await screen.findByRole("heading", { name: /compare your concepts/i })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: /refine this concept/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /what would you change/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("hides the refinement panel once the limit has been reached (a completed refinement exists)", async () => {
@@ -649,7 +689,9 @@ describe("DesignResult — refinement (Phase 14)", () => {
     );
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
-    expect(screen.queryByRole("heading", { name: /refine this concept/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /what would you change/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("hides the refinement panel when generation is disabled", async () => {
@@ -658,7 +700,9 @@ describe("DesignResult — refinement (Phase 14)", () => {
     mocks.fetchPublicConfig.mockResolvedValue(publicConfig(false));
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
-    expect(screen.queryByRole("heading", { name: /refine this concept/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /what would you change/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows a running-refinement notice with a link to the progress route, and hides the panel", async () => {
@@ -685,7 +729,9 @@ describe("DesignResult — refinement (Phase 14)", () => {
     renderResult();
     const link = await screen.findByRole("link", { name: /view refinement progress/i });
     expect(link).toHaveAttribute("href", "/design/d1/generation/j7");
-    expect(screen.queryByRole("heading", { name: /refine this concept/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /what would you change/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows a controlled failed-refinement notice while keeping version 1 fully readable", async () => {
@@ -717,6 +763,221 @@ describe("DesignResult — refinement (Phase 14)", () => {
       true,
     );
     // A resolved failure still permits a retry — the panel comes back.
-    expect(await screen.findByRole("heading", { name: /refine this concept/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /what would you change/i }),
+    ).toBeInTheDocument();
+  });
+  it("says the one refinement has been used, and links to the refined concept", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchDesign.mockResolvedValue(
+      design({
+        status: "generated",
+        latest_job: {
+          id: "j1",
+          design_id: "d1",
+          design_version_id: "v2",
+          status: "succeeded",
+          error_code: null,
+          generation_kind: "refinement",
+          is_demo: false,
+          created_at: "t",
+          updated_at: "t",
+          started_at: "t",
+          completed_at: "t",
+        },
+      }),
+    );
+    renderResult();
+    // A missing form is not an explanation. The locked state says which of the
+    // two reasons applies, and never implies more refinements could be bought.
+    expect(await screen.findByRole("heading", { name: /^Refinement$/ })).toBeInTheDocument();
+    expect(screen.getByText(/used your one refinement/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /view your refined concept/i })).toHaveAttribute(
+      "href",
+      "/design/d1/result/v2",
+    );
+  });
+
+  it("gives the unavailable reason, not the used-up one, when generation is disabled", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchPublicConfig.mockResolvedValue(publicConfig(false));
+    renderResult();
+    expect(await screen.findByRole("heading", { name: /^Refinement$/ })).toBeInTheDocument();
+    expect(screen.getByText(/not currently available/i)).toBeInTheDocument();
+    expect(screen.queryByText(/used your one refinement/i)).not.toBeInTheDocument();
+  });
+
+  it("offers no refinement wording at all while the design's own state is unknown", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchDesign.mockRejectedValue(new Error("network"));
+    renderResult();
+    await screen.findByRole("heading", { name: /Ivory and gold/i });
+    // Neither the form nor a lock claim: an unresolved fetch must not be
+    // reported to the user as "you have used your refinement".
+    expect(
+      screen.queryByRole("heading", { name: /what would you change/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Refinement$/ })).not.toBeInTheDocument();
+  });
+
+  it("claims nothing about refinement while the public config is still in flight", async () => {
+    // The mirror of the test above, for the other input. A pending config
+    // reads as "not offered", which is indistinguishable from a real no — so
+    // gating only on the design query would state "generation is not currently
+    // available" while the config request was still running, then replace it
+    // with the refinement form. The user must never be shown the wrong one
+    // first.
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchDesign.mockResolvedValue(design({ status: "generated", latest_job: null }));
+    let releaseConfig: (value: unknown) => void = () => {};
+    mocks.fetchPublicConfig.mockReturnValue(
+      new Promise((resolve) => {
+        releaseConfig = resolve;
+      }),
+    );
+
+    renderResult();
+    await screen.findByRole("heading", { name: /Ivory and gold/i });
+    // Neither answer yet.
+    expect(
+      screen.queryByRole("heading", { name: /what would you change/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Refinement$/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/not currently available/i)).not.toBeInTheDocument();
+
+    // Once the config answers, the panel appears — having never shown the
+    // opposite claim on the way there.
+    await act(async () => {
+      releaseConfig(publicConfig(true));
+    });
+    expect(
+      await screen.findByRole("heading", { name: /what would you change/i }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("DesignResult — concept masthead (Phase 17)", () => {
+  it("labels which concept this is: version number and generation mode", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({
+      ok: true,
+      result: result({ is_demo: true }),
+    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    renderResult();
+    await screen.findByRole("heading", { name: /Ivory and gold/i });
+    expect(screen.getByText("Version 1")).toBeInTheDocument();
+    expect(screen.getByText("Demo concept")).toBeInTheDocument();
+    expect(screen.queryByText("AI-generated concept")).not.toBeInTheDocument();
+  });
+
+  it("offers Edit answers back to the owning design, and Refine only when it is offered", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchDesign.mockResolvedValue(design({ status: "generated", latest_job: null }));
+    mocks.fetchPublicConfig.mockResolvedValue(publicConfig(true));
+    renderResult();
+    expect(await screen.findByRole("link", { name: /edit answers/i })).toHaveAttribute(
+      "href",
+      "/design/d1",
+    );
+    // The header action is a same-page jump to the form, never a second route.
+    expect(screen.getByRole("link", { name: /refine this concept/i })).toHaveAttribute(
+      "href",
+      "#refine-concept",
+    );
+  });
+
+  it("keeps exactly one h1 on the page", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    renderResult();
+    await screen.findByRole("heading", { name: /Ivory and gold/i });
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
+
+  describe("accessibility", () => {
+    it("has no axe violations with the image present, cards closed and expanded", async () => {
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      const { container } = renderResult();
+      await screen.findByRole("heading", { name: /Ivory and gold/i });
+      // Closed is the arrival state; expanded is a structurally different DOM
+      // (every disclosure body now rendered), so both are worth a run.
+      expect(await axeViolations(container)).toHaveNoViolations();
+      expandWholeBrief();
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations when the image is unavailable but the brief is present", async () => {
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({
+        ok: false,
+        status: 503,
+        code: "design_image_delivery_unavailable",
+        message: "Design images are temporarily unavailable.",
+      });
+      const { container } = renderResult();
+      await screen.findByRole("heading", { name: /Ivory and gold/i });
+      // The image query retries once before settling into its error state.
+      await screen.findByText(/temporarily unavailable/i, {}, { timeout: 3000 });
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations with the refinement panel available", async () => {
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      mocks.fetchDesign.mockResolvedValue(design({ status: "generated", latest_job: null }));
+      mocks.fetchPublicConfig.mockResolvedValue(publicConfig(true));
+      const { container } = renderResult();
+      await screen.findByRole("heading", { name: /what would you change/i });
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations in the refinement-used locked state", async () => {
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      mocks.fetchDesign.mockResolvedValue(
+        design({
+          status: "generated",
+          latest_job: {
+            id: "j1",
+            design_id: "d1",
+            design_version_id: "v2",
+            status: "succeeded",
+            error_code: null,
+            generation_kind: "refinement",
+            is_demo: false,
+            created_at: "t",
+            updated_at: "t",
+            started_at: "t",
+            completed_at: "t",
+          },
+        }),
+      );
+      mocks.fetchPublicConfig.mockResolvedValue(publicConfig(true));
+      const { container } = renderResult();
+      await screen.findByRole("heading", { name: /Ivory and gold/i });
+      await waitFor(() =>
+        expect(screen.queryByRole("heading", { name: /what would you change/i })).toBeNull(),
+      );
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations on the route-level result error", async () => {
+      mocks.fetchDesignResult.mockResolvedValue({
+        ok: false,
+        status: 503,
+        code: "unavailable",
+        message: "unused — the component substitutes its own copy",
+      });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      const { container } = renderResult();
+      await screen.findByRole("alert");
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
   });
 });

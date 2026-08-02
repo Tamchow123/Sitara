@@ -151,8 +151,24 @@ describe("formatDesignBrief", () => {
     expect(text).toContain("- Emerald look — Studio A");
     expect(text).toContain("- Rose gold look");
     expect(text).not.toContain("Rose gold look — ");
-    expect(text).toMatch(/staff-curated descriptions/i);
-    expect(text).toMatch(/not sent to the generation models/i);
+    expect(text).toMatch(/staff-written descriptions/i);
+    // ADR 0019 sends the references a user actually selected to the image
+    // provider. The downloadable brief must not tell her otherwise, and must
+    // stay word-for-word in step with the same paragraph on screen.
+    expect(text).toMatch(/sent to the AI image provider/i);
+    expect(text).not.toMatch(/not sent to the generation models/i);
+    expect(text).toMatch(/not a reproduction of any of them/i);
+  });
+
+  it("says nothing was sent to a provider when the concept came from the demo pack", () => {
+    const demoWithInspiration: DesignResult = {
+      ...RESULT,
+      is_demo: true,
+      inspiration_acknowledgements: [{ position: 1, title: "Emerald look", attribution: "" }],
+    };
+    const text = formatDesignBrief(demoWithInspiration);
+    expect(text).toMatch(/no image .* was sent to an AI provider/i);
+    expect(text).not.toMatch(/sent to the AI image provider/i);
   });
 
   it("excludes asset ids, provider cues, alt text, cultural context and URLs from acknowledgements", () => {

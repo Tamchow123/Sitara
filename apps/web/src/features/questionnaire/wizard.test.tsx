@@ -430,6 +430,30 @@ describe("QuestionnaireWizard", () => {
     expect(mocks.fetchDesign).toHaveBeenCalledWith("d1");
   });
 
+  describe("unreachable design", () => {
+    it("gives a not-found design one honest next action and reveals nothing else", async () => {
+      mocks.fetchDesign.mockRejectedValue(new Error("not_found"));
+      render(<QuestionnaireWizard initialDesignId="d1" />);
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(/design not found/i);
+      // The backend returns the same 404 for an absent design and for one
+      // owned by someone else; the copy must not distinguish them either.
+      expect(alert).not.toHaveTextContent(/deleted|belongs to|another (user|account)/i);
+      expect(screen.getByRole("link", { name: /start a new design/i })).toHaveAttribute(
+        "href",
+        "/",
+      );
+    });
+
+    it("offers a retry when the questionnaire itself could not be loaded", async () => {
+      mocks.fetchActiveQuestionnaire.mockRejectedValue(new Error("unavailable"));
+      render(<QuestionnaireWizard />);
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(/temporarily unavailable/i);
+      expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+    });
+  });
+
   it("opens the screen a review Edit link asks for", async () => {
     window.history.replaceState({}, "", "/design/d1?q=dupatta_style");
     mocks.fetchDesign.mockResolvedValue(

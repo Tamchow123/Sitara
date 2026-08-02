@@ -6,9 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "next lint --dir src --dir e2e --file playwright.config.ts --max-warnings 0",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
+    "e2e": "playwright test --grep-invert \"visual regression\"",
+    "e2e:visual": "playwright test visual",
+    "e2e:update": "playwright test visual --update-snapshots",
     "generate:api": "openapi-typescript ../api/openapi/schema.json --output src/api/schema.d.ts"
   },
   "dependencies": {
@@ -23,6 +26,7 @@
     "zod": "3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.0",
     "@testing-library/dom": "10.4.0",
     "@testing-library/jest-dom": "6.6.3",
     "@testing-library/react": "16.1.0",

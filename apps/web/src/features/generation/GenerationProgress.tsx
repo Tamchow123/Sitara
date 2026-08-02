@@ -2,9 +2,14 @@
 
 // The generation progress screen (Phase 12 Part B). Polls one owned
 // generation job via TanStack Query with a created_at-derived backoff
-// schedule, renders the durable states honestly (no fake percentage, no
-// invented completion estimate), and hands off to the result route once a
-// job succeeds with a confirmed DesignVersion id.
+// schedule, renders the durable states honestly, and hands off to the result
+// route once a job succeeds with a confirmed DesignVersion id.
+//
+// There is a progress bar, and it is deliberately not a percentage: it eases
+// across a band belonging to the stage the job is actually in, so it moves
+// while you wait without ever claiming a completion figure the job does not
+// have. No number is printed and it is hidden from assistive technology; the
+// stage list and the live region carry the real state.
 
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -30,6 +35,16 @@ const STAGE_LABELS: Record<StageKey, string> = {
   running_text: "Design brief",
   running_image: "Visual concept",
 };
+
+// The share of the bar each stage eases across, in order. The bands leave a
+// gap between them so a stage change is visible as a step, and the last one
+// stops short of 100% because the bar cannot know the image is finished until
+// the job says so.
+const STAGE_BANDS: [number, number][] = [
+  [4, 24],
+  [30, 62],
+  [68, 94],
+];
 
 function stageIndexFor(status: GenerationJob["status"]): number {
   const index = STAGE_KEYS.indexOf(status as StageKey);
@@ -100,7 +115,11 @@ export function GenerationProgress({ designId, jobId }: Props) {
         <div role="alert" className="generation-unavailable">
           <h1>Progress temporarily unavailable</h1>
           <p>We could not check your generation progress just now.</p>
-          <button type="button" onClick={() => void query.refetch()}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => void query.refetch()}
+          >
             Try again
           </button>
         </div>
@@ -140,7 +159,7 @@ export function GenerationProgress({ designId, jobId }: Props) {
   if (job.status === "failed") {
     const friendly = friendlyGenerationError(job.error_code);
     return (
-      <main className="generation-progress">
+      <div className="generation-progress">
         <div role="alert" className="generation-failed">
           <h1>{friendly.heading}</h1>
           <p>{friendly.message}</p>
@@ -160,7 +179,7 @@ export function GenerationProgress({ designId, jobId }: Props) {
         <p className="generation-privacy-note">
           Your private design details are never made public during generation.
         </p>
-      </main>
+      </div>
     );
   }
 
@@ -185,29 +204,83 @@ export function GenerationProgress({ designId, jobId }: Props) {
           : "Your image is being generated, verified and stored privately.";
 
   return (
-    <main className="generation-progress">
+    <div className="generation-progress">
       <ol className="generation-stages">
-        {STAGE_KEYS.map((stage, index) => (
-          <li
-            key={stage}
-            aria-current={index === stageIndex ? "step" : undefined}
-            className={
-              index < stageIndex
-                ? "generation-stage-complete"
-                : index === stageIndex
-                  ? "generation-stage-active"
-                  : "generation-stage-pending"
-            }
-          >
-            {STAGE_LABELS[stage]}
-            {index < stageIndex ? " (complete)" : null}
-          </li>
-        ))}
+        {STAGE_KEYS.map((stage, index) => {
+          const state =
+            index < stageIndex ? "complete" : index === stageIndex ? "active" : "pending";
+          return (
+            <li
+              key={stage}
+              aria-current={state === "active" ? "step" : undefined}
+              className={`generation-stage generation-stage-${state}`}
+            >
+              {/* The badge carries a tick or a numeral, so the three states are
+                  distinguished by glyph and by text as well as by colour. The
+                  parenthetical is what a screen reader reads; the tick is
+                  decorative because it says the same thing. */}
+              <span className="generation-stage-badge" aria-hidden="true">
+                {state === "complete" ? "✓" : index + 1}
+              </span>
+              {STAGE_LABELS[stage]}
+              {state === "complete" ? " (complete)" : null}
+              {state === "active" ? " (in progress)" : null}
+            </li>
+          );
+        })}
       </ol>
-      <div role="status" aria-live="polite">
+
+      {/* The handoff's pulsing star medallion. It is the only moving thing on
+          the screen, it is driven by "a stage is active" and nothing else, and
+          it encodes no amount — there is no percentage to encode, because a
+          durable job reports a stage, not a fraction. tokens.css zeroes the
+          animation under prefers-reduced-motion, which leaves the medallion
+          sitting still rather than disappearing. */}
+      <span className="generation-medallion" aria-hidden="true">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2 L14.4 9.6 L22 12 L14.4 14.4 L12 22 L9.6 14.4 L2 12 L9.6 9.6 Z" />
+        </svg>
+      </span>
+
+      {/* One polite live region for the whole screen. Its content changes only
+          when the job's status does, so a poll that returns the same stage
+          announces nothing — the announcements a user hears are exactly the
+          three stage changes, never a poll frame and never the animation. */}
+      <div role="status" aria-live="polite" className="generation-narration">
         <h1>{heading}</h1>
         <p>{explanation}</p>
       </div>
+      {/* The handoff's progress bar.
+
+          A durable job reports a STAGE, not a fraction, so the fill is not a
+          measurement and is not presented as one: each stage owns a band, and
+          a CSS animation eases the fill across its own band while that stage
+          runs. It therefore always moves, never runs backwards, and never
+          reaches the end before the job does — but it is an impression of
+          progress, not a percentage, so no number is printed beside it and the
+          whole block is hidden from assistive technology. The stage list above
+          and the live region below carry the state the job actually has.
+
+          `key` restarts the animation when the stage changes; without it the
+          fill would jump to the new band and sit still. */}
+      <div className="generation-estimate" aria-hidden="true">
+        <div className="generation-bar">
+          <span
+            key={job.status}
+            className="generation-bar-fill"
+            style={
+              {
+                "--bar-from": `${STAGE_BANDS[stageIndex]?.[0] ?? 100}%`,
+                "--bar-to": `${STAGE_BANDS[stageIndex]?.[1] ?? 100}%`,
+              } as React.CSSProperties
+            }
+          />
+        </div>
+        <p className="generation-bar-caption">
+          Step {Math.min(stageIndex + 1, STAGE_KEYS.length)} of {STAGE_KEYS.length}
+        </p>
+      </div>
+
       {isRefinement && (
         <ul className="refinement-progress-notes">
           {REFINEMENT_PROGRESS_NOTES.map((note) => (
@@ -218,6 +291,6 @@ export function GenerationProgress({ designId, jobId }: Props) {
       <p className="generation-privacy-note">
         Your private design details are never made public during generation.
       </p>
-    </main>
+    </div>
   );
 }

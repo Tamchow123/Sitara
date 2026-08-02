@@ -61,6 +61,24 @@ export function QuestionField({
       {question.help_text}
     </p>
   ) : null;
+
+  // How many answers the control takes, said in words. The handoff shows this
+  // above every option grid and it was missing here.
+  //
+  // Derived from the question TYPE, never from the schema's own copy: it
+  // describes the control, so it stays true when the schema changes and it does
+  // not duplicate anything the backend owns (§12). Not rendered for a text
+  // answer or a single colour_choice, where the swatch grid already reads as
+  // one-of and a count would be noise.
+  const selectionHint =
+    question.type === "single_choice"
+      ? question.required
+        ? "Choose one"
+        : "Choose one, or skip"
+      : question.type === "multi_choice"
+        ? "Choose any that apply"
+        : null;
+  const hint = selectionHint ? <p className="field-hint">{selectionHint}</p> : null;
   const errorMessage = error ? (
     <p id={errorId} className="field-error" role="alert">
       {error}
@@ -111,6 +129,7 @@ export function QuestionField({
       >
         <legend className={labelClass}>{question.label}</legend>
         {help}
+        {hint}
         <ColourSwatchGrid
           options={options}
           name={question.id}
@@ -148,6 +167,7 @@ export function QuestionField({
       >
         <legend className={labelClass}>{question.label}</legend>
         {help}
+        {hint}
         <ChoiceOptionGrid
           options={options}
           name={question.id}
@@ -194,6 +214,7 @@ export function QuestionField({
       >
         <legend className={labelClass}>{question.label}</legend>
         {help}
+        {hint}
         <ColourSwatchGrid
           options={options}
           name={question.id}
@@ -242,6 +263,7 @@ export function QuestionField({
     >
       <legend className={labelClass}>{question.label}</legend>
       {help}
+      {hint}
       {typeof max === "number" ? (
         // A live limit note, so a keyboard or screen-reader user learns they
         // have reached the maximum from the announcement rather than from

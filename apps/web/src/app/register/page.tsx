@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { DEFAULT_AUTHENTICATED_PATH } from "@/lib/navigation";
 
@@ -11,7 +12,7 @@ type FieldErrors = Record<string, string[]>;
 function FieldError({ id, errors }: { id: string; errors?: string[] }) {
   if (!errors?.length) return null;
   return (
-    <ul id={id} role="alert" className="status-bad field-errors">
+    <ul id={id} role="alert" className="field-error field-errors">
       {errors.map((message) => (
         <li key={message}>{message}</li>
       ))}
@@ -54,12 +55,12 @@ export default function RegisterPage() {
   }
 
   return (
-    <main>
+    <AppShell width="narrow">
       <h1>Create account</h1>
       <p className="tagline">
         An account keeps your bridal concepts private to you.
       </p>
-      <section aria-labelledby="register-heading">
+      <section className="panel" aria-labelledby="register-heading">
         <h2 id="register-heading">Your details</h2>
         <form onSubmit={onSubmit} noValidate>
           <div className="field">
@@ -70,6 +71,7 @@ export default function RegisterPage() {
               type="email"
               autoComplete="email"
               required
+              className="input"
               aria-describedby="email-errors"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
@@ -84,6 +86,7 @@ export default function RegisterPage() {
               type="password"
               autoComplete="new-password"
               required
+              className="input"
               aria-describedby="password-errors"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -98,6 +101,7 @@ export default function RegisterPage() {
               type="password"
               autoComplete="new-password"
               required
+              className="input"
               aria-describedby="password-confirm-errors"
               value={passwordConfirm}
               onChange={(event) => setPasswordConfirm(event.target.value)}
@@ -108,11 +112,11 @@ export default function RegisterPage() {
             />
           </div>
           {error && (
-            <p role="alert" className="status-bad">
-              {error}
-            </p>
+            <div role="alert" className="alert alert-error">
+              <p>{error}</p>
+            </div>
           )}
-          <button type="submit" disabled={submitting}>
+          <button type="submit" className="btn btn-primary" disabled={submitting}>
             {submitting ? "Creating account…" : "Create account"}
           </button>
         </form>
@@ -120,6 +124,6 @@ export default function RegisterPage() {
           Already have an account? <Link href="/login">Sign in</Link>
         </p>
       </section>
-    </main>
+    </AppShell>
   );
 }

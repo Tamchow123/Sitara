@@ -1,3 +1,21 @@
+/* ==================================================================== */
+/* Element defaults and the shared production primitives.               */
+/*                                                                      */
+/* Everything a route needs before it reaches for a feature partial      */
+/* lives here: the element reset, layout containers, and the button /    */
+/* link / panel / field / chip / dialog / disclosure / notice /          */
+/* skeleton / alert primitives the handoff's screens are built from.     */
+/*                                                                      */
+/* Feature partials RESTYLE these, they do not duplicate them. If a      */
+/* route needs a button, it uses .btn — a route-local button rule is a   */
+/* bug, because the hover / active / focus-visible / disabled / loading  */
+/* states are only defined once, here.                                   */
+/*                                                                      */
+/* Colours come from tokens.css. Nothing outside that file may declare a */
+/* raw colour literal — design-tokens.test.ts enforces it — so a retune   */
+/* of the palette reaches every screen from one place.                   */
+/* ==================================================================== */
+
 * {
   box-sizing: border-box;
 }
@@ -14,111 +32,743 @@ html {
 body {
   margin: 0;
   font-family: var(--font-body);
+  font-size: 16px;
   background: var(--color-bg);
   color: var(--color-text);
   line-height: 1.55;
+  /* iOS notches and the Android gesture bar. Applied on the body so a
+     fixed drawer or a sticky footer inherits the inset rather than each
+     component remembering to ask for it. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+/* ------------------------------------------------------------------ */
+/* Layout containers                                                   */
+/*                                                                     */
+/* The handoff uses three widths: 1020px for the reading screens        */
+/* (home, questionnaire, history), 1100px for the two-column concept    */
+/* and 860px for the narrow refinement column.                          */
+/* ------------------------------------------------------------------ */
+.container {
+  width: 100%;
+  max-width: 1020px;
+  margin: 0 auto;
+  padding-inline: var(--space-4);
+}
+
+.container-wide {
+  max-width: 1100px;
+}
+
+.container-narrow {
+  max-width: 860px;
 }
 
 main {
-  max-width: 46rem;
-  margin: 0 auto;
-  padding: 3rem 1.25rem 4rem;
+  /* A bare <main> with no container class still reads at a sane measure
+     rather than running the full viewport width. */
+  display: block;
 }
 
+main:not(.container):not(.container-wide):not(.container-narrow) {
+  width: 100%;
+  max-width: 1020px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4) var(--space-8);
+}
+
+/* ------------------------------------------------------------------ */
+/* Typography                                                          */
+/*                                                                     */
+/* --font-display (Cormorant Garamond) carries the wordmark and page    */
+/* h1s; --font-heading (Caprasimo) carries section and card headings.   */
+/* ------------------------------------------------------------------ */
 h1 {
   font-family: var(--font-display);
-  font-weight: 400;
+  font-weight: 500;
   font-size: clamp(30px, 4.5vw, 42px);
   line-height: 1.12;
-  margin: 0 0 0.25rem;
+  margin: 0 0 var(--space-2);
   letter-spacing: 0.02em;
   text-wrap: pretty;
 }
 
-.tagline {
-  color: var(--muted);
-  margin: 0 0 2rem;
-  font-size: 1.05rem;
-}
-
-section {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  padding: 1.25rem 1.5rem;
-  margin-bottom: 1.5rem;
-  background: var(--color-neutral-100);
+h2,
+h3,
+h4 {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  margin: 0 0 var(--space-2);
 }
 
 h2 {
-  font-size: 1.1rem;
-  margin: 0 0 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
+  font-size: clamp(24px, 3.2vw, 32px);
 }
 
+h3 {
+  font-size: 21px;
+}
+
+h4 {
+  font-size: 17px;
+}
+
+p {
+  margin: 0 0 var(--space-3);
+}
+
+a {
+  color: var(--color-accent-700);
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  color: var(--color-accent-800);
+}
+
+/* The handoff's small uppercase eyebrow, above an h1 or a section title.
+   accent-700 rather than accent, because it is small text (5.72:1). */
+.kicker {
+  margin: 0 0 var(--space-1);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-accent-700);
+}
+
+.lede {
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--color-neutral-800);
+  max-width: 58ch;
+}
+
+/* The sub-headline under an h1 on the auth and account pages. */
+.tagline {
+  margin: 0 0 var(--space-6);
+  font-size: 17px;
+  color: var(--color-neutral-800);
+}
+
+.text-muted {
+  color: var(--color-neutral-700);
+}
+
+/* Description lists are used for read-only detail rows (account email,
+   version metadata). Two columns so the term and its value align. */
 dl {
-  margin: 0;
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 0.4rem 1.25rem;
+  gap: var(--space-1) var(--space-4);
+  margin: 0 0 var(--space-3);
 }
 
 dt {
-  color: var(--muted);
+  color: var(--color-neutral-700);
+  font-size: 14px;
 }
 
 dd {
   margin: 0;
-  font-weight: bold;
+  font-weight: 700;
 }
 
-.status-ok {
-  color: var(--ok);
+.text-absent {
+  /* "Left to Sitara's imagination" and its siblings: present, but not a
+     value the user chose. accent-2-700 clears AA (5.43:1). */
+  color: var(--color-accent-2-700);
 }
 
-.status-bad {
-  color: var(--bad);
+/* ------------------------------------------------------------------ */
+/* Focus, selection and screen-reader utilities                        */
+/* ------------------------------------------------------------------ */
+:focus {
+  outline: none;
 }
 
-.badge {
-  display: inline-block;
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  padding: 0.1rem 0.7rem;
-  font-size: 0.9rem;
-  font-weight: bold;
-}
-
-.notice {
-  border-left: 4px solid var(--accent);
-  padding: 0.6rem 1rem;
-  margin: 0.75rem 0 0;
-  background: #faf3ee;
-}
-
-a:focus-visible,
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-[tabindex]:focus-visible {
-  outline: 3px solid var(--accent);
+:focus-visible {
+  outline: 2px solid var(--color-accent-700);
   outline-offset: 2px;
 }
 
-/* ------------------------------------------------------------------ */
-/* Call to action                                                     */
-/* ------------------------------------------------------------------ */
-.cta {
-  display: inline-block;
+::selection {
+  background: var(--color-accent-200);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Visible only once focused. First element in the DOM, so a keyboard user
+   reaches it before the brand lockup. */
+.skip-link {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 100;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
   background: var(--color-accent-700);
   color: var(--color-bg);
-  padding: 0.7rem 1.4rem;
-  border-radius: var(--radius-md);
+  font-weight: 700;
   text-decoration: none;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+  color: var(--color-bg);
+}
+
+/* The handoff's photographic treatment: photography sits back so the
+   cream ground and the accent stay the loudest things on the page. */
+.washed {
+  filter: saturate(0.6) contrast(0.85) brightness(1.1) opacity(0.94);
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                             */
+/*                                                                     */
+/* One element, four variants. `.btn` is deliberately usable on <a> as  */
+/* well as <button>: the handoff's primary call to action is a link.    */
+/* ------------------------------------------------------------------ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  /* WCAG 2.2 target size. 44px is the practical minimum for a thumb, and
+     it is what every footer control in the handoff measures. */
+  min-height: 44px;
+  padding: var(--space-2) calc(var(--space-3) * 1.4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--color-text);
+  background: transparent;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  /* accent-700, not the handoff's --color-accent: the handoff's own pairing
+     measures 3.03:1 against its label, below AA. See tokens.css. */
+  background: var(--color-accent-700);
+  color: var(--color-bg);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-accent-800);
+  color: var(--color-bg);
+}
+
+.btn-primary:active:not(:disabled) {
+  background: var(--color-accent-900);
+}
+
+.btn-secondary {
+  border-color: var(--color-neutral-400);
+  color: var(--color-text);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-neutral-200);
+  color: var(--color-text);
+}
+
+.btn-secondary:active:not(:disabled) {
+  background: var(--color-neutral-300);
+}
+
+.btn-ghost {
+  color: var(--color-accent-700);
+  padding-inline: var(--space-3);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+}
+
+.btn-ghost:active:not(:disabled) {
+  background: var(--color-accent-200);
+}
+
+.btn-icon {
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+}
+
+.btn-large {
+  min-height: 52px;
+  padding: var(--space-3) calc(var(--space-6) * 1.3);
+  font-size: 17px;
+}
+
+/* A button waiting on the network. `aria-busy` carries the state to
+   assistive technology; the spinner is decorative and stops under
+   reduced motion (the blanket rule in tokens.css kills the animation,
+   so the dot simply sits still rather than disappearing). */
+.btn[aria-busy="true"]::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--radius-pill);
+  animation: sitara-spin 700ms linear infinite;
+}
+
+@keyframes sitara-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Panels and cards                                                    */
+/* ------------------------------------------------------------------ */
+.panel {
+  background: var(--color-neutral-100);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-6);
+  margin: 0 0 var(--space-4);
+}
+
+.panel-plain {
+  background: transparent;
+  padding: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-100);
+}
+
+.elev-sm {
+  box-shadow: var(--shadow-sm);
+}
+
+.elev-md {
+  box-shadow: var(--shadow-md);
+}
+
+.elev-lg {
+  box-shadow: var(--shadow-lg);
+}
+
+.hr {
+  height: 1px;
+  border: 0;
+  margin: var(--space-4) 0;
+  background: var(--color-neutral-200);
+}
+
+/* ------------------------------------------------------------------ */
+/* Fields                                                              */
+/* ------------------------------------------------------------------ */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: var(--space-3);
+}
+
+.field > label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-neutral-800);
+}
+
+.field-hint {
+  font-size: 13px;
+  color: var(--color-neutral-700);
+}
+
+/* Field-local, not a page-level summary: sits next to the control it
+   describes and is referenced by aria-describedby. */
+.field-error {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-bad);
+}
+
+/* The same field-local error, when a single control can fail several
+   validations at once and the server returns them as a list. */
+.field-errors {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+}
+
+.input,
+.textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-body);
+  font-size: 16px;
+  color: var(--color-text);
+  caret-color: var(--color-accent-700);
+  background: var(--color-bg);
+  border: 2px solid var(--color-neutral-300);
+  border-radius: var(--radius-md);
+}
+
+.input:hover,
+.textarea:hover {
+  border-color: var(--color-neutral-400);
+}
+
+.input:focus-visible,
+.textarea:focus-visible {
+  border-color: var(--color-accent-700);
+  outline-offset: 0;
+}
+
+.input[aria-invalid="true"],
+.textarea[aria-invalid="true"] {
+  border-color: var(--color-bad);
+}
+
+.textarea {
+  min-height: 96px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+/* ------------------------------------------------------------------ */
+/* Chips and tags                                                      */
+/* ------------------------------------------------------------------ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px 5px 11px;
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-100);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chip-remove {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-800);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chip-remove:hover {
+  background: var(--color-accent-700);
+  color: var(--color-bg);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
-.cta:hover {
-  background: var(--color-accent-800);
+
+.tag-accent {
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+}
+
+.tag-accent-2 {
+  background: var(--color-accent-2-100);
+  color: var(--color-accent-2-800);
+}
+
+.tag-neutral {
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-800);
+}
+
+/* ------------------------------------------------------------------ */
+/* Notices, alerts and status                                          */
+/*                                                                     */
+/* A notice is ambient page copy; an alert reports the outcome of       */
+/* something the user did. They look different on purpose — a status    */
+/* must not be mistaken for decoration — and neither relies on colour   */
+/* alone, because each carries a text label.                            */
+/* ------------------------------------------------------------------ */
+.notice {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-800);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.notice-accent {
+  background: var(--color-accent-100);
+  color: var(--color-accent-900);
+}
+
+.alert {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-left: 4px solid var(--color-neutral-400);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-100);
+  font-size: 15px;
+}
+
+.alert-error {
+  border-left-color: var(--color-bad);
+}
+
+.alert-ok {
+  border-left-color: var(--color-ok);
+}
+
+.alert-title {
+  font-weight: 700;
+}
+
+/* A whole route that could not be shown — a missing design, an unreadable
+   result — as opposed to `.alert`, which reports the outcome of one action
+   inside a page that is otherwise fine. Narrow and centred, because there is
+   nothing else on the screen to sit beside. */
+.route-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-6);
+  border-left: 4px solid var(--color-bad);
+  border-radius: var(--radius-md);
+  background: var(--color-bad-100);
+}
+
+.route-error h1 {
+  margin: 0;
+  font-size: clamp(24px, 3.5vw, 32px);
+}
+
+.route-error p {
+  margin: 0;
+}
+
+.status-ok {
+  color: var(--color-ok);
+  font-weight: 700;
+}
+
+/* The single line shown while a route waits for its data. Styling only —
+   margin and colour. It deliberately does NOT try to reserve the height of
+   the content that will replace it: that height varies with image dimensions
+   and brief length, and a guessed min-height would leave a visible empty gap
+   more often than it would prevent a shift. Routes that need real space
+   reserved use `.skeleton`, which is sized to the layout it stands in for.
+   The surrounding element carries role="status". */
+.loading-note {
+  margin: var(--space-6) 0;
+  color: var(--color-neutral-800);
+}
+
+/* ------------------------------------------------------------------ */
+/* Loading skeletons                                                   */
+/*                                                                     */
+/* Reserve the same box the real content will occupy, so nothing jumps  */
+/* when it arrives. aria-hidden at the call site; the surrounding       */
+/* region carries the announcement.                                     */
+/* ------------------------------------------------------------------ */
+.skeleton {
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    90deg,
+    var(--color-neutral-200) 25%,
+    var(--color-neutral-100) 37%,
+    var(--color-neutral-200) 63%
+  );
+  background-size: 400% 100%;
+  animation: sitara-shimmer 1400ms ease-in-out infinite;
+}
+
+.skeleton-text {
+  height: 1em;
+  margin-bottom: var(--space-2);
+}
+
+@keyframes sitara-shimmer {
+  from {
+    background-position: 100% 50%;
+  }
+  to {
+    background-position: 0 50%;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Dialogs and drawers                                                 */
+/* ------------------------------------------------------------------ */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--color-scrim);
+  animation: sitara-fade var(--motion-fast) both;
+}
+
+.drawer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 51;
+  max-width: 620px;
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-6) var(--space-8);
+  padding-bottom: calc(var(--space-8) + env(safe-area-inset-bottom));
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--color-bg);
+  box-shadow: var(--shadow-lg);
+  outline: none;
+  animation: sitara-up var(--motion-drawer) both;
+}
+
+.drawer-handle {
+  width: 44px;
+  height: 5px;
+  margin: 0 auto var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-300);
+}
+
+@keyframes sitara-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sitara-up {
+  from {
+    transform: translateY(18px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* The handoff's screen-entry motion. Referenced by name so a route asks
+   for it rather than redeclaring the keyframes. */
+.screen-enter {
+  animation: sitara-up var(--motion-screen) both;
+}
+
+/* ------------------------------------------------------------------ */
+/* Disclosures                                                         */
+/*                                                                     */
+/* A real <button aria-expanded> toggling sibling content — never a     */
+/* bare <div> with a click handler, and never a nested interactive.     */
+/* ------------------------------------------------------------------ */
+.disclosure {
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--color-neutral-100);
+  box-shadow: var(--shadow-sm);
+}
+
+.disclosure-open {
+  background: var(--color-bg);
+}
+
+.disclosure-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  background: none;
+  font-family: var(--font-body);
+  font-size: 16px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.disclosure-trigger:focus-visible {
+  outline-offset: -2px;
+}
+
+.disclosure-chevron {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-200);
+  color: var(--color-accent-700);
+  transition: transform var(--motion-fast);
+}
+
+.disclosure-trigger[aria-expanded="true"] .disclosure-chevron {
+  transform: rotate(180deg);
+}
+
+.disclosure-body {
+  padding: 0 var(--space-4) var(--space-4);
 }

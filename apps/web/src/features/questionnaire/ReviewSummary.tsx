@@ -19,7 +19,11 @@ import { fetchDesign, fetchPublicConfig, startDesignGeneration, validateDesignDr
 import { answerLabels } from "./answer-utils";
 import { visibleQuestions } from "./rules";
 import { resolveDesignLifecycleTarget } from "@/lib/design-lifecycle";
-import { generationSubmitErrorMessage } from "@/features/generation/submit-errors";
+import { generationIsOffered } from "@/features/generation/generation-availability";
+import {
+  GENERATION_SUBMIT_TERMINAL_CODES,
+  generationSubmitErrorMessage,
+} from "@/features/generation/submit-errors";
 import { inspirationUploadImageUrl, type PublicConfig } from "@/lib/api";
 import type { Answers, DesignDraft, Question, QuestionnaireSchema } from "./types";
 
@@ -44,12 +48,19 @@ type State =
       schema: QuestionnaireSchema;
       valid: boolean;
       errors: Record<string, string[]>;
-      generationEnabled: boolean;
+      generationOffered: boolean;
       demoMode: boolean;
       generationMode: PublicConfig["generation_mode"] | null;
     };
 
-type SubmitState = { status: "idle" } | { status: "submitting" } | { status: "error"; message: string };
+type SubmitState =
+  | { status: "idle" }
+  | { status: "submitting" }
+  // `retryable` is false for the Phase 16 admission states that cannot succeed
+  // on an immediate second attempt (generation turned off, per-user limit
+  // reached, daily budget exhausted). Offering a button there would invite the
+  // user to keep asking a question already answered, so we do not render one.
+  | { status: "error"; message: string; retryable: boolean };
 
 export function ReviewSummary({ designId }: Props) {
   const router = useRouter();
@@ -93,7 +104,10 @@ export function ReviewSummary({ designId }: Props) {
           fetchPublicConfig().catch(() => null),
         ]);
         if (cancelled) return;
-        const generationEnabled = config?.generation_enabled === true;
+        // Not config.generation_enabled: that flag is the LIVE capability only
+        // and is false in demo mode by design, which silently disabled this
+        // button for every demo user. See generation-availability.ts.
+        const generationOffered = generationIsOffered(config);
         const demoMode = config?.demo_mode === true;
         const generationMode = config?.generation_mode ?? null;
         if (validation.ok) {
@@ -103,7 +117,7 @@ export function ReviewSummary({ designId }: Props) {
             schema: design.questionnaire.schema,
             valid: true,
             errors: {},
-            generationEnabled,
+            generationOffered,
             demoMode,
             generationMode,
           });
@@ -118,7 +132,7 @@ export function ReviewSummary({ designId }: Props) {
             schema: design.questionnaire.schema,
             valid: false,
             errors: validation.fields ?? {},
-            generationEnabled,
+            generationOffered,
             demoMode,
             generationMode,
           });
@@ -163,7 +177,7 @@ export function ReviewSummary({ designId }: Props) {
       // Transport failure or malformed response: genuinely ambiguous whether
       // the server received the request — keep the SAME key for the retry.
       submittingRef.current = false;
-      setSubmit({ status: "error", message: result.message });
+      setSubmit({ status: "error", message: result.message, retryable: true });
       return;
     }
 
@@ -197,38 +211,48 @@ export function ReviewSummary({ designId }: Props) {
     setSubmit({
       status: "error",
       message: generationSubmitErrorMessage(result.code, result.message),
+      retryable: !GENERATION_SUBMIT_TERMINAL_CODES.has(result.code),
     });
   }, [designId, router]);
 
   if (state.phase === "loading" || state.phase === "redirecting") {
     return (
-      <p role="status" aria-live="polite">
+      <p role="status" aria-live="polite" className="loading-note">
         Checking your design…
       </p>
     );
   }
   if (state.phase === "notfound") {
+    // Same wording as the questionnaire's own not-found branch, and for the
+    // same reason: the backend cannot distinguish absent from foreign, so
+    // neither may this copy.
     return (
-      <div role="alert">
+      <div role="alert" className="route-error">
         <h1>Design not found</h1>
         <p>This design is not available. It may belong to a different session.</p>
+        <Link className="btn btn-secondary" href="/">
+          Start a new design
+        </Link>
       </div>
     );
   }
   if (state.phase === "unavailable") {
     return (
-      <div role="alert">
+      <div role="alert" className="route-error">
         <h1>Review unavailable</h1>
         <p>We could not load this design. Please try again shortly.</p>
+        <button type="button" className="btn btn-secondary" onClick={retry}>
+          Try again
+        </button>
       </div>
     );
   }
   if (state.phase === "validation_unavailable") {
     return (
-      <div role="alert" className="wizard-unavailable">
+      <div role="alert" className="route-error">
         <h1>Review temporarily unavailable</h1>
         <p>We could not check your design just now. Your answers are safe.</p>
-        <button type="button" onClick={retry}>
+        <button type="button" className="btn btn-secondary" onClick={retry}>
           Try again
         </button>
       </div>
@@ -236,15 +260,17 @@ export function ReviewSummary({ designId }: Props) {
   }
   if (state.phase === "conflict") {
     return (
-      <div role="alert">
+      <div role="alert" className="route-error">
         <h1>We couldn&apos;t confirm your generation status</h1>
         <p>Please try again in a moment.</p>
-        <Link href={`/design/${designId}`}>Back to your design</Link>
+        <Link className="btn btn-secondary" href={`/design/${designId}`}>
+          Back to your design
+        </Link>
       </div>
     );
   }
 
-  const { design, schema, valid, errors, generationEnabled, demoMode, generationMode } = state;
+  const { design, schema, valid, errors, generationOffered, demoMode, generationMode } = state;
   // Read straight from the design the server returned — a resumed review must
   // show the uploads that are actually attached, never a client-side guess.
   const uploads = design.inspiration_uploads ?? [];
@@ -252,12 +278,12 @@ export function ReviewSummary({ designId }: Props) {
   const visibility = visibleQuestions(schema, answers);
   const editHref = `/design/${design.id}`;
   const submitting = submit.status === "submitting";
-  const canGenerate = valid && generationEnabled && !submitting;
+  const canGenerate = valid && generationOffered && !submitting;
   const demoAssetsUnavailable = demoMode && generationMode === "unavailable";
   const describedBy = demoMode ? "generate-note demo-disclosure" : "generate-note";
 
   return (
-    <main className="review">
+    <div className="review">
       <h1>Review your design concept</h1>
 
       {!valid && (
@@ -302,20 +328,26 @@ export function ReviewSummary({ designId }: Props) {
               {rows.map(({ question, text, answered }) => (
                 <div key={question.id} className="review-row">
                   <dt>{question.label}</dt>
-                  <dd className={answered ? undefined : "review-unanswered"}>{text}</dd>
-                  {/* Per-row Edit, deep-linked to that one question's screen —
-                      the wizard resolves ?q= to a screen index and still
-                      refuses to skip past what has been reached. */}
-                  <Link
-                    className="review-edit"
-                    href={`${editHref}?q=${encodeURIComponent(question.id)}`}
-                    // Named for assistive technology through aria-label rather
-                    // than a visually-hidden span, so the question's text
-                    // appears exactly once in the row.
-                    aria-label={`Edit ${question.label}`}
-                  >
-                    Edit
-                  </Link>
+                  {/* The Edit link lives INSIDE the <dd>, not beside it: a
+                      <dl>'s wrapper <div> may contain only <dt> and <dd>, so a
+                      sibling <a> there is invalid and axe rightly rejects it.
+                      The row's three-column look is rebuilt inside the <dd>. */}
+                  <dd>
+                    <span className={answered ? undefined : "review-unanswered"}>{text}</span>
+                    {/* Per-row Edit, deep-linked to that one question's screen —
+                        the wizard resolves ?q= to a screen index and still
+                        refuses to skip past what has been reached. */}
+                    <Link
+                      className="review-edit"
+                      href={`${editHref}?q=${encodeURIComponent(question.id)}`}
+                      // Named for assistive technology through aria-label rather
+                      // than a visually-hidden span, so the question's text
+                      // appears exactly once in the row.
+                      aria-label={`Edit ${question.label}`}
+                    >
+                      Edit
+                    </Link>
+                  </dd>
                 </div>
               ))}
             </dl>
@@ -429,7 +461,7 @@ export function ReviewSummary({ designId }: Props) {
       <p id="generate-note" className="field-help">
         {!valid
           ? "Complete the highlighted items above before generating."
-          : !generationEnabled
+          : !generationOffered
             ? demoAssetsUnavailable
               ? "Demo generation is temporarily unavailable because its visual library is not ready."
               : "Concept generation is not currently available."
@@ -438,13 +470,24 @@ export function ReviewSummary({ designId }: Props) {
               : "Ready to generate your concept."}
       </p>
       {submit.status === "error" && (
-        <div className="generate-error" role="alert">
+        // An in-page alert: the review itself is intact and every answer is
+        // still on screen. `submit.message` is the safe, server-derived reason
+        // (generation disabled, daily limit reached, demo pack unavailable) —
+        // it is rendered as text and never carries an identifier.
+        <div className="alert alert-error" role="alert">
+          <p className="alert-title">We could not start your generation</p>
           <p>{submit.message}</p>
-          <button type="button" onClick={() => void handleGenerate()}>
-            Try again
-          </button>
+          {submit.retryable && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => void handleGenerate()}
+            >
+              Try again
+            </button>
+          )}
         </div>
       )}
-    </main>
+    </div>
   );
 }

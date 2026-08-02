@@ -1,0 +1,8 @@
+# Playwright run artefacts. The BASELINES in e2e/visual.spec.ts-snapshots/ are
+# committed on purpose — they are the reference the suite compares against —
+# but per-run output never is: it holds actual/diff images, traces and failure
+# screenshots regenerated on every run.
+/test-results/
+/playwright-report/
+/blob-report/
+/.playwright/

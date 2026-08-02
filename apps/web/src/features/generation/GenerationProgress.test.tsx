@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GenerationProgress } from "./GenerationProgress";
 import { GenerationJobNotFoundError, GenerationJobUnavailableError } from "@/lib/api";
 import type { GenerationJob } from "@/lib/api";
+import { axeViolations } from "@/test-utils/axe";
 
 const mocks = vi.hoisted(() => ({
   fetchGenerationJob: vi.fn(),
@@ -105,14 +106,52 @@ describe("GenerationProgress", () => {
     expect(screen.getByText(/never made public/i)).toBeInTheDocument();
   });
 
-  it("marks the active stage with aria-current=step", async () => {
+  it("distinguishes completed, active and pending stages by text, not only colour", async () => {
     mocks.fetchGenerationJob.mockResolvedValue(job({ status: "running_text" }));
     renderProgress();
     await screen.findByText(/Creating your design brief/i);
-    const active = screen.getByText("Design brief").closest("li");
-    expect(active).toHaveAttribute("aria-current", "step");
-    const complete = screen.getByText(/Preparing \(complete\)/i);
-    expect(complete.closest("li")).not.toHaveAttribute("aria-current");
+
+    const stages = screen.getAllByRole("listitem");
+    expect(stages).toHaveLength(3);
+    // Each state says what it is in words, so the three are told apart with
+    // the stylesheet switched off — the badge glyph and the accent tint are
+    // reinforcement, never the only signal.
+    expect(stages[0]).toHaveTextContent(/Preparing \(complete\)/);
+    expect(stages[1]).toHaveTextContent(/Design brief \(in progress\)/);
+    expect(stages[2]).toHaveTextContent(/Visual concept/);
+    expect(stages[2]).not.toHaveTextContent(/complete|in progress/);
+
+    expect(stages[1]).toHaveAttribute("aria-current", "step");
+    expect(stages[0]).not.toHaveAttribute("aria-current");
+    expect(stages[2]).not.toHaveAttribute("aria-current");
+  });
+
+  it("shows a tick for a finished stage and a numeral for one still to come", async () => {
+    mocks.fetchGenerationJob.mockResolvedValue(job({ status: "running_image" }));
+    renderProgress();
+    await screen.findByText(/Creating your visual concept/i);
+    const badges = document.querySelectorAll(".generation-stage-badge");
+    // Decorative: the parenthetical text beside each already says the same
+    // thing, so announcing the glyph too would double up.
+    for (const badge of badges) expect(badge).toHaveAttribute("aria-hidden", "true");
+    expect([...badges].map((b) => b.textContent)).toEqual(["✓", "✓", "3"]);
+  });
+
+  it("animates only a decorative medallion, and never claims an amount of progress", async () => {
+    mocks.fetchGenerationJob.mockResolvedValue(job({ status: "queued" }));
+    renderProgress();
+    await screen.findByText(/Preparing your concept/i);
+
+    const medallion = document.querySelector(".generation-medallion");
+    expect(medallion).not.toBeNull();
+    expect(medallion).toHaveAttribute("aria-hidden", "true");
+
+    // A durable job reports a stage, not a fraction. Nothing on this screen
+    // may imply otherwise — no progressbar, no percentage, no estimate.
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    const page = document.body.textContent ?? "";
+    expect(page).not.toMatch(/\d+\s*%/);
+    expect(page).not.toMatch(/minutes? (left|remaining)|almost done|nearly there/i);
   });
 
   it("uses honest demo wording for a demo job, never claiming a live provider", async () => {
@@ -363,6 +402,78 @@ describe("GenerationProgress", () => {
       renderProgress();
       await screen.findByRole("alert");
       expect(screen.queryByRole("link", { name: /original concept/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it("never advances a stage on a timer — only new server data moves it", async () => {
+    // The handoff's prototype cycled its stages on a setInterval. Doing that
+    // here would tell a bride her image was being drawn while the job was in
+    // fact still queued (or already dead), so the current stage must follow the
+    // job status and nothing else.
+    vi.useFakeTimers();
+    mocks.fetchGenerationJob.mockResolvedValue(job({ status: "queued" }));
+    const { container } = renderProgress();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const currentStage = () => container.querySelector('[aria-current="step"]')?.textContent ?? "";
+    expect(currentStage()).toMatch(/Preparing \(in progress\)/i);
+
+    // Two full minutes of polling, with the server still saying "queued".
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(currentStage()).toMatch(/Preparing \(in progress\)/i);
+    // Exactly one stage is ever current — the timer never lights a second.
+    expect(container.querySelectorAll('[aria-current="step"]')).toHaveLength(1);
+
+    // Only a changed status moves it.
+    mocks.fetchGenerationJob.mockResolvedValue(job({ status: "running_image" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(currentStage()).toMatch(/Visual concept \(in progress\)/i);
+    vi.useRealTimers();
+  });
+
+  describe("accessibility", () => {
+    // Each narrated stage is a genuinely different DOM — a different stage is
+    // marked current, and the live region carries different text — so one axe
+    // run over one stage would not stand in for the others.
+    it.each([
+      ["queued", /Preparing your concept/i],
+      ["running_text", /Creating your design brief/i],
+      ["running_image", /Creating your visual concept/i],
+    ] as const)("has no axe violations in the %s stage", async (status, marker) => {
+      mocks.fetchGenerationJob.mockResolvedValue(job({ status }));
+      const { container } = renderProgress();
+      await screen.findByText(marker);
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations in the failure state", async () => {
+      mocks.fetchGenerationJob.mockResolvedValue(
+        job({ status: "failed", error_code: "image_ingest_failed" }),
+      );
+      const { container } = renderProgress();
+      await screen.findByRole("alert");
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations in the progress-unavailable retry state", async () => {
+      // The bounded retry/backoff (1s + 2s + 4s) has to be exhausted before the
+      // query settles into its error state, so this drives it with fake timers
+      // exactly as the behavioural test above does — then hands the clock back
+      // before axe runs, since axe-core schedules its own real timeouts.
+      vi.useFakeTimers();
+      mocks.fetchGenerationJob.mockRejectedValue(new GenerationJobUnavailableError());
+      const { container } = renderProgress();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(screen.getByRole("alert")).toHaveTextContent(/temporarily unavailable/i);
+      vi.useRealTimers();
+      expect(await axeViolations(container)).toHaveNoViolations();
     });
   });
 });

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { VersionComparison } from "./VersionComparison";
 import type { DesignImages, DesignResult as DesignResultType } from "@/lib/api";
+import { axeViolations } from "@/test-utils/axe";
 
 const mocks = vi.hoisted(() => ({
   fetchDesignResult: vi.fn(),
@@ -157,7 +158,7 @@ describe("VersionComparison", () => {
     expect(screen.getAllByText(/Garment breakdown/i).length).toBe(2);
   });
 
-  it("keeps the original then refined DOM order for consistent mobile stacking", async () => {
+  it("puts the current (refined) concept first, with the original under Previous design", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison();
@@ -169,9 +170,15 @@ describe("VersionComparison", () => {
     // DesignBrief also renders its own h3s (e.g. "Interpretation notes")
     // inside each card's collapsed detailed brief — scope to the card's own
     // "<label> — version N" heading specifically.
+    // Phase 17 applies the handoff's History hierarchy: the current design
+    // leads and earlier ones sit under "Previous design". On a narrow screen
+    // the same order stacks, so what a user meets first is the concept they
+    // just generated rather than the one they replaced.
     const headings = screen.getAllByRole("heading", { level: 2, name: /— version \d/ });
-    expect(headings[0]).toHaveTextContent(/original concept/i);
-    expect(headings[1]).toHaveTextContent(/refined concept/i);
+    expect(headings[0]).toHaveTextContent(/refined concept/i);
+    expect(headings[1]).toHaveTextContent(/original concept/i);
+    expect(headings[0]).toHaveTextContent(/current/i);
+    expect(screen.getByRole("heading", { name: /previous design/i })).toBeInTheDocument();
   });
 
   it("labels each version from its own persisted is_demo, never inferred together", async () => {
@@ -179,9 +186,10 @@ describe("VersionComparison", () => {
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison({ is_demo: false });
     await screen.findByRole("heading", { name: /original concept/i });
+    // Refined (live) leads; the original (demo) follows it.
     const headings = screen.getAllByRole("heading", { level: 2, name: /— version \d/ });
-    expect(headings[0]).toHaveTextContent(/demo/i);
-    expect(headings[1]).toHaveTextContent(/live/i);
+    expect(headings[0]).toHaveTextContent(/live/i);
+    expect(headings[1]).toHaveTextContent(/demo/i);
   });
 
   it("displays the selected refinement category in human-readable form", async () => {
@@ -291,5 +299,27 @@ describe("VersionComparison", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/temporarily unavailable/i);
     expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+  });
+
+  describe("accessibility", () => {
+    it("has no axe violations with both versions present", async () => {
+      const { container } = renderComparison();
+      await screen.findByRole("heading", { name: /previous design/i });
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations when the original's brief cannot be loaded", async () => {
+      // The asymmetric state: one side is a full concept, the other an alert.
+      // Worth its own run — a heading level or label can only go wrong here.
+      mocks.fetchDesignResult.mockResolvedValue({
+        ok: false,
+        status: 503,
+        code: "design_result_unavailable",
+        message: "unavailable",
+      });
+      const { container } = renderComparison();
+      await screen.findByRole("alert");
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
   });
 });

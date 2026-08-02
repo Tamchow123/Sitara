@@ -6,6 +6,14 @@
    from 700px the bar is hidden and the same list becomes the pill row.
    Nothing is duplicated in the DOM, so assistive technology sees each step
    exactly once at every width. */
+/* One line of reassurance above the progress nav, as in the handoff. */
+.wizard-reassurance {
+  margin: 0 0 var(--space-4);
+  max-width: 58ch;
+  font-size: 15px;
+  color: var(--color-neutral-800);
+}
+
 .progress-nav {
   margin: 0 0 1.5rem;
 }
@@ -106,15 +114,31 @@
   margin: 0 0 1.25rem;
 }
 
-/* The handoff's questionnaire column is 1020px; base.css's `main` rule gives
-   every page 46rem (736px), and `.wizard` had no rule of its own at all, so
-   the card grids were laid out in 72% of the width they were designed for.
-   A class beats the element selector, and this file is imported after base. */
-.wizard,
-.review {
-  max-width: 63.75rem;
-  padding-inline: var(--space-4);
+/* How many answers the control takes ("Choose one"), set above the option grid
+   exactly as the handoff does. Quieter than the question itself and than any
+   schema help text, because it describes the control rather than the choice. */
+.field-hint {
+  color: var(--muted);
+  font-size: 0.9375rem;
+  margin: 0 0 var(--space-3);
 }
+
+/* The handoff sets the QUESTION heading in the heavy display face — the same
+   one it uses for "How it works" — not the light serif the hero and the
+   generation headings use. Production had it in the light face on every route,
+   so the questionnaire read a weight lighter than the design. Scoped to the
+   wizard heading deliberately: the landing hero and the generation headings are
+   light in the handoff too, and already match. */
+.wizard #screen-heading {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  letter-spacing: -0.015em;
+}
+
+/* The 1020px column and its gutter now belong to AppShell's `.container`,
+   which every route renders into — the wizard must NOT set them again or the
+   padding is applied twice and the card grid loses 35px of the width it was
+   designed for. */
 
 /* A 1020px column would otherwise run prose to ~120 characters a line. Only
    the running text is capped — never the card grids or the review rows. */
@@ -124,12 +148,12 @@
   max-width: 62ch;
 }
 
-/* The wizard body is the cream ground. base.css paints every bare <section>
-   in --color-neutral-100, which is the OPTION CARD's own colour — so a card
-   sat on a panel of itself at 1.00:1 and only its photograph read as a card.
-   The handoff puts the kicker, heading and fields straight onto --color-bg.
-   Scoped to the wizard rather than rescoping the global rule, which the home,
-   auth, account and design-brief pages all rely on. */
+/* The handoff puts the kicker, heading and fields straight onto the cream
+   ground, with no panel behind them. Kept as an explicit declaration rather
+   than relying on a bare <section> having no styling of its own: a panel here
+   would be --color-neutral-100, which is the OPTION CARD's own colour, so
+   every card would sit on a ground of itself at 1.00:1 and only its
+   photograph would read as a card. */
 .wizard > section {
   border: 0;
   border-radius: 0;
@@ -142,17 +166,29 @@
    loudest edge on the screen. `min-inline-size: auto` is the declaration a
    <fieldset> needs to stop being pinned to its content's min-content width;
    without it a card grid inside cannot shrink below its widest option. */
-.field {
+/* Scoped: base.css's `.field` is the generic label-above-control wrapper the
+   auth forms use, and this is the questionnaire's <fieldset>. Same word, two
+   different components — without the scope the second silently retunes the
+   first's spacing. */
+.wizard .field,
+.review .field {
   border: none;
   padding: 0;
   margin: 0 0 var(--space-8);
   min-inline-size: auto;
 }
 
+/* On a one-question-per-screen wizard this legend is usually hidden (the screen
+   heading says it), so it is only ever seen where a screen carries several
+   sub-questions — the colours screen's fabric/embroidery/dupatta, and coverage.
+   There the handoff sets it in the display face, as a heading in its own right
+   rather than a bold run of body text. */
 .field-label {
   display: block;
-  font-weight: bold;
-  font-size: 1.05rem;
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
   margin-bottom: 0.4rem;
   padding: 0;
 }
@@ -161,12 +197,6 @@
   color: var(--muted);
   margin: 0 0 0.75rem;
   font-size: 0.95rem;
-}
-
-.field-error {
-  color: var(--bad);
-  font-weight: bold;
-  margin: 0.5rem 0 0;
 }
 
 /* Live "n of m chosen" note for a bounded multi-choice question. */
@@ -184,19 +214,6 @@
   border: 1px solid var(--line);
   border-radius: 6px;
   resize: vertical;
-}
-
-/* Accessible utility: visually hidden but available to assistive tech. */
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }
 
 /* Phase 16B: the handoff's option cards (with optional explanatory visuals and
@@ -382,29 +399,54 @@
   cursor: pointer;
   padding: 0;
 }
-.swatch-group {
-  border: none;
-  padding: 0;
-  margin: 0;
-}
-.swatch-group-heading {
-  font-weight: bold;
-  font-size: 0.95rem;
-  padding: 0;
-  margin-bottom: 0.35rem;
-}
+/* One flat wrapping row, never a categorised grid: the handoff shows the whole
+   palette at once so a bride compares hues against each other rather than
+   inside seven boxes. 10px is the handoff's own gap. */
 .swatch-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(5rem, 1fr));
-  gap: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
 .swatch {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.25rem;
+  display: inline-flex;
   cursor: pointer;
-  text-align: center;
+}
+/* An option with no hue ("Match the fabric") is a labelled pill, not a circle:
+   there is nothing to show, so it says what it is instead. */
+.swatch-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-100);
+  color: var(--color-text);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion-fast) ease-out;
+}
+.swatch-pill:hover {
+  background: var(--color-neutral-200);
+}
+.swatch-pill.swatch-selected {
+  background: var(--color-accent-700);
+  color: var(--color-on-accent);
+}
+.swatch-pill-tick {
+  line-height: 1;
+}
+/* The "Any colour" trigger belongs at the end of the same row (`display:
+   contents` lifts the button out of its wrapper and into the flex flow), while
+   its panel and limit note drop onto a line of their own. */
+.swatch-grid .custom-colour {
+  display: contents;
+}
+.swatch-grid .custom-colour-panel,
+.swatch-grid .custom-colour > .field-limit {
+  flex-basis: 100%;
 }
 /* 38px circles, a 19px rank badge and the 56px colour input below are the
    handoff's own component dimensions, quoted deliberately rather than derived
@@ -420,7 +462,6 @@
   width: 38px;
   height: 38px;
   border-radius: var(--radius-pill);
-  box-shadow: inset 0 0 0 1.5px rgba(32, 30, 29, 0.22);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-text) 22%, transparent);
   transition: transform var(--motion-fast) ease-out;
 }
@@ -441,7 +482,7 @@
   font-size: 0.9rem;
   line-height: 1;
   /* Legible on both dark and light swatches without knowing which it is. */
-  text-shadow: 0 0 3px rgba(32, 30, 29, 0.85);
+  text-shadow: 0 0 3px var(--color-glyph-veil);
 }
 .swatch-order {
   position: absolute;
@@ -456,14 +497,18 @@
   line-height: 19px;
   text-align: center;
 }
-.swatch-label {
-  font-size: 0.82rem;
-}
 .swatch-disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 .swatch input:focus-visible + .swatch-chip {
+  outline: 3px solid var(--color-accent-700);
+  outline-offset: 4px;
+}
+/* The pill has no chip to hang the ring on, so the focus ring goes on the pill
+   itself. Both rules exist because the input is visually hidden — without them
+   a keyboard user would tab through the palette with nothing to see. */
+.swatch-pill:has(input:focus-visible) {
   outline: 3px solid var(--color-accent-700);
   outline-offset: 4px;
 }
@@ -507,7 +552,7 @@
   width: 19px;
   height: 19px;
   border-radius: var(--radius-pill);
-  background: conic-gradient(from 0deg, #c22b33, #e8a13a, #1d6b4f, #2b3d8f, #46203f, #c22b33);
+  background: var(--gradient-colour-wheel);
 }
 .custom-colour-panel {
   display: flex;
@@ -580,10 +625,10 @@
 /* ------------------------------------------------------------------ */
 /* Option info drawer                                                 */
 /* ------------------------------------------------------------------ */
-/* Both scrim declarations are the same ink at the same alpha: an engine
-   without color-mix() keeps the rgba() line, one with it takes the second.
-   Without the fallback the scrim would resolve to `transparent` and the
-   modal would read as part of the page. Same pattern as tokens.css. */
+/* --color-scrim is a plain rgba() rather than a color-mix(), precisely so
+   it cannot become invalid at computed-value time and resolve to
+   `transparent` — a scrim that vanishes would leave the modal reading as
+   part of the page. */
 .info-scrim {
   position: fixed;
   inset: 0;
@@ -591,8 +636,7 @@
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgba(32, 30, 29, 0.45);
-  background: color-mix(in srgb, var(--color-text) 45%, transparent);
+  background: var(--color-scrim);
 }
 .info-drawer {
   width: min(46rem, 100%);
@@ -698,37 +742,40 @@
   font: inherit;
   border: 1px solid var(--accent);
   border-radius: 6px;
-  background: #fff;
+  background: var(--color-neutral-100);
   color: var(--accent);
   cursor: pointer;
   text-decoration: none;
 }
 .wizard-nav button:last-child {
   background: var(--accent);
-  color: #fff;
+  color: var(--color-on-accent);
 }
 .wizard-nav button[disabled] {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
+/* A page-level summary of everything still wrong, as opposed to `.field-error`
+   next to one control. Keeps the heavier full border rather than the `.alert`
+   left rule: this is the one block the user is sent back to, and it has to be
+   findable at a glance after focus moves to it. */
 .error-summary {
-  border: 2px solid var(--bad);
-  border-radius: 8px;
-  padding: 0.75rem 1.1rem;
-  margin-bottom: 1.5rem;
-  background: #fdeceb;
-}
-.error-summary h2 {
-  color: var(--bad);
-  margin-top: 0;
+  border: 2px solid var(--color-bad);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-6);
+  background: var(--color-bad-100);
 }
 
-.wizard-unavailable button {
-  margin-top: 0.75rem;
-  padding: 0.5rem 1.1rem;
-  font: inherit;
-  cursor: pointer;
+.error-summary h2 {
+  margin-top: 0;
+  font-size: 18px;
+  color: var(--color-bad);
+}
+
+.error-summary ul {
+  margin-bottom: 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -753,7 +800,7 @@
   border-radius: 8px;
   padding: 0;
   overflow: hidden;
-  background: #fff;
+  background: var(--color-neutral-100);
   cursor: pointer;
   font: inherit;
 }
@@ -772,7 +819,7 @@
   max-width: 100%;
   aspect-ratio: 1 / 1;
   object-fit: cover;
-  background: #f0e7db;
+  background: var(--color-neutral-200);
 }
 .inspiration-meta {
   display: flex;
@@ -798,7 +845,7 @@
   border-radius: 8px;
   padding: 0.75rem;
   color: var(--muted);
-  background: #f6f1ea;
+  background: var(--color-neutral-100);
 }
 .empty-state {
   color: var(--muted);
@@ -813,11 +860,35 @@
   align-items: baseline;
   gap: 1rem;
 }
+/* Two columns, not three: the Edit link is inside the <dd> because a <dl>'s
+   wrapper <div> may only contain <dt> and <dd>. The <dd> then lays the answer
+   and its Edit out as the third column used to look. */
 .review-row {
   display: grid;
-  grid-template-columns: max-content 1fr max-content;
-  gap: 0.4rem 1.25rem;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-5);
   align-items: baseline;
+}
+
+.review-row dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+/* A flex item defaults to min-width: auto, so a long unbroken answer would
+   refuse to shrink and push Edit out of the row. Edit is the only way to
+   correct one answer from here, so it must never be the thing that overflows:
+   the answer wraps, and the link keeps its width. */
+.review-row dd > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.review-row .review-edit {
+  flex-shrink: 0;
 }
 /* An unanswered row is a deliberate choice, not an error: it reads in the
    softer accent rather than the warning colour. */
@@ -892,7 +963,7 @@
   border-radius: 8px;
   padding: 0.85rem 1rem;
   margin-bottom: 0.85rem;
-  background: #fffdf9;
+  background: var(--color-neutral-100);
 }
 .upload-disclosure p {
   margin: 0 0 0.6rem;
@@ -932,7 +1003,7 @@
   padding: 0.5rem 1.1rem;
   cursor: pointer;
   font-size: 0.92rem;
-  background: #fff;
+  background: var(--color-neutral-100);
 }
 .upload-input:focus-visible + .upload-label {
   outline: 2px solid var(--accent);
@@ -942,10 +1013,20 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Holds its line height even when empty, so announcing an upload result does
+   not shift the buttons underneath it. */
 .upload-status {
   min-height: 1.4em;
-  margin: 0.6rem 0 0;
-  font-size: 0.9rem;
+  margin: var(--space-3) 0 0;
+  font-size: 14px;
+}
+
+/* A rejected upload reads differently from an accepted one. Colour is the
+   secondary cue only — the message itself already says what went wrong, so
+   this still works without it. */
+.upload-status-error {
+  font-weight: 700;
+  color: var(--color-bad);
 }
 .upload-grid {
   list-style: none;
@@ -959,7 +1040,7 @@
   border: 2px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
-  background: #fff;
+  background: var(--color-neutral-100);
 }
 /* 3:4 — the aspect the concepts themselves are generated at, so a preview
    shows the crop the reference will actually contribute. */
@@ -970,7 +1051,7 @@
   max-width: 100%;
   aspect-ratio: 3 / 4;
   object-fit: cover;
-  background: #f0e7db;
+  background: var(--color-neutral-200);
 }
 .upload-remove {
   display: block;
@@ -978,7 +1059,7 @@
   border: 0;
   border-top: 1px solid var(--line);
   padding: 0.5rem;
-  background: #fff;
+  background: var(--color-neutral-100);
   cursor: pointer;
   font: inherit;
   font-size: 0.85rem;

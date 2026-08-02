@@ -7,6 +7,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 
 const SIGN_OUT_FAILED_MESSAGE =
@@ -48,44 +49,46 @@ export default function AccountPage() {
   }
 
   return (
-    <main>
+    <AppShell width="narrow">
       <h1>Your account</h1>
-      <section aria-labelledby="account-heading">
+      <section className="panel" aria-labelledby="account-heading">
         <h2 id="account-heading">Account details</h2>
         <div role="status" aria-live="polite">
-          {status === "loading" && <p>Checking your session…</p>}
+          {status === "loading" && <p className="loading-note">Checking your session…</p>}
           {status === "unavailable" && (
-            <p className="status-bad">
-              Backend unavailable — your account details cannot be loaded right
-              now.
-            </p>
+            <div className="alert alert-error">
+              {/* The session check itself is what failed, so this says nothing
+                  about whether the user is still signed in — we do not know. */}
+              <p className="alert-title">Your account details cannot be loaded right now</p>
+              <p>Please try again shortly.</p>
+            </div>
           )}
-          {status === "anonymous" && <p>Redirecting to sign in…</p>}
+          {status === "anonymous" && <p className="loading-note">Redirecting to sign in…</p>}
           {status === "authenticated" && user && (
             <>
               <dl>
                 <dt>Email</dt>
                 <dd>{user.email}</dd>
               </dl>
-              <button type="button" onClick={onLogout} disabled={signingOut}>
+              <button type="button" className="btn btn-secondary" onClick={onLogout} disabled={signingOut}>
                 {signingOut ? "Signing out…" : "Sign out"}
               </button>
               {logoutError && (
-                <p role="alert" className="status-bad">
-                  {logoutError}
-                </p>
+                <div role="alert" className="alert alert-error">
+                  <p>{logoutError}</p>
+                </div>
               )}
             </>
           )}
         </div>
       </section>
-      <section aria-labelledby="coming-heading">
+      <section className="panel" aria-labelledby="coming-heading">
         <h2 id="coming-heading">What&apos;s next</h2>
         <p>
           Bridal design features — the guided questionnaire, private concept
           generation and your design gallery — arrive in later phases.
         </p>
       </section>
-    </main>
+    </AppShell>
   );
 }

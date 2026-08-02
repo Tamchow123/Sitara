@@ -35,11 +35,9 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
-from hashlib import sha256
-from io import BytesIO
 from pathlib import Path
 
-from PIL import Image
+from imagekit import digest, render
 
 WEB_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = WEB_ROOT.parent.parent
@@ -49,42 +47,65 @@ INTEGRITY_PATH = (
     WEB_ROOT / "src" / "features" / "questionnaire" / "visuals" / "asset-integrity.json"
 )
 
-# Card aspects, keyed by name -> (width, height) in CSS pixels at 2x for a
-# ~270 px card.
+# Card aspects, keyed by name -> (width, height) in device pixels. Every shape
+# is built on a 720 px long edge so one question's cards never arrive at a
+# visibly different resolution from another's.
+#
+# The names are the ratios, not adjectives: "portrait" alone stopped being
+# useful once the design asked for three different portrait shapes.
 ASPECTS = {
-    "portrait": (540, 720),
+    "landscape-3-2": (720, 480),
+    "landscape-5-4": (720, 576),
     "square": (720, 720),
+    "portrait-4-5": (576, 720),
+    "portrait-3-4": (540, 720),
+    "portrait-2-3": (480, 720),
 }
 
 # The aspect is a property of the GROUP, never of an individual entry, so every
-# card within one question's grid is necessarily the same shape. Full-figure
-# questions are portrait; close neckline and head-covering detail is square, as
-# is anything whose subject is a surface rather than a person — a woven cloth,
-# a worked panel, a density of handwork.
+# card within one question's grid is necessarily the same shape — and because
+# ChoiceOptionGrid reads `--choice-card-aspect` straight off the first visual
+# in the manifest, THIS TABLE is what sets the card shape on screen. There is
+# no second place to change it.
+#
+# The seven shapes are the handoff's own, one per question, each chosen so the
+# frame holds the thing the card exists to explain:
+#
+#   3:2   ceremony  — a room, a procession, a mandap: these are scene shots,
+#                     and a portrait crop of a room throws the room away.
+#         fabrics   — a swatch reads best as a wide field of cloth.
+#   3:4   garment, dupatta — a whole figure, not quite as narrow as a plate.
+#   2:3   culture, silhouette, saree drape — full length, where the silhouette
+#                     IS the answer and the hem must stay in frame.
+#   1:1   embroidery, richness — a surface, with no orientation of its own.
+#   5:4   neckline  — wide enough to hold both shoulders around the neckline.
+#   4:5   sleeves, back, midriff, head covering — an upright band of the body
+#                     from roughly the head to the hip.
 GROUP_ASPECT = {
-    "garments": "portrait",
-    "silhouettes": "portrait",
-    "ceremonies": "portrait",
-    "cultural-styling": "portrait",
-    "fabrics": "square",
+    "ceremonies": "landscape-3-2",
+    "fabrics": "landscape-3-2",
+    "garments": "portrait-3-4",
+    "dupatta": "portrait-3-4",
+    "cultural-styling": "portrait-2-3",
+    "silhouettes": "portrait-2-3",
+    "saree-drapes": "portrait-2-3",
     "embroidery": "square",
     "embellishment-density": "square",
-    "necklines": "square",
-    "sleeves": "portrait",
-    "back-coverage": "portrait",
-    "midriff": "portrait",
-    "head-covering": "square",
-    "dupatta": "portrait",
-    "saree-drapes": "portrait",
+    "necklines": "landscape-5-4",
+    "sleeves": "portrait-4-5",
+    "back-coverage": "portrait-4-5",
+    "midriff": "portrait-4-5",
+    "head-covering": "portrait-4-5",
 }
 
-# Vertical crop anchor: 0.0 keeps the top of the frame, 1.0 the bottom. Full
-# figures are biased upward so a tall source loses floor rather than head.
+# Vertical crop anchor: 0.0 keeps the top of the frame, 1.0 the bottom. This is
+# the ONLY place framing is decided — the served asset is already cut to the
+# card's exact aspect, so the browser does no second crop and there is no
+# `object-position` to disagree with this number.
+#
+# Full figures are biased upward so a tall source loses floor rather than head.
 FULL_FIGURE_FOCUS = 0.42
 CENTRE_FOCUS = 0.5
-
-WEBP_QUALITY = 82
-WEBP_METHOD = 6
 
 
 @dataclass(frozen=True)
@@ -126,7 +147,7 @@ VISUALS: dict[str, Visual] = {
     # --- garment_type ---
     "garment_lehenga": full_figure(
         "garments",
-        "03-garments/sitara__garments__lehenga__v1.jpg",
+        "03-garments/sitara__garments__lehenga__v2.jpg",
         "A bridal lehenga: a fitted blouse with a separate full-length flared skirt and dupatta.",
     ),
     "garment_saree": full_figure(
@@ -136,12 +157,12 @@ VISUALS: dict[str, Visual] = {
     ),
     "garment_gharara": full_figure(
         "garments",
-        "03-garments/sitara__garments__gharara__v1.jpg",
+        "03-garments/sitara__garments__gharara__v2.jpg",
         "A gharara: a short kameez over trousers fitted to the knee that flare widely below it.",
     ),
     "garment_sharara": full_figure(
         "garments",
-        "03-garments/sitara__garments__sharara__v1.jpg",
+        "03-garments/sitara__garments__sharara__v3.jpg",
         "A sharara: a kameez over wide trousers that flare from the waist.",
     ),
     "garment_anarkali": full_figure(
@@ -246,12 +267,12 @@ VISUALS: dict[str, Visual] = {
     ),
     "silhouette_front_open_anarkali": full_figure(
         "silhouettes",
-        "gaps/Anarkali — Front-open.png",
+        "gaps/front-open.png",
         "A front-open anarkali split down the centre front over trousers.",
     ),
     "silhouette_jacket_style_anarkali": full_figure(
         "silhouettes",
-        "gaps/Anarkali — Jacket style.png",
+        "gaps/jacket-style.png",
         "A jacket-style anarkali worn as an open layer over an inner garment.",
     ),
     # --- silhouette: shalwar kameez ---
@@ -267,7 +288,7 @@ VISUALS: dict[str, Visual] = {
     ),
     "silhouette_angrakha_kameez": full_figure(
         "silhouettes",
-        "gaps/Angrakha kameez.png",
+        "02-ceremonies/Angrakha kameez.png",
         "An angrakha kameez with an overlapping wrapped front fastened to one side.",
     ),
     "silhouette_long_line_kameez": full_figure(
@@ -313,12 +334,12 @@ VISUALS: dict[str, Visual] = {
     ),
     "neckline_high_neck": detail(
         "necklines",
-        "08-necklines/sitara__necklines__high_neck__v3.jpg",
+        "08-necklines/sitara__necklines__high_neck__v2.jpg",
         "A high neckline rising to sit close around the neck.",
     ),
     "neckline_band_collar": detail(
         "necklines",
-        "08-necklines/sitara__necklines__band_mandarin_collar__v3.jpg",
+        "08-necklines/sitara__necklines__band_mandarin_collar__v1.jpg",
         "An upright band or mandarin collar standing at the neck with a centre opening.",
     ),
     # --- sleeves ---
@@ -329,8 +350,9 @@ VISUALS: dict[str, Visual] = {
     ),
     "sleeves_cap_sleeve": detail(
         "sleeves",
-        "gaps/Cap sleeve.png",
-        "A cap sleeve covering just the top of the shoulder.",
+        "09-sleeves/sitara__sleeves__short_sleeves__v2.jpg",
+        "A cap sleeve on a dress form: a short lace sleeve covering the top of the shoulder "
+        "and no more.",
     ),
     "sleeves_elbow_sleeve": full_figure(
         "sleeves",
@@ -371,12 +393,12 @@ VISUALS: dict[str, Visual] = {
     ),
     "midriff_semi_sheer_midriff": detail(
         "midriff",
-        "gaps/Semi-sheer midriff.png",
+        "11-midriff/Semi-sheer midriff.png",
         "A semi-sheer midriff panel veiling the waist in translucent fabric.",
     ),
     "midriff_covered_midriff": full_figure(
         "midriff",
-        "11-midriff/sitara__midriff__covered__v2.jpg",
+        "11-midriff/sitara__midriff__covered__v1.jpg",
         "A fully covered midriff with no gap between blouse and skirt.",
     ),
     # --- head_covering ---
@@ -387,8 +409,9 @@ VISUALS: dict[str, Visual] = {
     ),
     "head_covering_dupatta_over_head": detail(
         "head-covering",
-        "gaps/Dupatta Over the head.png",
-        "A dupatta drawn up over the head and framing the face.",
+        "12-head-covering/sitara__head_covering__dupatta_over_head__v1.jpg",
+        "An embellished bridal dupatta drawn up over the head and falling either side of "
+        "the face.",
     ),
     "head_covering_veil_style": detail(
         "head-covering",
@@ -397,7 +420,7 @@ VISUALS: dict[str, Visual] = {
     ),
     "head_covering_hijab": detail(
         "head-covering",
-        "gaps/Hijab — full coverage, no hair shown.png",
+        "12-head-covering/Hijab — full coverage, no hair shown.png",
         "A hijab covering the hair, neck and shoulders completely.",
     ),
     # --- dupatta_style ---
@@ -413,8 +436,9 @@ VISUALS: dict[str, Visual] = {
     ),
     "dupatta_head_drape": full_figure(
         "dupatta",
-        "12-head-covering/sitara__head_covering__dupatta_over_head__v1.jpg",
-        "A dupatta taken over the head and down across the shoulders.",
+        "gaps/Dupatta Over the head.png",
+        "A soft, unembellished dupatta taken over the head from the crown and wound once "
+        "around the neck.",
     ),
     "dupatta_double_dupatta": full_figure(
         "dupatta",
@@ -444,8 +468,9 @@ VISUALS: dict[str, Visual] = {
     ),
     "saree_drape_lehenga_drape": full_figure(
         "saree-drapes",
-        "05-silhouettes/saree/sitara__silhouettes_saree__lehenga_style_saree__v2.jpg",
-        "A lehenga-style saree drape worn over a flared skirt.",
+        "13-saree-drapes/sitara__saree_drapes__pinned_pleats__v1.jpg",
+        "A saree drape with the waist pleats pinned flat so the skirt falls smoothly, the "
+        "pallu set over the left shoulder.",
     ),
     # --- ceremony ---
     # These are distinct occasions belonging to distinct traditions, not
@@ -453,40 +478,44 @@ VISUALS: dict[str, Visual] = {
     # ceremonies of different faiths, and a walima and a reception are the
     # celebrations that follow different ones. Each alt text names the occasion
     # rather than describing a generic bride.
-    "ceremony_nikah": full_figure(
+    "ceremony_nikah": detail(
         "ceremonies",
-        "02-ceremonies/sitara__ceremonies__nikah__v1.jpg",
-        "Bridalwear for a nikah, the Islamic marriage ceremony.",
+        "02-ceremonies/Nikah.png",
+        "A nikah: the marriage contract open on a table before a flower-dressed stage, "
+        "with the two families seated on either side.",
     ),
-    "ceremony_mehndi": full_figure(
+    "ceremony_mehndi": detail(
         "ceremonies",
-        "02-ceremonies/sitara__ceremonies__mehndi.jpg",
-        "Bridalwear for a mehndi, the henna celebration held before the wedding day.",
+        "02-ceremonies/mendhi.png",
+        "A mehndi: henna being applied to the bride's hand under a marigold-strung canopy "
+        "while guests look on.",
     ),
-    "ceremony_baraat": full_figure(
+    "ceremony_baraat": detail(
         "ceremonies",
-        "02-ceremonies/sitara__ceremonies__baraat__v1.jpg",
-        "Bridalwear for the baraat, when the groom's wedding procession arrives.",
+        "02-ceremonies/Baraat.png",
+        "A baraat: the groom's procession arriving on horseback at night through drummers, "
+        "dancing guests and falling petals.",
     ),
-    "ceremony_walima": full_figure(
+    "ceremony_walima": detail(
         "ceremonies",
-        "02-ceremonies/sitara__ceremonies__walima__v1.jpg",
-        "Bridalwear for a walima, the celebration hosted after a nikah.",
+        "02-ceremonies/Walima.png",
+        "A walima: a chandelier-lit banquet hall of seated guests facing a floral stage.",
     ),
-    "ceremony_pheras": full_figure(
+    "ceremony_pheras": detail(
         "ceremonies",
-        "02-ceremonies/sitara__ceremonies__pheras.jpg",
-        "Bridalwear for the pheras, the Hindu ceremony of circling the sacred fire.",
+        "02-ceremonies/Pheras.png",
+        "The pheras: a marigold-draped garden mandap with the sacred fire lit at its centre.",
     ),
-    "ceremony_anand_karaj": full_figure(
+    "ceremony_anand_karaj": detail(
         "ceremonies",
-        "02-ceremonies/sitara__ceremonies__anand_karaj.jpg",
-        "Bridalwear for an anand karaj, the Sikh marriage ceremony.",
+        "gaps/Anand Karaj.png",
+        "An anand karaj: the congregation seated on the floor of a gurdwara before the "
+        "canopied Guru Granth Sahib, with the couple at the front.",
     ),
-    "ceremony_reception": full_figure(
+    "ceremony_reception": detail(
         "ceremonies",
-        "02-ceremonies/sitara__ceremonies__reception.jpg",
-        "Bridalwear for a wedding reception.",
+        "02-ceremonies/Reception.png",
+        "A wedding reception: guests dancing on a lit floor between banquet tables.",
     ),
     # --- regional_style ---
     # Regional influence is optional and non-prescriptive (CLAUDE.md section
@@ -676,46 +705,6 @@ VISUALS: dict[str, Visual] = {
 }
 
 
-def crop_box(size: tuple[int, int], aspect: float, focus: float) -> tuple[int, int, int, int]:
-    """Largest centred box of `aspect` (w/h) inside `size`, anchored by `focus`.
-
-    Integer arithmetic only, so the same input always yields the same box.
-    """
-    width, height = size
-    if width / height > aspect:
-        # Source is wider than the target: trim the sides, keeping the centre.
-        new_width = round(height * aspect)
-        left = (width - new_width) // 2
-        return (left, 0, left + new_width, height)
-    # Source is taller than the target: trim top/bottom, biased by `focus`.
-    new_height = round(width / aspect)
-    top = round((height - new_height) * focus)
-    return (0, top, width, top + new_height)
-
-
-def render(visual: Visual, source_path: Path) -> bytes:
-    """Crop, downscale and encode one visual; returns the WebP bytes."""
-    target_width, target_height = ASPECTS[visual.aspect]
-    with Image.open(source_path) as image:
-        # A source could arrive in any mode (palette, greyscale, RGBA); render
-        # on an opaque white ground so the encoded output is always plain RGB.
-        if image.mode in ("RGBA", "LA", "P"):
-            rgba = image.convert("RGBA")
-            flattened = Image.new("RGB", rgba.size, (255, 255, 255))
-            flattened.paste(rgba, mask=rgba.split()[3])
-            prepared = flattened
-        else:
-            prepared = image.convert("RGB")
-        box = crop_box(prepared.size, target_width / target_height, visual.focus)
-        cropped = prepared.resize((target_width, target_height), resample=Image.LANCZOS, box=box)
-    # Copy the pixels into a bare image so no source EXIF/ICC/XMP rides along.
-    clean = Image.new("RGB", cropped.size)
-    clean.putdata(list(cropped.getdata()))
-    buffer = BytesIO()
-    clean.save(buffer, format="WEBP", quality=WEBP_QUALITY, method=WEBP_METHOD)
-    return buffer.getvalue()
-
-
 def main() -> int:
     unknown_groups = sorted({v.group for v in VISUALS.values()} - set(GROUP_ASPECT))
     if unknown_groups:
@@ -733,13 +722,16 @@ def main() -> int:
             print(f"  {entry}", file=sys.stderr)
         return 1
 
-    # Render everything BEFORE touching the tree. These assets are committed, so
-    # a failure part-way through (an undecodable source, a full disk, an
-    # interrupt) must not leave some visuals regenerated, others deleted, and
-    # asset-integrity.json describing neither. ~2 MB of encoded bytes is a cheap
-    # price for making the replacement all-or-nothing.
+    # Render everything BEFORE touching the tree, so the failure this is most
+    # likely to hit — an undecodable or missing source — aborts with the
+    # committed assets untouched. ~2 MB of encoded bytes is a cheap price for
+    # that. Note the limit of the guarantee: the disk phase below is a sequence
+    # of independent writes, so an interrupt or a full disk part-way through it
+    # CAN leave the tree and asset-integrity.json describing different states.
+    # The backstop for that is CI, which rebuilds both pipelines and fails on
+    # any diff — not this ordering.
     rendered: list[tuple[str, Visual, bytes]] = [
-        (key, visual, render(visual, SOURCE_ROOT / visual.source))
+        (key, visual, render(SOURCE_ROOT / visual.source, ASPECTS[visual.aspect], visual.focus))
         for key, visual in sorted(VISUALS.items())
     ]
 
@@ -766,7 +758,7 @@ def main() -> int:
             "path": f"/questionnaire-visuals/{visual.group}/{filename}",
             "width": width,
             "height": height,
-            "sha256": sha256(payload).hexdigest(),
+            "sha256": digest(payload),
             "alt": visual.alt,
             "source": visual.source,
         }

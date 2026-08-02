@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RefinementPanel } from "./RefinementPanel";
 import { REFINEMENT_NOTE_MAX_LENGTH } from "./refinement-options";
+import { axeViolations } from "@/test-utils/axe";
 
 const mocks = vi.hoisted(() => ({
   startDesignRefinement: vi.fn(),
@@ -176,12 +177,15 @@ describe("RefinementPanel — submission", () => {
     expect(secondKey).toBe(firstKey);
   });
 
-  it("mints a fresh key after a confirmed conflict, never reusing the consumed one", async () => {
+  // Uses a confirmed-but-retryable code deliberately: the invariant under test
+  // is "any confirmed HTTP response consumes the key", and the terminal codes
+  // no longer render a retry control to click (see the two tests below).
+  it("mints a fresh key after a confirmed failure, never reusing the consumed one", async () => {
     mocks.startDesignRefinement.mockResolvedValueOnce({
       ok: false,
-      status: 409,
-      code: "refinement_limit_reached",
-      message: "This design has already been refined.",
+      status: 400,
+      code: "refinement_invalid",
+      message: "Please choose one change and check your note, then try again.",
     });
     mocks.startDesignRefinement.mockResolvedValueOnce({ ok: true, data: { job: { id: "j1" } } });
     render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
@@ -194,6 +198,45 @@ describe("RefinementPanel — submission", () => {
     const firstKey = mocks.startDesignRefinement.mock.calls[0][2];
     const secondKey = mocks.startDesignRefinement.mock.calls[1][2];
     expect(secondKey).not.toBe(firstKey);
+  });
+
+  it("offers no retry control once this design's refinement has already been used", async () => {
+    mocks.startDesignRefinement.mockResolvedValue({
+      ok: false,
+      status: 409,
+      code: "refinement_limit_reached",
+      message: "This design has already been refined.",
+    });
+    render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
+    selectChip(/colour story/i);
+    acknowledge();
+    fireEvent.click(screen.getByRole("button", { name: /request refinement/i }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/already been refined/i);
+    expect(screen.queryByRole("button", { name: /try again/i })).not.toBeInTheDocument();
+  });
+
+  it("offers no retry control when generation is turned off or its limit is reached", async () => {
+    for (const code of [
+      "live_generation_disabled",
+      "generation_limit_reached",
+      "live_generation_budget_exhausted",
+    ]) {
+      mocks.startDesignRefinement.mockResolvedValue({
+        ok: false,
+        status: 429,
+        code,
+        message: "unused — the panel substitutes its own copy",
+      });
+      const view = render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
+      selectChip(/colour story/i);
+      acknowledge();
+      fireEvent.click(screen.getByRole("button", { name: /request refinement/i }));
+      await screen.findByRole("alert");
+      expect(screen.queryByRole("button", { name: /try again/i })).not.toBeInTheDocument();
+      view.unmount();
+      mocks.startDesignRefinement.mockReset();
+    }
   });
 
   it("calls onRequiresRecheck when the backend reports the design can no longer be refined", async () => {
@@ -224,5 +267,27 @@ describe("RefinementPanel — submission", () => {
     await vi.waitFor(() => expect(mocks.startDesignRefinement).toHaveBeenCalled());
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
+  });
+
+  describe("accessibility", () => {
+    it("has no axe violations on arrival and once a change is chosen", async () => {
+      const { container } = render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
+      // Arrival: submit disabled, nothing acknowledged. Then the enabled state,
+      // which turns aria-describedby hints and the acknowledgement on.
+      expect(await axeViolations(container)).toHaveNoViolations();
+      selectChip(/colour story/i);
+      acknowledge();
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations in the note-too-long error state", async () => {
+      const { container } = render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
+      selectChip(/colour story/i);
+      fireEvent.change(screen.getByLabelText(/optional note/i), {
+        target: { value: "x".repeat(REFINEMENT_NOTE_MAX_LENGTH + 1) },
+      });
+      await screen.findByText(/please shorten your note/i);
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
   });
 });

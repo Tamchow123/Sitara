@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReviewSummary } from "./ReviewSummary";
 import type { QuestionnaireSchema } from "./types";
+import { axeViolations } from "@/test-utils/axe";
 
 const mocks = vi.hoisted(() => ({
   fetchDesign: vi.fn(),
@@ -89,9 +90,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.fetchDesign.mockResolvedValue(design());
   mocks.validateDesignDraft.mockResolvedValue({ ok: true, data: { valid: true } });
+  // The exact payload the running stack returns under DEMO_MODE=true. The
+  // earlier fixture paired demo_mode: true with generation_enabled: true,
+  // which the backend never produces — and that impossible combination is
+  // what hid the disabled-in-demo-mode bug from every test in this file.
   mocks.fetchPublicConfig.mockResolvedValue({
     demo_mode: true,
-    generation_enabled: true,
+    generation_enabled: false,
+    generation_mode: "demo",
     max_inspiration_images: 3,
     max_refinements: 1,
   });
@@ -297,16 +303,35 @@ describe("ReviewSummary", () => {
   });
 
   describe("Generate my concept", () => {
-    it("enables the button when valid and generation is enabled", async () => {
+    it("enables the button in demo mode, which the backend admits without the live flag", async () => {
+      // Regression guard for the bug this fixture change exposed: demo mode
+      // reports generation_enabled: false (it means the LIVE capability), so
+      // reading that flag directly disabled demo generation for everyone.
       render(<ReviewSummary designId="d1" />);
       const button = await screen.findByRole("button", { name: /Generate my concept/i });
       expect(button).toBeEnabled();
+      expect(screen.getByText(/ready to generate your concept/i)).toBeInTheDocument();
+    });
+
+    it("enables the button for live generation when the operator has turned it on", async () => {
+      mocks.fetchPublicConfig.mockResolvedValue({
+        demo_mode: false,
+        generation_enabled: true,
+        generation_mode: "live",
+        max_inspiration_images: 3,
+        max_refinements: 1,
+      });
+      render(<ReviewSummary designId="d1" />);
+      expect(await screen.findByRole("button", { name: /Generate my concept/i })).toBeEnabled();
     });
 
     it("keeps the button disabled with accurate copy when generation is disabled", async () => {
+      // Live mode with the capability flag off: the one case where
+      // generation_enabled: false genuinely means "do not offer it".
       mocks.fetchPublicConfig.mockResolvedValue({
-        demo_mode: true,
+        demo_mode: false,
         generation_enabled: false,
+        generation_mode: "unavailable",
         max_inspiration_images: 3,
         max_refinements: 1,
       });
@@ -319,13 +344,6 @@ describe("ReviewSummary", () => {
     });
 
     it("shows the demo disclosure and associates it with the submit button when demo_mode is true", async () => {
-      mocks.fetchPublicConfig.mockResolvedValue({
-        demo_mode: true,
-        generation_enabled: true,
-        generation_mode: "demo",
-        max_inspiration_images: 3,
-        max_refinements: 1,
-      });
       render(<ReviewSummary designId="d1" />);
       const button = await screen.findByRole("button", { name: /Generate my concept/i });
       const disclosure = screen.getByRole("note", { name: /demo disclosure/i });
@@ -437,6 +455,39 @@ describe("ReviewSummary", () => {
       const firstKey = mocks.startDesignGeneration.mock.calls[0][1];
       const secondKey = mocks.startDesignGeneration.mock.calls[1][1];
       expect(secondKey).toBe(firstKey);
+    });
+
+    it.each([
+      ["live_generation_disabled", /currently turned off/i],
+      ["generation_limit_reached", /reached the limit/i],
+      ["live_generation_budget_exhausted", /daily limit/i],
+    ])(
+      "offers no retry control for %s, which an immediate retry cannot clear",
+      async (code, expected) => {
+        mocks.startDesignGeneration.mockResolvedValue({
+          ok: false,
+          status: 429,
+          code,
+          message: "unused — the page substitutes its own copy",
+        });
+        render(<ReviewSummary designId="d1" />);
+        fireEvent.click(await screen.findByRole("button", { name: /Generate my concept/i }));
+        expect(await screen.findByText(expected)).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Try again/i })).not.toBeInTheDocument();
+      },
+    );
+
+    it("still offers a retry for a transient admission outage", async () => {
+      mocks.startDesignGeneration.mockResolvedValue({
+        ok: false,
+        status: 503,
+        code: "queue_unavailable",
+        message: "unused — the page substitutes its own copy",
+      });
+      render(<ReviewSummary designId="d1" />);
+      fireEvent.click(await screen.findByRole("button", { name: /Generate my concept/i }));
+      await screen.findByText(/queue is temporarily unavailable/i);
+      expect(screen.getByRole("button", { name: /Try again/i })).toBeInTheDocument();
     });
 
     it("an in-progress conflict uses latest_job to resume the progress route", async () => {
@@ -562,6 +613,27 @@ describe("ReviewSummary", () => {
       await vi.waitFor(() =>
         expect(mocks.replace).toHaveBeenCalledWith("/design/d1/result/v-y"),
       );
+    });
+  });
+
+  describe("accessibility", () => {
+    it("has no axe violations on the ready-to-generate review", async () => {
+      const { container } = render(<ReviewSummary designId="d1" />);
+      await screen.findByRole("button", { name: /Generate my concept/i });
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations when the draft is incomplete and the error summary is shown", async () => {
+      mocks.validateDesignDraft.mockResolvedValue({
+        ok: false,
+        status: 400,
+        code: "validation_failed",
+        message: "bad",
+        fields: { garment_type: ["This question needs an answer."] },
+      });
+      const { container } = render(<ReviewSummary designId="d1" />);
+      await screen.findByText(/still need attention/i);
+      expect(await axeViolations(container)).toHaveNoViolations();
     });
   });
 });

@@ -1,0 +1,143 @@
+/* ==================================================================== */
+/* The branded application shell: brand lockup, header, footer.         */
+/* Consumed by components/AppShell.tsx, which every route renders into. */
+/* ==================================================================== */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.shell > main {
+  flex: 1;
+  padding-block: var(--space-6) var(--space-8);
+}
+
+/* ------------------------------------------------------------------ */
+/* Brand lockup                                                        */
+/* ------------------------------------------------------------------ */
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  /* Asymmetric so the hover pill hugs the wordmark rather than floating
+     away from the disc — the handoff's own 4px 14px 4px 4px. */
+  padding: 4px 14px 4px 4px;
+  border-radius: var(--radius-pill);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: background var(--motion-fast);
+}
+
+.brand-lockup:hover {
+  background: var(--color-accent-100);
+  color: var(--color-text);
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+.brand-wordmark {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 27px;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Header                                                              */
+/* ------------------------------------------------------------------ */
+.shell-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-top: var(--space-4);
+}
+
+.shell-home-hint {
+  flex: 1 1 auto;
+  min-width: 12ch;
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-neutral-700);
+}
+
+/* Pushed to the trailing edge whether or not a hint is present. */
+.shell-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.shell-account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Below the card-grid breakpoint the account controls drop to their own
+   row rather than squeezing the wordmark. */
+@media (max-width: 560px) {
+  .shell-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .brand-wordmark {
+    font-size: 24px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Footer                                                              */
+/*                                                                     */
+/* Two honest sentences on every screen: what a concept is, and that    */
+/* designs are private. No operational status, no analytics, no         */
+/* marketing. The two links carry the fuller versions of exactly those  */
+/* two sentences, and nothing else lives down here.                     */
+/* ------------------------------------------------------------------ */
+.shell-footer {
+  padding-block: var(--space-6) var(--space-8);
+  padding-bottom: calc(var(--space-8) + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--color-neutral-200);
+  margin-top: var(--space-8);
+  color: var(--color-neutral-700);
+  font-size: 13px;
+}
+
+.shell-footer p {
+  margin: 0 0 var(--space-1);
+  max-width: 70ch;
+}
+
+.shell-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+/* These are standalone controls in a nav, not links inside a sentence, so
+   the 24px minimum target applies to them. 13px text alone would not
+   reach it. */
+.shell-footer-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  font-weight: 600;
+}

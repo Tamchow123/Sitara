@@ -1,13 +1,9 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { axe, toHaveNoViolations } from "jest-axe";
 import { describe, expect, it, vi } from "vitest";
 
 import { QuestionField } from "./QuestionField";
 import type { Question } from "./types";
-
-expect.extend(toHaveNoViolations);
-
-const AXE_CONFIG = { rules: { "color-contrast": { enabled: false } } };
+import { axeViolations } from "@/test-utils/axe";
 
 const necklineQuestion: Question = {
   id: "neckline_style",
@@ -109,7 +105,7 @@ describe("QuestionField labelHidden", () => {
         labelHidden
       />,
     );
-    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });
 
@@ -259,10 +255,12 @@ describe("QuestionField single_choice with visuals and no-preference", () => {
         onChange={vi.fn()}
       />,
     );
-    // The neckline visuals are square, so the whole grid frames 720/720 — a
-    // per-question value, never a per-card one.
+    // Phase 17 gave each question the handoff's own frame shape; a neckline is
+    // 5:4, wide enough to hold both shoulders around the neckline. The value is
+    // per-question, never per-card. Which shape belongs to which question is
+    // pinned in visuals/manifest.test.ts; this asserts the wiring.
     const grid = container.querySelector(".choice-grid-visual");
-    expect(grid).toHaveStyle({ "--choice-card-aspect": "720 / 720" });
+    expect(grid).toHaveStyle({ "--choice-card-aspect": "720 / 576" });
   });
 
   it("marks a card with no resolvable visual so the grid does not stretch it", () => {
@@ -303,7 +301,7 @@ describe("QuestionField single_choice with visuals and no-preference", () => {
         onChange={vi.fn()}
       />,
     );
-    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });
 
@@ -361,8 +359,8 @@ describe("QuestionField bounded multi_choice", () => {
 });
 
 describe("QuestionField colour swatch selector", () => {
-  it("renders grouped swatches as real checkboxes with visible labels", () => {
-    render(
+  it("renders one flat palette of real checkboxes, each named by its colour", () => {
+    const { container } = render(
       <QuestionField
         question={colourQuestion}
         value={[]}
@@ -371,8 +369,11 @@ describe("QuestionField colour swatch selector", () => {
       />,
     );
     expect(screen.getByRole("checkbox", { name: /Scarlet/ })).toBeInstanceOf(HTMLInputElement);
-    expect(screen.getByText("Reds & maroons")).toBeInTheDocument();
-    expect(screen.getByText(/0 of 2 selected/)).toBeInTheDocument();
+    // No colour categories: the handoff shows the whole palette at once. The
+    // question's own fieldset is the only one on the screen.
+    expect(container.querySelectorAll("fieldset")).toHaveLength(1);
+    expect(screen.queryByText("Reds & maroons")).toBeNull();
+    expect(screen.getByText(/0 of 2 chosen/)).toBeInTheDocument();
   });
 
   it("preserves selection order and enforces the maximum", () => {
@@ -463,7 +464,7 @@ describe("QuestionField colour swatch selector", () => {
         onChange={vi.fn()}
       />,
     );
-    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });
 
@@ -481,15 +482,17 @@ describe("QuestionField colour_choice (schema v4)", () => {
       />,
     );
 
-  it("renders one radio group of grouped swatches, matching first", () => {
+  it("renders one flat radio palette, with Match the fabric first", () => {
     renderDupatta();
-    expect(screen.getByRole("radio", { name: /Match the fabric/ })).toBeInstanceOf(
-      HTMLInputElement,
-    );
-    expect(screen.getByText("Matching")).toBeInTheDocument();
-    expect(screen.getByText("Reds & maroons")).toBeInTheDocument();
+    const radios = screen.getAllByRole("radio");
+    expect(radios[0]).toBeInstanceOf(HTMLInputElement);
+    // "match" leads the manifest's group order, so the non-colour option comes
+    // first — as ORDER, not as a heading. There are no colour categories.
+    expect(radios[0]).toHaveAccessibleName(/Match the fabric/);
+    expect(screen.queryByText("Matching")).toBeNull();
+    expect(screen.queryByText("Reds & maroons")).toBeNull();
     // Single choice: no running count, because there is no limit to run to.
-    expect(screen.queryByText(/selected$/)).toBeNull();
+    expect(screen.queryByText(/chosen$/)).toBeNull();
   });
 
   it("stores a chosen swatch as its option value", () => {
@@ -509,7 +512,8 @@ describe("QuestionField colour_choice (schema v4)", () => {
   it("offers the design's own colours as swatches and stores the hex itself", () => {
     const onChange = vi.fn();
     renderDupatta({ customColours: ["#7f2b4a"], onChange });
-    expect(screen.getByText("Your colours")).toBeInTheDocument();
+    // In the same flat palette as every declared colour — a colour the bride
+    // added is not filed away in a section of its own.
     const custom = screen.getByRole("radio", { name: "#7f2b4a" });
     fireEvent.click(custom);
     // The backend accepts a colour_choice hex only when it is in the sibling
@@ -561,7 +565,7 @@ describe("QuestionField colour_choice (schema v4)", () => {
       customColours: ["#7f2b4a"],
       onAddCustomColour: vi.fn(),
     });
-    expect(await axe(container, AXE_CONFIG)).toHaveNoViolations();
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });
 
@@ -595,7 +599,6 @@ describe("QuestionField colour custom-palette boundaries", () => {
     );
     // A multi_choice answer is checked against its DECLARED options, so a raw
     // hex there is always rejected by the backend; the swatch must not exist.
-    expect(screen.queryByText("Your colours")).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "#7f2b4a" })).toBeNull();
   });
 });

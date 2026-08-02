@@ -1,0 +1,204 @@
+/* ==================================================================== */
+/* The landing page — `Sitara Home.dc.html`.                            */
+/*                                                                      */
+/* Four bands: the two-column hero, "How it works", a closing call to   */
+/* action on an accent ground, and the concept/demo notes. Everything   */
+/* collapses to one column below 760px, which is where the hero copy    */
+/* stops having room to sit beside a pair of portraits.                  */
+/* ==================================================================== */
+
+.landing > section {
+  margin-bottom: var(--space-8);
+}
+
+/* ------------------------------------------------------------------ */
+/* Hero                                                                */
+/* ------------------------------------------------------------------ */
+.landing-hero {
+  display: grid;
+  gap: var(--space-6);
+  align-items: center;
+  padding-block: var(--space-6);
+}
+
+@media (min-width: 760px) {
+  .landing-hero {
+    grid-template-columns: minmax(320px, 1fr) minmax(280px, 0.85fr);
+    gap: var(--space-8);
+  }
+}
+
+.landing-headline {
+  font-family: var(--font-display);
+  font-weight: 500;
+  /* Larger than the shared h1: this is the one place the wordmark's face
+     is given room to be the loudest thing on the page. */
+  font-size: clamp(38px, 6vw, 66px);
+  line-height: 1.05;
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.landing-headline em {
+  font-style: italic;
+}
+
+.landing-lede {
+  margin: var(--space-4) 0 var(--space-6);
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--color-neutral-800);
+  max-width: 46ch;
+}
+
+.landing-cta-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.landing-cta-note {
+  font-size: 14px;
+  color: var(--color-neutral-700);
+}
+
+.landing-privacy {
+  margin: var(--space-4) 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--color-neutral-700);
+  max-width: 52ch;
+}
+
+/* Two 2:3 tiles side by side, the first pushed down for the handoff's
+   asymmetric stagger. The stagger is dropped on a phone, where two
+   half-width tiles are already small enough without one of them being
+   pushed below the fold. */
+.landing-hero-images {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.landing-hero-tile {
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.landing-hero-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* The served asset is already cut to 2:3 by
+     scripts/build-landing-images.py, so this is a guard against a future
+     source of a different shape, not a second framing decision. */
+  object-position: center top;
+}
+
+@media (min-width: 760px) {
+  .landing-hero-tile:first-child {
+    margin-top: var(--space-8);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* How it works                                                        */
+/* ------------------------------------------------------------------ */
+.landing-how h2 {
+  margin-bottom: var(--space-6);
+}
+
+.landing-how-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: var(--space-4);
+}
+
+.landing-how-card {
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  background: var(--color-neutral-100);
+}
+
+.landing-how-card h3 {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: 21px;
+}
+
+.landing-how-card p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--color-neutral-800);
+}
+
+.landing-how-number {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-2-100);
+  color: var(--color-accent-2-800);
+  font-family: var(--font-heading);
+  font-size: 18px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Closing call to action                                              */
+/* ------------------------------------------------------------------ */
+.landing-close {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-6);
+  border-radius: var(--radius-lg);
+  background: var(--color-accent-100);
+}
+
+.landing-close h2 {
+  margin: 0;
+}
+
+.landing-close p {
+  margin: 0;
+  max-width: 48ch;
+  font-size: 16px;
+  color: var(--color-neutral-800);
+}
+
+/* ------------------------------------------------------------------ */
+/* Concept and generation-mode notes                                   */
+/* ------------------------------------------------------------------ */
+.landing-notes {
+  max-width: 70ch;
+}
+
+.landing-notes h2 {
+  /* .kicker carries the type; this only removes the h2 size that would
+     otherwise fight it. */
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+.landing-notes p {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--color-neutral-800);
+}
+
+/* Reserve two lines so the loading, unavailable and ready messages all
+   occupy the same box and the section never jumps as the read resolves. */
+.landing-mode {
+  min-height: 3.2em;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-100);
+  font-size: 14px;
+  color: var(--color-neutral-800);
+}

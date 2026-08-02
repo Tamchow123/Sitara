@@ -30,3 +30,24 @@ export function isRefinementFailed(design: Pick<DesignDraft, "latest_job"> | nul
   const job = design?.latest_job;
   return Boolean(job && job.generation_kind === "refinement" && job.status === "failed");
 }
+
+// Phase 17: the result page shows a locked state where the form would be, so
+// "one refinement, already used" is said rather than left to be inferred from
+// a missing panel. This is the same condition `isRefinementEligible` rejects
+// on — named separately so the page can tell that reason apart from
+// "generation is not currently available", which needs different words.
+export function isRefinementUsed(design: Pick<DesignDraft, "latest_job"> | null | undefined): boolean {
+  const job = design?.latest_job;
+  return Boolean(job && job.generation_kind === "refinement" && job.status === "succeeded");
+}
+
+// The version a completed refinement produced, when the server confirmed one.
+// Used only to offer a link to the user's own refined concept; ownership is
+// still enforced by the result route, never by this value's presence.
+export function refinedVersionId(
+  design: Pick<DesignDraft, "latest_job"> | null | undefined,
+): string | null {
+  const job = design?.latest_job;
+  if (!job || job.generation_kind !== "refinement" || job.status !== "succeeded") return null;
+  return job.design_version_id ?? null;
+}

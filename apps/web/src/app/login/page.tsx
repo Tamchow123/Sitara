@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
+import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { safeNextPath } from "@/lib/navigation";
 
@@ -44,10 +45,10 @@ function LoginForm() {
   }
 
   return (
-    <main>
+    <AppShell width="narrow">
       <h1>Sign in</h1>
       <p className="tagline">Welcome back to Sitara.</p>
-      <section aria-labelledby="login-heading">
+      <section className="panel" aria-labelledby="login-heading">
         <h2 id="login-heading">Your account</h2>
         <form onSubmit={onSubmit} noValidate>
           <div className="field">
@@ -58,6 +59,7 @@ function LoginForm() {
               type="email"
               autoComplete="email"
               required
+              className="input"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
             />
@@ -70,16 +72,20 @@ function LoginForm() {
               type="password"
               autoComplete="current-password"
               required
+              className="input"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />
           </div>
           {error && (
-            <p role="alert" className="status-bad">
-              {error}
-            </p>
+            // A form-level failure, so it gets the alert block rather than a
+            // bare red line. The message stays the generic one the auth layer
+            // produces — it must not reveal whether the address is registered.
+            <div role="alert" className="alert alert-error">
+              <p>{error}</p>
+            </div>
           )}
-          <button type="submit" disabled={submitting}>
+          <button type="submit" className="btn btn-primary" disabled={submitting}>
             {submitting ? "Signing in…" : "Sign in"}
           </button>
         </form>
@@ -87,7 +93,7 @@ function LoginForm() {
           New to Sitara? <Link href="/register">Create an account</Link>
         </p>
       </section>
-    </main>
+    </AppShell>
   );
 }
 
