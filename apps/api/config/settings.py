@@ -646,7 +646,13 @@ if not ANTHROPIC_MODEL:
     raise ImproperlyConfigured("ANTHROPIC_MODEL must be a non-empty model identifier")
 
 DESIGN_SPEC_MAX_INPUT_CHARS = env_positive_int("DESIGN_SPEC_MAX_INPUT_CHARS", 20_000)
-DESIGN_SPEC_MAX_OUTPUT_TOKENS = env_positive_int("DESIGN_SPEC_MAX_OUTPUT_TOKENS", 4096)
+# 8192, not the original 4096: a complete DesignSpec v3 measured at ~5,800
+# output tokens against the live API, so the old cap truncated every response
+# mid-JSON and the parse failed (stop_reason="max_tokens"). Note this value also
+# sets the per-call budget RESERVATION (services.py passes it to
+# anthropic_call_max_micro_usd), so raising it raises what each attempt holds
+# against the daily ceiling until reconcile_actual settles the real usage.
+DESIGN_SPEC_MAX_OUTPUT_TOKENS = env_positive_int("DESIGN_SPEC_MAX_OUTPUT_TOKENS", 8192)
 ANTHROPIC_TIMEOUT_SECONDS = env_positive_int("ANTHROPIC_TIMEOUT_SECONDS", 60)
 
 # ---------------------------------------------------------------------------
