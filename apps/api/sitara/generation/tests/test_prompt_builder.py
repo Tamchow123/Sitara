@@ -238,50 +238,67 @@ class TestDeterminismAndBounds:
         spec = DesignSpec.model_validate(_max_spec_dict())
         assert build_image_prompt(spec) == build_image_prompt(spec)
 
-    def test_slot_truncates_at_a_word_boundary(self):
+    def test_slot_keeps_whole_sentences_only(self):
         from sitara.generation.prompt_builder import _slot
 
-        text = "alpha beta gamma delta epsilon"
-        truncated = _slot(text, 12)
-        assert truncated == "alpha beta"  # no partial "gam..."
-        assert not truncated.endswith(" ")
+        text = "First sentence here. Second sentence runs on much longer than the cap."
+        assert _slot(text, 40) == "First sentence here."
 
     def test_slot_collapses_whitespace(self):
         from sitara.generation.prompt_builder import _slot
 
         assert _slot("  a\r\n b\t c  ", 100) == "a b c"
 
-    def test_truncate_omits_a_single_oversized_token(self):
-        from sitara.generation.prompt_builder import _truncate_at_word
+    def test_truncate_omits_a_single_oversized_sentence(self):
+        from sitara.generation.prompt_builder import _truncate_at_sentence
 
-        # One 400-character token with no interior space cannot be cut at a word
-        # boundary → omitted entirely, never a partial token.
-        assert _truncate_at_word("x" * 400, 300) == ""
+        # No sentence ends within the limit → omitted entirely. This is the
+        # first-live-run defect: a 196-character one-sentence overall_form under
+        # a 180 cap must not render as "...rather than a fully stitched."
+        assert _truncate_at_sentence("x" * 400, 300) == ""
+        assert _truncate_at_sentence("A single long clause that never ends", 20) == ""
 
-    def test_truncate_keeps_only_whole_leading_words(self):
-        from sitara.generation.prompt_builder import _truncate_at_word
+    def test_truncate_keeps_every_sentence_that_fits(self):
+        from sitara.generation.prompt_builder import _truncate_at_sentence
 
-        text = "y" * 290 + " and more words follow here"
-        result = _truncate_at_word(text, 300)
-        # The long first token is kept whole, plus the words that still fit; the
-        # result always ends at a word boundary (never a partial token).
-        assert result == "y" * 290 + " and more"
-        assert result.split()[0] == "y" * 290
-        assert result == text[: len(result)] and text[len(result)] == " "
+        text = "One. Two. Three. " + "z" * 300
+        result = _truncate_at_sentence(text, 40)
+        assert result == "One. Two. Three."
+        assert not result.endswith(" ")
 
-    def test_truncate_is_total_on_unicode_words(self):
-        from sitara.generation.prompt_builder import _truncate_at_word
+    def test_truncate_accepts_any_sentence_terminator(self):
+        from sitara.generation.prompt_builder import _truncate_at_sentence
 
-        result = _truncate_at_word("café café café café", 12)
-        assert result == "café café"  # whole words only, no split accents
-        assert "caf " not in result
+        assert _truncate_at_sentence("Really? Yes indeed, at some length here.", 10) == "Really?"
+        assert _truncate_at_sentence("Stunning! And then it runs on and on.", 12) == "Stunning!"
 
-    def test_single_long_token_narrative_is_omitted_not_partially_rendered(self):
+    def test_truncate_is_total_on_unicode(self):
+        from sitara.generation.prompt_builder import _truncate_at_sentence
+
+        result = _truncate_at_sentence("Café doré. Café doré again, at length.", 14)
+        assert result == "Café doré."  # no split accents
+        assert "Caf " not in result
+
+    def test_an_unterminated_narrative_is_omitted_not_partially_rendered(self):
         data = _spec_dict("nikah_lehenga_head_drape")
-        data["garment_breakdown"]["overall_form"] = "z" * 400  # one 400-char token
+        data["garment_breakdown"]["overall_form"] = "z" * 400  # no sentence end
         prompt = build_image_prompt(DesignSpec.model_validate(data))
         assert len(prompt) <= IMAGE_PROMPT_MAX_CHARS
-        assert "z" * 50 not in prompt  # no partial token leaked
+        assert "z" * 50 not in prompt  # nothing partial leaked
+
+    def test_the_live_regression_shape_renders_whole_or_not_at_all(self):
+        # The exact first-live-run field: 196 characters, one sentence.
+        data = _spec_dict("nikah_lehenga_head_drape")
+        form = (
+            "A lehenga-style saree: a fitted, high-coverage blouse joined to a "
+            "structured, skirt-like base, with a traditional saree pallu draped "
+            "over the shoulder rather than a fully stitched gown silhouette."
+        )
+        data["garment_breakdown"]["overall_form"] = form
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "rather than a fully stitched." not in prompt
+        if "lehenga-style saree" in prompt:
+            assert form in prompt  # whole sentence, terminator included
 
     def test_maximum_spec_with_untokenised_narrative_stays_bounded(self):
         # Every narrative string a single oversized token: all narrative is
@@ -372,7 +389,9 @@ class TestContentInclusionAndExclusion:
 
     def test_ordered_colours_are_rendered_in_order(self):
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
-        assert "Colours, in order of importance: ivory, gold" in prompt
+        # "ivory" is a questionnaire value and gains its hue; this v1 fixture's
+        # "gold" predates the v4 palette and falls back to its readable form.
+        assert "Colours, in order of importance: warm ivory white, gold" in prompt
 
     def test_ordered_embellishment_styles_are_rendered_in_order(self):
         prompt = build_image_prompt(_load_spec("baraat_sharara_double_dupatta"))
@@ -396,7 +415,7 @@ class TestContentInclusionAndExclusion:
             "pearls",
         ]
         prompt = build_image_prompt(DesignSpec.model_validate(data))
-        assert "Colours, in order of importance: red, gold, ivory, green." in prompt
+        assert "Colours, in order of importance: red, gold, warm ivory white, green." in prompt
         assert "Fabrics: velvet, silk, net." in prompt
         assert "Embellishment: zardozi, dabka, kora, sequins." in prompt
         for dropped in ("black", "organza", "pearls"):
@@ -802,6 +821,108 @@ class TestPositivePhrasingOnly:
         prompt = build_image_prompt(_load_spec("walima_anarkali_none"))
         assert "Leave the fabric plain and unworked" in prompt
         assert "no surface embellishment" not in prompt.lower()
+
+
+class TestColoursAreNamedUnambiguously:
+    """A canonical colour renders with its HUE spelled out.
+
+    The first live 8.0.0 generation asked for `pistachio` and rendered blush
+    pink with no green anywhere. Most of the palette is named after an object
+    rather than a colour, and an image model reads a bare object noun as the
+    object — or ignores it and falls back on the pink/red/gold prior that
+    "South Asian bridal" carries."""
+
+    def _descriptors(self) -> dict[str, str]:
+        from sitara.generation.prompt_builder import _COLOUR_DESCRIPTORS
+
+        return _COLOUR_DESCRIPTORS
+
+    def test_the_map_covers_exactly_the_questionnaire_palette(self):
+        # A contract with the live questionnaire: a colour the user can pick and
+        # the builder cannot name unambiguously is the whole bug, so a new option
+        # must fail here rather than silently render as a bare object noun.
+        import json
+        from pathlib import Path
+
+        schema_path = (
+            Path(__file__).resolve().parents[2]
+            / "questionnaire"
+            / "fixtures"
+            / "questionnaire_v4.json"
+        )
+        options: set[str] = set()
+
+        def walk(node):
+            if isinstance(node, dict):
+                if "colour" in str(node.get("id", "")) and node.get("options"):
+                    options.update(o["value"] for o in node["options"])
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        walk(json.loads(schema_path.read_text(encoding="utf-8"))[0]["fields"]["schema"])
+        options.discard("match_fabric")  # a relationship, not a colour
+        assert options, "no colour options found; the schema shape changed"
+        assert options == set(self._descriptors())
+
+    @pytest.mark.parametrize(
+        "value,hue",
+        [
+            ("pistachio", "green"),
+            ("sage", "green"),
+            ("mint", "green"),
+            ("rust", "orange"),
+            ("marigold", "orange"),
+            ("peacock", "blue-green"),
+            ("oxblood", "red"),
+            ("aubergine", "purple"),
+            ("amethyst", "purple"),
+            ("champagne", "gold"),
+            ("pearl", "white"),
+            ("blush", "pink"),
+        ],
+    )
+    def test_an_object_named_colour_gets_an_explicit_hue(self, value, hue):
+        assert hue in self._descriptors()[value]
+
+    def test_every_descriptor_still_contains_the_chosen_shade(self):
+        # The hue is ADDED, never substituted: the bride picked a specific shade
+        # and "green" alone would lose it.
+        for value, descriptor in self._descriptors().items():
+            assert value.replace("_", " ") in descriptor
+
+    def test_a_v3_role_colour_renders_its_descriptor(self):
+        # The exact live-run shape: a v3 spec whose fabric colour is pistachio.
+        data = _spec_dict("mehndi_saree_open_coverage")
+        data["source_selections"]["fabric_colour"] = "pistachio"
+        prompt = build_image_prompt(validate_design_spec(data))
+        assert "the main fabric in pale pistachio green" in prompt
+        assert "the main fabric in pistachio." not in prompt
+
+    def test_a_v1_palette_renders_descriptors_in_order(self):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["source_selections"]["colour_palette"] = ["pistachio", "champagne"]
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert (
+            "Colours, in order of importance: pale pistachio green, pale champagne gold" in prompt
+        )
+
+    def test_a_bride_supplied_hex_is_unaffected(self):
+        prompt = build_image_prompt(_load_spec("nikah_gharara_hex_colour_hijab"))
+        assert "the exact colour code #7b1f2b" in prompt
+
+    def test_an_unrecognised_colour_falls_back_and_invents_nothing(self):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["source_selections"]["colour_palette"] = ["unlisted_shade"]
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "Colours, in order of importance: unlisted shade." in prompt
+
+    def test_match_fabric_stays_a_relationship_not_a_colour(self):
+        prompt = build_image_prompt(_load_spec("walima_lehenga_match_fabric_dupatta"))
+        assert "the dupatta in the same colour as the main fabric" in prompt
+        assert "match fabric" not in prompt
 
 
 class TestRedundantNarrativeIsDropped:

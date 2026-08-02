@@ -106,7 +106,16 @@ from .selection_semantics import (
 # garment's one-piece/two-piece construction is named, coverage is stated once
 # and early instead of twice, and redundant model-authored prose is no longer
 # rendered. Every schema version's output changes.
-PROMPT_BUILDER_VERSION = "8.0.0"
+#
+# 8.1.0: the first live 8.0.0 generation held every coverage requirement but
+# ignored the colour — `pistachio` rendered as blush pink, no green anywhere —
+# and cut a 196-character overall_form mid-sentence, the fragment displacing the
+# colour placement from the budget. Minor, not major: the v8 architecture is
+# unchanged and this is a wording and robustness fix on top of it. It still
+# bumps, because a real DesignVersion already carries 8.0.0 as immutable
+# provenance and its stored prompt must keep matching the version that produced
+# it.
+PROMPT_BUILDER_VERSION = "8.1.0"
 
 # What the narrative budget aims at. Chosen so the assembled prompt fits inside
 # the default image model's text-encoder attention window (~512 tokens), which is
@@ -136,8 +145,12 @@ _SEPARATOR_RESERVE = 48
 #
 # The caps are far tighter than 7.0.0's (300/200) because 8.0.0 inverts the
 # balance: canonical selections carry the design and narrative supplements it.
-_FORM_CAP = 180
-_PLACEMENT_CAP = 150
+# 240, not 180: the first live 8.0.0 generation produced a 196-character
+# overall_form, which a 180 cap cut mid-sentence. The schema allows 400, so an
+# ordinary one-sentence description must fit whole rather than be dropped by
+# :func:`_truncate_at_sentence`.
+_FORM_CAP = 240
+_PLACEMENT_CAP = 200
 _AREA_CAP = 100
 _LIST_ITEM_CAP = 90
 
@@ -285,27 +298,33 @@ def _slot(text: str, cap: int) -> str:
     normalised = unicodedata.normalize("NFKC", text)
     normalised = normalised.replace("\r\n", "\n").replace("\r", "\n")
     normalised = _WHITESPACE.sub(" ", normalised).strip()
-    return _trim_separators(_truncate_at_word(normalised, cap))
+    return _trim_separators(_truncate_at_sentence(normalised, cap))
 
 
-def _truncate_at_word(text: str, limit: int) -> str:
-    """Truncate ``text`` to at most ``limit`` characters at a word boundary.
+def _truncate_at_sentence(text: str, limit: int) -> str:
+    """Keep whole sentences of ``text`` up to ``limit`` characters.
 
-    TOTAL: never returns a partial token. When the first token alone exceeds
-    ``limit`` there is no safe word boundary, so the whole (non-mandatory
-    narrative) piece is omitted by returning ``""`` — the builder then drops the
-    empty piece. Mandatory canonical machine values are bounded by the schema and
-    are never routed through this helper."""
+    TOTAL, and stronger than 7.0.0's word-boundary rule: it never returns a
+    partial SENTENCE. Word-boundary truncation was safe against partial tokens
+    but not against partial meaning — the first live 8.0.0 generation rendered
+    "…draped over the shoulder rather than a fully stitched." because the field
+    was 196 characters against a 180 cap, and 196 is an entirely ordinary length
+    for a 400-character field. A dangling comparison conditions the provider on
+    less than the clean absence of the detail, and it cost 180 characters of
+    budget that the colour placement would otherwise have used.
+
+    When no sentence ends within ``limit`` the whole (non-mandatory narrative)
+    piece is omitted by returning ``""`` — the builder then drops the empty
+    piece. Mandatory canonical machine values are bounded by the schema and are
+    never routed through this helper."""
     if limit <= 0 or not text:
         return ""
     if len(text) <= limit:
         return text
-    boundary = text.rfind(" ", 0, limit + 1)
-    if boundary <= 0:
-        # The first token alone exceeds the limit → omit rather than emit a
-        # partial token.
+    boundary = max(text.rfind(mark, 0, limit + 1) for mark in ".!?")
+    if boundary < 0:
         return ""
-    return text[:boundary].rstrip()
+    return text[: boundary + 1].rstrip()
 
 
 def _join_items(items: list[str], limit: int | None = None) -> str:
@@ -385,12 +404,60 @@ def _garment(spec: DesignSpec) -> list[_Piece]:
     ]
 
 
+# Unambiguous colour wording for each canonical colour value. A small,
+# source-controlled map like the garment-construction and coverage clauses, NOT
+# a colour theory engine — it only makes the HUE explicit.
+#
+# The first live 8.0.0 generation asked for `pistachio` and rendered blush pink,
+# with no green anywhere. Most of the questionnaire's palette is named after an
+# object rather than a colour — pistachio, sage, rust, peacock, oxblood,
+# aubergine, champagne, marigold, mint, pearl, amethyst — and an image model
+# reads a bare object noun as the object, or ignores it and falls back on the
+# overwhelming pink/red/gold prior that "South Asian bridal" carries. Naming the
+# hue alongside the name ("pale pistachio green") removes the ambiguity while
+# keeping the shade the user actually chose.
+#
+# The questionnaire remains the authority over WHICH values exist; an
+# unrecognised value falls back to its readable form and is never invented.
+_COLOUR_DESCRIPTORS = {
+    "scarlet": "bright scarlet red",
+    "deep_maroon": "deep maroon red",
+    "oxblood": "dark oxblood red",
+    "rust": "burnt rust orange",
+    "blush": "pale blush pink",
+    "rose": "rose pink",
+    "rani_pink": "vivid rani pink",
+    "old_rose": "muted old rose pink",
+    "marigold": "bright marigold orange",
+    "antique_gold": "antique gold",
+    "champagne": "pale champagne gold",
+    "ivory": "warm ivory white",
+    "emerald": "rich emerald green",
+    "mehndi_green": "deep mehndi green",
+    "sage": "soft sage green",
+    "pistachio": "pale pistachio green",
+    "royal_blue": "royal blue",
+    "navy": "dark navy blue",
+    "peacock": "deep peacock blue-green",
+    "powder_blue": "pale powder blue",
+    "aubergine": "deep aubergine purple",
+    "amethyst": "amethyst purple",
+    "lilac": "soft lilac purple",
+    "plum_wine": "deep plum wine purple",
+    "silver_grey": "silver grey",
+    "pearl": "soft pearl white",
+    "mint": "pale mint green",
+    "peach": "soft peach orange",
+}
+
+
 def _readable_colour(value: str) -> str:
     """A colour selection as prompt wording: a bride-supplied hex is named as a
-    literal colour code, a canonical option value as readable words."""
+    literal colour code, a canonical option value as an unambiguous colour
+    phrase (falling back to its readable form when unrecognised)."""
     if value.startswith("#"):
         return f"the exact colour code {value}"
-    return _readable(value)
+    return _COLOUR_DESCRIPTORS.get(value, _readable(value))
 
 
 def _colour_roles_clause(ss) -> str | None:
@@ -421,7 +488,11 @@ def _colour(spec: DesignSpec) -> list[_Piece]:
     if roles_clause:
         pieces.append(_mandatory(roles_clause))
     else:
-        colours = _readable_list(list(ordered_colour_values(ss))[:_MAX_COLOURS])
+        # Version 1/2 palettes get the same unambiguous colour wording as the
+        # version-3 per-role clause above.
+        colours = ", ".join(
+            _readable_colour(value) for value in list(ordered_colour_values(ss))[:_MAX_COLOURS]
+        )
         if colours:
             pieces.append(_mandatory(f"Colours, in order of importance: {colours}"))
     # colour_story.placement says WHERE each colour sits, which the canonical

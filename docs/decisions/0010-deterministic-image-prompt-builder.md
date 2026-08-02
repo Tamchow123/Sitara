@@ -293,6 +293,47 @@ As with `5.0.0`, prompt-level correctness is deterministic and snapshot-guarded
 while provider adherence stays stochastic — acceptance needs an operator-run
 before/after comparison on a fixed DesignSpec, not wording inspection.
 
+### What the first live `8.0.0` run showed, and `8.1.0`
+
+A real paid generation on 2026-08-02 (v3 spec: saree, nikah, high neck,
+three-quarter sleeves, covered back and midriff, hijab, pistachio, unembellished)
+**validated the coverage thesis**. Every observable coverage requirement was
+honoured — the closed high neckline, three-quarter sleeves, covered midriff and a
+hijab enclosing all the hair — against `7.0.0`, which had rendered an open
+neckline and a bare head from an equivalent spec. Composition, garment
+construction and the less-covered sleeve answer were all correct too. (The
+covered back is not observable in a front-facing catalogue frame.)
+
+Two defects the run exposed, both fixed in `8.1.0`:
+
+**Colour was ignored.** `pistachio` rendered as blush pink with no green
+anywhere. Most of the questionnaire's palette is named after an object rather
+than a colour — pistachio, sage, rust, peacock, oxblood, aubergine, champagne,
+marigold, mint, pearl, amethyst — and an image model reads a bare object noun as
+the object, or ignores it and falls back on the overwhelming pink/red/gold prior
+that "South Asian bridal" carries. `8.1.0` adds `_COLOUR_DESCRIPTORS`, a
+source-controlled map naming the hue alongside the shade ("pale pistachio
+green"), covering the v4 palette exactly — a contract test fails if the
+questionnaire gains a colour the builder cannot name unambiguously. The chosen
+shade is always kept, never replaced by a bare hue, and an unrecognised value
+falls back to its readable form.
+
+**A narrative slot was cut mid-sentence.** `overall_form` was 196 characters
+against a 180 cap and rendered as "…draped over the shoulder rather than a fully
+stitched." Word-boundary truncation is safe against partial *tokens* but not
+against partial *meaning*, and 196 is an entirely ordinary length for a
+400-character field. Worse, that 180-character fragment consumed the budget the
+colour placement would otherwise have used. `8.1.0` replaces
+`_truncate_at_word` with `_truncate_at_sentence`: whole sentences only, and a
+piece with no sentence ending inside its cap is dropped rather than cut. `_FORM_CAP`
+rises 180 → 240 and `_PLACEMENT_CAP` 150 → 200 so ordinary one-sentence values
+fit whole instead of being dropped. The guarantee is now stronger than `7.0.0`'s:
+never a partial sentence, not merely never a partial token.
+
+`8.1.0` is a minor bump because the v8 architecture is unchanged. It bumps at all
+because a real `DesignVersion` already carries `8.0.0` as immutable provenance,
+and its stored prompt must keep matching the version that produced it.
+
 ### Garment-integrity cues (superseded by `8.0.0`'s construction clauses)
 
 A very small, source-controlled set of integrity cues is added only for the

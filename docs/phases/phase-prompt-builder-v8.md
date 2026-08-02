@@ -1,7 +1,7 @@
 # Phase — prompt builder v8 (focused, positive-only image prompt)
 
 - **Branch:** `feat/prompt-builder-v8-focused-prompt` (from `main` @ `80af5c5`)
-- **Scope:** `PROMPT_BUILDER_VERSION` `7.0.0` → `8.0.0`; ADR 0010 amendment
+- **Scope:** `PROMPT_BUILDER_VERSION` `7.0.0` → `8.0.0` → `8.1.0`; ADR 0010 amendment
 - **Out of scope:** DesignSpec contract, questionnaire, persistence/immutability,
   provider wiring, cost controls, refinement flow, frontend
 
@@ -253,6 +253,35 @@ neckline.
 6. Every `7.0.0` safety and exclusion test still passes, updated only where the
    wording it asserts deliberately changed.
 7. ADR 0010 amended.
+
+## Live evidence (2026-08-02) and `8.1.0`
+
+A real paid generation — v3 spec: saree, nikah, high neck, three-quarter sleeves,
+covered back and midriff, hijab, pistachio, unembellished — **validated the
+coverage thesis**. Every observable coverage requirement was honoured: closed
+high neckline, three-quarter sleeves, covered midriff, hijab enclosing all the
+hair. `7.0.0` had rendered an open neckline and a bare head from an equivalent
+spec. Composition, garment construction and the less-covered sleeve answer were
+correct too. The covered back is not observable in a front-facing frame.
+
+Two defects the run exposed, both fixed in `8.1.0`:
+
+1. **Colour ignored** — `pistachio` rendered blush pink, no green anywhere. Most
+   of the palette is named after an object, not a colour, and a bare object noun
+   loses to the pink/red/gold prior "South Asian bridal" carries.
+   `_COLOUR_DESCRIPTORS` now names the hue alongside the shade ("pale pistachio
+   green") and covers the v4 palette exactly, guarded by a contract test.
+2. **A slot cut mid-sentence** — `overall_form` was 196 characters against a 180
+   cap and rendered "…rather than a fully stitched." That fragment also consumed
+   the budget the colour placement needed. `_truncate_at_sentence` replaces
+   `_truncate_at_word`: whole sentences only, dropped if none fits. `_FORM_CAP`
+   180 → 240, `_PLACEMENT_CAP` 150 → 200.
+
+`8.1.0` is minor — the architecture is unchanged. It bumps because a real
+`DesignVersion` already carries `8.0.0` as immutable provenance.
+
+**Still unverified:** whether the colour fix works on a real render. That needs a
+second live run.
 
 Provider adherence stays stochastic. Prompt-level correctness is deterministic and
 snapshot-guarded; whether the model honours it needs an operator-run before/after
