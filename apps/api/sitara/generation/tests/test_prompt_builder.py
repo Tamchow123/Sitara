@@ -566,14 +566,13 @@ class TestCanonicalSelectionAuthority:
         }
         prompt = build_image_prompt(DesignSpec.model_validate(data))
         lowered = prompt.lower()
-        # 8.0.0 states this positively — what the surface IS, not what it lacks.
-        assert "leave the fabric plain and unworked" in lowered
-        assert "smooth undecorated surface" in lowered
+        # 8.2.0 describes what the cloth IS, never what it lacks.
+        assert "one continuous expanse of solid colour" in lowered
         assert "SENTINELEMB" not in prompt
         for word in (*self._HEAVY, "density", "embroidery", "embroidered"):
             assert word not in lowered
         # The unembellished finishing wording is used.
-        assert "texture and drape" in lowered
+        assert "smooth, single-colour cloth" in lowered
 
     def test_non_none_retains_embroidery_finishing(self):
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
@@ -608,7 +607,7 @@ class TestCanonicalSelectionAuthority:
         assert "heavily worked, densely packed yoke" in prompt
         # The canonical ordered selection is untouched (not transformed to none).
         assert "embellishment: zardozi, dabka, kora" in prompt
-        assert "plain and unworked" not in prompt
+        assert "one continuous expanse of solid colour" not in prompt
 
 
 class TestCoverageRequirements:
@@ -654,7 +653,7 @@ class TestCoverageRequirements:
         for name in FIXTURES:
             prompt = build_image_prompt(_load_spec(name)).rstrip()
             assert prompt.endswith("true to the real fabric colour.") or prompt.endswith(
-                "true to the real fabric colour, texture and drape."
+                "true to the smooth, single-colour cloth and the way it falls."
             )
 
     def test_high_neckline_rendered_as_closed_visual_requirement(self):
@@ -817,10 +816,38 @@ class TestPositivePhrasingOnly:
         assert "a midriff fully covered by fabric at the waist" in directive
         assert prompt.find(directive) < prompt.find("no bare skin")
 
-    def test_unembellished_direction_is_positive(self):
+    # Words that negate decoration by prefix rather than by a negation token.
+    # The regex above never caught these, and both live 8.x runs rendered gold
+    # borders and scattered motifs against wording built from them: an encoder
+    # reading "unworked" still sees "worked".
+    _ABSENCE_WORDS = (
+        "unworked",
+        "undecorated",
+        "unembellished",
+        "unadorned",
+        "unornamented",
+        "devoid",
+        "free of",
+        "absent",
+    )
+
+    def test_unembellished_direction_describes_the_material_affirmatively(self):
         prompt = build_image_prompt(_load_spec("walima_anarkali_none"))
-        assert "Leave the fabric plain and unworked" in prompt
-        assert "no surface embellishment" not in prompt.lower()
+        assert "one continuous expanse of solid colour" in prompt
+        assert "flat and uniform from edge to edge" in prompt
+        assert "the sheen and fall of the cloth" in prompt
+
+    @pytest.mark.parametrize("word", _ABSENCE_WORDS)
+    def test_no_builder_clause_negates_by_prefix(self, word):
+        for where, text in self._builder_wording().items():
+            assert word not in text.lower(), where
+
+    @pytest.mark.parametrize("word", _ABSENCE_WORDS)
+    def test_an_unembellished_prompt_never_asks_for_an_absence(self, word):
+        # End-to-end on the one fixture that selects ["none"].
+        prompt = build_image_prompt(_load_spec("walima_anarkali_none")).lower()
+        assert word not in prompt
+        assert "no surface embellishment" not in prompt
 
 
 class TestColoursAreNamedUnambiguously:

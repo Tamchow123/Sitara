@@ -115,7 +115,13 @@ from .selection_semantics import (
 # bumps, because a real DesignVersion already carries 8.0.0 as immutable
 # provenance and its stored prompt must keep matching the version that produced
 # it.
-PROMPT_BUILDER_VERSION = "8.1.0"
+#
+# 8.2.0: both live 8.x runs ignored an explicit ["none"] embellishment selection
+# and rendered gold borders and scattered motifs. 8.1.0's wording was
+# grammatically positive but semantically asked for an absence, and
+# "unworked"/"undecorated" carry the concepts they negate. The unembellished
+# clause and finishing directive now describe what the cloth IS.
+PROMPT_BUILDER_VERSION = "8.2.0"
 
 # What the narrative budget aims at. Chosen so the assembled prompt fits inside
 # the default image model's text-encoder attention window (~512 tokens), which is
@@ -200,7 +206,8 @@ _FINISHING = (
 # construction instead, so it never contradicts the "none" selection.
 _FINISHING_UNEMBELLISHED = (
     "Render an original, non-branded textile design with natural anatomy and "
-    "coherent hands, in even light true to the real fabric colour, texture and drape."
+    "coherent hands, in even light true to the smooth, single-colour cloth and "
+    "the way it falls."
 )
 
 # How each garment is CONSTRUCTED, keyed only on source_selections.garment_type.
@@ -525,11 +532,23 @@ def _embellishment(spec: DesignSpec) -> list[_Piece]:
     ep = spec.embellishment_plan
     # Canonical authority: exactly ["none"] means no embellishment. "none" wins
     # over any persisted density (minimal/balanced/heavy is NOT rendered), and
-    # ALL generated embellishment-plan content is omitted — one clear
-    # unembellished instruction is given instead, phrased positively.
+    # ALL generated embellishment-plan content is omitted.
+    #
+    # The instruction DESCRIBES THE MATERIAL rather than the absence of
+    # decoration. 8.1.0 said "plain and unworked, with a smooth undecorated
+    # surface" — grammatically positive, but semantically a request for an
+    # absence, and "unworked"/"undecorated" carry the very concepts they negate.
+    # Both live 8.x runs rendered gold borders and scattered motifs against it:
+    # "South Asian bridalwear catalogue photograph" is about as strong an
+    # ornate-embroidery prior as exists, and weak affirmatives lose to it. Every
+    # word here now names something the cloth positively IS.
     if ss.embellishment_styles == [_NONE_EMBELLISHMENT]:
         return [
-            _mandatory("Leave the fabric plain and unworked, with a smooth undecorated surface")
+            _mandatory(
+                "The fabric is one continuous expanse of solid colour, flat and "
+                "uniform from edge to edge, its beauty coming from the sheen and "
+                "fall of the cloth alone"
+            )
         ]
 
     pieces = []
