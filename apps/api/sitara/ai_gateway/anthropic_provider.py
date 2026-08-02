@@ -1,17 +1,26 @@
 """The gated Anthropic structured-design provider (Phase 8).
 
-A narrow wrapper over the Anthropic SDK's first-class structured-output
-parsing (``beta.messages.parse`` with ``output_format=DesignSpec``). It is
-reached ONLY through ``policy.get_structured_design_generation_provider`` after
-every gate passes. The network client is created LAZILY inside ``generate``
-(never in ``__init__``), tests inject a fake client, and CI never instantiates
-a real one.
+A narrow wrapper over the Anthropic SDK's structured output
+(``messages.create`` with ``output_config.format``). It is reached ONLY through
+``policy.get_structured_design_generation_provider`` after every gate passes.
+The network client is created LAZILY inside ``generate`` (never in
+``__init__``), tests inject a fake client, and CI never instantiates a real one.
+
+The schema sent to the provider is the strict DesignSpec model's, minus the
+size constraints that made its compiled grammar too large to accept (see
+``output_schema``). The strict model is therefore applied to the response here,
+in ``_parse``, rather than by the decoder — the validation is unchanged, only
+the place it happens. This replaced the SDK's ``beta.messages.parse``/
+``output_format`` pairing, which takes a model class and so cannot express a
+modified schema; ``output_format`` is deprecated in the SDK besides.
 
 No streaming, no extended thinking, no tools, no images, no inspiration
 content, and SDK automatic retries are disabled (``max_retries=0``) so the
 Sitara service controls the exact provider-call count. Request and response
 bodies are never logged.
 """
+
+import json
 
 import anthropic
 from celery.exceptions import SoftTimeLimitExceeded
@@ -23,6 +32,7 @@ from sitara.generation.design_spec import (
     design_spec_model_for_version,
 )
 
+from .output_schema import ECHOED_FIELD, provider_output_schema
 from .structured_design import (
     StructuredDesignProviderError,
     StructuredDesignRequest,
@@ -102,19 +112,19 @@ class AnthropicStructuredDesignProvider:
                 "unsupported_schema_version", ambiguous_acceptance=False
             ) from None
         try:
-            message = client.beta.messages.parse(
+            message = client.beta.messages.create(
                 model=settings.ANTHROPIC_MODEL,
                 max_tokens=request.max_output_tokens,
                 system=request.system_prompt,
                 messages=[{"role": "user", "content": request.user_message}],
-                output_format=output_format,
+                output_config={
+                    "format": {
+                        "type": "json_schema",
+                        "schema": provider_output_schema(output_format),
+                    }
+                },
                 timeout=settings.ANTHROPIC_TIMEOUT_SECONDS,
             )
-        except ValidationError:
-            # The model returned something that did not parse into DesignSpec:
-            # a structurally invalid output, not a transport failure. Treated
-            # as retryable (payload=None); no body is captured.
-            return self._result(None, None, None, "parse_error", refused=False)
         except tuple(cls for cls, _ in _ANTHROPIC_ERROR_CATEGORIES) as exc:
             category = self._categorise(exc)
             raise StructuredDesignProviderError(
@@ -129,9 +139,52 @@ class AnthropicStructuredDesignProvider:
         if stop_reason == "refusal":
             return self._result(None, input_tokens, output_tokens, stop_reason, refused=True)
 
-        parsed = message.parsed_output
-        payload = parsed.model_dump(mode="json") if parsed is not None else None
+        payload = self._parse(message, output_format, request.source_selections)
+        if payload is None:
+            # Unusable body — malformed JSON, a truncated response
+            # (stop_reason="max_tokens"), or output that does not satisfy the
+            # strict model. Structurally invalid output, not a transport
+            # failure: retryable, and no body is captured.
+            return self._result(None, input_tokens, output_tokens, "parse_error", refused=False)
         return self._result(payload, input_tokens, output_tokens, stop_reason, refused=False)
+
+    @staticmethod
+    def _parse(message, model_cls, source_selections: dict) -> dict | None:
+        """The response body as a strictly-validated payload, or None.
+
+        Two things happen here that the decoder used to do:
+
+        * The strict model is applied. The provider-facing schema has had its
+          size constraints removed (see ``output_schema``), so the bounds are no
+          longer guaranteed by decoding — and model output is untrusted anyway.
+        * ``source_selections`` is injected from the request. It is not in the
+          schema the provider was given, so the model never produced it; the
+          caller's canonical echo is authoritative and overwrites anything that
+          somehow arrived under that key.
+
+        Returns None for anything unusable; never raises, and never lets a
+        response body escape into an exception message.
+        """
+        blocks = getattr(message, "content", None) or []
+        text = "".join(
+            block.text
+            for block in blocks
+            if getattr(block, "type", None) == "text"
+            and isinstance(getattr(block, "text", None), str)
+        )
+        if not text.strip():
+            return None
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        data[ECHOED_FIELD] = source_selections
+        try:
+            return model_cls.model_validate(data).model_dump(mode="json")
+        except ValidationError:
+            return None
 
     @staticmethod
     def _categorise(exc: Exception) -> str:
