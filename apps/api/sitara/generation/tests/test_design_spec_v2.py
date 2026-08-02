@@ -98,10 +98,13 @@ class TestVersionDispatch:
 class TestCanonicalNecklinePrompt:
     def test_canonical_neckline_leads_the_coverage_directive(self):
         prompt = build_image_prompt(validate_design_spec(_v2_spec_dict()))
-        # The high-neck canonical clause appears in the leading coverage
-        # directive and the closing reinforcement.
-        assert "fully closed high neckline covering the collarbone" in prompt
-        assert "closed high neckline" in prompt.rsplit("\n\n", 1)[-1]
+        # The high-neck canonical clause opens the coverage directive. 8.0.0
+        # states it ONCE — the closing reinforcement is gone, because at 7.0.0
+        # lengths it sat outside the encoder window and conditioned nothing.
+        directive = prompt.split("\n\n")[2]
+        assert directive.startswith("Show clearly in the render:")
+        assert "a closed high neckline covering the collarbone" in directive
+        assert prompt.count("closed high neckline") == 1
 
     def test_generated_neckline_narrative_is_suppressed_for_a_canonical_neckline(self):
         # The v2 sweetheart fixture's narrative says "scooped"; the canonical
@@ -130,15 +133,36 @@ class TestCanonicalNecklinePrompt:
             "An open, plunging neckline dipping low toward the waist."
         )
         prompt = build_image_prompt(validate_design_spec(payload))
-        assert "fully closed high neckline" in prompt
+        assert "a closed high neckline covering the collarbone" in prompt
         assert "plunging" not in prompt.lower()
         # The model-authored narrative "Neckline:" line is dropped entirely.
         assert "Neckline:" not in prompt
 
     def test_v1_spec_still_renders_without_a_canonical_neckline_clause(self):
-        # A v1 spec keeps its generated neckline narrative (unchanged behaviour).
-        prompt = build_image_prompt(validate_design_spec(_v1_spec_dict()))
+        # A v1 spec carries no canonical neckline. When its coverage_preferences
+        # do not settle the neckline either, the generated narrative is the only
+        # neckline information it has and must survive the 8.0.0 budget — which
+        # is why the coverage narrative outranks embellishment in section order.
+        unsettled = json.loads(
+            (_FIXTURE_DIR / "pheras_saree_heavy_no_region.json").read_text(encoding="utf-8")
+        )
+        assert "high_neckline" not in unsettled["source_selections"]["coverage_preferences"]
+        prompt = build_image_prompt(validate_design_spec(unsettled))
         assert "Neckline:" in prompt
+        assert "closed high neckline" not in prompt
+
+    def test_a_v1_preference_already_in_the_directive_suppresses_its_narrative(self):
+        # nikah_lehenga_head_drape selects high_neckline AND full_sleeves, so the
+        # directive already states both. 7.0.0 rendered each requirement twice —
+        # once as a concrete visual clause and again as model prose that could
+        # drift from it. 8.0.0 states each exactly once.
+        spec = validate_design_spec(_v1_spec_dict())
+        prefs = spec.source_selections.coverage_preferences
+        assert {"high_neckline", "full_sleeves"} <= set(prefs)
+        prompt = build_image_prompt(spec)
+        assert "a closed high neckline covering the collarbone" in prompt
+        assert "Neckline:" not in prompt
+        assert "Sleeves:" not in prompt
 
 
 class TestRefinementCannotContradictCanonicalNeckline:
