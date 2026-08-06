@@ -5,10 +5,13 @@ Auth calls get a unique REMOTE_ADDR and email per test so the Redis-backed
 authentication rate limiters never bleed between tests."""
 
 import json
+import threading
 import uuid
+from http.cookies import SimpleCookie
 
 from django.core.files.base import ContentFile
 from django.core.files.storage import storages
+from django.db import connection
 from django.test import Client
 from django.utils import timezone
 
@@ -124,6 +127,70 @@ def logout(client: Client):
     response = send_json(client, "post", "/api/v1/auth/logout/", {}, token=token)
     assert response.status_code == 200, response.content
     return response
+
+
+def clone_browser(browser: Client) -> Client:
+    """A second client carrying the SAME cookies — one browser, two tabs.
+
+    Used by the genuinely-simultaneous tests. Only meaningful under
+    ``django_db(transaction=True)``, where each thread gets its own committed
+    view of PostgreSQL (required for SELECT ... FOR UPDATE to coordinate
+    anything)."""
+    twin = csrf_client()
+    twin.cookies = SimpleCookie()
+    twin.cookies.load({name: morsel.value for name, morsel in browser.cookies.items()})
+    return twin
+
+
+def run_simultaneously(workers):
+    """Run callables on their own threads, released together by a barrier.
+
+    Worker exceptions surface in the assertion; every thread closes its own
+    database connection safely."""
+    barrier = threading.Barrier(len(workers), timeout=10)
+    results = [None] * len(workers)
+    failures: list[BaseException] = []
+
+    def runner(index, work):
+        try:
+            barrier.wait()
+            results[index] = work()
+        except BaseException as exc:  # noqa: BLE001 - surfaced in the assert
+            failures.append(exc)
+        finally:
+            connection.close()
+
+    threads = [
+        threading.Thread(target=runner, args=(index, work)) for index, work in enumerate(workers)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert failures == []
+    assert all(result is not None for result in results)
+    return results
+
+
+def create_pending_design_version(design_id, *, version_number: int = 1) -> DesignVersion:
+    """A DesignVersion with its DesignSpec but NO permanent image yet.
+
+    The state between enqueue and ingest. Its own helper rather than a flag on
+    ``create_ready_design_version`` because the permanent-image fields are
+    all-or-none at the database level, so "ready" and "pending" are two distinct
+    valid rows rather than one row with a field switched off."""
+    return DesignVersion.objects.create(
+        design_id=design_id,
+        version_number=version_number,
+        design_spec={"schema_version": 1},
+        design_spec_schema_version=1,
+        design_spec_template_version="v1",
+        design_spec_provider="fixture",
+        design_spec_model="fixture-model",
+        design_spec_generated_at=timezone.now(),
+        image_prompt="A test prompt.",
+        prompt_builder_version="3.0.0",
+    )
 
 
 def create_ready_design_version(

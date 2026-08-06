@@ -44,6 +44,9 @@ EXPECTED_OPERATIONS = frozenset(
         ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/image/", "get"),
         ("/api/v1/designs/{design_id}/versions/{version_id}/images/", "get"),
         ("/api/v1/designs/{design_id}/versions/{version_id}/result/", "get"),
+        ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "get"),
+        ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "put"),
+        ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "delete"),
         ("/api/v1/jobs/{job_id}/", "get"),
         ("/api/v1/questionnaire/active/", "get"),
         ("/api/v1/inspiration-assets/", "get"),
@@ -65,6 +68,8 @@ UNSAFE_OPERATIONS = frozenset(
         ("/api/v1/designs/{design_id}/refine/", "post"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/", "post"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/", "delete"),
+        ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "put"),
+        ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "delete"),
     }
 )
 

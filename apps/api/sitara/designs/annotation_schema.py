@@ -88,7 +88,9 @@ ANNOTATION_PALETTES = ("terracotta", "sage", "ink")
 # percent of the image edge — about 5px on a 1024px-wide render.
 MIN_GEOMETRY_EXTENT = 0.005
 
-_ITEM_TYPES = ("pin", "arrow", "rectangle", "freehand")
+# The complete set of mark types. Public so the OpenAPI serializers derive
+# their choices from here rather than restating the list.
+ANNOTATION_ITEM_TYPES = ("pin", "arrow", "rectangle", "freehand")
 
 # A plain canonical UUID and nothing else. Bounded by construction (36 chars),
 # so a client cannot smuggle a long or structured id into a persisted document.

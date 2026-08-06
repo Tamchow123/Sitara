@@ -74,9 +74,22 @@ from sitara.schema import (
     ValidationErrorEnvelopeSerializer,
 )
 
+from .annotation_service import (
+    AnnotationConflict,
+    AnnotationDocumentInvalid,
+    AnnotationImageNotReady,
+    AnnotationVersionGone,
+    annotation_payload,
+    delete_annotation_document,
+    read_annotation_document,
+    replace_annotation_document,
+)
 from .jobs import _iso, public_job_payload
 from .models import Design, DesignInspirationUpload, DesignVersion, GenerationAttempt
 from .openapi import (
+    AnnotationConflictErrorSerializer,
+    AnnotationDocumentResponseSerializer,
+    AnnotationDocumentWriteSerializer,
     DesignDetailResponseSerializer,
     DesignListResponseSerializer,
     DesignResultResponseSerializer,
@@ -856,6 +869,203 @@ class DesignVersionResultView(APIView):
         return Response(
             design_result_payload(version, spec, acknowledgements, lineage), headers=NO_STORE
         )
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class DesignVersionAnnotationsView(APIView):
+    """The owner's private editorial overlay for one owned DesignVersion (Phase 19).
+
+    Ownership filtering runs BEFORE the design UUID lookup, and the version must
+    belong to that owned design — an inaccessible or nonexistent design OR
+    version is one indistinguishable 404, so a caller knowing only a
+    DesignVersion UUID gains nothing.
+
+    ``csrf_protect`` on dispatch, not DRF's SessionAuthentication alone: these
+    endpoints accept anonymous unsafe requests (an anonymous browser workspace is
+    a feature), and SessionAuthentication only enforces CSRF for already
+    authenticated callers.
+
+    Nothing here touches the generated image. DELETE clears the overlay only, and
+    no response exposes a storage key, hash, user id, DesignSession id or signed
+    URL."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+    parser_classes = [JSONParser]
+
+    def _get_owned_version(self, request, design_id: str, version_id: str):
+        # Ownership filter FIRST, UUID lookup second — never the reverse.
+        design = accessible_designs(request).filter(pk=design_id).first()
+        if design is None:
+            return None
+        return DesignVersion.objects.filter(design=design, pk=version_id).first()
+
+    @staticmethod
+    def _not_ready() -> Response:
+        return _error(
+            "design_image_not_ready",
+            "This design version has no viewable image yet.",
+            status.HTTP_409_CONFLICT,
+        )
+
+    @staticmethod
+    def _conflict(current_revision: int) -> Response:
+        # Only the code, a safe message and the server's current revision. The
+        # stored document is never echoed back — a conflict must not become a
+        # channel for reading private note text.
+        return Response(
+            {
+                "error": {
+                    "code": "annotation_conflict",
+                    "message": (
+                        "These annotations changed since your last save. "
+                        "Reload to see the latest marks."
+                    ),
+                },
+                "revision": current_revision,
+            },
+            status=status.HTTP_409_CONFLICT,
+            headers=NO_STORE,
+        )
+
+    @extend_schema(
+        operation_id="designs_version_annotations_retrieve",
+        tags=_DESIGN_TAGS,
+        responses={
+            200: AnnotationDocumentResponseSerializer,
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="design_image_not_ready: no permanent image has been ingested yet.",
+            ),
+        },
+        summary="Get your private annotations for a design version",
+        description=(
+            "Returns the owner's annotation overlay. Before anything has been "
+            "saved this is a 200 with an empty item list and revision 0 — not a "
+            "404 — so revision 0 is the unambiguous never-saved signal and the "
+            "client needs no separate branch. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def get(self, request, design_id: str, version_id: str):
+        version = self._get_owned_version(request, design_id, version_id)
+        if version is None:
+            return _not_found()
+        try:
+            document, revision, updated_at = read_annotation_document(version)
+        except AnnotationImageNotReady:
+            return self._not_ready()
+        return Response(annotation_payload(document, revision, updated_at), headers=NO_STORE)
+
+    @extend_schema(
+        operation_id="designs_version_annotations_replace",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request={"application/json": AnnotationDocumentWriteSerializer},
+        responses={
+            200: AnnotationDocumentResponseSerializer,
+            400: ValidationErrorEnvelopeSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(
+                AnnotationConflictErrorSerializer,
+                description=(
+                    "annotation_conflict: expected_revision is stale, and the stored "
+                    "document is unchanged. The body carries the server's current "
+                    "revision and never the document itself. Or design_image_not_ready."
+                ),
+            ),
+        },
+        summary="Replace your private annotations for a design version",
+        description=(
+            "Replaces the COMPLETE overlay atomically — there is no partial "
+            "update, so a removed mark is unambiguous. Send the revision you hold "
+            "as expected_revision (0 to create); a stale value is refused and "
+            "nothing is overwritten. A successful write returns 200 with the "
+            "stored document and its incremented revision. The revision counts "
+            "writes, not content changes, so replaying identical content with the "
+            "current revision still increments. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def put(self, request, design_id: str, version_id: str):
+        version = self._get_owned_version(request, design_id, version_id)
+        if version is None:
+            return _not_found()
+        body, parse_failure = _parse_body(request)
+        if parse_failure is not None:
+            return parse_failure
+        if not isinstance(body, dict):
+            return _error(
+                "annotation_invalid",
+                "The annotation document is not valid.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        # expected_revision is a transport concern, not part of the stored
+        # document, so it is split off before the document is validated.
+        payload = {key: value for key, value in body.items() if key != "expected_revision"}
+        expected = body.get("expected_revision")
+        if not isinstance(expected, int) or isinstance(expected, bool) or expected < 0:
+            return _error(
+                "annotation_invalid",
+                "A valid expected_revision is required.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            document, revision, updated_at = replace_annotation_document(
+                version, payload, expected_revision=expected
+            )
+        except AnnotationImageNotReady:
+            return self._not_ready()
+        except AnnotationVersionGone:
+            # Purged between the ownership lookup and the lock. The same 404 a
+            # fresh request would get, so the answer stays consistent.
+            return _not_found()
+        except AnnotationConflict as exc:
+            return self._conflict(exc.current_revision)
+        except AnnotationDocumentInvalid as exc:
+            # The service's message is already generic; it never quotes the
+            # rejected note back.
+            return _error(exc.code, exc.message, status.HTTP_400_BAD_REQUEST)
+        return Response(annotation_payload(document, revision, updated_at), headers=NO_STORE)
+
+    @extend_schema(
+        operation_id="designs_version_annotations_delete",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=None,
+        responses={
+            204: OpenApiResponse(description="Cleared."),
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(ErrorEnvelopeSerializer, description="design_image_not_ready."),
+        },
+        summary="Clear your private annotations for a design version",
+        description=(
+            "Removes the overlay document. The generated image is never touched. "
+            "Idempotent: clearing when nothing is stored still succeeds. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def delete(self, request, design_id: str, version_id: str):
+        version = self._get_owned_version(request, design_id, version_id)
+        if version is None:
+            return _not_found()
+        try:
+            delete_annotation_document(version)
+        except AnnotationImageNotReady:
+            return self._not_ready()
+        except AnnotationVersionGone:
+            return _not_found()
+        return Response(status=status.HTTP_204_NO_CONTENT, headers=NO_STORE)
 
 
 @method_decorator(csrf_protect, name="dispatch")

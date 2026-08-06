@@ -61,6 +61,11 @@ urlpatterns = [
         name="design-version-result",
     ),
     re_path(
+        rf"^designs/{_UUID}/versions/{_VERSION_UUID}/annotations/?$",
+        views.DesignVersionAnnotationsView.as_view(),
+        name="design-version-annotations",
+    ),
+    re_path(
         rf"^designs/{_UUID}/inspiration-uploads/?$",
         views.DesignInspirationUploadView.as_view(),
         name="design-inspiration-upload-list",

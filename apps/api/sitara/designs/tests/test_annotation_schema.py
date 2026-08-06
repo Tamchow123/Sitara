@@ -7,11 +7,13 @@ input becomes ``AnnotationDocumentInvalid``, never a raw ``TypeError``,
 """
 
 import json
+import math
 import uuid
 
 import pytest
 
 from sitara.designs.annotation_schema import (
+    ANNOTATION_ITEM_TYPES,
     ANNOTATION_NOTE_MAX_LENGTH,
     ANNOTATION_NOTE_RAW_MAX_LENGTH,
     ANNOTATION_PALETTES,
@@ -217,6 +219,32 @@ def test_arrow_just_past_the_tolerance_accepted():
         "end": {"x": 0.5 + MIN_GEOMETRY_EXTENT * 2, "y": 0.5},
     }
     assert normalise(document([item(type="arrow", geometry=geometry)]))
+
+
+def test_a_short_diagonal_arrow_is_measured_end_to_end_not_per_axis():
+    """The tolerance is a straight-line distance, ``hypot(dx, dy)``.
+
+    This diagonal is under the tolerance on BOTH axes individually (0.004 each)
+    but over it end to end (~0.00566), so it is accepted. The case exists because
+    a per-axis reading of the rule would reject it, and a client pre-validating
+    from the published contract would then silently drop a mark the server would
+    have kept — the contract's own wording is pinned to this behaviour."""
+    short_leg = MIN_GEOMETRY_EXTENT * 0.8
+    geometry = {"start": {"x": 0.0, "y": 0.0}, "end": {"x": short_leg, "y": short_leg}}
+    assert math.hypot(short_leg, short_leg) > MIN_GEOMETRY_EXTENT
+    assert short_leg < MIN_GEOMETRY_EXTENT
+    assert normalise(document([item(type="arrow", geometry=geometry)]))
+
+
+def test_the_published_contract_describes_the_arrow_rule_correctly():
+    """The help_text is what a client author reads, so it must not describe a
+    different rule from the one enforced above."""
+    from sitara.designs.openapi import AnnotationArrowGeometrySerializer
+
+    described = AnnotationArrowGeometrySerializer().fields["end"].help_text
+    assert "straight-line" in described
+    assert "not either axis alone" in described
+    assert str(MIN_GEOMETRY_EXTENT) in described
 
 
 # --- freehand point bounds --------------------------------------------------
@@ -615,3 +643,16 @@ def test_canonical_bytes_are_stable_and_order_independent():
     b = json.loads(json.dumps({"c": {"x": 1, "y": 2}, "a": [1, 2], "b": 1}))
     assert canonical_document_bytes(a) == canonical_document_bytes(b)
     assert b" " not in canonical_document_bytes(a)
+
+
+# --- the published contract -------------------------------------------------
+
+
+def test_the_serializer_choices_match_the_taxonomy():
+    """The OpenAPI serializers restate the taxonomy for documentation, so they
+    must not drift from the contract they document."""
+    from sitara.designs.openapi import AnnotationItemSerializer
+
+    fields = AnnotationItemSerializer().fields
+    assert list(fields["type"].choices) == list(ANNOTATION_ITEM_TYPES)
+    assert list(fields["palette"].choices) == list(ANNOTATION_PALETTES)

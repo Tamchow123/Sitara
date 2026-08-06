@@ -7,12 +7,22 @@ DesignSession id, user, version rows, generation attempts, storage keys,
 image hashes, rights evidence, verifier identity or internal notes.
 """
 
+from drf_spectacular.utils import PolymorphicProxySerializer, extend_schema_field
 from rest_framework import serializers
 
 from sitara.generation.errors import GENERATION_ERROR_CODES
 from sitara.generation.refinement import REFINEMENT_CHANGE_TYPES
 from sitara.questionnaire.openapi import QuestionnaireSchemaSerializer
 
+from .annotation_schema import (
+    ANNOTATION_ITEM_TYPES,
+    ANNOTATION_NOTE_MAX_LENGTH,
+    ANNOTATION_PALETTES,
+    FREEHAND_MAX_POINTS,
+    FREEHAND_MIN_POINTS,
+    MAX_ANNOTATION_ITEMS,
+    MIN_GEOMETRY_EXTENT,
+)
 from .models import GenerationAttempt
 
 
@@ -190,6 +200,207 @@ class DesignImagesSerializer(serializers.Serializer):
 
 class DesignVersionImagesResponseSerializer(serializers.Serializer):
     images = DesignImagesSerializer()
+
+
+# --- Annotations (Phase 19) ------------------------------------------------
+#
+# Geometry is modelled as one explicit serializer per item type rather than an
+# untyped JSON blob, so the generated TypeScript actually constrains what a
+# client may build. The four shapes are mutually exclusive by their field names.
+
+
+class AnnotationPointSerializer(serializers.Serializer):
+    """A normalised point: a fraction of the image's own width and height, in
+    the closed range [0, 1]. Never viewport pixels — those would stop meaning
+    anything the moment the image were rendered at a different size."""
+
+    x = serializers.FloatField(min_value=0, max_value=1)
+    y = serializers.FloatField(min_value=0, max_value=1)
+
+
+class AnnotationPinGeometrySerializer(serializers.Serializer):
+    point = AnnotationPointSerializer()
+
+
+class AnnotationArrowGeometrySerializer(serializers.Serializer):
+    """An arrow must span at least the degenerate-geometry floor.
+
+    OpenAPI cannot express a constraint between two fields, so the rule is stated
+    here rather than left for a client to discover by rejection."""
+
+    start = AnnotationPointSerializer()
+    end = AnnotationPointSerializer(
+        help_text=(
+            "The straight-line distance from start must be at least "
+            f"{MIN_GEOMETRY_EXTENT} — hypot(dx, dy), not either axis alone; "
+            "a zero-length arrow points at nothing."
+        )
+    )
+
+
+class AnnotationRectangleGeometrySerializer(serializers.Serializer):
+    """Origin plus extent, so one shape has exactly one representation.
+
+    Two rules OpenAPI cannot express, both enforced server-side: each side must
+    be at least the degenerate-geometry floor, and the rectangle must stay inside
+    the image (``x + width`` and ``y + height`` at most 1)."""
+
+    x = serializers.FloatField(min_value=0, max_value=1)
+    y = serializers.FloatField(min_value=0, max_value=1)
+    width = serializers.FloatField(
+        min_value=0,
+        max_value=1,
+        help_text=f"At least {MIN_GEOMETRY_EXTENT}, and x + width must not exceed 1.",
+    )
+    height = serializers.FloatField(
+        min_value=0,
+        max_value=1,
+        help_text=f"At least {MIN_GEOMETRY_EXTENT}, and y + height must not exceed 1.",
+    )
+
+
+class AnnotationFreehandGeometrySerializer(serializers.Serializer):
+    # The ceilings live in the description rather than as minItems/maxItems:
+    # drf-spectacular derives those from validators, and neither a validator nor
+    # ListSerializer's own min_length/max_length survives a nested many=True
+    # field, so the keywords never reach the published contract. Prose does, and
+    # discoverability is the point — a client should learn the ceiling from the
+    # contract rather than from being rejected. Enforcement is, as ever,
+    # annotation_schema's.
+    points = AnnotationPointSerializer(
+        many=True,
+        help_text=(
+            f"Between {FREEHAND_MIN_POINTS} and {FREEHAND_MAX_POINTS} points, "
+            "already simplified by the client."
+        ),
+    )
+
+
+@extend_schema_field(
+    PolymorphicProxySerializer(
+        component_name="AnnotationGeometry",
+        serializers=[
+            AnnotationPinGeometrySerializer,
+            AnnotationArrowGeometrySerializer,
+            AnnotationRectangleGeometrySerializer,
+            AnnotationFreehandGeometrySerializer,
+        ],
+        # No discriminator: see the class docstring.
+        resource_type_field_name=None,
+    )
+)
+class AnnotationGeometryField(serializers.Field):
+    """The geometry for whichever ``type`` the item declares.
+
+    A ``oneOf`` rather than a discriminated union: the discriminator (``type``)
+    lives on the ITEM, not inside the geometry object, and OpenAPI's
+    ``discriminator`` requires the property to be on each variant. The shapes are
+    unambiguous without one, so adding a redundant nested ``type`` purely to
+    satisfy the keyword would change the wire contract for no gain.
+
+    A ``PolymorphicProxySerializer`` rather than a hand-written ``oneOf`` of
+    ``$ref`` strings: the variant serializers are reachable only from here, so
+    drf-spectacular would never register them as components and every ``$ref``
+    would dangle. ``openapi-typescript`` rejects the schema outright in that
+    state, which is how the first attempt was caught."""
+
+    def to_representation(self, value):
+        return value
+
+    def to_internal_value(self, data):
+        return data
+
+
+class AnnotationItemSerializer(serializers.Serializer):
+    id = serializers.UUIDField(
+        help_text=(
+            "A client-generated UUID, stable for this mark's life and unique "
+            "within the document."
+        )
+    )
+    type = serializers.ChoiceField(
+        choices=list(ANNOTATION_ITEM_TYPES),
+        help_text="Must agree with the geometry shape sent alongside it.",
+    )
+    geometry = AnnotationGeometryField()
+    note = serializers.CharField(
+        allow_blank=True,
+        max_length=ANNOTATION_NOTE_MAX_LENGTH,
+        help_text=(
+            "Short editorial note, at most "
+            f"{ANNOTATION_NOTE_MAX_LENGTH} characters. May be blank for a purely "
+            "visual mark. Stored and returned as inert text: markup and URLs are "
+            "rejected, and invisible/bidirectional characters are stripped."
+        ),
+    )
+    palette = serializers.ChoiceField(
+        choices=list(ANNOTATION_PALETTES),
+        help_text="A fixed allowlisted mark colour, never a free colour value.",
+    )
+    created_order = serializers.IntegerField(
+        min_value=1, help_text="The mark's 1-based placement order; unique within a document."
+    )
+
+
+class AnnotationDocumentSerializer(serializers.Serializer):
+    schema_version = serializers.IntegerField()
+    image_width = serializers.IntegerField(
+        help_text="The canonical image width the marks were placed against."
+    )
+    image_height = serializers.IntegerField()
+    items = AnnotationItemSerializer(
+        many=True, help_text=f"At most {MAX_ANNOTATION_ITEMS} marks. May be empty."
+    )
+    revision = serializers.IntegerField(
+        help_text=(
+            "Counts WRITES to this document. 0 means nothing has ever been saved "
+            "for this version; a stored document is always 1 or more. Send the "
+            "revision you hold as expected_revision when replacing."
+        )
+    )
+    updated_at = serializers.DateTimeField(
+        allow_null=True, help_text="Null when nothing has been saved yet."
+    )
+
+
+class AnnotationDocumentResponseSerializer(serializers.Serializer):
+    annotations = AnnotationDocumentSerializer()
+
+
+class AnnotationDocumentWriteSerializer(serializers.Serializer):
+    """A complete replacement. There is no partial update: the client owns the
+    whole overlay and sends all of it, so a dropped item is unambiguous rather
+    than indistinguishable from an omitted field."""
+
+    schema_version = serializers.IntegerField()
+    image_width = serializers.IntegerField(
+        help_text=(
+            "Must equal the version's own canonical width. Validated against the "
+            "server's value and rejected on mismatch — never trusted."
+        )
+    )
+    image_height = serializers.IntegerField()
+    items = AnnotationItemSerializer(
+        many=True, help_text=f"At most {MAX_ANNOTATION_ITEMS} marks. May be empty."
+    )
+    expected_revision = serializers.IntegerField(
+        min_value=0,
+        help_text=(
+            "The revision the client believes it holds. Use 0 to create the "
+            "document for the first time. A stale value is refused with "
+            "annotation_conflict and the stored document is left unchanged."
+        ),
+    )
+
+
+class AnnotationConflictErrorSerializer(serializers.Serializer):
+    """The 409 body. Deliberately carries the server's current revision and
+    nothing else — a conflict must never echo the stored private document."""
+
+    error = serializers.DictField(
+        help_text="code=annotation_conflict plus a safe message.",
+    )
+    revision = serializers.IntegerField(help_text="The server's current revision; reload to it.")
 
 
 class GarmentBreakdownResultSerializer(serializers.Serializer):

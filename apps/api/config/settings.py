@@ -400,8 +400,29 @@ SPECTACULAR_SETTINGS = {
     # plain literal (rather than a dotted import path) because GenerationKind
     # is a class nested inside the GenerationAttempt model, one level deeper
     # than drf-spectacular's dotted-path resolver supports.
+    #
+    # Phase 19 added ``AnnotationItemSerializer.type``, which shares its FIELD
+    # NAME with ``QuestionSchemaSerializer.type`` while carrying a different
+    # choice set. drf-spectacular resolves that collision by prefixing BOTH
+    # components with their serializer name, silently renaming the long-standing
+    # ``TypeEnum`` to ``QuestionSchemaTypeEnum`` — a rename of a published
+    # questionnaire contract component caused by an unrelated annotation field.
+    # Pinning the questionnaire side keeps the Phase 19 contract diff purely
+    # additive; the annotation side then takes the unambiguous
+    # ``AnnotationItemTypeEnum`` on its own. Nothing guards these literals
+    # directly and nothing needs to: if they ever stop matching the real field
+    # choices the override simply will not apply, the component reverts to
+    # ``QuestionSchemaTypeEnum``, and ``test_questionnaire_schema_is_structurally
+    # _typed`` fails on the missing ``TypeEnum``.
     "ENUM_NAME_OVERRIDES": {
         "GenerationKindEnum": [("initial", "initial"), ("refinement", "refinement")],
+        "TypeEnum": [
+            ("colour_choice", "colour_choice"),
+            ("colour_list", "colour_list"),
+            ("multi_choice", "multi_choice"),
+            ("single_choice", "single_choice"),
+            ("text", "text"),
+        ],
     },
 }
 
