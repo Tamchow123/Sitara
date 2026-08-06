@@ -1,0 +1,121 @@
+{
+  "phase": 4,
+  "builder_version": "8.3.0",
+  "questionnaire_version": 4,
+  "image_model": "black-forest-labs/flux-1.1-pro",
+  "run_date": "2026-08-02",
+  "scope": "7 of the 20 Phase 1 rows, live re-rendered under 8.3.0 via `run_fidelity_eval.py --rows 3,5,7,8,16,17,19`. Rows were selected by matching each row's Phase 1/2 documented failure mechanism against what 8.3.0 actually changed (gharara/anarkali construction+silhouette wording, square-neck wording, Bengali-atpoure drape wording, double-dupatta drape wording) -- not simply 're-render everything that failed Phase 1'. All 7 attempts succeeded (20/20 -> 7/7 targeted). Verdicts below were reached by reading each design's actual persisted image_prompt from the database (confirming the intended 8.3.0 clause text was really sent) and reviewing the rendered image against that text and the row's original Phase 1 failure note.",
+  "budget_note": "Harness cumulative run_reserved after row 19 was $1.3122 against the day's ledger; a direct before/after read of cost_control.day_budget_total_micro_usd() implied a smaller delta (~$0.865585). Reported as an open, unexplained discrepancy (plausibly reservation-vs-settlement reconciliation) rather than resolved -- not investigated further in this phase.",
+  "verdict_summary": {
+    "fixed": ["row 8 (square-neck)", "row 16 (square-neck + gharara construction/silhouette)", "row 17 (anarkali construction/silhouette)"],
+    "not_fixed": ["row 3 (gharara construction/silhouette; also carries double-dupatta)", "row 7 (Bengali atpoure drape)", "row 19 (double-dupatta)"],
+    "no_clean_signal": ["row 5 -- its actual Phase 1 fails (neckline=boat_neck, drape=one_shoulder obscured) do not match any dimension 8.3.0 changed for those values; excluded from the scored result rather than forced into a verdict"],
+    "by_fix": {
+      "square_neck_wording": "2/2 clean (rows 8, 16)",
+      "gharara_anarkali_construction_and_silhouette": "2/3 clean (rows 16, 17); row 3 still reads as one continuous garment",
+      "bengali_atpoure_drape": "0/1 (row 7 still renders generic single-shoulder nivi)",
+      "double_dupatta_drape": "0/3 (rows 3, 8, 19 all render what reads as one dupatta/veil, not two visually distinct pieces, despite confirmed-correct prompt text in all three)"
+    },
+    "side_observation": "Rows 3 and 7 show severe, unrelated fabric-colour misses (row 3: requested #7b1f2b dark maroon rendered as pale blue; row 7: requested deep peacock blue-green with silver-grey embroidery rendered as cream/ivory with gold embroidery). Confirmed genuine by re-fetching the stored image bytes directly from the design_images storage backend and hashing them against the reviewed file (no row/image mixup). Both a hex code and a named colour pair failed, so this does not look like a hex-specific issue. Out of scope for 8.3.0 (colour fidelity was not one of its target dimensions) -- flagged here as a candidate for future investigation, not fixed or scored in this phase."
+  },
+  "designs": [
+    {
+      "row": 3,
+      "garment": "gharara",
+      "ceremony": "mehndi",
+      "phase1_design_version_id": "28f86584-ac15-4a2a-812b-ff3ec94fb968",
+      "design_id": "24545fbf-b665-4076-99a0-933234f6c046",
+      "design_version_id": "7d6d6d56-b9d0-4268-9116-41cd5568e0ac",
+      "status": "succeeded",
+      "image_dimensions": "896x1152",
+      "phase1_documented_fails": "1,2,3,4,7,9,15 -- reads as a generic fitted-bodice ballgown, not a gharara at all",
+      "targeted_fixes": ["gharara_construction_wording", "gharara_silhouette_clause", "double_dupatta_drape (incidental, same prompt)"],
+      "verdict": "not_fixed",
+      "evidence": "Rendered garment is still one continuous piece from shoulder to floor with no visible waist break between a kurti top and flared trousers -- the same construction failure as Phase 1. Drape also still reads as a single veil-like dupatta falling on both sides, not two distinct pieces. Fabric colour is a severe, separate miss (#7b1f2b maroon requested, pale blue rendered) that plausibly compounds the garment misread but is not itself an 8.3.0 target."
+    },
+    {
+      "row": 5,
+      "garment": "anarkali",
+      "ceremony": "reception",
+      "phase1_design_version_id": "51ac2a1a-d36f-4ae2-9cb9-d3e2a3a6bc51",
+      "design_id": "330fab72-7fc5-4fd7-8e2a-22015f961bdf",
+      "design_version_id": "d7fbaf81-68f2-431b-bb1d-9f7eb03066ab",
+      "status": "succeeded",
+      "image_dimensions": "896x1152",
+      "phase1_documented_fails": "10,15 -- shoulder wrap obscures neckline/one-shoulder drape",
+      "targeted_fixes": [],
+      "verdict": "no_clean_signal",
+      "evidence": "This row's neckline (boat_neck) and drape (one_shoulder) values were not changed by 8.3.0 -- the row's anarkali construction/silhouette *was* touched, but construction/silhouette were not among its Phase 1 fails, so there is no fixable failure for 8.3.0 to have addressed here. Included in the original 7-row selection on a weaker rationale than the other six; re-checked against ground truth (the actual sent prompt text and the Phase 1 fail table) during Phase 4 review and reclassified as not a valid test of any 8.3.0 change. Rendered image shows no dupatta at all in the front-facing frame (the one_shoulder clause places it down the back, so this is plausibly a framing artifact, not a wording failure) and a plain unembellished gown consistent with the unrelated 8.3.0-adjacent 'unembellished fabric' fix."
+    },
+    {
+      "row": 7,
+      "garment": "saree",
+      "ceremony": "pheras",
+      "phase1_design_version_id": "8d59d278-3c2d-4cf7-b0a0-6763ec4309c4",
+      "design_id": "6f6d19f6-792d-4491-a2d2-2fcd0de3cbfc",
+      "design_version_id": "b96ca27c-ca79-4192-9d20-2d30776c71c9",
+      "status": "succeeded",
+      "image_dimensions": "896x1152",
+      "phase1_documented_fails": "3,7,13,15 -- net rendered opaque; midriff covered instead of bare; generic nivi drape instead of Bengali atpoure",
+      "targeted_fixes": ["bengali_atpoure_drape_clause"],
+      "verdict": "not_fixed",
+      "evidence": "Confirmed via direct DB read that the prompt correctly contains 'the Bengali atpoure style, broad box pleats and the pallu wrapped around both shoulders'. Rendered image still shows a classic asymmetric single-shoulder nivi drape (diagonal pallu from one hip to the opposite shoulder, bare midriff on one side) with no box pleats and no wrap around both shoulders. Also shows the same severe colour miss pattern as row 3 (deep peacock blue-green with silver-grey embroidery requested; cream/ivory with gold embroidery rendered) -- unrelated to 8.3.0."
+    },
+    {
+      "row": 8,
+      "garment": "lehenga",
+      "ceremony": "anand_karaj",
+      "phase1_design_version_id": "7e5498ce-9cff-48e7-a978-5a33ca61b023",
+      "design_id": "e56711c8-51a1-4640-bbd9-b33354461a09",
+      "design_version_id": "5b9fd8de-134a-4876-8e6d-78e1ca6e1a9d",
+      "status": "succeeded",
+      "image_dimensions": "896x1152",
+      "phase1_documented_fails": "9,10,13,15 -- minimal read as heavy; square neck read as sweetheart; midriff sheer not covered",
+      "targeted_fixes": ["square_neck_clause", "double_dupatta_drape (incidental, same prompt)"],
+      "verdict": "fixed",
+      "evidence": "Square neckline renders cleanly: a flat straight edge with two crisp right-angle corners across the chest, clearly distinct from a sweetheart curve. This is a clean, unambiguous win for the targeted dimension. Drape still reads as a single dupatta/veil rather than two distinct pieces (consistent with rows 3 and 19). Midriff and embellishment density remain unresolved but were never 8.3.0 targets for this row."
+    },
+    {
+      "row": 16,
+      "garment": "gharara",
+      "ceremony": "reception",
+      "phase1_design_version_id": "c5a9d85a-792b-4ded-bb1c-72c4899a8079",
+      "design_id": "2f89808a-fe70-44a3-a585-dcc5bbaf0631",
+      "design_version_id": "b510a055-5a32-4486-a0ca-2e97fece3679",
+      "status": "succeeded",
+      "image_dimensions": "896x1152",
+      "phase1_documented_fails": "2,9,10 -- reads as a continuous gown, no knee-flare; balanced read as heavy; square neck read as sweetheart",
+      "targeted_fixes": ["gharara_construction_wording", "gharara_silhouette_clause", "square_neck_clause"],
+      "verdict": "fixed",
+      "evidence": "Strongest result of the batch: both targeted dimensions render correctly in the same image. A fitted embroidered kurti top with a curved hem is clearly visible over separate straight trousers underneath (genuine two-piece construction, no continuous-gown misread), and the neckline shows the same clean square edge and right-angle corners as row 8. Fabric colour (deep plum wine purple, a named colour) also renders faithfully here, unlike rows 3 and 7."
+    },
+    {
+      "row": 17,
+      "garment": "anarkali",
+      "ceremony": "pheras",
+      "phase1_design_version_id": "83bfa5bb-17f9-4202-a962-986208ac7da6",
+      "design_id": "78fdec88-ddee-4f61-a0e7-fc0f460bb731",
+      "design_version_id": "2631f8ac-19a6-4ddd-94ab-f9547680de7f",
+      "status": "succeeded",
+      "image_dimensions": "896x1152",
+      "phase1_documented_fails": "1,2,3,7,10,13 -- reads as a two-piece lehenga with bare midriff, not a one-piece anarkali at all",
+      "targeted_fixes": ["anarkali_construction_wording", "front_open_anarkali_silhouette_clause"],
+      "verdict": "fixed",
+      "evidence": "This was the most severe garment-identity collapse in Phase 1. The re-render is a clean win: a single continuous floor-length garment with no waist break and no bare-midriff gap, with a subtle centre-front seam consistent with the front_open_anarkali clause's 'outer panel opening down the front over a fitted inner layer as one ensemble'. Directly resolves the row's primary documented failure."
+    },
+    {
+      "row": 19,
+      "garment": "shalwar_kameez",
+      "ceremony": "baraat",
+      "phase1_design_version_id": "5f9c57de-bd97-4004-b86b-34081c1e2012",
+      "design_id": "1574f385-3658-4c6c-bf99-31cd66b27978",
+      "design_version_id": "bac961cd-768a-4959-b799-d555df59dbb3",
+      "status": "succeeded",
+      "image_dimensions": "896x1152",
+      "phase1_documented_fails": "2,8,15 -- bottom read as a lehenga skirt, not shalwar trousers; embellishment rendered despite 'none' selected; single dupatta not double",
+      "targeted_fixes": ["double_dupatta_drape_clause"],
+      "verdict": "not_fixed",
+      "evidence": "Confirmed via direct DB read that the prompt correctly contains 'two dupattas, one at the head, one trailing'. Rendered image shows a single large dupatta draped over the head and falling symmetrically down both sides -- the same visual pattern as rows 3 and 8, and indistinguishable from a single generously-draped veil. No second, visually distinct dupatta (different position, texture, or trailing point) is present. The shalwar-vs-lehenga-skirt construction fail was never an 8.3.0 target (shalwar kameez construction wording was not touched)."
+    }
+  ]
+}

@@ -9,7 +9,18 @@
   beside coverage and restated at the close, and the model-authored neckline
   narrative is suppressed when a canonical neckline is chosen, `PROMPT_BUILDER_VERSION`
   `6.0.0`, with v1 golden snapshots byte-identical and two new v2 fixtures; see
-  ADR 0018)
+  ADR 0018; further amended 2026-08-02 for prompt builder v8 — the prompt is cut
+  to roughly a third of its length so it fits the image encoder's attention
+  window, every directive is rephrased positively, garment construction is named,
+  coverage is stated once, and redundant model-authored prose is dropped,
+  `PROMPT_BUILDER_VERSION` `8.0.0`; further amended 2026-08-02 for two live-evidence
+  fixes — an ignored object-named colour and a mid-sentence truncation,
+  `PROMPT_BUILDER_VERSION` `8.1.0`, then an ignored `["none"]` embellishment
+  selection, `PROMPT_BUILDER_VERSION` `8.2.0`; further amended 2026-08-02 for the
+  Phase 1/2 prompt-fidelity evaluation's targeted fixes — gharara/anarkali
+  construction and silhouette, square-neck disambiguation, and dupatta/saree-drape
+  visual clauses, `PROMPT_BUILDER_VERSION` `8.3.0`, see
+  ../phases/phase-prompt-builder-v8.md)
 - **Deciders:** Sitara maintainers
 - **Phase:** Phase 9 (see ../phases/PHASES.md); amended by Phase
   image-composition (see ../phases/phase-image-composition.md) and Phase 16B
@@ -178,7 +189,220 @@ fully covered head fight strong FLUX priors), so acceptance requires an
 operator-run before/after comparison on a fixed DesignSpec, not wording
 inspection alone.
 
-### Garment-integrity cues
+### Short, positive, canonical-first (prompt builder v8, `8.0.0`)
+
+A live `7.0.0` generation (2026-07-29) ignored four validated selections at once
+— neckline, midriff, embellishment and head covering. The DesignSpec was correct
+and every one of those requirements was present in the prompt. Two measured
+causes, neither of which is missing information.
+
+**Length.** `7.0.0` prompts ran 2,444–3,993 characters (~600–1,000 tokens). The
+default model's T5-XXL text encoder attends over roughly **512 tokens**;
+everything past that is weakly conditioned or dropped, which is exactly where
+`7.0.0` put colour, fabric, embellishment and its closing coverage restatement.
+An A/B comparison on one fixed DesignSpec met **2 of 6** stated requirements at
+full length and **6 of 6** at roughly a quarter of the words.
+
+**Negation.** `7.0.0` stated coverage negatively in six places ("not an open,
+scooped or sweetheart neckline", "not left open", "with no bare skin at the
+waist", "with no hair visible", "without a gharara knee joint", "not converted
+into a stitched gown"). Diffusion text conditioning has no representation for
+negation: "not an open neckline" conditions on *open neckline* and makes it
+**more** likely. Every negated clause was working against the requirement it was
+meant to defend.
+
+`8.0.0` therefore:
+
+- **Two bounds, not one.** `IMAGE_PROMPT_TARGET_CHARS` (1,500) is what the
+  narrative budget aims at; `IMAGE_PROMPT_MAX_CHARS` (2,600) is the guaranteed
+  hard bound. A single 1,500 bound is not achievable — a schema-valid DesignSpec
+  may carry 64-character machine values in every canonical list, so its
+  *mandatory* content alone can exceed 1,500 with no narrative at all. The
+  reviewed fixtures build to 1,300–1,470; the adversarial worst case measures
+  2,327.
+- **Positive-only phrasing.** No clause the builder authors contains "not",
+  "no", "never" or "without" — composition, coverage, neckline, per-area,
+  head-covering, construction and finishing alike. Model-authored narrative may
+  still phrase a slot negatively; the builder must not silently rewrite generated
+  meaning, so the canonical requirement is always stated positively FIRST, in the
+  directive. That residual belongs to the DesignSpec system prompt, not here.
+- **Garment construction is named.** A source-controlled map keyed only on
+  `garment_type` states one-piece versus two-piece before any surface detail, and
+  absorbs the former `_GARMENT_INTEGRITY_CUES`. The gharara/sharara distinction
+  (CLAUDE.md §12) is preserved and now stated positively for **both** — "fitted
+  through the upper leg and knee and flaring below the knee" against "flaring in
+  one continuous line from the waist" — rather than as a negation on the sharara.
+- **Coverage stated once, early.** The closing reinforcement is removed: at
+  `7.0.0` lengths it sat ~3,700 characters in, far outside the encoder window, so
+  it conditioned nothing while costing ~170 characters. Inside a target-length
+  prompt the single early statement is in-window by construction. The directive
+  now sits third, after the garment's identity and construction, because a prompt
+  that renders the wrong garment wastes every requirement in it — still under 900
+  characters in, roughly 220 tokens.
+- **Redundant narrative dropped.** The prompt renders canonical selections as its
+  skeleton and a small bounded set of narrative slots as supplement — the inverse
+  of `7.0.0`. Kept: `garment_breakdown.overall_form`, `colour_story.placement`,
+  `embellishment_plan.placement`/`motifs`, and the `coverage_and_drape` slots for
+  areas nothing else has settled. Dropped (all still in the persisted DesignSpec
+  and the user-facing brief): `title`, `concept_summary`,
+  `garment_breakdown.silhouette`/`drape_or_layering`/`key_proportions`/`garment_components`,
+  `colour_story.palette_summary`, `fabrics_and_texture`,
+  `embellishment_plan.techniques`/`density`/`restraint_notes`,
+  `coverage_and_drape.head_covering`/`dupatta_or_saree_drape`, and all of
+  `cultural_context`'s prose. Each restates a canonical selection the prompt
+  already carries, or is non-visual prose an image model cannot draw.
+  `fabrics_and_texture` has one exception: when `source_selections.fabrics` is
+  empty (the schema permits it) the entries' fabric names render as the design's
+  only fabric statement, and are mandatory for that reason.
+- **A version-1/2 coverage preference suppresses its own narrative slot**, just
+  as a version-3 answer already did. `7.0.0` rendered "a closed high neckline
+  covering the collarbone" in the directive *and* "Neckline: A closed high
+  neckline…" in the prose — one requirement paid for twice, with a second chance
+  for generated text to drift from the validated choice.
+- **The canonical regional selection is rendered, not the model's elaboration.**
+  `cultural_context.regional_direction` was kept as a narrative slot at first and,
+  being last in priority, was dropped by the budget for **every** reviewed
+  fixture — the user's regional choice reached the image prompt in no case at
+  all. A short mandatory clause built from `source_selections.regional_style`
+  always renders and costs a fraction as much. The framing stays
+  non-prescriptive: "Broad regional influence: punjabi." "Broad" and "influence"
+  carry that without `7.0.0`'s "offered as guidance rather than a universal rule",
+  which is meta-language an image model cannot use.
+- **Canonical lists are item-capped** at 4 colours, 3 fabrics and 4 embellishment
+  styles, in order. Real answers are far under these; the schema's eight-item
+  ceilings are a hostile-input backstop, and naming eight of anything dilutes the
+  prompt. The raw `Coverage preferences: …` echo line is removed entirely — every
+  value in it is already a concrete visual requirement.
+
+**Budgeting changed shape with the budget.** `7.0.0` split the narrative budget
+proportionally between sections and truncated a piece to whatever remained. Both
+are right at 6,000 characters and wrong at 1,500: proportional shares were too
+thin to render anything, starving the most valuable slots along with the least,
+and budget-level truncation produced dangling fragments ("fitted to the knee
+before a.", a bare "Motifs:"). `8.0.0` spends the budget greedily in priority
+(reading) order and selects **all-or-nothing** per piece — a piece that does not
+fit is dropped whole, prefix included, because a half-sentence conditions the
+provider on less than the clean absence of the detail. Per-slot caps still bound
+each piece, so all-or-nothing costs little; a dropped piece frees its whole
+length, so a later, shorter piece that still fits is kept. The coverage narrative
+was also moved to sit with the coverage directive rather than after
+embellishment: ranked below embellishment it lost, and a version-1 spec's
+neckline narrative is the only neckline information such a spec has.
+
+Everything else is unchanged: purity and determinism, one positive
+natural-language prompt with no negative prompt, no JSON prompt, no model
+identifier and no provider call; both safety scans; `ImagePromptBuildError` as
+the only escaping exception; word-boundary truncation still total; the
+regeneration command's version guard; and the immutability of persisted
+`image_prompt`/`prompt_builder_version` audit data on existing rows.
+
+As with `5.0.0`, prompt-level correctness is deterministic and snapshot-guarded
+while provider adherence stays stochastic — acceptance needs an operator-run
+before/after comparison on a fixed DesignSpec, not wording inspection.
+
+### What the first live `8.0.0` run showed, and `8.1.0`
+
+A real paid generation on 2026-08-02 (v3 spec: saree, nikah, high neck,
+three-quarter sleeves, covered back and midriff, hijab, pistachio, unembellished)
+**validated the coverage thesis**. Every observable coverage requirement was
+honoured — the closed high neckline, three-quarter sleeves, covered midriff and a
+hijab enclosing all the hair — against `7.0.0`, which had rendered an open
+neckline and a bare head from an equivalent spec. Composition, garment
+construction and the less-covered sleeve answer were all correct too. (The
+covered back is not observable in a front-facing catalogue frame.)
+
+Two defects the run exposed, both fixed in `8.1.0`:
+
+**Colour was ignored.** `pistachio` rendered as blush pink with no green
+anywhere. Most of the questionnaire's palette is named after an object rather
+than a colour — pistachio, sage, rust, peacock, oxblood, aubergine, champagne,
+marigold, mint, pearl, amethyst — and an image model reads a bare object noun as
+the object, or ignores it and falls back on the overwhelming pink/red/gold prior
+that "South Asian bridal" carries. `8.1.0` adds `_COLOUR_DESCRIPTORS`, a
+source-controlled map naming the hue alongside the shade ("pale pistachio
+green"), covering the v4 palette exactly — a contract test fails if the
+questionnaire gains a colour the builder cannot name unambiguously. The chosen
+shade is always kept, never replaced by a bare hue, and an unrecognised value
+falls back to its readable form.
+
+**A narrative slot was cut mid-sentence.** `overall_form` was 196 characters
+against a 180 cap and rendered as "…draped over the shoulder rather than a fully
+stitched." Word-boundary truncation is safe against partial *tokens* but not
+against partial *meaning*, and 196 is an entirely ordinary length for a
+400-character field. Worse, that 180-character fragment consumed the budget the
+colour placement would otherwise have used. `8.1.0` replaces
+`_truncate_at_word` with `_truncate_at_sentence`: whole sentences only, and a
+piece with no sentence ending inside its cap is dropped rather than cut. `_FORM_CAP`
+rises 180 → 240 and `_PLACEMENT_CAP` 150 → 200 so ordinary one-sentence values
+fit whole instead of being dropped. The guarantee is now stronger than `7.0.0`'s:
+never a partial sentence, not merely never a partial token.
+
+`8.1.0` is a minor bump because the v8 architecture is unchanged. It bumps at all
+because a real `DesignVersion` already carries `8.0.0` as immutable provenance,
+and its stored prompt must keep matching the version that produced it.
+
+`8.2.0` (not narrated separately here — see `../phases/phase-prompt-builder-v8.md`)
+fixed a third live defect the same way: an explicit `["none"]` embellishment
+selection was still rendering gold borders and scattered motifs, because
+`8.1.0`'s "unworked, undecorated" wording named the absence it was trying to
+avoid. The unembellished clause and finishing directive were rewritten to
+describe what the cloth positively **is**.
+
+### A scoped 20-design evaluation and targeted fixes, `8.3.0`
+
+`8.0.0`–`8.2.0` were each driven by a single live generation. Before a fourth
+single-shot fix, a scoped study replaced that approach:
+`../phases/prompt-fidelity-evaluation-plan.md` rendered all 20 matrix designs
+live at `8.2.0` and blind-rubric-reviewed all 20 across 19 dimensions
+(`../phases/prompt-fidelity-phase1-results.json`,
+`../phases/prompt-fidelity-phase2-review.md`). `8.3.0` fixes exactly the three
+failure modes that review verdicted fixable at this layer, and touches nothing
+else:
+
+- **Gharara and anarkali construction.** 3 of 6 renders lost the
+  one-piece/two-piece identity, in both directions. `_GARMENT_CONSTRUCTION`'s
+  gharara and anarkali entries now name the trouser structure and continuity
+  explicitly instead of sharing "flared" vocabulary with the lehenga clause, and
+  a new `_SILHOUETTE_CLAUSES` map — scoped only to these two garments' own
+  silhouette values, not a speculative map across all 22 the questionnaire
+  offers — carries each silhouette's own flare character as a delta on the
+  construction clause rather than repeating it, so the two mandatory clauses
+  never contradict each other the way a bare `"The silhouette is slim modern
+  gharara"` once could against `"flaring below the knee"`.
+- **Square vs sweetheart neckline.** A square neckline read as a sweetheart
+  twice in three renders. `_NECKLINE_CLAUSES["square_neck"]` now names the flat
+  edge and right-angle corners a curved sweetheart cannot satisfy.
+- **Dupatta and saree-drape styling.** `dupatta_style` and `saree_drape` were
+  the only two canonical fields in the builder with no visual clause map at
+  all, rendering through a bare `"dupatta worn as a X"` fallback while every
+  sibling field named a concrete shape. New `_DUPATTA_STYLE_CLAUSES` (5 entries)
+  and `_SAREE_DRAPE_CLAUSES` (4 entries) maps follow the same source-controlled
+  pattern as the rest of the file. This fixed two distinct failures: a Bengali
+  atpoure drape and a lehenga-style saree drape both rendering as the generic
+  nivi drape (the map now names `bengali_drape`'s defining both-shoulders pallu
+  explicitly), and a one-shoulder/front-draped dupatta both occluding an
+  already-rendered neckline requirement (both now positively anchored — down
+  the back, below the neckline — rather than left to compete with it).
+
+**Deliberately not touched.** The review's single clearest finding —
+embellishment-density and midriff-coverage restraint failing 60–83% of the
+time, always toward *more* decoration and coverage than requested — is left
+alone. `8.2.0` was already a targeted fix at that exact class and did not
+resolve it; a same-direction failure surviving a targeted fix reads as the
+model's own convention prior, not a prompt-clarity gap, and the evaluation
+plan's own stopping rule rules out a third attempt at the same class. This is
+reported as a finding for a product decision, not chased further in the
+builder.
+
+All three fixes are mandatory content, so they compete for the same
+`IMAGE_PROMPT_TARGET_CHARS` narrative budget as before; every new/lengthened
+clause was trimmed until all eleven reviewed fixtures cleared the target again.
+The measured cost is that several fixtures now drop the lowest-priority
+embellishment `placement`/`motifs` narrative under the tighter budget — never
+the mandatory density/style selections, and never a requirement the review
+verdicted broken.
+
+### Garment-integrity cues (superseded by `8.0.0`'s construction clauses)
 
 A very small, source-controlled set of integrity cues is added only for the
 categories with meaningful confusion risk in Phase 2, keyed solely on
@@ -300,7 +524,7 @@ manifest first and **refuses** to overwrite it when the rendered combined hash
 changed while `PROMPT_BUILDER_VERSION` did not — a deliberate version bump is
 required. After a bump it rewrites the snapshots and manifest; an unchanged hash
 is a no-op. Normal tests run comparison-only and never write files, so silent
-wording drift cannot slip past review. `PROMPT_BUILDER_VERSION` is `5.0.0`:
+wording drift cannot slip past review. `PROMPT_BUILDER_VERSION` is `8.3.0`:
 `2.0.0` introduced bounded rendering and canonical-selection authority; `3.0.0`
 finalised the no-embellishment rules (dropping the density line and switching to
 the unembellished finishing wording), made truncation total and added HTML/Markdown
@@ -310,8 +534,18 @@ garment-detail hierarchy (coverage ahead of colour/fabric), split the trailing
 block into finishing-only wording and tightened the `concept_summary` cap
 (700→400); `5.0.0` (Phase image-composition follow-up) added the high-priority
 conditional coverage directive plus a closing reinforcement, and stopped
-rendering `styling_notes` and `colour_story.rationale` — each changing every
-fixture snapshot and requiring the version bump.
+rendering `styling_notes` and `colour_story.rationale`; `6.0.0` (Phase 16B)
+rendered the dedicated canonical neckline; `7.0.0` (Phase 16B) rendered
+DesignSpec v3's per-role colour and per-area coverage; `8.0.0` (prompt builder
+v8) cut the prompt to roughly a third of its length, rephrased every directive
+positively, named garment construction, stated coverage once and stopped
+rendering redundant model-authored prose; `8.1.0` named colour hues explicitly
+and made truncation whole-sentence; `8.2.0` described an unembellished fabric by
+what it is rather than what it lacks; `8.3.0` (the Phase 1/2 prompt-fidelity
+evaluation's targeted fixes) strengthened gharara/anarkali construction and
+added a scoped silhouette map, disambiguated the square neckline from the
+sweetheart, and added dupatta-style/saree-drape visual clause maps — each
+changing every fixture snapshot and requiring the version bump.
 Each bump rewrote snapshots deliberately through the regeneration command's
 version guard; persisted `image_prompt`/`prompt_builder_version` audit data on
 existing `DesignVersion` rows is never rewritten, so a builder change only

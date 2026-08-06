@@ -8,6 +8,7 @@ overwrite committed snapshots without a deliberate PROMPT_BUILDER_VERSION bump
 
 import copy
 import json
+import re
 
 import pytest
 
@@ -15,6 +16,7 @@ from sitara.generation.design_spec import DesignSpec, validate_design_spec
 from sitara.generation.prompt_builder import (
     _COMPOSITION,
     IMAGE_PROMPT_MAX_CHARS,
+    IMAGE_PROMPT_TARGET_CHARS,
     PROMPT_BUILDER_VERSION,
     ImagePromptBuildError,
     build_image_prompt,
@@ -173,21 +175,48 @@ class TestDeterminismAndBounds:
     def test_prompt_is_within_the_global_cap(self, name):
         assert len(build_image_prompt(_load_spec(name))) <= IMAGE_PROMPT_MAX_CHARS
 
+    @pytest.mark.parametrize("name", FIXTURES)
+    def test_realistic_prompt_is_within_the_target(self, name):
+        # The whole point of 8.0.0: every realistic prompt fits the image
+        # encoder's attention window. The hard cap is a backstop for adversarial
+        # machine values, not the working budget.
+        assert len(build_image_prompt(_load_spec(name))) <= IMAGE_PROMPT_TARGET_CHARS
+
+    def test_the_target_is_well_under_the_hard_cap(self):
+        # Two bounds with a real gap between them, so a spec carrying 64-character
+        # machine values in every canonical list still has somewhere to go.
+        assert IMAGE_PROMPT_TARGET_CHARS < IMAGE_PROMPT_MAX_CHARS
+
     def test_maximum_bound_spec_builds_within_the_cap(self):
         spec = DesignSpec.model_validate(_max_spec_dict())
         prompt = build_image_prompt(spec)
         assert len(prompt) <= IMAGE_PROMPT_MAX_CHARS
         # Mandatory content survives even at maximum size.
         assert prompt.startswith(_COMPOSITION)  # composition still leads
-        assert "The colour palette, in order, is" in prompt
-        assert "Coverage preferences:" in prompt
-        assert prompt.endswith("embroidery detail.")  # finishing intact
+        assert "Colours, in order of importance:" in prompt
+        assert "Fabrics:" in prompt
+        assert "Embellishment:" in prompt
+        assert prompt.endswith("true to the real fabric colour.")  # finishing intact
 
     @pytest.mark.parametrize(
         "shape",
         [
-            {"source_selections": {"garment_type": "sharara"}},  # integrity cue present
+            {"source_selections": {"garment_type": "sharara"}},  # construction clause present
             {"source_selections": {"garment_type": "saree", "dupatta_style": None}},
+            {  # the true worst case: 64-character machine values in every
+                # canonical list AND a recognised garment whose construction
+                # clause renders AND every coverage clause firing at once.
+                "source_selections": {
+                    "garment_type": "saree",
+                    "coverage_preferences": [
+                        "full_sleeves",
+                        "high_neckline",
+                        "full_midriff",
+                        "full_back",
+                        "head_drape_preferred",
+                    ],
+                }
+            },
             {  # no regional direction
                 "source_selections": {"regional_style": "no_specific_direction"},
                 "cultural_context": {
@@ -209,50 +238,67 @@ class TestDeterminismAndBounds:
         spec = DesignSpec.model_validate(_max_spec_dict())
         assert build_image_prompt(spec) == build_image_prompt(spec)
 
-    def test_slot_truncates_at_a_word_boundary(self):
+    def test_slot_keeps_whole_sentences_only(self):
         from sitara.generation.prompt_builder import _slot
 
-        text = "alpha beta gamma delta epsilon"
-        truncated = _slot(text, 12)
-        assert truncated == "alpha beta"  # no partial "gam..."
-        assert not truncated.endswith(" ")
+        text = "First sentence here. Second sentence runs on much longer than the cap."
+        assert _slot(text, 40) == "First sentence here."
 
     def test_slot_collapses_whitespace(self):
         from sitara.generation.prompt_builder import _slot
 
         assert _slot("  a\r\n b\t c  ", 100) == "a b c"
 
-    def test_truncate_omits_a_single_oversized_token(self):
-        from sitara.generation.prompt_builder import _truncate_at_word
+    def test_truncate_omits_a_single_oversized_sentence(self):
+        from sitara.generation.prompt_builder import _truncate_at_sentence
 
-        # One 400-character token with no interior space cannot be cut at a word
-        # boundary → omitted entirely, never a partial token.
-        assert _truncate_at_word("x" * 400, 300) == ""
+        # No sentence ends within the limit → omitted entirely. This is the
+        # first-live-run defect: a 196-character one-sentence overall_form under
+        # a 180 cap must not render as "...rather than a fully stitched."
+        assert _truncate_at_sentence("x" * 400, 300) == ""
+        assert _truncate_at_sentence("A single long clause that never ends", 20) == ""
 
-    def test_truncate_keeps_only_whole_leading_words(self):
-        from sitara.generation.prompt_builder import _truncate_at_word
+    def test_truncate_keeps_every_sentence_that_fits(self):
+        from sitara.generation.prompt_builder import _truncate_at_sentence
 
-        text = "y" * 290 + " and more words follow here"
-        result = _truncate_at_word(text, 300)
-        # The long first token is kept whole, plus the words that still fit; the
-        # result always ends at a word boundary (never a partial token).
-        assert result == "y" * 290 + " and more"
-        assert result.split()[0] == "y" * 290
-        assert result == text[: len(result)] and text[len(result)] == " "
+        text = "One. Two. Three. " + "z" * 300
+        result = _truncate_at_sentence(text, 40)
+        assert result == "One. Two. Three."
+        assert not result.endswith(" ")
 
-    def test_truncate_is_total_on_unicode_words(self):
-        from sitara.generation.prompt_builder import _truncate_at_word
+    def test_truncate_accepts_any_sentence_terminator(self):
+        from sitara.generation.prompt_builder import _truncate_at_sentence
 
-        result = _truncate_at_word("café café café café", 12)
-        assert result == "café café"  # whole words only, no split accents
-        assert "caf " not in result
+        assert _truncate_at_sentence("Really? Yes indeed, at some length here.", 10) == "Really?"
+        assert _truncate_at_sentence("Stunning! And then it runs on and on.", 12) == "Stunning!"
 
-    def test_single_long_token_narrative_is_omitted_not_partially_rendered(self):
+    def test_truncate_is_total_on_unicode(self):
+        from sitara.generation.prompt_builder import _truncate_at_sentence
+
+        result = _truncate_at_sentence("Café doré. Café doré again, at length.", 14)
+        assert result == "Café doré."  # no split accents
+        assert "Caf " not in result
+
+    def test_an_unterminated_narrative_is_omitted_not_partially_rendered(self):
         data = _spec_dict("nikah_lehenga_head_drape")
-        data["garment_breakdown"]["overall_form"] = "z" * 400  # one 400-char token
+        data["garment_breakdown"]["overall_form"] = "z" * 400  # no sentence end
         prompt = build_image_prompt(DesignSpec.model_validate(data))
         assert len(prompt) <= IMAGE_PROMPT_MAX_CHARS
-        assert "z" * 50 not in prompt  # no partial token leaked
+        assert "z" * 50 not in prompt  # nothing partial leaked
+
+    def test_the_live_regression_shape_renders_whole_or_not_at_all(self):
+        # The exact first-live-run field: 196 characters, one sentence.
+        data = _spec_dict("nikah_lehenga_head_drape")
+        form = (
+            "A lehenga-style saree: a fitted, high-coverage blouse joined to a "
+            "structured, skirt-like base, with a traditional saree pallu draped "
+            "over the shoulder rather than a fully stitched gown silhouette."
+        )
+        data["garment_breakdown"]["overall_form"] = form
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "rather than a fully stitched." not in prompt
+        if "lehenga-style saree" in prompt:
+            assert form in prompt  # whole sentence, terminator included
 
     def test_maximum_spec_with_untokenised_narrative_stays_bounded(self):
         # Every narrative string a single oversized token: all narrative is
@@ -291,7 +337,7 @@ class TestCompositionComesFirst:
         composition_end = len(_COMPOSITION)
         # Representative garment-detail / finishing markers all appear only AFTER
         # the composition directive, never before it.
-        for marker in ("The silhouette is", "Coverage preferences:", "non-branded"):
+        for marker in ("The silhouette is", "Show clearly in the render:", "non-branded"):
             index = prompt.find(marker)
             if index != -1:
                 assert index >= composition_end
@@ -304,6 +350,8 @@ class TestCompositionComesFirst:
         assert prompt.startswith(_COMPOSITION)
 
     def test_required_framing_semantics_are_expressed(self):
+        # 8.0.0 shortened the composition directive from 615 characters to ~430;
+        # every framing REQUIREMENT it expressed must still be there.
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
         # Exactly one model.
         assert "exactly one" in prompt and "model" in prompt
@@ -311,15 +359,15 @@ class TestCompositionComesFirst:
         assert "top of the head" in prompt
         assert "both feet" in prompt
         # Complete garment and trailing fabric visible.
-        assert "complete outfit" in prompt
+        assert "whole outfit" in prompt
         assert "trailing fabric" in prompt
         # Neutral studio backdrop.
-        assert "seamless plain neutral studio backdrop" in prompt
+        assert "Seamless plain neutral studio backdrop" in prompt
         # Even studio lighting.
-        assert "soft, even" in prompt
+        assert "soft even studio lighting" in prompt
         # Garment-focused catalogue presentation.
         assert "catalogue photograph" in prompt
-        assert "primary subject rather than the face" in prompt
+        assert "the garment itself as the subject" in prompt
 
     def test_no_editorial_or_environmental_cues(self):
         # Wording must not invite portrait/beauty/venue/environmental framing.
@@ -331,21 +379,47 @@ class TestCompositionComesFirst:
 
 class TestContentInclusionAndExclusion:
     def test_coverage_machine_selections_survive(self):
+        # 8.0.0 drops the raw "Coverage preferences: ..." echo line: every value
+        # in it is already rendered as a concrete visual requirement, and the
+        # echo restated the machine values a second time for no visual gain.
         prompt = build_image_prompt(_load_spec("reception_shalwar_kameez_full_coverage"))
-        for token in ("full sleeves", "high neckline", "full coverage"):
-            assert token in prompt
+        assert "full-length sleeves reaching the wrists" in prompt
+        assert "a closed high neckline covering the collarbone" in prompt
+        assert "Coverage preferences:" not in prompt
 
     def test_ordered_colours_are_rendered_in_order(self):
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
-        assert "in order, is ivory, gold" in prompt
+        # "ivory" is a questionnaire value and gains its hue; this v1 fixture's
+        # "gold" predates the v4 palette and falls back to its readable form.
+        assert "Colours, in order of importance: warm ivory white, gold" in prompt
 
     def test_ordered_embellishment_styles_are_rendered_in_order(self):
         prompt = build_image_prompt(_load_spec("baraat_sharara_double_dupatta"))
-        assert "in order, are zardozi, dabka, kora" in prompt
+        assert "Embellishment: zardozi, dabka, kora" in prompt
 
     def test_ordered_fabrics_are_rendered_in_order(self):
         prompt = build_image_prompt(_load_spec("baraat_sharara_double_dupatta"))
-        assert "in order, are velvet, silk" in prompt
+        assert "Fabrics: velvet, silk" in prompt
+
+    def test_canonical_lists_are_item_capped(self):
+        # The schema permits eight of each; naming eight dilutes the prompt, so
+        # only the leading (most important) items render, in order.
+        data = _spec_dict("baraat_sharara_double_dupatta")
+        data["source_selections"]["colour_palette"] = ["red", "gold", "ivory", "green", "black"]
+        data["source_selections"]["fabrics"] = ["velvet", "silk", "net", "organza"]
+        data["source_selections"]["embellishment_styles"] = [
+            "zardozi",
+            "dabka",
+            "kora",
+            "sequins",
+            "pearls",
+        ]
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "Colours, in order of importance: red, gold, warm ivory white, green." in prompt
+        assert "Fabrics: velvet, silk, net." in prompt
+        assert "Embellishment: zardozi, dabka, kora, sequins." in prompt
+        for dropped in ("black", "organza", "pearls"):
+            assert dropped not in prompt
 
     def test_construction_caveats_and_alt_text_are_excluded(self):
         data = _spec_dict("nikah_lehenga_head_drape")
@@ -368,8 +442,8 @@ class TestContentInclusionAndExclusion:
         for phrase in (
             "non-branded",
             "natural anatomy",
-            "coherent, naturally posed hands",
-            "true to the real fabric colour and embroidery detail",
+            "coherent hands",
+            "true to the real fabric colour",
         ):
             assert phrase in prompt
 
@@ -385,40 +459,165 @@ class TestContentInclusionAndExclusion:
             assert marker not in prompt
 
 
-class TestGarmentIntegrityCues:
-    def test_gharara_has_knee_flare_cue(self):
+class TestGarmentConstruction:
+    """Every garment's construction is named as one-piece or two-piece before any
+    surface detail, and the former garment-integrity cues are folded into it —
+    stated positively for every garment rather than as a negation on some."""
+
+    def test_gharara_is_two_piece_with_the_knee_flare(self):
         prompt = build_image_prompt(_load_spec("mehndi_gharara_minimal"))
-        assert "flare beginning below the knee" in prompt
-        assert "fitted through the upper leg and knee" in prompt
+        assert "a two-piece outfit of a kurti over wide-legged trousers" in prompt
+        assert "each leg fitted to the knee before flaring" in prompt
 
-    def test_sharara_has_waist_flare_cue(self):
+    def test_sharara_is_two_piece_flaring_from_the_waist(self):
+        # The gharara/sharara distinction (CLAUDE.md §12) is preserved, but the
+        # sharara now says what it IS ("one continuous line from the waist")
+        # rather than what it is not ("without a gharara knee joint").
         prompt = build_image_prompt(_load_spec("baraat_sharara_double_dupatta"))
-        assert "flaring from the waist or upper leg" in prompt
-        assert "without a gharara knee joint" in prompt
+        assert "a two-piece outfit of a kurti over separate trousers" in prompt
+        assert "flaring in one continuous line from the waist to a wide hem" in prompt
+        assert "knee" not in prompt
 
-    def test_saree_stays_a_draped_garment_with_pallu(self):
+    def test_saree_is_a_draped_length_over_a_blouse(self):
         prompt = build_image_prompt(_load_spec("pheras_saree_heavy_no_region"))
-        assert "visibly draped fabric with a pallu" in prompt
-        assert "not converted into a stitched gown" in prompt
+        assert "a single draped length of fabric with the pallu falling" in prompt
+        assert "over a separate fitted blouse" in prompt
 
-    def test_lehenga_has_no_integrity_cue_injected(self):
+    def test_lehenga_is_two_piece_choli_and_skirt(self):
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
-        assert "knee joint" not in prompt
-        assert "stitched gown" not in prompt
+        assert "a two-piece outfit of a fitted choli blouse" in prompt
+        assert "with a separate long flared skirt" in prompt
+
+    def test_anarkali_is_one_piece(self):
+        prompt = build_image_prompt(_load_spec("walima_anarkali_none"))
+        assert "a single continuous floor-length kurta, unbroken from shoulder to hem" in prompt
+        assert "worn over narrow trousers" in prompt
+
+    def test_shalwar_kameez_is_two_piece_tunic_and_trousers(self):
+        prompt = build_image_prompt(_load_spec("reception_shalwar_kameez_full_coverage"))
+        assert "a two-piece outfit of a long tunic over separate trousers" in prompt
+
+    def test_unknown_garment_type_gets_no_construction_clause(self):
+        # The map is a small source-controlled set, not a rules engine: an
+        # unrecognised garment renders its name and nothing invented.
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["source_selections"]["garment_type"] = "unknown_garment"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "A South Asian bridal unknown garment for a nikah ceremony." in prompt
+        assert "two-piece" not in prompt
+        assert "one-piece" not in prompt
 
     def test_head_covering_selection_stays_visible(self):
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
-        assert "head drape" in prompt  # dupatta_style machine value
-        assert "over the head" in prompt  # narrative head-covering detail
+        assert "drawn up from the shoulders to frame the face" in prompt  # dupatta_style clause
+        assert "over the head" in prompt  # the coverage requirement
+
+
+class TestGharaAndAnarkaliSilhouette:
+    """8.3.0: a silhouette-level clause map scoped to gharara's and anarkali's
+    own silhouette values, added after the Phase 1 prompt-fidelity evaluation
+    found these two garments losing their one-piece/two-piece identity while
+    every other garment held construction with only the plain "The silhouette
+    is X" fallback. Each entry states its own flare/continuity character so it
+    never contradicts the garment-construction clause beside it."""
+
+    def test_farshi_gharara_names_the_floor_sweeping_flare(self):
+        prompt = build_image_prompt(_load_spec("nikah_gharara_hex_colour_hijab"))
+        assert "The silhouette is the farshi gharara" in prompt
+        assert "its flare floor-sweeping" in prompt
+
+    def test_floor_length_anarkali_names_the_unbroken_piece(self):
+        prompt = build_image_prompt(_load_spec("walima_anarkali_none"))
+        assert "The silhouette is the floor-length anarkali" in prompt
+        assert "its flare falling to the floor" in prompt
+        # The invariant continuity fact lives in the construction clause.
+        assert "unbroken from shoulder to hem" in prompt
+
+    def test_classic_gharara_names_its_flare_character(self):
+        data = _spec_dict("mehndi_gharara_minimal")
+        data["source_selections"]["silhouette"] = "classic_gharara"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "The silhouette is the classic gharara" in prompt
+        assert "its flare moderate and traditional" in prompt
+        # The shared two-leg trouser fact lives in the construction clause,
+        # not repeated here.
+        assert "each leg fitted to the knee before flaring" in prompt
+
+    def test_slim_modern_gharara_agrees_with_the_construction_clause(self):
+        # The row-16 mechanism: a bare "slim modern gharara" silhouette line
+        # used to sit directly against "flaring below the knee" with nothing
+        # reconciling the two. The dedicated clause now states its own
+        # (subtler) flare explicitly instead of leaving a bare contradiction.
+        data = _spec_dict("mehndi_gharara_minimal")
+        data["source_selections"]["silhouette"] = "slim_modern_gharara"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "the slim modern gharara" in prompt
+        assert "its flare subtle, only below the knee" in prompt
+
+    def test_kalidar_anarkali_names_the_panelled_construction(self):
+        data = _spec_dict("walima_anarkali_none")
+        data["source_selections"]["silhouette"] = "kalidar_anarkali"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "the kalidar anarkali" in prompt
+        assert "built from many stitched flare panels" in prompt
+
+    def test_front_open_anarkali_stays_one_ensemble(self):
+        # The row-17 failure: a front-open anarkali rendered as "a two-piece
+        # lehenga with a bare midriff gap". The real garment does have a front
+        # opening (unlike the other anarkali silhouettes), so the fix cannot
+        # claim full continuity — it anchors the layered opening as one moving
+        # ensemble instead.
+        data = _spec_dict("walima_anarkali_none")
+        data["source_selections"]["silhouette"] = "front_open_anarkali"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "the front-open anarkali" in prompt
+        assert "opening down the front over a fitted inner layer as one ensemble" in prompt
+
+    def test_a_legacy_gharara_silhouette_value_falls_back_unchanged(self):
+        # mehndi_gharara_minimal is a v1 fixture carrying "gharara_set", which
+        # predates the v4 silhouette vocabulary this map is keyed on. It must
+        # keep rendering through the plain 8.2.0 fallback, not silently drop.
+        prompt = build_image_prompt(_load_spec("mehndi_gharara_minimal"))
+        assert "The silhouette is gharara set" in prompt
+
+    def test_silhouette_clauses_are_scoped_to_gharara_and_anarkali_only(self):
+        # A small, evidence-scoped addition, not a map across every silhouette
+        # the questionnaire offers: a lehenga silhouette value renders through
+        # the same plain fallback as before 8.3.0.
+        from sitara.generation.prompt_builder import _SILHOUETTE_CLAUSES
+
+        assert "flared_lehenga" not in _SILHOUETTE_CLAUSES
+        prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
+        assert "The silhouette is flared lehenga" in prompt
 
     def test_no_regional_direction_is_not_invented(self):
         prompt = build_image_prompt(_load_spec("pheras_saree_heavy_no_region"))
         assert "regional influence" not in prompt.lower()
 
-    def test_supplied_regional_direction_is_framed_as_influence(self):
+    def test_the_canonical_regional_selection_is_rendered_as_influence(self):
+        # 8.0.0 renders the CANONICAL selection, not the model's prose
+        # elaboration. As a narrative slot the elaboration was last in priority
+        # and the budget dropped it for every reviewed fixture, so the user's
+        # regional choice reached the prompt in no case at all.
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
-        framing = "Broad regional influence, offered as guidance rather than a universal rule"
-        assert framing in prompt
+        assert "Broad regional influence: pakistani." in prompt
+
+    def test_the_regional_elaboration_prose_is_not_rendered(self):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["cultural_context"]["regional_direction"] = "SENTINELREGION a Pakistani influence."
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "SENTINELREGION" not in prompt
+        assert "Broad regional influence: pakistani." in prompt
+
+    @pytest.mark.parametrize("name", FIXTURES)
+    def test_the_regional_selection_always_survives_the_budget(self, name):
+        # The regression that motivated making this mandatory: it must never be
+        # squeezed out by narrative again.
+        spec = _load_spec(name)
+        style = spec.source_selections.regional_style
+        prompt = build_image_prompt(spec)
+        if style and style != "no_specific_direction":
+            assert f"Broad regional influence: {style.replace('_', ' ')}." in prompt
 
 
 class TestCanonicalSelectionAuthority:
@@ -446,19 +645,17 @@ class TestCanonicalSelectionAuthority:
         }
         prompt = build_image_prompt(DesignSpec.model_validate(data))
         lowered = prompt.lower()
-        assert "no surface embellishment" in lowered
+        # 8.2.0 describes what the cloth IS, never what it lacks.
+        assert "one continuous expanse of solid colour" in lowered
         assert "SENTINELEMB" not in prompt
         for word in (*self._HEAVY, "density", "embroidery", "embroidered"):
             assert word not in lowered
-        # Canonical selection still present; unembellished finishing used.
-        assert "in order, are none" in lowered
-        assert "texture, drape and garment detail" in lowered
+        # The unembellished finishing wording is used.
+        assert "smooth, single-colour cloth" in lowered
 
     def test_non_none_retains_embroidery_finishing(self):
-        # The embroidery-aware finishing directive is present (it is no longer the
-        # very last line when a coverage reinforcement follows).
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
-        assert "true to the real fabric colour and embroidery detail." in prompt
+        assert "non-branded textile and embroidery design" in prompt
 
     def test_minimal_density_strips_heavy_directions_from_narrative(self):
         data = _spec_dict("nikah_lehenga_head_drape")
@@ -479,55 +676,87 @@ class TestCanonicalSelectionAuthority:
     def test_balanced_selection_keeps_matching_narrative(self):
         # A non-minimal, non-none selection is rendered faithfully — no silent
         # transformation, heavy wording preserved where the spec intends it.
+        # 8.0.0 no longer renders embellishment_plan.density (it restates the
+        # canonical density line), so the surviving narrative slots carry it.
         data = _spec_dict("baraat_sharara_double_dupatta")
         data["source_selections"]["embellishment_density"] = "heavy"
-        data["embellishment_plan"]["density"] = "A heavy, densely worked surface."
+        data["embellishment_plan"]["placement"] = ["A heavily worked, densely packed yoke"]
         prompt = build_image_prompt(DesignSpec.model_validate(data)).lower()
         assert "embellishment density: heavy" in prompt
-        assert "densely worked" in prompt
+        assert "heavily worked, densely packed yoke" in prompt
         # The canonical ordered selection is untouched (not transformed to none).
-        assert "in order, are zardozi, dabka, kora" in prompt
-        assert "no surface embellishment" not in prompt
+        assert "embellishment: zardozi, dabka, kora" in prompt
+        assert "one continuous expanse of solid colour" not in prompt
 
 
 class TestCoverageRequirements:
-    """Coverage selections are rendered as explicit visual requirements, placed
-    high (right after composition) and briefly reinforced last, garment-neutral,
-    and strictly conditional on the canonical selections."""
+    """Coverage selections are rendered as explicit, positive visual requirements,
+    placed high, stated ONCE, garment-neutral, and strictly conditional on the
+    canonical selections."""
 
-    _DIRECTIVE = "Coverage and modesty requirements that must be clearly visible in the render"
-    _REINFORCE = "Coverage to keep clearly visible in the final image"
+    _DIRECTIVE = "Show clearly in the render:"
 
-    def test_directive_is_second_block_after_composition(self):
+    def test_directive_is_third_block_after_composition_and_garment(self):
+        # 8.0.0 puts the garment's identity and construction between composition
+        # and coverage: a prompt that renders the wrong garment wastes every
+        # other requirement in it. The directive still sits ~550 characters in,
+        # deep inside the encoder window — the 5.0.0 concern was coverage buried
+        # in mid-prompt prose thousands of characters down, not this.
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
         assert prompt.startswith(_COMPOSITION)
         paras = prompt.split("\n\n")
-        assert paras[1].startswith(self._DIRECTIVE)
+        assert paras[2].startswith(self._DIRECTIVE)
+        # ~900 characters is roughly 220 tokens — comfortably inside the ~512
+        # token window, which is the property that matters.
+        assert prompt.find(self._DIRECTIVE) < 900
 
-    def test_directive_precedes_all_garment_detail(self):
+    def test_directive_precedes_colour_fabric_and_embellishment(self):
         prompt = build_image_prompt(_load_spec("reception_shalwar_kameez_full_coverage"))
         directive_at = prompt.find(self._DIRECTIVE)
         assert directive_at != -1
         assert directive_at >= len(_COMPOSITION)
-        assert directive_at < prompt.find("The silhouette is")
+        for later in ("Colours,", "Fabrics:", "Embellishment:"):
+            assert directive_at < prompt.find(later)
+
+    def test_coverage_is_stated_exactly_once(self):
+        # 8.0.0 removes the closing reinforcement. At 7.0.0 lengths it sat
+        # outside the encoder's attention window and conditioned nothing while
+        # costing ~170 characters; inside a target-length prompt the single
+        # early statement is in-window by construction.
+        for name in FIXTURES:
+            prompt = build_image_prompt(_load_spec(name))
+            assert prompt.count(self._DIRECTIVE) <= 1
+            assert "Coverage to keep clearly visible in the final image" not in prompt
+
+    def test_prompt_ends_with_the_finishing_directive(self):
+        for name in FIXTURES:
+            prompt = build_image_prompt(_load_spec(name)).rstrip()
+            assert prompt.endswith("true to the real fabric colour.") or prompt.endswith(
+                "true to the smooth, single-colour cloth and the way it falls."
+            )
 
     def test_high_neckline_rendered_as_closed_visual_requirement(self):
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
-        assert (
-            "a fully closed high blouse neckline covering the collarbone and upper chest" in prompt
-        )
-        assert "not an open, scooped or sweetheart neckline" in prompt
+        assert "a closed high neckline covering the collarbone and upper chest" in prompt
+
+    def test_square_neck_is_named_distinctly_from_sweetheart(self):
+        # 8.3.0: the Phase 1 evaluation found a square neckline rendered as a
+        # sweetheart neckline twice in three renders. The clause now names the
+        # flat edge and right-angle corners a curved sweetheart cannot satisfy.
+        data = _spec_dict("nikah_gharara_hex_colour_hijab")
+        data["source_selections"]["neckline_style"] = "square_neck"
+        prompt = build_image_prompt(validate_design_spec(data))
+        assert "a square neckline with a flat straight edge" in prompt
+        assert "two crisp right-angle corners across the chest" in prompt
+        assert "curved like the top of a heart" not in prompt
 
     def test_full_sleeves_rendered_as_visual_requirement(self):
         prompt = build_image_prompt(_load_spec("mehndi_gharara_minimal"))
-        assert "full-length sleeves reaching the wrists, with both arms fully covered" in prompt
+        assert "full-length sleeves reaching the wrists, covering both arms" in prompt
 
     def test_head_covering_veil_for_dupatta_head_drape(self):
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
-        assert (
-            "the dupatta pulled up and over the head like a veil, completely "
-            "covering the hair with no hair visible" in prompt
-        )
+        assert "the dupatta drawn up over the head as a veil, enclosing all of the hair" in prompt
 
     def test_head_covering_veil_for_saree_uses_pallu_not_dupatta(self):
         # The live-failing shape: a saree with a seedha-pallu drape, no dupatta,
@@ -542,28 +771,41 @@ class TestCoverageRequirements:
             "head_drape_preferred",
         ]
         prompt = build_image_prompt(DesignSpec.model_validate(data))
-        assert "the saree pallu pulled up and over the head like a veil" in prompt
-        assert "the dupatta pulled up" not in prompt
+        assert "the saree pallu drawn up over the head as a veil" in prompt
+        assert "the dupatta drawn up" not in prompt
 
     def test_no_head_covering_when_not_requested(self):
         prompt = build_image_prompt(_load_spec("pheras_saree_heavy_no_region"))
-        assert "like a veil" not in prompt
-        assert "no hair visible" not in prompt
+        assert "as a veil" not in prompt
+        assert "enclosing all of the hair" not in prompt
 
-    def test_no_directive_or_reinforcement_when_nothing_coverage_relevant(self):
+    def test_head_covering_narrative_is_never_rendered(self):
+        # The slot has no useful case: when a covered head was asked for the
+        # directive states it concretely, and when it was not the slot reads
+        # "No head covering..." — pure negation.
+        data = _spec_dict("pheras_saree_heavy_no_region")
+        data["coverage_and_drape"]["head_covering"] = "SENTINELHEAD no head covering is worn."
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "SENTINELHEAD" not in prompt
+        assert "Head covering:" not in prompt
+
+    def test_no_directive_when_nothing_coverage_relevant(self):
         # three-quarter sleeves + shoulder drape: nothing coverage-increasing.
         prompt = build_image_prompt(_load_spec("walima_anarkali_none"))
         assert self._DIRECTIVE not in prompt
-        assert self._REINFORCE not in prompt
 
     def test_less_covered_sleeves_never_forced_to_full_coverage(self):
         for name in ("pheras_saree_heavy_no_region", "walima_anarkali_none"):
             prompt = build_image_prompt(_load_spec(name))
-            assert "both arms fully covered" not in prompt
+            assert "covering both arms" not in prompt
 
-    def test_reinforcement_is_last_when_present(self):
-        prompt = build_image_prompt(_load_spec("reception_shalwar_kameez_full_coverage"))
-        assert prompt.rstrip().endswith("the head covered with no hair visible.")
+    def test_less_covered_v3_answers_are_stated_as_chosen(self):
+        # A version-3 body area is a single explicit answer, so a deliberately
+        # less-covered choice is rendered as what the user actually picked.
+        prompt = build_image_prompt(_load_spec("mehndi_saree_open_coverage"))
+        assert "a sleeveless bodice with bare shoulders and arms" in prompt
+        assert "a deeply cut open back" in prompt
+        assert "a bare midriff at the waist" in prompt
 
     def test_styling_notes_are_not_rendered(self):
         data = _spec_dict("nikah_lehenga_head_drape")
@@ -584,6 +826,427 @@ class TestCoverageRequirements:
         # Adding the coverage directive must not displace the composition directive.
         for name in FIXTURES:
             assert build_image_prompt(_load_spec(name)).startswith(_COMPOSITION)
+
+
+class TestDrapeStyling:
+    """8.3.0: dupatta_style and saree_drape were the only canonical fields in
+    this file with no visual clause map — every value rendered through a bare
+    "dupatta worn as a X" / "saree draped as a X" fallback while every sibling
+    field (garment construction, neckline, sleeves, back, midriff) named a
+    concrete visual shape. The Phase 1 evaluation traced real failures to this
+    gap: a Bengali atpoure and a lehenga-style saree drape both rendered as a
+    generic nivi drape, and a one-shoulder / front-draped dupatta both fell
+    forward and occluded an already-rendered neckline requirement."""
+
+    def test_one_shoulder_dupatta_falls_down_the_back(self):
+        # Anchoring the cascade toward the back keeps it clear of the neckline
+        # requirement stated earlier in the same coverage directive.
+        data = _spec_dict("nikah_gharara_hex_colour_hijab")
+        data["source_selections"]["dupatta_style"] = "one_shoulder"
+        prompt = build_image_prompt(validate_design_spec(data))
+        assert "pinned at one shoulder, falling in a single cascade down the back" in prompt
+
+    def test_front_drape_dupatta_sits_below_the_neckline(self):
+        prompt = build_image_prompt(_load_spec("nikah_gharara_hex_colour_hijab"))
+        assert "carried across the front from one shoulder" in prompt
+        assert "its embellished face on view below the neckline" in prompt
+
+    def test_double_dupatta_names_both_layers(self):
+        prompt = build_image_prompt(_load_spec("baraat_sharara_double_dupatta"))
+        assert "two dupattas, one at the head, one trailing" in prompt
+
+    def test_trail_dupatta_sweeps_behind_like_a_train(self):
+        prompt = build_image_prompt(_load_spec("walima_lehenga_match_fabric_dupatta"))
+        assert "pinned to sweep behind like a trailing train" in prompt
+
+    def test_a_legacy_dupatta_style_value_falls_back_unchanged(self):
+        # walima_anarkali_none carries "shoulder_drape", which predates the v4
+        # dupatta_style vocabulary this map is keyed on.
+        prompt = build_image_prompt(_load_spec("walima_anarkali_none"))
+        assert "Drape: dupatta worn as a shoulder drape." in prompt
+
+    def test_bengali_drape_is_named_distinctly_from_nivi(self):
+        # The row-7 failure: a Bengali atpoure drape rendered as a generic nivi
+        # drape. The defining trait — the pallu wrapped around BOTH shoulders,
+        # not one — is now named explicitly.
+        data = _spec_dict("pheras_saree_heavy_no_region")
+        data["source_selections"]["saree_drape"] = "bengali_drape"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "the Bengali atpoure style" in prompt
+        assert "the pallu wrapped around both shoulders" in prompt
+        assert "the classic nivi style" not in prompt
+
+    def test_seedha_pallu_names_the_right_shoulder(self):
+        data = _spec_dict("pheras_saree_heavy_no_region")
+        data["source_selections"]["saree_drape"] = "seedha_pallu"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "the pallu brought over the right shoulder and fanned across the front" in prompt
+
+    def test_lehenga_drape_saree_names_the_fanned_pleats(self):
+        # The row-15 finding: a half-saree's lehenga-style drape rendered as a
+        # standard full nivi drape.
+        prompt = build_image_prompt(_load_spec("mehndi_saree_open_coverage"))
+        assert "the lehenga style, pleats fanned like a lehenga skirt" in prompt
+
+    def test_nivi_drape_names_the_left_shoulder_pallu(self):
+        prompt = build_image_prompt(_load_spec("walima_saree_sweetheart"))
+        assert "the classic nivi style" in prompt
+        assert "the pallu over the left shoulder" in prompt
+
+
+class TestPositivePhrasingOnly:
+    """No builder-authored directive uses negation.
+
+    Diffusion text conditioning has no representation for negation: "not an open
+    neckline" conditions on *open neckline* and makes it MORE likely. 7.0.0
+    defended six requirements that way. These are the builder's own words, so
+    the guarantee is absolute — model-authored narrative is bounded and scanned,
+    but its phrasing is not ours to choose."""
+
+    _NEGATION = re.compile(r"\b(?:not|no|never|without|nor|none|cannot)\b", re.IGNORECASE)
+
+    def _builder_wording(self) -> dict[str, str]:
+        """Every fixed string the builder can emit, by where it comes from."""
+        from sitara.generation import prompt_builder as pb
+
+        wording = {
+            "_COMPOSITION": pb._COMPOSITION,
+            "_FINISHING": pb._FINISHING,
+            "_FINISHING_UNEMBELLISHED": pb._FINISHING_UNEMBELLISHED,
+        }
+        for map_name in (
+            "_GARMENT_CONSTRUCTION",
+            "_SILHOUETTE_CLAUSES",
+            "_COVERAGE_CLAUSES",
+            "_NECKLINE_CLAUSES",
+            "_SLEEVE_CLAUSES",
+            "_BACK_CLAUSES",
+            "_MIDRIFF_CLAUSES",
+            "_HEAD_COVERING_CLAUSES",
+            "_DUPATTA_STYLE_CLAUSES",
+            "_SAREE_DRAPE_CLAUSES",
+        ):
+            for key, clause in getattr(pb, map_name).items():
+                wording[f"{map_name}[{key}]"] = clause
+        return wording
+
+    def test_no_fixed_builder_clause_uses_negation(self):
+        offenders = {
+            where: self._NEGATION.findall(text)
+            for where, text in self._builder_wording().items()
+            if self._NEGATION.search(text)
+        }
+        assert offenders == {}
+
+    def test_the_builder_wording_under_test_is_not_empty(self):
+        # Anti-vacuity: the scan above would pass trivially on an empty map.
+        wording = self._builder_wording()
+        assert len(wording) > 25
+        assert all(text.strip() for text in wording.values())
+
+    @pytest.mark.parametrize("name", FIXTURES)
+    def test_the_coverage_directive_is_negation_free_in_every_fixture(self, name):
+        # The coverage directive is 100% builder-authored, and it is the block
+        # that defends the requirements 7.0.0 lost. Asserted end-to-end on the
+        # real fixtures, not just on the clause maps in isolation.
+        prompt = build_image_prompt(_load_spec(name))
+        for para in prompt.split("\n\n"):
+            if para.startswith("Show clearly in the render:"):
+                assert not self._NEGATION.search(para)
+
+    @pytest.mark.parametrize("name", FIXTURES)
+    def test_the_fixed_directives_are_negation_free_in_every_fixture(self, name):
+        # Composition leads and finishing closes; both are fixed builder prose.
+        paras = build_image_prompt(_load_spec(name)).split("\n\n")
+        assert not self._NEGATION.search(paras[0])
+        assert not self._NEGATION.search(paras[-1])
+
+    def test_model_authored_narrative_negation_is_a_known_residual(self):
+        # The guarantee is over the BUILDER's words. A DesignSpec's generated
+        # prose may still phrase a slot negatively ("no bare skin at the waist"),
+        # and the builder must not silently rewrite model-authored meaning — that
+        # would be a content rules engine. The canonical requirement is stated
+        # positively FIRST, in the directive, which is what conditions the render.
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["source_selections"]["coverage_preferences"] = ["full_midriff"]
+        data["coverage_and_drape"]["back_and_midriff"] = "A midriff with no bare skin at all."
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        directive = next(p for p in prompt.split("\n\n") if p.startswith("Show clearly"))
+        assert "a midriff fully covered by fabric at the waist" in directive
+        assert prompt.find(directive) < prompt.find("no bare skin")
+
+    # Words that negate decoration by prefix rather than by a negation token.
+    # The regex above never caught these, and both live 8.x runs rendered gold
+    # borders and scattered motifs against wording built from them: an encoder
+    # reading "unworked" still sees "worked".
+    _ABSENCE_WORDS = (
+        "unworked",
+        "undecorated",
+        "unembellished",
+        "unadorned",
+        "unornamented",
+        "devoid",
+        "free of",
+        "absent",
+    )
+
+    def test_unembellished_direction_describes_the_material_affirmatively(self):
+        prompt = build_image_prompt(_load_spec("walima_anarkali_none"))
+        assert "one continuous expanse of solid colour" in prompt
+        assert "flat and uniform from edge to edge" in prompt
+        assert "the sheen and fall of the cloth" in prompt
+
+    @pytest.mark.parametrize("word", _ABSENCE_WORDS)
+    def test_no_builder_clause_negates_by_prefix(self, word):
+        for where, text in self._builder_wording().items():
+            assert word not in text.lower(), where
+
+    @pytest.mark.parametrize("word", _ABSENCE_WORDS)
+    def test_an_unembellished_prompt_never_asks_for_an_absence(self, word):
+        # End-to-end on the one fixture that selects ["none"].
+        prompt = build_image_prompt(_load_spec("walima_anarkali_none")).lower()
+        assert word not in prompt
+        assert "no surface embellishment" not in prompt
+
+
+class TestColoursAreNamedUnambiguously:
+    """A canonical colour renders with its HUE spelled out.
+
+    The first live 8.0.0 generation asked for `pistachio` and rendered blush
+    pink with no green anywhere. Most of the palette is named after an object
+    rather than a colour, and an image model reads a bare object noun as the
+    object — or ignores it and falls back on the pink/red/gold prior that
+    "South Asian bridal" carries."""
+
+    def _descriptors(self) -> dict[str, str]:
+        from sitara.generation.prompt_builder import _COLOUR_DESCRIPTORS
+
+        return _COLOUR_DESCRIPTORS
+
+    def test_the_map_covers_exactly_the_questionnaire_palette(self):
+        # A contract with the live questionnaire: a colour the user can pick and
+        # the builder cannot name unambiguously is the whole bug, so a new option
+        # must fail here rather than silently render as a bare object noun.
+        import json
+        from pathlib import Path
+
+        schema_path = (
+            Path(__file__).resolve().parents[2]
+            / "questionnaire"
+            / "fixtures"
+            / "questionnaire_v4.json"
+        )
+        options: set[str] = set()
+
+        def walk(node):
+            if isinstance(node, dict):
+                if "colour" in str(node.get("id", "")) and node.get("options"):
+                    options.update(o["value"] for o in node["options"])
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        walk(json.loads(schema_path.read_text(encoding="utf-8"))[0]["fields"]["schema"])
+        options.discard("match_fabric")  # a relationship, not a colour
+        assert options, "no colour options found; the schema shape changed"
+        assert options == set(self._descriptors())
+
+    @pytest.mark.parametrize(
+        "value,hue",
+        [
+            ("pistachio", "green"),
+            ("sage", "green"),
+            ("mint", "green"),
+            ("rust", "orange"),
+            ("marigold", "orange"),
+            ("peacock", "blue-green"),
+            ("oxblood", "red"),
+            ("aubergine", "purple"),
+            ("amethyst", "purple"),
+            ("champagne", "gold"),
+            ("pearl", "white"),
+            ("blush", "pink"),
+        ],
+    )
+    def test_an_object_named_colour_gets_an_explicit_hue(self, value, hue):
+        assert hue in self._descriptors()[value]
+
+    def test_every_descriptor_still_contains_the_chosen_shade(self):
+        # The hue is ADDED, never substituted: the bride picked a specific shade
+        # and "green" alone would lose it.
+        for value, descriptor in self._descriptors().items():
+            assert value.replace("_", " ") in descriptor
+
+    def test_a_v3_role_colour_renders_its_descriptor(self):
+        # The exact live-run shape: a v3 spec whose fabric colour is pistachio.
+        data = _spec_dict("mehndi_saree_open_coverage")
+        data["source_selections"]["fabric_colour"] = "pistachio"
+        prompt = build_image_prompt(validate_design_spec(data))
+        assert "the main fabric in pale pistachio green" in prompt
+        assert "the main fabric in pistachio." not in prompt
+
+    def test_a_v1_palette_renders_descriptors_in_order(self):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["source_selections"]["colour_palette"] = ["pistachio", "champagne"]
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert (
+            "Colours, in order of importance: pale pistachio green, pale champagne gold" in prompt
+        )
+
+    def test_a_bride_supplied_hex_is_unaffected(self):
+        prompt = build_image_prompt(_load_spec("nikah_gharara_hex_colour_hijab"))
+        assert "the exact colour code #7b1f2b" in prompt
+
+    def test_an_unrecognised_colour_falls_back_and_invents_nothing(self):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["source_selections"]["colour_palette"] = ["unlisted_shade"]
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "Colours, in order of importance: unlisted shade." in prompt
+
+    def test_match_fabric_stays_a_relationship_not_a_colour(self):
+        prompt = build_image_prompt(_load_spec("walima_lehenga_match_fabric_dupatta"))
+        assert "the dupatta in the same colour as the main fabric" in prompt
+        assert "match fabric" not in prompt
+
+
+class TestRedundantNarrativeIsDropped:
+    """8.0.0 renders canonical selections as the skeleton and a small bounded set
+    of narrative slots as supplement — the inverse of 7.0.0. Each slot below is
+    dropped because it restates a canonical selection or describes something an
+    image model cannot draw. All of them remain in the persisted DesignSpec and
+    the user-facing design brief."""
+
+    @pytest.mark.parametrize(
+        "path,sentinel",
+        [
+            (("concept_summary",), "SENTINELSUMMARY"),
+            (("title",), "SENTINELTITLE"),
+            (("garment_breakdown", "silhouette"), "SENTINELGBSIL"),
+            (("garment_breakdown", "drape_or_layering"), "SENTINELDRAPE"),
+            (("garment_breakdown", "key_proportions"), "SENTINELPROP"),
+            (("colour_story", "palette_summary"), "SENTINELPALETTE"),
+            (("colour_story", "rationale"), "SENTINELRATIONALE"),
+            (("embellishment_plan", "density"), "SENTINELDENSITY"),
+            (("embellishment_plan", "restraint_notes"), "SENTINELRESTRAINT"),
+            (("coverage_and_drape", "dupatta_or_saree_drape"), "SENTINELDUPDRAPE"),
+        ],
+    )
+    def test_slot_is_not_rendered(self, path, sentinel):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        node = data
+        for key in path[:-1]:
+            node = node[key]
+        # Keep the value schema-valid: concept_summary has an 80-character floor
+        # and title a 120-character ceiling, so pad only where padding is needed.
+        text = f"{sentinel} a bridal detail described at some length."
+        if path[-1] == "concept_summary":
+            text += " It restates the whole design in prose, exactly as the model wrote it."
+        node[path[-1]] = text
+        assert sentinel not in build_image_prompt(DesignSpec.model_validate(data))
+
+    @pytest.mark.parametrize(
+        "field,sentinel",
+        [
+            ("techniques", "SENTINELTECH"),
+            ("interpretation_notes", "SENTINELINTERP"),
+            ("safeguards", "SENTINELSAFE"),
+            ("garment_components", "SENTINELCOMPONENT"),
+        ],
+    )
+    def test_list_slot_is_not_rendered(self, field, sentinel):
+        section = {
+            "techniques": "embellishment_plan",
+            "garment_components": "garment_breakdown",
+        }.get(field, "cultural_context")
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data[section][field] = [f"{sentinel} a described detail."]
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert sentinel not in prompt
+        assert "Its components are" not in prompt
+
+    def test_fabric_narrative_is_not_rendered_when_canonical_fabrics_exist(self):
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["fabrics_and_texture"] = [
+            {
+                "fabric": "SENTINELFABRIC silk",
+                "placement": "SENTINELFABRIC skirt panels",
+                "finish_and_movement": "SENTINELFABRIC a fluid fall",
+            }
+        ]
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "SENTINELFABRIC" not in prompt
+        assert "Fabrics: silk, organza" in prompt  # the canonical selection
+
+    def test_fabric_narrative_is_the_fallback_when_no_canonical_fabrics(self):
+        # The schema permits an empty canonical fabric list, and then the
+        # narrative names are the only fabric information the design has.
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["source_selections"]["fabrics"] = []
+        data["fabrics_and_texture"] = [
+            {
+                "fabric": "Banarasi silk",
+                "placement": "Skirt panels",
+                "finish_and_movement": "A structured fall",
+            }
+        ]
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "Fabrics: Banarasi silk." in prompt
+        # Only the fabric NAME crosses over, not its placement/finish prose.
+        assert "Skirt panels" not in prompt
+        assert "A structured fall" not in prompt
+
+
+class TestNarrativeBudgetIsAllOrNothing:
+    """A narrative piece that does not fit is dropped whole, never cut down.
+
+    Budget-level truncation produced 8.0.0's worst early output — dangling
+    fragments like "fitted to the knee before a." and a bare "Motifs:" label. A
+    half-sentence conditions the provider on less than the clean absence of the
+    detail."""
+
+    _LABELS = ("Concentrated at", "Motifs:", "Sleeves:", "Neckline:", "Back and midriff:")
+
+    @pytest.mark.parametrize("name", FIXTURES)
+    def test_no_orphaned_label_survives(self, name):
+        prompt = build_image_prompt(_load_spec(name))
+        for label in self._LABELS:
+            index = prompt.find(label)
+            if index != -1:
+                # A label is always followed by real content, never a terminator.
+                tail = prompt[index + len(label) :].lstrip()
+                assert tail and tail[0] not in ".;,"
+
+    @pytest.mark.parametrize("name", FIXTURES)
+    def test_no_sentence_ends_on_a_dangling_separator(self, name):
+        prompt = build_image_prompt(_load_spec(name))
+        for fragment in (";.", ",.", ":.", " ."):
+            assert fragment not in prompt
+
+    def test_an_oversized_narrative_piece_is_dropped_not_truncated(self):
+        # overall_form is the first narrative piece; padded past the budget it
+        # must vanish entirely rather than leave a fragment behind.
+        data = _spec_dict("nikah_lehenga_head_drape")
+        data["garment_breakdown"]["overall_form"] = (
+            "SENTINELFORM a fitted choli paired with a voluminous circular lehenga "
+            "skirt and a matching dupatta carried over the head throughout the day"
+        )
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        # Either the whole piece is there, or none of it — never a prefix of it.
+        assert ("SENTINELFORM" in prompt) == ("carried over the head throughout the day" in prompt)
+
+    def test_mandatory_content_survives_when_the_budget_is_exhausted(self):
+        # A spec whose canonical machine values alone overshoot the target: all
+        # narrative is dropped and every mandatory element still renders.
+        spec = DesignSpec.model_validate(_max_spec_dict())
+        prompt = build_image_prompt(spec)
+        assert prompt.startswith(_COMPOSITION)
+        assert "A South Asian bridal" in prompt
+        assert "The silhouette is" in prompt
+        assert "Colours, in order of importance:" in prompt
+        assert "Broad regional influence:" in prompt
+        assert prompt.endswith("true to the real fabric colour.")
 
 
 class TestSafetyIsEnforced:

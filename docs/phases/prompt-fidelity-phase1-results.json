@@ -1,0 +1,29 @@
+{
+  "builder_version": "8.2.0",
+  "questionnaire_version": 4,
+  "image_model": "black-forest-labs/flux-1.1-pro",
+  "run_date": "2026-08-02",
+  "notes": "Anthropic account-level usage cap hit after row 6 (unrelated to Sitara's own budget ledger, see memory anthropic-usage-limit-until-2026-09-01), lifted by the user mid-run; row 19 first failed with structured_submission_ambiguous (isolated timeout/connection-classified failure, not a repeat of the cap), then succeeded on a single retry. 20/20 complete.",
+  "designs": [
+    {"row": 1, "garment": "saree", "ceremony": "nikah", "design_id": "f342f17b-3539-4d6a-9641-4e5aabf9a6e2", "design_version_id": "b1a09c5e-0136-458f-abf8-97708e9ac33d", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 2, "garment": "lehenga", "ceremony": "walima", "design_id": "f8cacdde-8f17-427d-9c66-8535ab682055", "design_version_id": "068c1d92-8edf-4dac-96da-dda5ae7d53e8", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 3, "garment": "gharara", "ceremony": "mehndi", "design_id": "b0d03ca0-351c-467e-8cf2-3d72767e132d", "design_version_id": "28f86584-ac15-4a2a-812b-ff3ec94fb968", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 4, "garment": "sharara", "ceremony": "baraat", "design_id": "9c24f907-6a8d-4c80-91f9-6834a66de395", "design_version_id": "1c3dfb89-b5e0-4a01-bcd9-c8dc281170af", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 5, "garment": "anarkali", "ceremony": "reception", "design_id": "95a28af2-9482-4fb7-9b26-7557149c86cf", "design_version_id": "51ac2a1a-d36f-4ae2-9cb9-d3e2a3a6bc51", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 6, "garment": "shalwar_kameez", "ceremony": "nikah", "design_id": "b45075b3-97da-4a6d-9219-b851a657f26b", "design_version_id": "fd4c5db9-6234-46cd-a6d1-813ba2d0318a", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 7, "garment": "saree", "ceremony": "pheras", "design_id": "ddb998f3-955b-4987-9788-b45a58f557e6", "design_version_id": "8d59d278-3c2d-4cf7-b0a0-6763ec4309c4", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 8, "garment": "lehenga", "ceremony": "anand_karaj", "design_id": "e882a90c-ce38-410e-8420-f8776b57d5b5", "design_version_id": "7e5498ce-9cff-48e7-a978-5a33ca61b023", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 9, "garment": "gharara", "ceremony": "walima", "design_id": "f2cc0e72-e9ef-4797-8629-665a7108828d", "design_version_id": "cebf7b16-faa3-43f5-98b9-ec8878329926", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 10, "garment": "anarkali", "ceremony": "mehndi", "design_id": "82cddece-6446-4381-8b49-76ad653b7310", "design_version_id": "e062753a-f0ed-44f7-85ff-18986b5b3597", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 11, "garment": "saree", "ceremony": "reception", "design_id": "b06cccee-43b0-494c-94ee-8796b3f831e4", "design_version_id": "52c50e91-d824-4b00-84c9-23533c16095f", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 12, "garment": "sharara", "ceremony": "nikah", "design_id": "0bf141bb-cffc-4360-b44c-08aecb37a486", "design_version_id": "c9f3ffbd-d51b-4d0e-b5fd-5495edd84715", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 13, "garment": "lehenga", "ceremony": "baraat", "design_id": "9439539c-bb71-40d2-a6b8-79a56a1ca603", "design_version_id": "76b589cd-004d-4c36-a058-e90a54461aec", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 14, "garment": "shalwar_kameez", "ceremony": "walima", "design_id": "a1eeb913-b6d4-4d2f-858f-b039d1c1fe56", "design_version_id": "d1160a07-9fe8-4527-82b6-4073b7e9346f", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 15, "garment": "saree", "ceremony": "mehndi", "design_id": "4387e64f-991d-4e18-bccb-38cb168050d2", "design_version_id": "9b197504-76a1-4df4-991b-6d9d018c24dd", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 16, "garment": "gharara", "ceremony": "reception", "design_id": "1d6aa207-533c-4e8a-87ef-f265ce53a17d", "design_version_id": "c5a9d85a-792b-4ded-bb1c-72c4899a8079", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 17, "garment": "anarkali", "ceremony": "pheras", "design_id": "d406fbdc-a913-49cf-84aa-9be3c3ecc949", "design_version_id": "83bfa5bb-17f9-4202-a962-986208ac7da6", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 18, "garment": "lehenga", "ceremony": "nikah", "design_id": "5d5d9994-3c97-4de7-86e1-758b241647a8", "design_version_id": "2d7aaf67-df1c-44ca-85c7-28ad49fe7fcb", "status": "succeeded", "image_dimensions": "896x1152"},
+    {"row": 19, "garment": "shalwar_kameez", "ceremony": "baraat", "design_id": "9a57638e-5d88-404f-aa57-bc44e7c20031", "design_version_id": "5f9c57de-bd97-4004-b86b-34081c1e2012", "status": "succeeded", "image_dimensions": "896x1152", "first_attempt_design_id_failed": "0476903d-39e9-446a-8606-0f684252df1a"},
+    {"row": 20, "garment": "saree", "ceremony": "walima", "design_id": "bc8bc4f1-061d-44a9-bf07-2e5954b02d20", "design_version_id": "841e9eb3-5e48-4385-ad0a-25c31d45253d", "status": "succeeded", "image_dimensions": "896x1152"}
+  ]
+}

@@ -311,10 +311,10 @@ class TestDemoDesignSpecEngineForV3:
 class TestImagePromptForV3:
     def test_the_prompt_names_a_colour_per_role_and_not_a_palette(self):
         prompt = build_image_prompt(_v3_spec())
-        assert "The chosen colours are the main fabric in deep maroon" in prompt
+        assert "Colours: the main fabric in deep maroon" in prompt
         assert "the embroidery and surface work in antique gold" in prompt
         assert "the dupatta in the same colour as the main fabric" in prompt
-        assert "colour palette, in order" not in prompt
+        assert "in order of importance" not in prompt
 
     def test_a_bride_supplied_hex_is_rendered_as_a_literal_colour_code(self):
         prompt = build_image_prompt(_v3_spec(fabric_colour="#a1b2c3", custom_colours=["#a1b2c3"]))
@@ -325,19 +325,22 @@ class TestImagePromptForV3:
         assert "#0f0f0f" not in prompt
 
     def test_every_answered_body_area_becomes_a_visual_requirement(self):
+        # 8.0.0 states each requirement positively: what must be PRESENT, never
+        # "not left open" or "no bare skin", which diffusion conditioning reads
+        # as a request for exactly the thing being excluded.
         prompt = build_image_prompt(_v3_spec())
-        directive = prompt.split("\n\n")[1]
-        assert directive.startswith("Coverage requirements that must be clearly visible")
+        directive = prompt.split("\n\n")[2]
+        assert directive.startswith("Show clearly in the render:")
         assert "full-length sleeves reaching the wrists" in directive
-        assert "a covered back that is not left open" in directive
-        assert "the midriff kept covered" in directive
-        assert "over the head like a veil" in directive
+        assert "a back fully covered by the garment" in directive
+        assert "a midriff fully covered by fabric" in directive
+        assert "over the head as a veil" in directive
 
     def test_a_less_covered_answer_is_stated_rather_than_silently_dropped(self):
         prompt = build_image_prompt(
             _v3_spec(sleeves="sleeveless", back_coverage="open_back", midriff="bare_midriff")
         )
-        directive = prompt.split("\n\n")[1]
+        directive = prompt.split("\n\n")[2]
         assert "a sleeveless bodice" in directive
         assert "an open back" in directive
         assert "a bare midriff" in directive
@@ -354,20 +357,24 @@ class TestImagePromptForV3:
 
     def test_a_hijab_renders_its_own_covering_rather_than_a_dupatta(self):
         prompt = build_image_prompt(_v3_spec(head_covering="hijab"))
-        assert "a hijab completely covering the hair and neck" in prompt
+        assert "a hijab wrapping the head and neck, enclosing all of the hair" in prompt
+        assert "the dupatta drawn up" not in prompt
 
     def test_an_explicit_uncovered_head_is_honoured_over_a_head_draped_dupatta(self):
         prompt = build_image_prompt(_v3_spec(head_covering="uncovered", dupatta_style="head_drape"))
-        assert "over the head like a veil" not in prompt
-        assert "the head covered with no hair visible" not in prompt
+        assert "over the head as a veil" not in prompt
+        assert "enclosing all of the hair" not in prompt
 
-    def test_the_closing_reinforcement_restates_only_the_coverage_worth_defending(self):
-        prompt = build_image_prompt(
-            _v3_spec(sleeves="sleeveless", back_coverage="open_back", midriff="bare_midriff")
-        )
-        closing = prompt.rsplit("\n\n", 1)[-1]
-        assert "a sleeveless bodice" not in closing
-        assert "an open back" not in closing
+    def test_coverage_is_stated_once_with_no_closing_reinforcement(self):
+        # 7.0.0 restated the critical coverage after the finishing directive.
+        # 8.0.0 drops it: at 7.0.0 lengths the restatement sat ~3,700 characters
+        # in, far outside the encoder's attention window, so it conditioned
+        # nothing while costing ~170 characters. The prompt now ends on the
+        # finishing directive.
+        prompt = build_image_prompt(_v3_spec())
+        assert prompt.count("Show clearly in the render:") == 1
+        assert "Coverage to keep clearly visible in the final image" not in prompt
+        assert prompt.rstrip().endswith("true to the real fabric colour.")
 
 
 class TestDemoAssetSelectionForV3:
@@ -417,7 +424,7 @@ class TestDemoAssetSelectionForV3:
             )
         )
         prompt = build_image_prompt(spec)
-        assert "the head covered with no hair visible" not in prompt
+        assert "enclosing all of the hair" not in prompt
         assert select_demo_asset(spec, prompt, manifest).asset_id == "bare-head-lehenga"
 
     def test_a_head_draped_dupatta_still_covers_when_the_question_is_unanswered(self):
@@ -505,4 +512,4 @@ class TestV4DesignThroughTheWholeDemoPipeline:
         assert version.design_spec["source_selections"]["head_covering"] == "dupatta_over_head"
         assert "colour_palette" not in version.design_spec["source_selections"]
         # ...and the prompt names the roles rather than a palette.
-        assert "The chosen colours are the main fabric in deep maroon" in version.image_prompt
+        assert "Colours: the main fabric in deep maroon" in version.image_prompt

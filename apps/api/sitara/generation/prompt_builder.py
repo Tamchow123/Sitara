@@ -20,47 +20,70 @@ NOT rendered, and no provider metadata, token usage, database identifier,
 questionnaire label/schema, inspiration metadata or raw questionnaire free text
 can appear (the DesignSpec contract carries none of those into this builder).
 
-## Composition- and coverage-first ordering
+## Short, positive, canonical-first (8.0.0)
 
-The prompt LEADS with a fixed catalogue-composition directive (framing, studio
-backdrop, even lighting, garment as primary subject) so the highest-priority
-instruction is the first content the model reads and can never be displaced or
-truncated by lower-priority garment detail. A concrete, garment-neutral coverage
-directive follows immediately (rendering the canonical neckline / sleeve /
-midriff / back / head-covering selections as explicit visual requirements), so
-the coverage the provider most often ignores appears high in the prompt; the
-critical coverage requirements are briefly restated last. A DesignSpec v3 answers
-each of those areas with its own dedicated question, so every answer — including
-a deliberately less-covered one — is rendered there and its generated narrative
-is suppressed; v1/v2's coverage multi-select keeps its original
-coverage-increasing-values-only treatment, because there an absent value meant
-nothing had been asked for. Garment-detail sections
-render in a documented priority order between them, and a short
-photographic-finishing directive precedes the closing coverage reinforcement.
-Advisory styling notes and non-visual colour rationale are NOT rendered (they
-pull the provider toward portraiture and can contradict coverage). See ADR 0010.
+A live 7.0.0 generation ignored four validated selections at once. The cause was
+not missing information — every requirement was in the prompt — but length and
+phrasing. 7.0.0 prompts ran 2,444-3,993 characters, well past the ~512-token
+window the default model's text encoder attends over, so colour, fabric,
+embellishment and the closing coverage restatement fell outside it; and coverage
+was stated NEGATIVELY in six places, which diffusion text conditioning cannot
+represent (``not an open neckline`` conditions on *open neckline*).
+
+8.0.0 therefore:
+
+* budgets toward :data:`IMAGE_PROMPT_TARGET_CHARS` rather than 6,000, so the
+  whole prompt sits inside the encoder window;
+* states every requirement POSITIVELY — no clause here contains "not", "no",
+  "never" or "without";
+* names each garment's CONSTRUCTION (one-piece vs two-piece) up front, folding
+  in the former garment-integrity cues;
+* renders CANONICAL SELECTIONS as the skeleton and a small fixed set of bounded
+  narrative slots as supplement, instead of letting model-authored prose
+  dominate;
+* states coverage ONCE, early, and drops the closing reinforcement (which at
+  7.0.0 lengths sat outside the encoder window and conditioned nothing).
+
+Ordering: the fixed catalogue-composition directive leads, then the garment's
+identity and construction, then the coverage requirements, then colour, fabric,
+embellishment, drape and broad regional influence, then a short photographic
+finishing directive. Advisory styling notes, non-visual colour rationale and the
+cultural interpretation/safeguard notes are NOT rendered — they pull the
+provider toward portraiture or carry nothing an image model can draw. See
+ADR 0010.
 
 ## Bounded rendering
 
-The DesignSpec schema permits several eight-item narrative lists and eight
-fabric entries, so per-slot caps alone cannot guarantee the global bound.
-Rendering therefore reserves space for the MANDATORY content first — the leading
-composition directive, garment and ceremony, the canonical silhouette, the
-garment-integrity cue, the canonical colour/fabric/embellishment selections, all
-canonical coverage preferences, the canonical dupatta/saree drape and the fixed
-finishing wording — and lets generated narrative consume only the remaining
-budget, shared across sections in fixed order. When a section's narrative exceeds
-its budget, lower-priority generated details are deterministically shortened at a
-word boundary or omitted; the composition directive, canonical selections,
-coverage, garment-integrity and finishing content are never removed, and the
-fully assembled prompt is never sliced.
+The DesignSpec schema permits several eight-item narrative lists and 64-character
+machine values in every canonical list, so per-slot caps alone cannot guarantee a
+global bound. Rendering therefore reserves space for the MANDATORY content first
+— the leading composition directive, garment/ceremony/construction, the canonical
+silhouette, every coverage requirement, the canonical colour/fabric/embellishment
+selections, the canonical dupatta/saree drape and the fixed finishing wording —
+and lets generated narrative consume only the remaining budget, shared across
+sections in fixed order. When a section's narrative exceeds its budget,
+lower-priority generated details are deterministically shortened at a word
+boundary or omitted; mandatory content is never removed, and the fully assembled
+prompt is never sliced.
+
+Two bounds, deliberately. A schema-valid spec carrying 64-character machine
+values in every list has mandatory content alone exceeding the target, so a
+single bound would be a promise the schema can break:
+:data:`IMAGE_PROMPT_TARGET_CHARS` is what the narrative budget aims at (realistic
+specs land there), and :data:`IMAGE_PROMPT_MAX_CHARS` is the hard bound no
+schema-valid spec can exceed.
 """
 
 import re
 import unicodedata
 from dataclasses import dataclass
 
-from .design_spec import COLOUR_MATCH_FABRIC, DesignSpec, validate_design_spec
+from .design_spec import (
+    COLOUR_MATCH_FABRIC,
+    NO_REGIONAL_DIRECTION,
+    DesignSpec,
+    validate_design_spec,
+)
 from .input_safety import scan_design_spec, scan_generated_text
 from .selection_semantics import (
     COLOUR_ROLE_LABELS,
@@ -77,40 +100,95 @@ from .selection_semantics import (
 # value changes (see prompt_snapshots.evaluate_regeneration); the persisted
 # provenance records this value.
 #
-# 7.0.0 (Phase 16B): DesignSpec v3 is rendered — colour is named per garment
-# role (main fabric / embroidery / dupatta, including a bride-supplied hex and
-# the "same as the fabric" relationship) instead of as one palette clause, and
-# each answered body area (sleeves, back, midriff, head covering) becomes an
-# explicit visual requirement whose generated narrative is suppressed so it can
-# never be contradicted. Version-1 and version-2 specs render exactly as before,
-# byte for byte.
-PROMPT_BUILDER_VERSION = "7.0.0"
+# 8.0.0 (prompt builder v8): the prompt is cut to roughly a third of its 7.0.0
+# length so it fits the image encoder's attention window, every directive is
+# rephrased positively (diffusion conditioning cannot represent negation), each
+# garment's one-piece/two-piece construction is named, coverage is stated once
+# and early instead of twice, and redundant model-authored prose is no longer
+# rendered. Every schema version's output changes.
+#
+# 8.1.0: the first live 8.0.0 generation held every coverage requirement but
+# ignored the colour — `pistachio` rendered as blush pink, no green anywhere —
+# and cut a 196-character overall_form mid-sentence, the fragment displacing the
+# colour placement from the budget. Minor, not major: the v8 architecture is
+# unchanged and this is a wording and robustness fix on top of it. It still
+# bumps, because a real DesignVersion already carries 8.0.0 as immutable
+# provenance and its stored prompt must keep matching the version that produced
+# it.
+#
+# 8.2.0: both live 8.x runs ignored an explicit ["none"] embellishment selection
+# and rendered gold borders and scattered motifs. 8.1.0's wording was
+# grammatically positive but semantically asked for an absence, and
+# "unworked"/"undecorated" carry the concepts they negate. The unembellished
+# clause and finishing directive now describe what the cloth IS.
+#
+# 8.3.0: the Phase 1 prompt-fidelity evaluation (20 live renders, blind rubric
+# review — docs/phases/prompt-fidelity-phase2-review.md) found three targeted,
+# fixable failure modes and one deliberately left alone. Gharara and anarkali
+# lost their one-piece/two-piece identity in 3 of 6 renders (a ballgown, a
+# continuous gown with no knee-flare, a two-piece lehenga where a one-piece
+# anarkali was asked for); their construction clauses now name the trouser/
+# continuity structure explicitly and a new silhouette-level clause map (scoped
+# to only these two garments) carries each silhouette's own flare character
+# instead of leaving it to a bare, sometimes-contradictory "The silhouette is
+# X" line. A square neckline read as a sweetheart twice in three renders; its
+# clause now names the flat edge and right-angle corners a curved sweetheart
+# cannot satisfy. A Bengali atpoure drape, a lehenga-style saree drape and two
+# dupatta stylings all rendered as either a generic nivi drape or an
+# occluded neckline; dupatta_style and saree_drape were the only canonical
+# fields in this file with no visual clause map at all, so this adds one for
+# each, following the same pattern as every other field. Embellishment-density
+# and midriff-coverage restraint are NOT touched here: Phase 2 found the same
+# directional bias (more decoration, more coverage than requested) at 60-83%
+# regardless of wording, already survived one prior targeted fix (8.2.0's own
+# unembellished-material rewrite), and is verdicted a product question, not a
+# prompt-clarity one.
+PROMPT_BUILDER_VERSION = "8.3.0"
 
-# Hard upper bound on the assembled prompt. Guaranteed by construction: the
-# mandatory content is reserved first and generated narrative is budgeted into
-# the remainder, so every DesignSpec valid under the Pydantic schema builds to
-# at most this many characters without slicing the finished prompt.
-IMAGE_PROMPT_MAX_CHARS = 6000
+# What the narrative budget aims at. Chosen so the assembled prompt fits inside
+# the default image model's text-encoder attention window (~512 tokens), which is
+# the whole point of 8.0.0 — content past that window is weakly conditioned or
+# dropped, and 7.0.0 put a third of every prompt there.
+IMAGE_PROMPT_TARGET_CHARS = 1500
+
+# Hard upper bound on the assembled prompt, guaranteed by construction. Higher
+# than the target because a schema-valid DesignSpec may carry a 64-character
+# machine value in every canonical list, which the builder must render in full:
+# such a spec drops ALL narrative and still fits here. Realistic specs never
+# approach it.
+IMAGE_PROMPT_MAX_CHARS = 2600
 
 # Conservative reserve (from the narrative budget) for the whitespace that joins
-# pieces and sections. The total number of pieces is bounded by the schema, so
-# the real separator count stays well under this.
-_SEPARATOR_RESERVE = 128
+# pieces and sections. There are at most ten sections (18 characters of blank
+# line) and at most ten intra-section joins, so the real cost stays under 30;
+# reserving much more than that just buys nothing with characters the narrative
+# could have used.
+_SEPARATOR_RESERVE = 48
 
 # Documented per-slot character caps. Each generated narrative string is first
 # normalised and truncated at a word boundary to at most its slot cap; section
 # budgeting may then shorten it further. Critical machine selections and coverage
 # choices are rendered directly from short machine values and are never subject
 # to these caps or to budgeting.
-# ``concept_summary`` is a model-authored whole-design PROSE restatement that
-# overlaps every structured section below it, so it is the single most redundant
-# slot. Its cap is deliberately tightened (700 -> 400) to bound that redundancy
-# on verbose specs; it never affects a canonical machine selection, coverage,
-# garment-integrity or the composition directive. The reviewed fixtures are all
-# well under 400, so this changes no committed golden snapshot.
-_SUMMARY_CAP = 400
-_NARRATIVE_CAP = 300
-_LIST_ITEM_CAP = 200
+#
+# The caps are far tighter than 7.0.0's (300/200) because 8.0.0 inverts the
+# balance: canonical selections carry the design and narrative supplements it.
+# 240, not 180: the first live 8.0.0 generation produced a 196-character
+# overall_form, which a 180 cap cut mid-sentence. The schema allows 400, so an
+# ordinary one-sentence description must fit whole rather than be dropped by
+# :func:`_truncate_at_sentence`.
+_FORM_CAP = 240
+_PLACEMENT_CAP = 200
+_AREA_CAP = 100
+_LIST_ITEM_CAP = 90
+
+# How many items of each canonical list are rendered. Real questionnaire answers
+# are far under these; the schema's eight-item ceilings are a hostile-input
+# backstop, and naming eight of anything dilutes the prompt. Order is preserved,
+# so the kept items are always the most important ones.
+_MAX_COLOURS = 4
+_MAX_FABRICS = 3
+_MAX_EMBELLISHMENT_STYLES = 4
 
 # Fixed, garment-agnostic catalogue-composition directive — the FIRST and
 # highest-priority section of every prompt (see ADR 0010). It fixes the framing
@@ -121,30 +199,27 @@ _LIST_ITEM_CAP = 200
 # language only — no negative prompt — and applies across sarees, lehengas,
 # shararas/ghararas, anarkalis and kurta-style outfits. Because it is mandatory
 # and rendered first, lower-priority garment detail can never displace or
-# truncate it.
+# truncate it. Shortened for 8.0.0 with no requirement removed: the 7.0.0 wording
+# spent 615 characters saying this.
 _COMPOSITION = (
-    "Full-length South Asian bridalwear catalogue photograph of exactly one "
-    "adult model standing upright and primarily facing the camera, centred in "
-    "the frame. Place the camera far enough back that the top of the head, both "
-    "feet, the complete outfit, the garment hem, the dupatta fall and any train "
-    "or trailing fabric stay fully inside the frame, with clear breathing room "
-    "around the whole subject. Use a seamless plain neutral studio backdrop and "
-    "soft, even, shadow-controlled studio lighting. Keep the garment's "
-    "construction, drape, colour and embellishment the primary subject rather "
-    "than the face, jewellery or surroundings."
+    "Full-length South Asian bridalwear catalogue photograph of exactly one adult "
+    "model standing upright and facing the camera, centred in frame and complete "
+    "from the top of the head to both feet, with the whole outfit, the hem, the "
+    "dupatta fall and any trailing fabric inside the frame and clear space around "
+    "the subject. Seamless plain neutral studio backdrop, soft even studio "
+    "lighting, the garment itself as the subject of the photograph."
 )
 
 # Fixed positive-only photographic-finishing directive — the LAST, lowest-priority
 # section. It carries only the design-integrity safeguards (original/non-branded
 # textile and embroidery, natural anatomy, coherent hands, colour-faithful even
-# lighting); all framing/backdrop/lighting composition now lives in _COMPOSITION,
-# so this wording no longer duplicates it. There is deliberately NO negative
-# prompt and NO universal modesty/sleeve/neckline suffix — coverage comes only
-# from the DesignSpec so a generic suffix can never contradict validated choices.
+# lighting); all framing/backdrop/lighting composition lives in _COMPOSITION, so
+# this wording never duplicates it. There is deliberately NO negative prompt and
+# NO universal modesty/sleeve/neckline suffix — coverage comes only from the
+# DesignSpec so a generic suffix can never contradict validated choices.
 _FINISHING = (
     "Render an original, non-branded textile and embroidery design with natural "
-    "anatomy and coherent, naturally posed hands, keeping the even lighting true "
-    "to the real fabric colour and embroidery detail."
+    "anatomy and coherent hands, in even light true to the real fabric colour."
 )
 
 # Finishing directive for an unembellished garment (embellishment_styles ==
@@ -153,25 +228,97 @@ _FINISHING = (
 # construction instead, so it never contradicts the "none" selection.
 _FINISHING_UNEMBELLISHED = (
     "Render an original, non-branded textile design with natural anatomy and "
-    "coherent, naturally posed hands, keeping the even lighting true to the real "
-    "fabric colour, texture, drape and garment detail."
+    "coherent hands, in even light true to the smooth, single-colour cloth and "
+    "the way it falls."
 )
 
-# Very small, source-controlled garment-integrity cues for the categories with
-# meaningful confusion risk in Phase 2. Keyed ONLY by source_selections
-# garment_type; deliberately not a broad cultural rules engine.
-_GARMENT_INTEGRITY_CUES = {
+# How each garment is CONSTRUCTED, keyed only on source_selections.garment_type.
+# A small, source-controlled map like the coverage clauses, NOT a broad cultural
+# rules engine. New in 8.0.0: naming one-piece versus two-piece construction up
+# front gives the model the garment's fundamental shape before any surface
+# detail, and it absorbs the former _GARMENT_INTEGRITY_CUES (the gharara/sharara
+# distinction and the saree's draped construction) stated POSITIVELY for every
+# garment rather than as a negation on some.
+_GARMENT_CONSTRUCTION = {
+    "lehenga": "a two-piece outfit of a fitted choli blouse with a separate long flared skirt",
+    "saree": (
+        "a single draped length of fabric with the pallu falling over a separate fitted blouse"
+    ),
+    # 8.3.0: "a one-piece floor-length FLARED kurta" shared its central adjective
+    # with the lehenga clause above ("flared skirt"), and the Phase 1 prompt-
+    # fidelity evaluation (docs/phases/prompt-fidelity-phase2-review.md) found an
+    # anarkali collapsing to "a two-piece lehenga with a bare midriff gap" once in
+    # three live renders. The flare characteristic now lives only in
+    # _SILHOUETTE_CLAUSES, keyed per anarkali silhouette; this clause carries just
+    # the invariant fact true of every anarkali — one continuous garment, unbroken
+    # from shoulder to hem — so it never competes with "flared" for the model's
+    # lehenga prior.
+    "anarkali": (
+        "a single continuous floor-length kurta, unbroken from shoulder to hem, "
+        "worn over narrow trousers"
+    ),
+    # 8.3.0: the same evaluation found a gharara collapsing to "a generic
+    # fitted-bodice ballgown" and, separately, to "a continuous gown, no
+    # knee-flare" — twice in three live renders, in a garment whose defining
+    # trait is that the flare is TWO SEPARATE TROUSER LEGS, not a skirt panel.
+    # "each leg" and "wide-legged trousers" name that trouser structure
+    # explicitly; the degree of flare (subtle, classic, floor-sweeping) now lives
+    # in _SILHOUETTE_CLAUSES, keyed per gharara silhouette.
     "gharara": (
-        "Show the gharara fitted through the upper leg and knee, with the flare "
-        "beginning below the knee."
+        "a two-piece outfit of a kurti over wide-legged trousers, each leg "
+        "fitted to the knee before flaring"
     ),
     "sharara": (
-        "Show the sharara as trousers flaring from the waist or upper leg, "
-        "without a gharara knee joint."
+        "a two-piece outfit of a kurti over separate trousers flaring in one "
+        "continuous line from the waist to a wide hem"
     ),
-    "saree": (
-        "Keep the saree as visibly draped fabric with a pallu over a blouse, not "
-        "converted into a stitched gown."
+    "shalwar_kameez": "a two-piece outfit of a long tunic over separate trousers",
+}
+
+# Silhouette-specific visual elaboration, keyed on the canonical `silhouette`
+# machine value. Populated ONLY for gharara's and anarkali's own silhouette
+# options: the Phase 1 prompt-fidelity evaluation found these two garments'
+# one-piece/two-piece identity collapsing in 3 of 6 live renders while the
+# other four garment types held their construction with no silhouette-level
+# help at all (docs/phases/prompt-fidelity-phase2-review.md), so this stays a
+# small, evidence-scoped addition rather than a speculative map across every
+# silhouette the questionnaire offers. A silhouette with no entry here falls
+# back to the plain "The silhouette is X" rendering, unchanged from 8.2.0.
+#
+# One concrete mechanism this fixes: a bare "slim modern gharara" silhouette
+# line sat directly beside the construction clause's "flaring below the knee"
+# — two adjacent mandatory sentences pulling in opposite directions — and that
+# render lost the knee-flare entirely. Each entry below states its own flare
+# character explicitly instead, so the silhouette and construction clauses
+# agree rather than compete.
+_SILHOUETTE_CLAUSES = {
+    # The two-leg trouser structure is already named in _GARMENT_CONSTRUCTION;
+    # each gharara entry below adds only its own flare character, not the
+    # shared premise, so the two mandatory clauses never repeat themselves.
+    "classic_gharara": "The silhouette is the classic gharara, its flare moderate and traditional",
+    "farshi_gharara": "The silhouette is the farshi gharara, its flare floor-sweeping",
+    "slim_modern_gharara": (
+        "The silhouette is the slim modern gharara, its flare subtle, only below the knee"
+    ),
+    # Likewise, the single-continuous-garment fact is already in
+    # _GARMENT_CONSTRUCTION for floor_length_anarkali and kalidar_anarkali;
+    # these two add only their own distinguishing detail.
+    "floor_length_anarkali": (
+        "The silhouette is the floor-length anarkali, its flare falling to the floor"
+    ),
+    "kalidar_anarkali": (
+        "The silhouette is the kalidar anarkali, built from many stitched flare panels"
+    ),
+    # These two DO complicate the construction clause's "unbroken" claim — the
+    # real garment has a visible front opening or jacket layer — so each names
+    # that opening explicitly while still anchoring it as one moving ensemble.
+    "front_open_anarkali": (
+        "The silhouette is the front-open anarkali, its outer panel opening "
+        "down the front over a fitted inner layer as one ensemble"
+    ),
+    "jacket_style_anarkali": (
+        "The silhouette is the jacket-style anarkali, its structured jacket "
+        "layered over the flare as one ensemble"
     ),
 }
 
@@ -206,13 +353,34 @@ class ImagePromptBuildError(Exception):
     narrative or any user data — so it is always safe to surface and log."""
 
 
+# Trailing list/clause separators left behind by word-boundary truncation at a
+# slot cap, which would otherwise render as "... border;." at the end of a piece.
+_TRAILING_SEPARATORS = " ;,:-"
+
+
 @dataclass
 class _Piece:
-    """One ordered fragment of a section. ``mandatory`` pieces are always kept in
-    full; narrative pieces may be shortened or omitted to honour the budget."""
+    """One ordered fragment of a section.
+
+    ``mandatory`` pieces are always kept in full. A narrative piece may be
+    shortened or omitted to honour the budget, and carries its ``prefix``
+    separately ("Motifs: ", "Concentrated at ") so the label is rendered only
+    when a usable body survives — an orphaned label states nothing."""
 
     text: str
     mandatory: bool = False
+    prefix: str = ""
+
+    @property
+    def length(self) -> int:
+        """The rendered length, including the prefix and sentence terminator."""
+        return len(self.rendered)
+
+    @property
+    def rendered(self) -> str:
+        if not self.text:
+            return ""
+        return _sentence(f"{self.prefix}{self.text}")
 
 
 def _slot(text: str, cap: int) -> str:
@@ -225,32 +393,42 @@ def _slot(text: str, cap: int) -> str:
     normalised = unicodedata.normalize("NFKC", text)
     normalised = normalised.replace("\r\n", "\n").replace("\r", "\n")
     normalised = _WHITESPACE.sub(" ", normalised).strip()
-    return _truncate_at_word(normalised, cap)
+    return _trim_separators(_truncate_at_sentence(normalised, cap))
 
 
-def _truncate_at_word(text: str, limit: int) -> str:
-    """Truncate ``text`` to at most ``limit`` characters at a word boundary.
+def _truncate_at_sentence(text: str, limit: int) -> str:
+    """Keep whole sentences of ``text`` up to ``limit`` characters.
 
-    TOTAL: never returns a partial token. When the first token alone exceeds
-    ``limit`` there is no safe word boundary, so the whole (non-mandatory
-    narrative) piece is omitted by returning ``""`` — the builder then drops the
-    empty piece. Mandatory canonical machine values are bounded by the schema and
-    are never routed through this helper."""
+    TOTAL, and stronger than 7.0.0's word-boundary rule: it never returns a
+    partial SENTENCE. Word-boundary truncation was safe against partial tokens
+    but not against partial meaning — the first live 8.0.0 generation rendered
+    "…draped over the shoulder rather than a fully stitched." because the field
+    was 196 characters against a 180 cap, and 196 is an entirely ordinary length
+    for a 400-character field. A dangling comparison conditions the provider on
+    less than the clean absence of the detail, and it cost 180 characters of
+    budget that the colour placement would otherwise have used.
+
+    When no sentence ends within ``limit`` the whole (non-mandatory narrative)
+    piece is omitted by returning ``""`` — the builder then drops the empty
+    piece. Mandatory canonical machine values are bounded by the schema and are
+    never routed through this helper."""
     if limit <= 0 or not text:
         return ""
     if len(text) <= limit:
         return text
-    boundary = text.rfind(" ", 0, limit + 1)
-    if boundary <= 0:
-        # The first token alone exceeds the limit → omit rather than emit a
-        # partial token.
+    boundary = max(text.rfind(mark, 0, limit + 1) for mark in ".!?")
+    if boundary < 0:
         return ""
-    return text[:boundary].rstrip()
+    return text[: boundary + 1].rstrip()
 
 
-def _join_items(items: list[str]) -> str:
-    """Render a bounded narrative list as one clause, preserving order."""
-    rendered = [_slot(item, _LIST_ITEM_CAP) for item in items]
+def _join_items(items: list[str], limit: int | None = None) -> str:
+    """Render a bounded narrative list as one clause, preserving order.
+
+    ``limit`` caps how many items are rendered; the schema permits eight, and
+    naming eight of anything dilutes the prompt."""
+    selected = items if limit is None else items[:limit]
+    rendered = [_slot(item, _LIST_ITEM_CAP) for item in selected]
     return "; ".join(part for part in rendered if part)
 
 
@@ -280,57 +458,104 @@ def _neutralise_heavy(text: str) -> str:
     return text
 
 
+def _trim_separators(text: str) -> str:
+    """Drop a dangling list separator left by word-boundary truncation."""
+    return text.rstrip(_TRAILING_SEPARATORS)
+
+
 def _mandatory(text: str) -> _Piece:
-    return _Piece(_sentence(text), mandatory=True)
+    return _Piece(text, mandatory=True)
 
 
-def _narrative(text: str) -> _Piece:
-    return _Piece(_sentence(text), mandatory=False)
+def _narrative(text: str, prefix: str = "") -> _Piece:
+    return _Piece(text, mandatory=False, prefix=prefix)
 
 
-def _garment_and_ceremony(spec: DesignSpec) -> list[_Piece]:
+def _garment(spec: DesignSpec) -> list[_Piece]:
+    """The garment's identity, construction and silhouette — the second section.
+
+    Placed immediately after composition because a prompt that renders the wrong
+    garment wastes every other requirement in it. The construction clause states
+    one-piece versus two-piece before any surface detail.
+
+    ``title`` and ``concept_summary`` are NOT rendered: both are whole-design
+    prose restating what the canonical selections and the sections below already
+    carry. Nor is ``garment_breakdown.garment_components`` — 8.0.0's construction
+    clause names the garment's pieces canonically and the drape section names the
+    dupatta, so the model's component list ("Long kameez; Waist-flared sharara
+    trousers; Head dupatta") restates both, and at this budget it was winning
+    against embellishment placement, which is genuinely additive."""
     ss = spec.source_selections
     garment = _readable(ss.garment_type)
     ceremony = _readable(ss.ceremony)
-    pieces = [
-        _narrative(_slot(spec.title, _NARRATIVE_CAP)),
-        _mandatory(f"A South Asian bridal {garment} styled for a {ceremony} ceremony"),
-        _narrative(_slot(spec.concept_summary, _SUMMARY_CAP)),
-        _narrative(_slot(spec.garment_breakdown.overall_form, _NARRATIVE_CAP)),
-    ]
-    cue = _GARMENT_INTEGRITY_CUES.get(ss.garment_type)
-    if cue:
-        pieces.append(_Piece(cue, mandatory=True))
-    return pieces
-
-
-def _silhouette_and_components(spec: DesignSpec) -> list[_Piece]:
-    gb = spec.garment_breakdown
-    silhouette = _readable(spec.source_selections.silhouette)
-    pieces = [
-        _mandatory(f"The silhouette is {silhouette}"),
-        _narrative(_slot(gb.silhouette, _NARRATIVE_CAP)),
-    ]
-    components = _join_items(gb.garment_components)
-    if components:
-        pieces.append(_narrative(f"Its components include {components}"))
-    return pieces
-
-
-def _drape_and_proportions(spec: DesignSpec) -> list[_Piece]:
-    gb = spec.garment_breakdown
+    opening = f"A South Asian bridal {garment} for a {ceremony} ceremony"
+    construction = _GARMENT_CONSTRUCTION.get(ss.garment_type)
+    if construction:
+        opening = f"{opening}: {construction}"
+    silhouette = _SILHOUETTE_CLAUSES.get(
+        ss.silhouette, f"The silhouette is {_readable(ss.silhouette)}"
+    )
     return [
-        _narrative(_slot(gb.drape_or_layering, _NARRATIVE_CAP)),
-        _narrative(_slot(gb.key_proportions, _NARRATIVE_CAP)),
+        _mandatory(opening),
+        _mandatory(silhouette),
+        _narrative(_slot(spec.garment_breakdown.overall_form, _FORM_CAP)),
     ]
+
+
+# Unambiguous colour wording for each canonical colour value. A small,
+# source-controlled map like the garment-construction and coverage clauses, NOT
+# a colour theory engine — it only makes the HUE explicit.
+#
+# The first live 8.0.0 generation asked for `pistachio` and rendered blush pink,
+# with no green anywhere. Most of the questionnaire's palette is named after an
+# object rather than a colour — pistachio, sage, rust, peacock, oxblood,
+# aubergine, champagne, marigold, mint, pearl, amethyst — and an image model
+# reads a bare object noun as the object, or ignores it and falls back on the
+# overwhelming pink/red/gold prior that "South Asian bridal" carries. Naming the
+# hue alongside the name ("pale pistachio green") removes the ambiguity while
+# keeping the shade the user actually chose.
+#
+# The questionnaire remains the authority over WHICH values exist; an
+# unrecognised value falls back to its readable form and is never invented.
+_COLOUR_DESCRIPTORS = {
+    "scarlet": "bright scarlet red",
+    "deep_maroon": "deep maroon red",
+    "oxblood": "dark oxblood red",
+    "rust": "burnt rust orange",
+    "blush": "pale blush pink",
+    "rose": "rose pink",
+    "rani_pink": "vivid rani pink",
+    "old_rose": "muted old rose pink",
+    "marigold": "bright marigold orange",
+    "antique_gold": "antique gold",
+    "champagne": "pale champagne gold",
+    "ivory": "warm ivory white",
+    "emerald": "rich emerald green",
+    "mehndi_green": "deep mehndi green",
+    "sage": "soft sage green",
+    "pistachio": "pale pistachio green",
+    "royal_blue": "royal blue",
+    "navy": "dark navy blue",
+    "peacock": "deep peacock blue-green",
+    "powder_blue": "pale powder blue",
+    "aubergine": "deep aubergine purple",
+    "amethyst": "amethyst purple",
+    "lilac": "soft lilac purple",
+    "plum_wine": "deep plum wine purple",
+    "silver_grey": "silver grey",
+    "pearl": "soft pearl white",
+    "mint": "pale mint green",
+    "peach": "soft peach orange",
+}
 
 
 def _readable_colour(value: str) -> str:
     """A colour selection as prompt wording: a bride-supplied hex is named as a
-    literal colour code, a canonical option value as readable words."""
+    literal colour code, a canonical option value as an unambiguous colour
+    phrase (falling back to its readable form when unrecognised)."""
     if value.startswith("#"):
         return f"the exact colour code {value}"
-    return _readable(value)
+    return _COLOUR_DESCRIPTORS.get(value, _readable(value))
 
 
 def _colour_roles_clause(ss) -> str | None:
@@ -347,11 +572,10 @@ def _colour_roles_clause(ss) -> str | None:
             parts.append(f"{where} in the same colour as the main fabric")
         else:
             parts.append(f"{where} in {_readable_colour(value)}")
-    return "The chosen colours are " + ", ".join(parts)
+    return "Colours: " + ", ".join(parts)
 
 
 def _colour(spec: DesignSpec) -> list[_Piece]:
-    cs = spec.colour_story
     ss = spec.source_selections
     pieces = []
     # Version 3 names a colour per garment role; versions 1 and 2 have one
@@ -362,156 +586,140 @@ def _colour(spec: DesignSpec) -> list[_Piece]:
     if roles_clause:
         pieces.append(_mandatory(roles_clause))
     else:
-        colours = _readable_list(list(ordered_colour_values(ss)))
+        # Version 1/2 palettes get the same unambiguous colour wording as the
+        # version-3 per-role clause above.
+        colours = ", ".join(
+            _readable_colour(value) for value in list(ordered_colour_values(ss))[:_MAX_COLOURS]
+        )
         if colours:
-            pieces.append(_mandatory(f"The colour palette, in order, is {colours}"))
-    pieces.append(_narrative(_slot(cs.palette_summary, _NARRATIVE_CAP)))
-    pieces.append(_narrative(_slot(cs.placement, _NARRATIVE_CAP)))
-    # colour_story.rationale (WHY the palette was chosen) is deliberately NOT
-    # rendered into the image prompt: palette + placement already convey the
-    # visual requirement, and the rationale is non-visual prose that only adds
-    # length. It remains in the persisted DesignSpec brief.
+            pieces.append(_mandatory(f"Colours, in order of importance: {colours}"))
+    # colour_story.placement says WHERE each colour sits, which the canonical
+    # list cannot. colour_story.palette_summary restates the list itself and
+    # colour_story.rationale explains WHY it was chosen; neither is rendered.
+    pieces.append(_narrative(_slot(spec.colour_story.placement, _PLACEMENT_CAP)))
     return pieces
 
 
 def _fabrics(spec: DesignSpec) -> list[_Piece]:
+    """The canonical fabric selections.
+
+    ``fabrics_and_texture`` narrative is NOT rendered: the canonical fabric names
+    already carry their own texture and drape semantics for an image model. The
+    one exception is a spec with no canonical fabrics at all (the schema permits
+    an empty list), where the narrative entries' fabric names are the only fabric
+    information the design has."""
     ss = spec.source_selections
-    pieces = []
     if ss.fabrics:
-        pieces.append(
-            _mandatory(f"The selected fabrics, in order, are {_readable_list(ss.fabrics)}")
-        )
-    for entry in spec.fabrics_and_texture:
-        fabric = _slot(entry.fabric, _LIST_ITEM_CAP)
-        placement = _slot(entry.placement, _LIST_ITEM_CAP)
-        finish = _slot(entry.finish_and_movement, _LIST_ITEM_CAP)
-        detail = ". ".join(bit for bit in (placement, finish) if bit)
-        pieces.append(_narrative(f"{fabric}: {detail}" if detail else fabric))
-    return pieces
+        return [_mandatory(f"Fabrics: {_readable_list(list(ss.fabrics)[:_MAX_FABRICS])}")]
+    # Mandatory, not narrative: when it fires this is the design's ONLY fabric
+    # statement, so the budget must not be able to drop it — the same reasoning
+    # that makes the canonical line above mandatory.
+    named = _join_items([entry.fabric for entry in spec.fabrics_and_texture], limit=_MAX_FABRICS)
+    return [_mandatory(f"Fabrics: {named}")] if named else []
 
 
 def _embellishment(spec: DesignSpec) -> list[_Piece]:
     ss = spec.source_selections
     ep = spec.embellishment_plan
-    pieces = []
     # Canonical authority: exactly ["none"] means no embellishment. "none" wins
     # over any persisted density (minimal/balanced/heavy is NOT rendered), and
-    # ALL generated embellishment-plan content is omitted — the canonical
-    # selection is echoed and ONE clear unembellished instruction is given.
+    # ALL generated embellishment-plan content is omitted.
+    #
+    # The instruction DESCRIBES THE MATERIAL rather than the absence of
+    # decoration. 8.1.0 said "plain and unworked, with a smooth undecorated
+    # surface" — grammatically positive, but semantically a request for an
+    # absence, and "unworked"/"undecorated" carry the very concepts they negate.
+    # Both live 8.x runs rendered gold borders and scattered motifs against it:
+    # "South Asian bridalwear catalogue photograph" is about as strong an
+    # ornate-embroidery prior as exists, and weak affirmatives lose to it. Every
+    # word here now names something the cloth positively IS.
     if ss.embellishment_styles == [_NONE_EMBELLISHMENT]:
-        pieces.append(_mandatory("The selected embellishment styles, in order, are none"))
-        pieces.append(
+        return [
             _mandatory(
-                "The design carries no surface embellishment; render the fabric "
-                "plain and unworked"
+                "The fabric is one continuous expanse of solid colour, flat and "
+                "uniform from edge to edge, its beauty coming from the sheen and "
+                "fall of the cloth alone"
             )
-        )
-        return pieces
+        ]
 
+    pieces = []
     if ss.embellishment_density:
         pieces.append(_mandatory(f"Embellishment density: {_readable(ss.embellishment_density)}"))
     if ss.embellishment_styles:
-        pieces.append(
-            _mandatory(
-                "The selected embellishment styles, in order, are "
-                f"{_readable_list(ss.embellishment_styles)}"
-            )
-        )
+        styles = _readable_list(list(ss.embellishment_styles)[:_MAX_EMBELLISHMENT_STYLES])
+        pieces.append(_mandatory(f"Embellishment: {styles}"))
 
     minimal = ss.embellishment_density == "minimal"
 
     def narrate(text: str) -> str:
         return _neutralise_heavy(text) if minimal else text
 
-    techniques = _join_items(ep.techniques)
-    if techniques:
-        pieces.append(_narrative(narrate(f"Techniques: {techniques}")))
-    pieces.append(_narrative(narrate(_slot(ep.density, _NARRATIVE_CAP))))
-    placement = _join_items(ep.placement)
+    # Only WHERE the embellishment sits and WHAT it depicts are rendered.
+    # ``techniques`` restates the canonical styles, and ``density`` /
+    # ``restraint_notes`` restate the canonical density line above them.
+    placement = _join_items(ep.placement, limit=3)
     if placement:
-        pieces.append(_narrative(narrate(f"Concentrated at {placement}")))
-    motifs = _join_items(ep.motifs)
+        pieces.append(_narrative(narrate(placement), prefix="Concentrated at "))
+    motifs = _join_items(ep.motifs, limit=3)
     if motifs:
-        pieces.append(_narrative(narrate(f"Motifs: {motifs}")))
-    pieces.append(_narrative(narrate(_slot(ep.restraint_notes, _NARRATIVE_CAP))))
+        pieces.append(_narrative(narrate(motifs), prefix="Motifs: "))
     return pieces
 
 
-# Concrete, garment-neutral VISUAL clauses for the coverage selections that FLUX
-# most often ignores or contradicts (Phase image-composition follow-up: 4.0.0
-# fixed framing but the model still rendered an open neckline and a bare head
-# despite an explicit high-neck/head-covering DesignSpec). Keyed only on the
-# canonical `coverage_preferences` machine values — a small, source-controlled
-# set like the garment-integrity cues, NOT a broad rules engine. Only
-# coverage-INCREASING selections get a clause; deliberately less-covered choices
-# (sleeveless, short/elbow/three-quarter sleeves) get none, so the directive can
-# never contradict a validated choice. Insertion order is the render order.
+# Concrete, garment-neutral VISUAL clauses for the version-1/2
+# ``coverage_preferences`` multi-select. Keyed only on canonical machine values —
+# a small, source-controlled set like the garment-construction clauses, NOT a
+# broad rules engine. Only coverage-INCREASING selections get a clause; there an
+# absent value meant nothing had been asked for, so a deliberately less-covered
+# choice (sleeveless, short/elbow/three-quarter sleeves) gets none and the
+# directive can never contradict a validated choice. Insertion order is the
+# render order.
+#
+# Every clause states what must be PRESENT. 7.0.0 defended these requirements
+# with negations ("not an open, scooped or sweetheart neckline", "not left
+# open", "no bare skin"); diffusion text conditioning has no representation for
+# negation, so those clauses conditioned on exactly what they meant to exclude.
 _COVERAGE_CLAUSES = {
-    "full_sleeves": "full-length sleeves reaching the wrists, with both arms fully covered",
-    "high_neckline": (
-        "a fully closed high blouse neckline covering the collarbone and upper chest, "
-        "not an open, scooped or sweetheart neckline"
-    ),
-    "full_midriff": "the midriff kept covered, with no bare skin at the waist",
-    "full_back": "a covered back that is not left open",
-}
-# Short labels for the brief end-of-prompt reinforcement (same keys/order).
-_COVERAGE_REINFORCE = {
-    "full_sleeves": "full-length sleeves",
-    "high_neckline": "a closed high neckline",
-    "full_midriff": "a covered midriff",
-    "full_back": "a covered back",
+    "full_sleeves": "full-length sleeves reaching the wrists, covering both arms",
+    "high_neckline": "a closed high neckline covering the collarbone and upper chest",
+    "full_midriff": "a midriff fully covered by fabric at the waist",
+    "full_back": "a back fully covered by the garment",
 }
 # Concrete, garment-neutral VISUAL clauses for the dedicated canonical neckline
 # (DesignSpec v2 / Phase 16B). Keyed only on the canonical `neckline_style`
-# machine value — a small, source-controlled set like the coverage clauses, NOT
-# a broad rules engine. When a neckline is chosen it is rendered as an explicit,
-# mandatory visual requirement beside the other coverage requirements (and
-# briefly restated at the close), and the generated neckline narrative is
-# suppressed so it can never contradict the canonical choice. A v1 spec, or a v2
-# spec with no neckline preference, renders exactly as before.
+# machine value. When a neckline is chosen it is rendered as an explicit,
+# mandatory visual requirement beside the other coverage requirements, and the
+# generated neckline narrative is suppressed so it can never contradict the
+# canonical choice. A v1 spec, or a v2 spec with no neckline preference, renders
+# no neckline clause.
 _NECKLINE_CLAUSES = {
-    "classic_crew": "a classic crew neckline sitting at the base of the neck",
-    "curved_scoop": "a softly curved scoop neckline dipping just below the collarbone",
+    "classic_crew": "a crew neckline sitting at the base of the neck",
+    "curved_scoop": "a scoop neckline curving just below the collarbone",
     "v_neck": "a moderate V-shaped neckline",
     "deep_v_neck": "a deep V-shaped neckline plunging below the collarbone",
-    "boat_neck": "a wide boat neckline running straight across from shoulder to shoulder",
-    "square_neck": "a clean square neckline cut across the chest",
-    "sweetheart_neck": "a sweetheart neckline curved like the top of a heart",
-    "high_neck": (
-        "a fully closed high neckline covering the collarbone and upper chest, "
-        "not an open, scooped or sweetheart neckline"
+    "boat_neck": "a boat neckline running straight from shoulder to shoulder",
+    # 8.3.0: the Phase 1 prompt-fidelity evaluation found this rendered as a
+    # sweetheart neckline twice in three live renders — "cut across the chest"
+    # gave the model no geometry to weigh against "South Asian bridalwear"'s
+    # strong sweetheart-neckline prior. The new wording names the flat edge and
+    # right-angle corners explicitly, which a curved heart-shaped dip cannot
+    # satisfy, without ever saying what the shape is not.
+    "square_neck": (
+        "a square neckline with a flat straight edge and two crisp right-angle "
+        "corners across the chest"
     ),
-    "band_collar": "an upright band or mandarin collar standing at the neck",
-}
-# Short labels for the brief end-of-prompt reinforcement (same keys).
-_NECKLINE_REINFORCE = {
-    "classic_crew": "a crew neckline",
-    "curved_scoop": "a scoop neckline",
-    "v_neck": "a V neckline",
-    "deep_v_neck": "a deep V neckline",
-    "boat_neck": "a boat neckline",
-    "square_neck": "a square neckline",
-    "sweetheart_neck": "a sweetheart neckline",
-    "high_neck": "a closed high neckline",
-    "band_collar": "a band collar",
+    "sweetheart_neck": "a sweetheart neckline curved like the top of a heart",
+    "high_neck": "a closed high neckline covering the collarbone and upper chest",
+    "band_collar": "an upright band collar standing at the neck",
 }
 
 
 def _canonical_neckline(ss) -> str | None:
-    """The canonical neckline clause for a v2 spec with a neckline preference,
+    """The canonical neckline clause for a v2/v3 spec with a neckline preference,
     or ``None`` for a v1 spec / no preference. Uses ``getattr`` because a
     version-1 SourceSelections has no ``neckline_style`` attribute."""
     value = getattr(ss, "neckline_style", None)
     return _NECKLINE_CLAUSES.get(value) if value else None
-
-
-def _canonical_neckline_reinforce(ss) -> str | None:
-    """The short reinforcement label for a v2 spec's canonical neckline, or
-    ``None`` for a v1 spec / no preference. Uses ``getattr`` because a
-    version-1 SourceSelections has no ``neckline_style`` attribute."""
-    value = getattr(ss, "neckline_style", None)
-    return _NECKLINE_REINFORCE.get(value) if value else None
 
 
 # Concrete, garment-neutral VISUAL clauses for the version-3 per-body-area
@@ -523,59 +731,42 @@ def _canonical_neckline_reinforce(ss) -> str | None:
 # Head covering is handled separately because its wording depends on which
 # garment carries the fabric. Insertion order is the render order.
 _SLEEVE_CLAUSES = {
-    "sleeveless": "a sleeveless bodice leaving the shoulders and arms bare",
-    "cap_sleeve": "short cap sleeves covering only the top of the shoulder",
+    "sleeveless": "a sleeveless bodice with bare shoulders and arms",
+    "cap_sleeve": "short cap sleeves covering the top of the shoulder",
     "elbow_sleeve": "elbow-length sleeves",
-    "three_quarter_sleeve": "three-quarter-length sleeves ending between the elbow and the wrist",
-    "full_sleeve": "full-length sleeves reaching the wrists, with both arms fully covered",
+    "three_quarter_sleeve": "three-quarter sleeves ending between the elbow and the wrist",
+    "full_sleeve": "full-length sleeves reaching the wrists, covering both arms",
 }
 _BACK_CLAUSES = {
     "open_back": "an open back",
     "deep_cut_back": "a deeply cut open back",
-    "modest_back": "a covered back that is not left open",
+    "modest_back": "a back fully covered by the garment",
 }
 _MIDRIFF_CLAUSES = {
     "bare_midriff": "a bare midriff at the waist",
-    "semi_sheer_midriff": "a midriff veiled in sheer fabric rather than left bare",
-    "covered_midriff": "the midriff kept covered, with no bare skin at the waist",
+    "semi_sheer_midriff": "a midriff veiled in sheer fabric",
+    "covered_midriff": "a midriff fully covered by fabric at the waist",
 }
-# Head coverings that hide the hair. ``uncovered`` is deliberately absent: it is
-# a real answer, but "leave the head uncovered" is FLUX's default behaviour and
-# stating it adds nothing to the visual requirement list.
+# Head coverings that enclose the hair. ``uncovered`` is deliberately absent: it
+# is a real answer, but an uncovered head is the model's default and stating it
+# adds nothing to the visual requirement list.
 _HEAD_COVERING_CLAUSES = {
-    "veil_style": (
-        "a veil worn over the head and completely covering the hair, with no hair visible"
-    ),
-    "hijab": "a hijab completely covering the hair and neck, with no hair visible",
-}
-# Areas whose answer is restated in the brief closing reinforcement — the
-# coverage FLUX most often drops between the top of the prompt and the render.
-# Less-covered answers are not restated: they need no defending.
-_SLEEVE_REINFORCE = {"full_sleeve": "full-length sleeves"}
-_BACK_REINFORCE = {"modest_back": "a covered back"}
-_MIDRIFF_REINFORCE = {
-    "semi_sheer_midriff": "a sheer-veiled rather than bare midriff",
-    "covered_midriff": "a covered midriff",
+    "veil_style": "a veil worn over the head, enclosing all of the hair",
+    "hijab": "a hijab wrapping the head and neck, enclosing all of the hair",
 }
 _AREA_CLAUSES = {
     "sleeves": _SLEEVE_CLAUSES,
     "back_coverage": _BACK_CLAUSES,
     "midriff": _MIDRIFF_CLAUSES,
 }
-_AREA_REINFORCE = {
-    "sleeves": _SLEEVE_REINFORCE,
-    "back_coverage": _BACK_REINFORCE,
-    "midriff": _MIDRIFF_REINFORCE,
-}
 
 # The user's explicit head-covering coverage preference, and the dupatta styling
-# that also means "worn over the head". Either signals that the hair must be
-# covered.
+# that also means "worn over the head". Either signals that the hair is enclosed.
 _HEAD_DRAPE_DUPATTA = "head_drape"
 
 
 def _wants_head_covered(ss) -> bool:
-    """True when the hair must not be visible.
+    """True when the hair must be enclosed.
 
     The user's own decision wins whenever they made one (see
     :func:`explicit_head_covering_decision`); otherwise a dupatta worn over the
@@ -597,8 +788,8 @@ def _head_covering_clause(ss) -> str | None:
     if specific:
         return specific
     return (
-        f"{_head_cover_reference(ss)} pulled up and over the head like a veil, "
-        "completely covering the hair with no hair visible"
+        f"{_head_cover_reference(ss)} drawn up over the head as a veil, "
+        "enclosing all of the hair"
     )
 
 
@@ -614,19 +805,21 @@ def _head_cover_reference(ss) -> str:
 
 
 def _coverage_directive(spec: DesignSpec) -> list[_Piece]:
-    """High-priority, garment-neutral coverage directive rendered immediately
-    after the composition directive.
+    """The coverage requirements, stated ONCE as explicit visual requirements.
 
-    Renders the canonical coverage selections as explicit VISUAL requirements so
-    FLUX is far likelier to honour them than when they sit buried in mid-prompt
-    prose. It is conditional: it names only selected requirements, never forces
-    coverage a less-covered choice did not ask for, and includes the head-covering
-    veil clause only when the user actually requested a covered head."""
+    Rendered high in the prompt — third, after composition and the garment's
+    identity — because these are the requirements the provider most often drops.
+    8.0.0 removes 7.0.0's closing restatement: at 7.0.0 lengths it sat outside
+    the encoder's attention window and conditioned nothing, and inside a
+    target-length prompt the single early statement is in-window by construction.
+
+    Conditional throughout: it names only selected requirements, never forces
+    coverage a less-covered choice did not ask for, and includes the head
+    covering only when the user actually asked for one."""
     ss = spec.source_selections
     prefs = legacy_coverage_values(ss)
     # The canonical neckline is rendered FIRST so it sits at the very front of
-    # the high-priority coverage directive, beside the other coverage
-    # requirements FLUX most often ignores.
+    # the coverage requirements.
     clauses = []
     neckline = _canonical_neckline(ss)
     if neckline:
@@ -641,156 +834,205 @@ def _coverage_directive(spec: DesignSpec) -> list[_Piece]:
         clauses.append(head_clause)
     if not clauses:
         return []
-    # A version-1/2 spec can only ever list coverage-INCREASING values here, so
-    # its heading names modesty. A version-3 spec lists whatever each body-area
-    # question was actually answered with — including deliberately less-covered
-    # answers — so calling those "modesty requirements" would misdescribe the
-    # user's own choice.
-    heading = (
-        "Coverage and modesty requirements"
-        if not coverage_area_values(ss)
-        else "Coverage requirements"
-    )
-    return [
-        _mandatory(f"{heading} that must be clearly visible in the render: {'; '.join(clauses)}")
-    ]
+    return [_mandatory("Show clearly in the render: " + "; ".join(clauses))]
 
 
-def _coverage_reinforcement(spec: DesignSpec) -> _Piece | None:
-    """A brief positive restatement of the critical coverage requirements placed
-    last, so FLUX re-reads them after the detailed garment prose. Deterministic,
-    positive, conditional; never a negative prompt."""
-    ss = spec.source_selections
-    prefs = legacy_coverage_values(ss)
-    bits = []
-    neckline = _canonical_neckline_reinforce(ss)
-    if neckline:
-        bits.append(neckline)
-    bits += [label for key, label in _COVERAGE_REINFORCE.items() if key in prefs]
-    for field, value in coverage_area_values(ss):
-        label = _AREA_REINFORCE.get(field, {}).get(value)
-        if label:
-            bits.append(label)
-    if _wants_head_covered(ss):
-        bits.append("the head covered with no hair visible")
-    if not bits:
-        return None
-    return _mandatory("Coverage to keep clearly visible in the final image: " + ", ".join(bits))
+def _coverage_narrative(spec: DesignSpec) -> list[_Piece]:
+    """Generated coverage prose for the body areas with NO canonical answer.
 
+    Every canonically answered area is already a mandatory visual requirement in
+    the coverage directive, so its model-authored narrative is suppressed here —
+    generated prose must never be able to contradict a validated choice. A v1/v2
+    spec, which has no per-area questions, keeps whichever slots its selections
+    did not already settle.
 
-def _coverage(spec: DesignSpec) -> list[_Piece]:
+    A version-1/2 ``coverage_preferences`` value settles its area just as firmly
+    as a version-3 answer does, so a slot the directive already states is
+    suppressed too. 7.0.0 rendered both — "a closed high neckline covering the
+    collarbone" in the directive and "Neckline: A closed high neckline..." in the
+    prose — which cost characters twice for one requirement and gave generated
+    text a chance to drift from the validated choice.
+
+    ``coverage_and_drape.head_covering`` is dropped for EVERY version. It has no
+    useful case: when the user asked for a covered head the directive already
+    states the requirement concretely, and when they did not, the slot reads
+    "No head covering..." — pure negation, which is exactly what 8.0.0 removes
+    from the prompt."""
     ss = spec.source_selections
     cd = spec.coverage_and_drape
+    answered = {field for field, _value in coverage_area_values(ss)}
     prefs = legacy_coverage_values(ss)
-    # Every body area answered canonically (version 3) is already a mandatory
-    # visual requirement in the leading coverage directive, so its model-authored
-    # narrative is suppressed here for exactly the reason the neckline narrative
-    # is: generated prose must never be able to contradict a validated choice.
-    answered_areas = {field for field, _value in coverage_area_values(ss)}
     pieces = []
-    if prefs:
-        pieces.append(_mandatory(f"Coverage preferences: {_readable_list(list(prefs))}"))
-    if "sleeves" not in answered_areas:
-        pieces.append(_narrative(f"Sleeves: {_slot(cd.sleeves, _NARRATIVE_CAP)}"))
-    # When a canonical neckline was chosen it is already rendered as a mandatory
-    # visual requirement in the leading coverage directive; the model-authored
-    # neckline narrative is suppressed here so it can never contradict it. A v1
-    # spec (or a v2 spec with no neckline preference) still renders the narrative.
-    if _canonical_neckline(ss) is None:
-        pieces.append(_narrative(f"Neckline: {_slot(cd.neckline, _NARRATIVE_CAP)}"))
+    if "sleeves" not in answered and "full_sleeves" not in prefs:
+        pieces.append(_narrative(_slot(cd.sleeves, _AREA_CAP), prefix="Sleeves: "))
+    if _canonical_neckline(ss) is None and "high_neckline" not in prefs:
+        pieces.append(_narrative(_slot(cd.neckline, _AREA_CAP), prefix="Neckline: "))
     # One narrative slot covers both the back and the midriff, so it is
-    # suppressed only when BOTH have canonical answers.
-    if not {"back_coverage", "midriff"} <= answered_areas:
-        pieces.append(_narrative(f"Back and midriff: {_slot(cd.back_and_midriff, _NARRATIVE_CAP)}"))
-    if "head_covering" not in answered_areas:
-        pieces.append(_narrative(f"Head covering: {_slot(cd.head_covering, _NARRATIVE_CAP)}"))
+    # suppressed only when BOTH are already settled.
+    back_settled = "back_coverage" in answered or "full_back" in prefs
+    midriff_settled = "midriff" in answered or "full_midriff" in prefs
+    if not (back_settled and midriff_settled):
+        pieces.append(
+            _narrative(_slot(cd.back_and_midriff, _AREA_CAP), prefix="Back and midriff: ")
+        )
     return pieces
 
 
-def _dupatta_or_drape(spec: DesignSpec) -> list[_Piece]:
+# Concrete, visual descriptions of each canonical dupatta styling, keyed on the
+# `dupatta_style` machine value. 8.3.0: before this map, every style rendered
+# through the bare fallback below ("dupatta worn as a front drape") — unlike
+# every sibling clause map in this file (garment construction, neckline,
+# sleeves, back, midriff), which all name a concrete visual shape. The Phase 1
+# prompt-fidelity evaluation traced two live failures to exactly this gap: a
+# one-shoulder and a front-draped dupatta both fell forward and obscured an
+# already-rendered neckline requirement, because nothing in the prompt said
+# where the fabric should NOT compete for the same space. `one_shoulder` now
+# anchors the cascade down the back and `front_drape` anchors its fall below
+# the neckline — both positive placements, not negations of the neckline
+# clause. A value with no entry here falls back to the plain "dupatta worn as a
+# X" rendering, unchanged from 8.2.0.
+_DUPATTA_STYLE_CLAUSES = {
+    "one_shoulder": "a dupatta pinned at one shoulder, falling in a single cascade down the back",
+    "front_drape": (
+        "a dupatta carried across the front from one shoulder, its "
+        "embellished face on view below the neckline"
+    ),
+    "head_drape": "a dupatta drawn up from the shoulders to frame the face and fall over the head",
+    "double_dupatta": "two dupattas, one at the head, one trailing",
+    "trail_dupatta": "a dupatta pinned to sweep behind like a trailing train",
+}
+
+# Concrete, visual descriptions of each canonical saree drape, keyed on the
+# `saree_drape` machine value. Same 8.3.0 gap and same fix as
+# :data:`_DUPATTA_STYLE_CLAUSES` above. The Phase 1 evaluation found a Bengali
+# atpoure drape and a half-saree's lehenga-style drape both rendering as a
+# generic nivi drape — the single most iconic saree styling in bridalwear
+# imagery, and the one this map's bare fallback gave the model no visual detail
+# to compete against. `bengali_drape`'s defining trait (the pallu wrapped
+# around BOTH shoulders, not one) is named explicitly for exactly that reason.
+_SAREE_DRAPE_CLAUSES = {
+    "nivi_drape": (
+        "the classic nivi style, front-tucked pleats and the pallu over the left shoulder"
+    ),
+    "bengali_drape": (
+        "the Bengali atpoure style, broad box pleats and the pallu wrapped around both shoulders"
+    ),
+    "seedha_pallu": (
+        "the seedha pallu style, the pallu brought over the right shoulder "
+        "and fanned across the front"
+    ),
+    "lehenga_drape": "the lehenga style, pleats fanned like a lehenga skirt under a fitted wrap",
+}
+
+
+def _drape(spec: DesignSpec) -> list[_Piece]:
+    """The canonical dupatta/saree drape selections.
+
+    ``coverage_and_drape.dupatta_or_saree_drape`` narrative is not rendered: the
+    canonical drape value names the styling, and the composition directive
+    already requires the whole dupatta fall to be in frame."""
     ss = spec.source_selections
-    cd = spec.coverage_and_drape
     selections = []
     if ss.dupatta_style:
-        selections.append(f"dupatta style {_readable(ss.dupatta_style)}")
-    if ss.saree_drape:
-        selections.append(f"saree drape {_readable(ss.saree_drape)}")
-    pieces = []
-    if selections:
-        pieces.append(_mandatory("Drape: " + ", ".join(selections)))
-    pieces.append(_narrative(_slot(cd.dupatta_or_saree_drape, _NARRATIVE_CAP)))
-    return pieces
-
-
-def _cultural_and_styling(spec: DesignSpec) -> list[_Piece]:
-    cc = spec.cultural_context
-    pieces = []
-    if cc.regional_direction is not None:
-        pieces.append(
-            _narrative(
-                "Broad regional influence, offered as guidance rather than a "
-                f"universal rule: {_slot(cc.regional_direction, _NARRATIVE_CAP)}"
+        selections.append(
+            _DUPATTA_STYLE_CLAUSES.get(
+                ss.dupatta_style, f"dupatta worn as a {_readable(ss.dupatta_style)}"
             )
         )
-    interpretation = _join_items(cc.interpretation_notes)
-    if interpretation:
-        pieces.append(_narrative(f"Interpretation: {interpretation}"))
-    safeguards = _join_items(cc.safeguards)
-    if safeguards:
-        pieces.append(_narrative(f"Safeguards: {safeguards}"))
-    # styling_notes are deliberately NOT rendered into the image prompt. They are
-    # advisory beauty/styling prose (jewellery at the neckline, maang tikka / head
-    # ornaments, hair) that pulls FLUX toward portraiture and can directly
-    # contradict the coverage requirements — the live 4.0.0 saree showed exactly
-    # that (open neckline + bare head with a choker and head ornament). They stay
-    # in the persisted DesignSpec brief; only the image prompt omits them.
-    return pieces
+    if ss.saree_drape:
+        selections.append(
+            _SAREE_DRAPE_CLAUSES.get(
+                ss.saree_drape, f"saree draped as a {_readable(ss.saree_drape)}"
+            )
+        )
+    return [_mandatory("Drape: " + ", ".join(selections))] if selections else []
+
+
+def _regional(spec: DesignSpec) -> list[_Piece]:
+    """The user's canonical regional selection, framed as influence not a rule.
+
+    The CANONICAL value is rendered, not ``cultural_context.regional_direction``.
+    7.0.0 rendered the model's prose elaboration and 8.0.0 first kept it as a
+    narrative slot — where, being last in priority, it was dropped by the budget
+    for every single reviewed fixture. The user's regional choice reached the
+    image prompt in no case at all. A short mandatory clause built from the
+    canonical selection always renders and costs a fraction as much.
+
+    ``regional_direction``, ``interpretation_notes`` and ``safeguards`` are
+    therefore all unrendered: they are editorial prose about how the direction
+    should be read, which carries nothing an image model can draw. They remain
+    in the persisted DesignSpec brief. ``styling_notes`` are likewise not
+    rendered — advisory beauty/jewellery prose pulls the provider toward
+    portraiture and can contradict the coverage requirements.
+
+    The framing stays non-prescriptive (CLAUDE.md §12): "broad" and "influence"
+    both say the direction guides rather than governs. 7.0.0 spelt that out as
+    "offered as guidance rather than a universal rule", which is meta-language an
+    image model cannot use — and 8.0.0's first wording, "not a rule", reintroduced
+    the one negation left in the builder."""
+    style = spec.source_selections.regional_style
+    if style is None or style == NO_REGIONAL_DIRECTION:
+        return []
+    return [_mandatory(f"Broad regional influence: {_readable(style)}")]
 
 
 # Fixed conceptual ordering, documented as a priority hierarchy in ADR 0010 and
-# snapshot-tested. The leading composition directive, the coverage directive, the
-# trailing finishing directive and the closing coverage reinforcement are added
-# directly in build_image_prompt; these garment-detail builders render between
-# them in descending priority: garment type/silhouette, construction/drape,
-# coverage/modesty detail, colour and fabric, embellishment, dupatta/veil
-# treatment, then broad cultural context (styling notes are not rendered).
+# snapshot-tested. The leading composition directive and the trailing finishing
+# directive are added directly in build_image_prompt; these builders render
+# between them in descending priority: the garment's identity and construction,
+# the coverage requirements and the coverage narrative that completes them,
+# colour, fabric, embellishment, drape, then broad regional influence.
+#
+# The coverage narrative sits with the directive rather than after embellishment
+# (ADR 0010's long-standing "coverage outranks decoration"). It matters at 8.0.0
+# budgets in a way it never did at 6,000 characters: ranked below embellishment,
+# a version-1 spec's neckline narrative — the ONLY neckline information such a
+# spec has, since it carries no canonical neckline — was dropped in favour of
+# embellishment motifs.
 _SECTION_BUILDERS = (
-    _garment_and_ceremony,
-    _silhouette_and_components,
-    _drape_and_proportions,
-    _coverage,
+    _garment,
+    _coverage_directive,
+    _coverage_narrative,
     _colour,
     _fabrics,
     _embellishment,
-    _dupatta_or_drape,
-    _cultural_and_styling,
+    _drape,
+    _regional,
 )
 
 
-def _apply_narrative_budget(sections: list[list[_Piece]], budget: int, natural_total: int) -> None:
+def _apply_narrative_budget(sections: list[list[_Piece]], budget: int) -> None:
     """Shrink narrative pieces IN PLACE so their combined length ≤ ``budget``.
 
-    Each section receives a share of the budget proportional to its natural
-    narrative size; within a section, pieces are consumed in priority (reading)
-    order — earlier pieces are kept, a piece that does not fit is truncated at a
-    word boundary and the remaining lower-priority pieces are omitted. Mandatory
-    pieces are never touched."""
+    A single greedy pass in PRIORITY (reading) order across every section:
+    each narrative piece that still fits is kept whole, and the budget is
+    consumed as it goes. Mandatory pieces are never touched.
+
+    7.0.0 split the budget proportionally between sections, which is the right
+    shape when almost everything fits. At 8.0.0's budget it is the wrong one —
+    it hands every section a slice too thin to render anything, starving the
+    most valuable slots (the garment's overall form, where the colours sit)
+    along with the least. Priority order spends the budget on the highest-value
+    narrative first and drops the tail, which is what the fixed section order
+    already encodes.
+
+    Selection is ALL-OR-NOTHING per piece: a piece that does not fit is dropped
+    whole, prefix included, never cut down to fill the remainder. Budget-level
+    truncation is what produced 8.0.0's worst early output — dangling fragments
+    like "fitted to the knee before a." and a bare "Motifs:" label — and a
+    half-sentence conditions the provider on less than the clean absence of the
+    detail. The per-slot caps already bound each piece, so all-or-nothing costs
+    little; a dropped piece frees its whole length, so a later, shorter piece
+    that still fits is kept rather than wasting the remainder."""
+    remaining = budget
     for section in sections:
-        section_natural = sum(len(p.text) for p in section if not p.mandatory)
-        if section_natural == 0:
-            continue
-        remaining = budget * section_natural // natural_total
         for piece in section:
             if piece.mandatory:
                 continue
-            if remaining <= 0:
-                piece.text = ""
-                continue
-            if len(piece.text) <= remaining:
-                remaining -= len(piece.text)
+            if piece.length <= remaining:
+                remaining -= piece.length
             else:
-                piece.text = _truncate_at_word(piece.text, remaining)
-                remaining = 0
+                piece.text = ""
 
 
 def build_image_prompt(spec: DesignSpec) -> str:
@@ -799,15 +1041,16 @@ def build_image_prompt(spec: DesignSpec) -> str:
     Accepts a validated :class:`DesignSpec` (or any DesignSpec-compatible
     payload, revalidated defensively here). Runs the generated-content safety
     scan before interpolation, reserves the mandatory content and budgets the
-    generated narrative into the remainder so the result never exceeds
+    generated narrative into the remainder so the result aims at
+    :data:`IMAGE_PROMPT_TARGET_CHARS` and never exceeds
     :data:`IMAGE_PROMPT_MAX_CHARS`, then runs a final safety scan. Raises ONLY
     :class:`ImagePromptBuildError` — never :class:`GeneratedContentRejected` —
     and never echoes the prompt or spec text."""
     if not isinstance(spec, DesignSpec):
         try:
-            # Version-dispatched: a raw dict is validated as v1 or v2 by its
-            # own schema_version (a DesignSpecV2 instance already passes the
-            # isinstance check above, since it subclasses DesignSpec).
+            # Version-dispatched: a raw dict is validated as v1, v2 or v3 by its
+            # own schema_version (a DesignSpecV2/V3 instance already passes the
+            # isinstance check above, since both subclass DesignSpec).
             spec = validate_design_spec(spec)
         except Exception as exc:  # controlled: never surface the payload
             raise ImagePromptBuildError("design spec failed validation") from exc
@@ -820,38 +1063,28 @@ def build_image_prompt(spec: DesignSpec) -> str:
         raise ImagePromptBuildError("design spec failed the safety scan") from exc
 
     # Composition leads (highest priority, mandatory, rendered first) so it is
-    # always the first content and can never be displaced or truncated. The
-    # concrete coverage directive follows immediately (second), so the coverage
-    # requirements FLUX most often ignores appear high in the prompt rather than
-    # buried in mid-prompt prose (empty and skipped when nothing coverage-relevant
-    # is selected).
-    sections = [[_Piece(_COMPOSITION, mandatory=True)], _coverage_directive(spec)]
+    # always the first content and can never be displaced or truncated.
+    sections = [[_Piece(_COMPOSITION, mandatory=True)]]
     sections += [list(builder(spec)) for builder in _SECTION_BUILDERS]
     # Unembellished designs use finishing wording that does not ask for embroidery
     # detail, so the fixed wording never contradicts a "none" choice.
     unembellished = spec.source_selections.embellishment_styles == [_NONE_EMBELLISHMENT]
-    finishing = _FINISHING_UNEMBELLISHED if unembellished else _FINISHING
-    sections.append([_Piece(finishing, mandatory=True)])
-    # A brief coverage reinforcement is the LAST thing FLUX reads, so the critical
-    # requirements are restated after the detailed garment prose (skipped when no
-    # coverage-critical selection exists).
-    reinforcement = _coverage_reinforcement(spec)
-    if reinforcement is not None:
-        sections.append([reinforcement])
+    sections.append(
+        [_Piece(_FINISHING_UNEMBELLISHED if unembellished else _FINISHING, mandatory=True)]
+    )
 
-    mandatory_len = sum(len(p.text) for section in sections for p in section if p.mandatory)
-    natural_total = sum(len(p.text) for section in sections for p in section if not p.mandatory)
-    budget = IMAGE_PROMPT_MAX_CHARS - mandatory_len - _SEPARATOR_RESERVE
-    if budget < 0:
-        # Unreachable for a schema-valid DesignSpec (mandatory content is bounded
-        # well under the limit); a controlled error rather than an overrun.
-        raise ImagePromptBuildError("mandatory content exceeds the maximum length")
+    mandatory_len = sum(p.length for section in sections for p in section if p.mandatory)
+    natural_total = sum(p.length for section in sections for p in section if not p.mandatory)
+    # Budget against the TARGET, not the hard bound. A spec whose canonical
+    # machine values alone overshoot the target yields a negative budget, which
+    # simply drops all narrative — the hard bound still holds by construction.
+    budget = max(IMAGE_PROMPT_TARGET_CHARS - mandatory_len - _SEPARATOR_RESERVE, 0)
     if natural_total > budget:
-        _apply_narrative_budget(sections, budget, natural_total)
+        _apply_narrative_budget(sections, budget)
 
     rendered = []
     for section in sections:
-        texts = [piece.text for piece in section if piece.text]
+        texts = [piece.rendered for piece in section if piece.rendered]
         if texts:
             rendered.append(" ".join(texts))
     prompt = "\n\n".join(rendered)
