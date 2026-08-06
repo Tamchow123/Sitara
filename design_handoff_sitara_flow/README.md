@@ -2,7 +2,7 @@
 
 ## Overview
 
-Sitara is a guided, image-led questionnaire that captures a bride's vision for a South Asian bridal outfit, generates an AI concept from it, and lets her refine that concept a limited number of times. This bundle covers six screens: **Home → Questionnaire → Generation → Concept → Amendments → History**.
+Sitara is a guided, image-led questionnaire that captures a bride's vision for a South Asian bridal outfit, generates an AI concept from it, and lets her refine that concept a limited number of times. This bundle covers seven screens: **Home → Questionnaire → Generation → Concept → Amendments → History**, plus a private **Annotation workspace** entered from the Concept screen.
 
 ## About the design files
 
@@ -111,7 +111,7 @@ Three phases — Preparing, Design brief, Visual concept — with an animated pr
 
 ### 4. Concept — `Sitara Concept.dc.html`
 
-Two columns: a sticky 3:4 render on the left; on the right, collapsible specification cards (all collapsed on load) covering the brief. Actions: "Edit answers" and "Refine this concept".
+Two columns: a sticky 3:4 render on the left; on the right, collapsible specification cards (all collapsed on load) covering the brief. Header actions: "Design history", "Edit answers", "Refine this concept". Under the render: **Annotate** (→ annotation workspace), **Send to account** (flattens the render to PNG and emails it to the account address; button flashes "Sent to your email ✓" for ~2.2 s) and **Copy brief**. There is no local download button — delivery is by email only.
 
 ### 5. Amendments — `Sitara Amendments.dc.html`
 
@@ -120,6 +120,31 @@ Free-form amendment requests. Unlimited changes per round, but only **3 regenera
 ### 6. History — `Sitara History.dc.html`
 
 Current design large, previous versions in a grid below, each labelled "Original concept" / "Refinement n" with a version number.
+
+### 7. Annotation workspace — `Sitara Annotation.dc.html`
+
+**Purpose:** A private, owner-only worktable for marking up one generated concept image — pins, arrows, rectangles and bounded freehand strokes, each with a short note (max 140 chars), exportable as a flattened PNG emailed to the owner. No sharing, no other viewers, no new account role. Entered via **Annotate** on the Concept screen, scoped to that image.
+
+**Layout:** quiet chrome around a centred canvas. Header: back link ("Concept"), title + `Private — only you` tag, autosave status pill, eye toggle (hide/show overlays), **Send to account** (primary action), and a ⋮ overflow. Main row: a **persistent vertical tool rail on the left** (pill-shaped card, 40px circular icon buttons: Select/Pan, Pin, Arrow, Rectangle, Freehand, Note; active tool = solid accent), the canvas centre (image on a `--color-neutral-200` worktable, `--shadow-lg`, 3:4), and the **annotation list panel on the right** (300px card). Panel side is a prototype prop (`panelSide`: right | left).
+
+**Marks:** clean vector SVG over the image (viewBox 600×800), terracotta `--color-accent` strokes (2.75) with a **white halo stroke underneath** — accent alone fails contrast on the maroon fabric, so every mark, ring and badge carries the halo; keep this in production (accessibility wins over palette). Numbered 22–27px badges tie each mark to its list row.
+
+**List rows:** number badge, type label, note text, pencil (edit) and trash (delete) icon buttons. Click row or mark to select — row tints `--color-accent-100`, the canvas mark gets a ring (rectangle also gets 4 corner handles) and a note chip appears beside the mark. Editing is inline in the row: textarea, live `n/140` counter, Cancel / Save.
+
+**States & behaviour**
+- **Empty:** no marks → centred prompt card on the canvas ("Nothing marked yet…") and a list-panel hint with *Restore sample marks* (prototype only).
+- **Autosave pill:** `Saved` (sage tint) → any change flips it to `Saving…` (spinner, ~900 ms) → back to `Saved`. Failure state `Couldn't save · Retry` uses the deep-terracotta tint (`--color-accent-100`/`-800`) — the system has no red; keep errors in this ramp. Never a blocking modal.
+- **Zoom:** −/label/+/fit cluster, bottom-right of canvas; 60–300%, `transform: scale()` on the image+overlay group so marks stay pinned; a hint chip appears while zoomed.
+- **Hide overlays:** eye toggle; marks hidden (never deleted), dark pill on canvas announces it.
+- **Clear all:** list-panel action → destructive confirm dialog (`.dialog` pattern, confirm button `--color-accent-800`); confirming empties to the Empty state.
+- **Conflict:** modal when another tab saved newer changes — "Reload latest" (primary) vs "Discard my changes"; no silent overwrite. Only conflict and clear-all are modals.
+- **Unsaved-leave:** anchored popover under the back link (not a modal): Stay / Leave anyway.
+- **Keyboard pass:** focus order is toolbar → canvas marks → list rows; Enter edits, arrows nudge, Delete removes, Esc deselects; 2px accent `:focus-visible` rings (with white underlay on-canvas).
+- **⋮ menu (prototype only):** triggers the four states unreachable naturally — autosave failure, tab conflict, unsaved-leave, keyboard-focus pass. Don't ship this menu.
+
+**Send to account (export):** flattens the canvas to PNG at 2× (1620×2560), renders numbered markers plus a **note legend block below the image** (two-column grid; an inline-notes-on-image variant exists behind the `exportLegend` prop) and emails it to the account address. The export view in the prototype shows the artifact itself — a paper card with filename row, "Sent to your account email" confirmation, Send again / Back to workspace.
+
+**Props (prototype tweaks):** `panelSide` right|left · `exportLegend` "Legend below image" | "Notes inline on image".
 
 ---
 
@@ -188,6 +213,7 @@ The exact filename for every option lives in the `imgMap()` method of `Sitara Qu
 - `Sitara Concept.dc.html` — generated concept and specification
 - `Sitara Amendments.dc.html` — refinement requests, 3-regeneration limit
 - `Sitara History.dc.html` — version history
+- `Sitara Annotation.dc.html` — private annotation workspace (entered from Concept)
 - `_ds/organic-…/` — design system stylesheet and bundle (tokens live here)
 - `image-slot.js` — the prototype's drop-in image placeholder component; not needed in production
 - `support.js` — prototype template runtime; **do not port**
