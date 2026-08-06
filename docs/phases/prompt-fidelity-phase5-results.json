@@ -1,0 +1,98 @@
+{
+  "phase": 5,
+  "purpose": "Regression-check a sample of Phase 1 designs that PASSED, under 8.3.0, to catch a targeted fix that repairs one failure while silently breaking something that previously worked -- the plan's stated reason Phase 5 exists (docs/phases/prompt-fidelity-evaluation-plan.md).",
+  "builder_version": "8.3.0",
+  "questionnaire_version": 4,
+  "image_model": "black-forest-labs/flux-1.1-pro",
+  "run_date": "2026-08-02",
+  "planned_rows_priority_order": [9, 10, 2, 13, 20, 12],
+  "outcome": "4 of 6 planned rows ran (9, 10, 2, 13). Rows 20 and 12 never attempted: today's LIVE_GENERATION_DAILY_COUNT_LIMIT (50) was exhausted exactly (50/50) after row 13 -- a hard gate independent of the dollar budget, confirmed by direct read of the Redis count ledger. The $1.00 soft budget floor (this evaluation's own plan stopping rule, unrelated to any Anthropic-account-level limit) had already been stopping the batch after every single row since the ledger was already under $1.00 remaining before Phase 5 started (carried over from Phase 4), so each of the 4 invocations below ran at most one live row before self-stopping.",
+  "headline_finding": "Row 9 (gharara/walima) was Phase 1's only passing gharara construction sample. A tiebreaker third render (see designs[0].tiebreaker below) was authorized specifically because n=1 (Phase 1 pass vs Phase 5 fail) was too thin to call a regression on its own. The tiebreaker did NOT cleanly resolve the question -- it produced a THIRD, distinct outcome (ambiguous: a visible waist band/border appeared, unlike the clean-fail render, but the flare below still reads as one unified skirt rather than distinguishable trouser legs). Across all three 8.3.0-adjacent data points for row 9 (Phase 1 pass, Phase 5 clean-fail, Phase 5 tiebreaker-ambiguous), the honest read is not 'fixed' or 'regressed' but 'high output variance for this specific design under 8.3.0's gharara wording' -- three renders of the identical prompt text produced three visually different constructions. Counting all gharara construction samples across every phase (3: still fails, 9: 1 pass/1 fail/1 ambiguous, 16: now passes), the gharara-specific half of the 8.3.0 fix cannot be called a clean win, and there is no further gharara row in the 20-design matrix to sample -- per the plan's 3-renders-per-design cap, row 9 has now used its full allowance. The anarkali side of the same fix (row 17 in Phase 4, row 10 here) shows no equivalent instability -- both the previously-failing and previously-passing anarkali samples read correctly as one continuous piece under 8.3.0, consistently.",
+  "secondary_finding": "Colour fidelity, which Phase 2 declared 'fixed, validated at scale' on 12 Phase-1 samples, has now missed on 3 of the 9 rows re-rendered since (Phase 4 rows 3, 7; Phase 5 row 10) -- all named or hex colours, requested colour and rendered colour unrelated in each case (not just off-shade). Colour clauses were not touched by 8.3.0. Read as previously-unmeasured FLUX variance surfacing on a larger sample rather than a builder regression, but the Phase 2 verdict should no longer be treated as closed.",
+  "designs": [
+    {
+      "row": 9,
+      "garment": "gharara",
+      "ceremony": "walima",
+      "phase1_verdict": "clean -- genuine knee-flare construction visible",
+      "phase1_design_version_id": "cebf7b16-faa3-43f5-98b9-ec8878329926",
+      "design_id": "28750859-3f0f-47a9-9ed9-17d8dc41febd",
+      "design_version_id": "70c15d40-08b5-4400-a098-f547f7f63a00",
+      "status": "succeeded",
+      "image_dimensions": "896x1152",
+      "verdict": "inconclusive -- see tiebreaker",
+      "evidence": "Prompt confirmed correct (builder_version 8.3.0, farshi_gharara silhouette clause present: 'a two-piece outfit of a kurti over wide-legged trousers, each leg fitted to the knee before flaring... its flare floor-sweeping'). Rendered image is a single continuous floor-length garment with no visible waist break, hip seam, or trouser distinction -- indistinguishable in construction from Phase 1's original row 3 failure. This was the only previously-passing gharara construction sample available in the 20-row matrix, so a tiebreaker third render was authorized rather than calling a regression on n=1.",
+      "tiebreaker": {
+        "purpose": "Third render of the identical row-9 answers, authorized to resolve the 1-pass/1-fail tie before treating the gharara construction/silhouette fix as regressed. Within the plan's 3-renders-per-design cap (this was render #3).",
+        "run_date": "2026-08-05",
+        "preceding_failed_attempts": 2,
+        "preceding_failure_note": "Two attempts before the successful tiebreaker both failed with structured_submission_ambiguous (an ambiguous transport failure between the app and Anthropic, not a content rejection -- see apps/api/sitara/generation/errors.py). Root cause identified as Docker Desktop's engine becoming unreachable on this machine (confirmed independently via `docker compose ps` failing identically); NOT an Anthropic-account or row-9-content issue. Both failed attempts reserved a partial $0.1475 each (spend is unresolved per the error's own semantics, so the ledger does not release it) but produced no image and are not counted against the 3-render cap, per the user's explicit ruling that non-rendering transport failures do not consume a design's render allowance.",
+        "design_id": "76656002-c4f0-49d8-8749-80aac17f44da",
+        "design_version_id": "88cc3a0a-eda3-4250-a4c1-70a7d30c4eed",
+        "status": "succeeded",
+        "image_dimensions": "896x1152",
+        "verdict": "ambiguous",
+        "evidence": "Prompt confirmed correct and identical in construction/silhouette wording to the first Phase 5 render. Rendered image is visually distinct from BOTH prior renders: unlike the clean-fail render, a visible horizontal embroidered waist band clearly separates the upper bodice from the lower flare -- a genuine two-piece visual cue absent from the earlier failure. However, the flare below the waist still reads as one unified, symmetric skirt with no hint of two separate trouser legs, so it remains genuinely unclear whether this is true gharara construction or a one-piece gown with a decorative waist seam. Not scored as a pass or a fail -- reported as ambiguous, the honest third outcome."
+      }
+    },
+    {
+      "row": 10,
+      "garment": "anarkali",
+      "ceremony": "mehndi",
+      "phase1_verdict": "1 fail only (sleeves) -- construction/silhouette passed",
+      "phase1_design_version_id": "e062753a-f0ed-44f7-85ff-18986b5b3597",
+      "design_id": "a6737275-448d-430a-b5cc-5b8404b534b5",
+      "design_version_id": "d900a390-9278-4b6c-ad3a-3e4305122db5",
+      "status": "succeeded",
+      "image_dimensions": "896x1152",
+      "verdict": "stable, no regression",
+      "evidence": "Prompt confirmed correct (kalidar_anarkali silhouette clause: 'built from many stitched flare panels... a panelled, floor-length skirt formed from multiple kalis'). Rendered image is a genuine one-piece anarkali: fitted bodice, defined waist, full panelled floor-length skirt, no midriff gap. Corroborates row 17's Phase 4 fix -- the anarkali side of the construction/silhouette rewrite looks stable across both a previously-failing and a previously-passing sample. Colour is a severe miss (bright marigold orange requested, pale sage rendered) -- third independent colour-fidelity miss across Phase 4/5, see secondary_finding."
+    },
+    {
+      "row": 2,
+      "garment": "lehenga",
+      "ceremony": "walima",
+      "phase1_verdict": "clean, zero fails",
+      "phase1_design_version_id": "068c1d92-8edf-4dac-96da-dda5ae7d53e8",
+      "design_id": "eee3277d-6400-45f3-987f-a08aaaded3c4",
+      "design_version_id": null,
+      "status": "failed",
+      "error_code": "structured_submission_ambiguous",
+      "verdict": "isolated failure, not retried",
+      "evidence": "Same error code Phase 1's row 19 hit on its first attempt before succeeding on retry (a timeout/connection-classified failure per the harness's own docstring, not an Anthropic account-cap repeat). The harness's consecutive-failure guard did not trip (this was the only failure in the run), so this is recorded as isolated per the plan's own rules rather than treated as systemic. Not retried: the $1.00 budget floor triggered immediately after this attempt's partial reservation, and lower-priority queued rows were judged more valuable than a retry of a general zero-fail sentinel row given the tight remaining budget."
+    },
+    {
+      "row": 13,
+      "garment": "lehenga",
+      "ceremony": "baraat",
+      "phase1_verdict": "2 fails (colour, fabric character) -- construction/neckline/drape/midriff/back all passed",
+      "phase1_design_version_id": "76b589cd-004d-4c36-a058-e90a54461aec",
+      "design_id": "406542b6-bbd1-4020-8826-a0f26bcdff2d",
+      "design_version_id": "ce3b14f4-6baf-4812-80be-207be930efdc",
+      "status": "succeeded",
+      "image_dimensions": "896x1152",
+      "verdict": "stable, no regression",
+      "evidence": "Prompt confirmed correct (8.3.0, unrelated clauses for this row -- lehenga construction and neckline text were not touched by 8.3.0). Rendered image preserves every previously-passing dimension: two-piece construction, sweetheart neckline, bare midriff, one-shoulder drape, deep-cut back. The two previously-failing dimensions (rani pink rendered as dusty rose; velvet rendered without a plush texture) fail again in the same direction as Phase 1 -- a stable pre-existing miss, not a new regression."
+    },
+    {
+      "row": 20,
+      "garment": "saree",
+      "ceremony": "walima",
+      "phase1_verdict": "2 fails (density, midriff) -- drape passed",
+      "phase1_design_version_id": "841e9eb3-5e48-4385-ad0a-25c31d45253d",
+      "status": "not_attempted",
+      "verdict": "not_attempted",
+      "evidence": "Never reached: enqueue rejected with CountLimitReached (today's live-generation count hit exactly 50/50, the hard LIVE_GENERATION_DAILY_COUNT_LIMIT, confirmed by a direct read of the Redis count ledger) before this row's turn."
+    },
+    {
+      "row": 12,
+      "garment": "sharara",
+      "ceremony": "nikah",
+      "phase1_verdict": "2 fails (fabric character, density) -- construction passed; sharara untouched by 8.3.0",
+      "phase1_design_version_id": "c9f3ffbd-d51b-4d0e-b5fd-5495edd84715",
+      "status": "not_attempted",
+      "verdict": "not_attempted",
+      "evidence": "Never reached, same CountLimitReached exhaustion as row 20."
+    }
+  ]
+}
