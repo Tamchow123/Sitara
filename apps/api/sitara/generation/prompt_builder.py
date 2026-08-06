@@ -121,7 +121,29 @@ from .selection_semantics import (
 # grammatically positive but semantically asked for an absence, and
 # "unworked"/"undecorated" carry the concepts they negate. The unembellished
 # clause and finishing directive now describe what the cloth IS.
-PROMPT_BUILDER_VERSION = "8.2.0"
+#
+# 8.3.0: the Phase 1 prompt-fidelity evaluation (20 live renders, blind rubric
+# review — docs/phases/prompt-fidelity-phase2-review.md) found three targeted,
+# fixable failure modes and one deliberately left alone. Gharara and anarkali
+# lost their one-piece/two-piece identity in 3 of 6 renders (a ballgown, a
+# continuous gown with no knee-flare, a two-piece lehenga where a one-piece
+# anarkali was asked for); their construction clauses now name the trouser/
+# continuity structure explicitly and a new silhouette-level clause map (scoped
+# to only these two garments) carries each silhouette's own flare character
+# instead of leaving it to a bare, sometimes-contradictory "The silhouette is
+# X" line. A square neckline read as a sweetheart twice in three renders; its
+# clause now names the flat edge and right-angle corners a curved sweetheart
+# cannot satisfy. A Bengali atpoure drape, a lehenga-style saree drape and two
+# dupatta stylings all rendered as either a generic nivi drape or an
+# occluded neckline; dupatta_style and saree_drape were the only canonical
+# fields in this file with no visual clause map at all, so this adds one for
+# each, following the same pattern as every other field. Embellishment-density
+# and midriff-coverage restraint are NOT touched here: Phase 2 found the same
+# directional bias (more decoration, more coverage than requested) at 60-83%
+# regardless of wording, already survived one prior targeted fix (8.2.0's own
+# unembellished-material rewrite), and is verdicted a product question, not a
+# prompt-clarity one.
+PROMPT_BUILDER_VERSION = "8.3.0"
 
 # What the narrative budget aims at. Chosen so the assembled prompt fits inside
 # the default image model's text-encoder attention window (~512 tokens), which is
@@ -222,16 +244,82 @@ _GARMENT_CONSTRUCTION = {
     "saree": (
         "a single draped length of fabric with the pallu falling over a separate fitted blouse"
     ),
-    "anarkali": "a one-piece floor-length flared kurta worn over narrow trousers",
+    # 8.3.0: "a one-piece floor-length FLARED kurta" shared its central adjective
+    # with the lehenga clause above ("flared skirt"), and the Phase 1 prompt-
+    # fidelity evaluation (docs/phases/prompt-fidelity-phase2-review.md) found an
+    # anarkali collapsing to "a two-piece lehenga with a bare midriff gap" once in
+    # three live renders. The flare characteristic now lives only in
+    # _SILHOUETTE_CLAUSES, keyed per anarkali silhouette; this clause carries just
+    # the invariant fact true of every anarkali — one continuous garment, unbroken
+    # from shoulder to hem — so it never competes with "flared" for the model's
+    # lehenga prior.
+    "anarkali": (
+        "a single continuous floor-length kurta, unbroken from shoulder to hem, "
+        "worn over narrow trousers"
+    ),
+    # 8.3.0: the same evaluation found a gharara collapsing to "a generic
+    # fitted-bodice ballgown" and, separately, to "a continuous gown, no
+    # knee-flare" — twice in three live renders, in a garment whose defining
+    # trait is that the flare is TWO SEPARATE TROUSER LEGS, not a skirt panel.
+    # "each leg" and "wide-legged trousers" name that trouser structure
+    # explicitly; the degree of flare (subtle, classic, floor-sweeping) now lives
+    # in _SILHOUETTE_CLAUSES, keyed per gharara silhouette.
     "gharara": (
-        "a two-piece outfit of a kurti over separate trousers, fitted through the "
-        "upper leg and knee and flaring below the knee"
+        "a two-piece outfit of a kurti over wide-legged trousers, each leg "
+        "fitted to the knee before flaring"
     ),
     "sharara": (
         "a two-piece outfit of a kurti over separate trousers flaring in one "
         "continuous line from the waist to a wide hem"
     ),
     "shalwar_kameez": "a two-piece outfit of a long tunic over separate trousers",
+}
+
+# Silhouette-specific visual elaboration, keyed on the canonical `silhouette`
+# machine value. Populated ONLY for gharara's and anarkali's own silhouette
+# options: the Phase 1 prompt-fidelity evaluation found these two garments'
+# one-piece/two-piece identity collapsing in 3 of 6 live renders while the
+# other four garment types held their construction with no silhouette-level
+# help at all (docs/phases/prompt-fidelity-phase2-review.md), so this stays a
+# small, evidence-scoped addition rather than a speculative map across every
+# silhouette the questionnaire offers. A silhouette with no entry here falls
+# back to the plain "The silhouette is X" rendering, unchanged from 8.2.0.
+#
+# One concrete mechanism this fixes: a bare "slim modern gharara" silhouette
+# line sat directly beside the construction clause's "flaring below the knee"
+# — two adjacent mandatory sentences pulling in opposite directions — and that
+# render lost the knee-flare entirely. Each entry below states its own flare
+# character explicitly instead, so the silhouette and construction clauses
+# agree rather than compete.
+_SILHOUETTE_CLAUSES = {
+    # The two-leg trouser structure is already named in _GARMENT_CONSTRUCTION;
+    # each gharara entry below adds only its own flare character, not the
+    # shared premise, so the two mandatory clauses never repeat themselves.
+    "classic_gharara": "The silhouette is the classic gharara, its flare moderate and traditional",
+    "farshi_gharara": "The silhouette is the farshi gharara, its flare floor-sweeping",
+    "slim_modern_gharara": (
+        "The silhouette is the slim modern gharara, its flare subtle, only below the knee"
+    ),
+    # Likewise, the single-continuous-garment fact is already in
+    # _GARMENT_CONSTRUCTION for floor_length_anarkali and kalidar_anarkali;
+    # these two add only their own distinguishing detail.
+    "floor_length_anarkali": (
+        "The silhouette is the floor-length anarkali, its flare falling to the floor"
+    ),
+    "kalidar_anarkali": (
+        "The silhouette is the kalidar anarkali, built from many stitched flare panels"
+    ),
+    # These two DO complicate the construction clause's "unbroken" claim — the
+    # real garment has a visible front opening or jacket layer — so each names
+    # that opening explicitly while still anchoring it as one moving ensemble.
+    "front_open_anarkali": (
+        "The silhouette is the front-open anarkali, its outer panel opening "
+        "down the front over a fitted inner layer as one ensemble"
+    ),
+    "jacket_style_anarkali": (
+        "The silhouette is the jacket-style anarkali, its structured jacket "
+        "layered over the flare as one ensemble"
+    ),
 }
 
 # The canonical machine value marking "no embellishment". When embellishment
@@ -404,9 +492,12 @@ def _garment(spec: DesignSpec) -> list[_Piece]:
     construction = _GARMENT_CONSTRUCTION.get(ss.garment_type)
     if construction:
         opening = f"{opening}: {construction}"
+    silhouette = _SILHOUETTE_CLAUSES.get(
+        ss.silhouette, f"The silhouette is {_readable(ss.silhouette)}"
+    )
     return [
         _mandatory(opening),
-        _mandatory(f"The silhouette is {_readable(ss.silhouette)}"),
+        _mandatory(silhouette),
         _narrative(_slot(spec.garment_breakdown.overall_form, _FORM_CAP)),
     ]
 
@@ -607,7 +698,16 @@ _NECKLINE_CLAUSES = {
     "v_neck": "a moderate V-shaped neckline",
     "deep_v_neck": "a deep V-shaped neckline plunging below the collarbone",
     "boat_neck": "a boat neckline running straight from shoulder to shoulder",
-    "square_neck": "a square neckline cut across the chest",
+    # 8.3.0: the Phase 1 prompt-fidelity evaluation found this rendered as a
+    # sweetheart neckline twice in three live renders — "cut across the chest"
+    # gave the model no geometry to weigh against "South Asian bridalwear"'s
+    # strong sweetheart-neckline prior. The new wording names the flat edge and
+    # right-angle corners explicitly, which a curved heart-shaped dip cannot
+    # satisfy, without ever saying what the shape is not.
+    "square_neck": (
+        "a square neckline with a flat straight edge and two crisp right-angle "
+        "corners across the chest"
+    ),
     "sweetheart_neck": "a sweetheart neckline curved like the top of a heart",
     "high_neck": "a closed high neckline covering the collarbone and upper chest",
     "band_collar": "an upright band collar standing at the neck",
@@ -778,6 +878,53 @@ def _coverage_narrative(spec: DesignSpec) -> list[_Piece]:
     return pieces
 
 
+# Concrete, visual descriptions of each canonical dupatta styling, keyed on the
+# `dupatta_style` machine value. 8.3.0: before this map, every style rendered
+# through the bare fallback below ("dupatta worn as a front drape") — unlike
+# every sibling clause map in this file (garment construction, neckline,
+# sleeves, back, midriff), which all name a concrete visual shape. The Phase 1
+# prompt-fidelity evaluation traced two live failures to exactly this gap: a
+# one-shoulder and a front-draped dupatta both fell forward and obscured an
+# already-rendered neckline requirement, because nothing in the prompt said
+# where the fabric should NOT compete for the same space. `one_shoulder` now
+# anchors the cascade down the back and `front_drape` anchors its fall below
+# the neckline — both positive placements, not negations of the neckline
+# clause. A value with no entry here falls back to the plain "dupatta worn as a
+# X" rendering, unchanged from 8.2.0.
+_DUPATTA_STYLE_CLAUSES = {
+    "one_shoulder": "a dupatta pinned at one shoulder, falling in a single cascade down the back",
+    "front_drape": (
+        "a dupatta carried across the front from one shoulder, its "
+        "embellished face on view below the neckline"
+    ),
+    "head_drape": "a dupatta drawn up from the shoulders to frame the face and fall over the head",
+    "double_dupatta": "two dupattas, one at the head, one trailing",
+    "trail_dupatta": "a dupatta pinned to sweep behind like a trailing train",
+}
+
+# Concrete, visual descriptions of each canonical saree drape, keyed on the
+# `saree_drape` machine value. Same 8.3.0 gap and same fix as
+# :data:`_DUPATTA_STYLE_CLAUSES` above. The Phase 1 evaluation found a Bengali
+# atpoure drape and a half-saree's lehenga-style drape both rendering as a
+# generic nivi drape — the single most iconic saree styling in bridalwear
+# imagery, and the one this map's bare fallback gave the model no visual detail
+# to compete against. `bengali_drape`'s defining trait (the pallu wrapped
+# around BOTH shoulders, not one) is named explicitly for exactly that reason.
+_SAREE_DRAPE_CLAUSES = {
+    "nivi_drape": (
+        "the classic nivi style, front-tucked pleats and the pallu over the left shoulder"
+    ),
+    "bengali_drape": (
+        "the Bengali atpoure style, broad box pleats and the pallu wrapped around both shoulders"
+    ),
+    "seedha_pallu": (
+        "the seedha pallu style, the pallu brought over the right shoulder "
+        "and fanned across the front"
+    ),
+    "lehenga_drape": "the lehenga style, pleats fanned like a lehenga skirt under a fitted wrap",
+}
+
+
 def _drape(spec: DesignSpec) -> list[_Piece]:
     """The canonical dupatta/saree drape selections.
 
@@ -787,9 +934,17 @@ def _drape(spec: DesignSpec) -> list[_Piece]:
     ss = spec.source_selections
     selections = []
     if ss.dupatta_style:
-        selections.append(f"dupatta worn as a {_readable(ss.dupatta_style)}")
+        selections.append(
+            _DUPATTA_STYLE_CLAUSES.get(
+                ss.dupatta_style, f"dupatta worn as a {_readable(ss.dupatta_style)}"
+            )
+        )
     if ss.saree_drape:
-        selections.append(f"saree draped as a {_readable(ss.saree_drape)}")
+        selections.append(
+            _SAREE_DRAPE_CLAUSES.get(
+                ss.saree_drape, f"saree draped as a {_readable(ss.saree_drape)}"
+            )
+        )
     return [_mandatory("Drape: " + ", ".join(selections))] if selections else []
 
 

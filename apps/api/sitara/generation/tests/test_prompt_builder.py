@@ -466,8 +466,8 @@ class TestGarmentConstruction:
 
     def test_gharara_is_two_piece_with_the_knee_flare(self):
         prompt = build_image_prompt(_load_spec("mehndi_gharara_minimal"))
-        assert "a two-piece outfit of a kurti over separate trousers" in prompt
-        assert "fitted through the upper leg and knee and flaring below the knee" in prompt
+        assert "a two-piece outfit of a kurti over wide-legged trousers" in prompt
+        assert "each leg fitted to the knee before flaring" in prompt
 
     def test_sharara_is_two_piece_flaring_from_the_waist(self):
         # The gharara/sharara distinction (CLAUDE.md §12) is preserved, but the
@@ -490,7 +490,8 @@ class TestGarmentConstruction:
 
     def test_anarkali_is_one_piece(self):
         prompt = build_image_prompt(_load_spec("walima_anarkali_none"))
-        assert "a one-piece floor-length flared kurta worn over narrow trousers" in prompt
+        assert "a single continuous floor-length kurta, unbroken from shoulder to hem" in prompt
+        assert "worn over narrow trousers" in prompt
 
     def test_shalwar_kameez_is_two_piece_tunic_and_trousers(self):
         prompt = build_image_prompt(_load_spec("reception_shalwar_kameez_full_coverage"))
@@ -508,8 +509,86 @@ class TestGarmentConstruction:
 
     def test_head_covering_selection_stays_visible(self):
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
-        assert "head drape" in prompt  # dupatta_style machine value
+        assert "drawn up from the shoulders to frame the face" in prompt  # dupatta_style clause
         assert "over the head" in prompt  # the coverage requirement
+
+
+class TestGharaAndAnarkaliSilhouette:
+    """8.3.0: a silhouette-level clause map scoped to gharara's and anarkali's
+    own silhouette values, added after the Phase 1 prompt-fidelity evaluation
+    found these two garments losing their one-piece/two-piece identity while
+    every other garment held construction with only the plain "The silhouette
+    is X" fallback. Each entry states its own flare/continuity character so it
+    never contradicts the garment-construction clause beside it."""
+
+    def test_farshi_gharara_names_the_floor_sweeping_flare(self):
+        prompt = build_image_prompt(_load_spec("nikah_gharara_hex_colour_hijab"))
+        assert "The silhouette is the farshi gharara" in prompt
+        assert "its flare floor-sweeping" in prompt
+
+    def test_floor_length_anarkali_names_the_unbroken_piece(self):
+        prompt = build_image_prompt(_load_spec("walima_anarkali_none"))
+        assert "The silhouette is the floor-length anarkali" in prompt
+        assert "its flare falling to the floor" in prompt
+        # The invariant continuity fact lives in the construction clause.
+        assert "unbroken from shoulder to hem" in prompt
+
+    def test_classic_gharara_names_its_flare_character(self):
+        data = _spec_dict("mehndi_gharara_minimal")
+        data["source_selections"]["silhouette"] = "classic_gharara"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "The silhouette is the classic gharara" in prompt
+        assert "its flare moderate and traditional" in prompt
+        # The shared two-leg trouser fact lives in the construction clause,
+        # not repeated here.
+        assert "each leg fitted to the knee before flaring" in prompt
+
+    def test_slim_modern_gharara_agrees_with_the_construction_clause(self):
+        # The row-16 mechanism: a bare "slim modern gharara" silhouette line
+        # used to sit directly against "flaring below the knee" with nothing
+        # reconciling the two. The dedicated clause now states its own
+        # (subtler) flare explicitly instead of leaving a bare contradiction.
+        data = _spec_dict("mehndi_gharara_minimal")
+        data["source_selections"]["silhouette"] = "slim_modern_gharara"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "the slim modern gharara" in prompt
+        assert "its flare subtle, only below the knee" in prompt
+
+    def test_kalidar_anarkali_names_the_panelled_construction(self):
+        data = _spec_dict("walima_anarkali_none")
+        data["source_selections"]["silhouette"] = "kalidar_anarkali"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "the kalidar anarkali" in prompt
+        assert "built from many stitched flare panels" in prompt
+
+    def test_front_open_anarkali_stays_one_ensemble(self):
+        # The row-17 failure: a front-open anarkali rendered as "a two-piece
+        # lehenga with a bare midriff gap". The real garment does have a front
+        # opening (unlike the other anarkali silhouettes), so the fix cannot
+        # claim full continuity — it anchors the layered opening as one moving
+        # ensemble instead.
+        data = _spec_dict("walima_anarkali_none")
+        data["source_selections"]["silhouette"] = "front_open_anarkali"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "the front-open anarkali" in prompt
+        assert "opening down the front over a fitted inner layer as one ensemble" in prompt
+
+    def test_a_legacy_gharara_silhouette_value_falls_back_unchanged(self):
+        # mehndi_gharara_minimal is a v1 fixture carrying "gharara_set", which
+        # predates the v4 silhouette vocabulary this map is keyed on. It must
+        # keep rendering through the plain 8.2.0 fallback, not silently drop.
+        prompt = build_image_prompt(_load_spec("mehndi_gharara_minimal"))
+        assert "The silhouette is gharara set" in prompt
+
+    def test_silhouette_clauses_are_scoped_to_gharara_and_anarkali_only(self):
+        # A small, evidence-scoped addition, not a map across every silhouette
+        # the questionnaire offers: a lehenga silhouette value renders through
+        # the same plain fallback as before 8.3.0.
+        from sitara.generation.prompt_builder import _SILHOUETTE_CLAUSES
+
+        assert "flared_lehenga" not in _SILHOUETTE_CLAUSES
+        prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
+        assert "The silhouette is flared lehenga" in prompt
 
     def test_no_regional_direction_is_not_invented(self):
         prompt = build_image_prompt(_load_spec("pheras_saree_heavy_no_region"))
@@ -660,6 +739,17 @@ class TestCoverageRequirements:
         prompt = build_image_prompt(_load_spec("nikah_lehenga_head_drape"))
         assert "a closed high neckline covering the collarbone and upper chest" in prompt
 
+    def test_square_neck_is_named_distinctly_from_sweetheart(self):
+        # 8.3.0: the Phase 1 evaluation found a square neckline rendered as a
+        # sweetheart neckline twice in three renders. The clause now names the
+        # flat edge and right-angle corners a curved sweetheart cannot satisfy.
+        data = _spec_dict("nikah_gharara_hex_colour_hijab")
+        data["source_selections"]["neckline_style"] = "square_neck"
+        prompt = build_image_prompt(validate_design_spec(data))
+        assert "a square neckline with a flat straight edge" in prompt
+        assert "two crisp right-angle corners across the chest" in prompt
+        assert "curved like the top of a heart" not in prompt
+
     def test_full_sleeves_rendered_as_visual_requirement(self):
         prompt = build_image_prompt(_load_spec("mehndi_gharara_minimal"))
         assert "full-length sleeves reaching the wrists, covering both arms" in prompt
@@ -738,6 +828,72 @@ class TestCoverageRequirements:
             assert build_image_prompt(_load_spec(name)).startswith(_COMPOSITION)
 
 
+class TestDrapeStyling:
+    """8.3.0: dupatta_style and saree_drape were the only canonical fields in
+    this file with no visual clause map — every value rendered through a bare
+    "dupatta worn as a X" / "saree draped as a X" fallback while every sibling
+    field (garment construction, neckline, sleeves, back, midriff) named a
+    concrete visual shape. The Phase 1 evaluation traced real failures to this
+    gap: a Bengali atpoure and a lehenga-style saree drape both rendered as a
+    generic nivi drape, and a one-shoulder / front-draped dupatta both fell
+    forward and occluded an already-rendered neckline requirement."""
+
+    def test_one_shoulder_dupatta_falls_down_the_back(self):
+        # Anchoring the cascade toward the back keeps it clear of the neckline
+        # requirement stated earlier in the same coverage directive.
+        data = _spec_dict("nikah_gharara_hex_colour_hijab")
+        data["source_selections"]["dupatta_style"] = "one_shoulder"
+        prompt = build_image_prompt(validate_design_spec(data))
+        assert "pinned at one shoulder, falling in a single cascade down the back" in prompt
+
+    def test_front_drape_dupatta_sits_below_the_neckline(self):
+        prompt = build_image_prompt(_load_spec("nikah_gharara_hex_colour_hijab"))
+        assert "carried across the front from one shoulder" in prompt
+        assert "its embellished face on view below the neckline" in prompt
+
+    def test_double_dupatta_names_both_layers(self):
+        prompt = build_image_prompt(_load_spec("baraat_sharara_double_dupatta"))
+        assert "two dupattas, one at the head, one trailing" in prompt
+
+    def test_trail_dupatta_sweeps_behind_like_a_train(self):
+        prompt = build_image_prompt(_load_spec("walima_lehenga_match_fabric_dupatta"))
+        assert "pinned to sweep behind like a trailing train" in prompt
+
+    def test_a_legacy_dupatta_style_value_falls_back_unchanged(self):
+        # walima_anarkali_none carries "shoulder_drape", which predates the v4
+        # dupatta_style vocabulary this map is keyed on.
+        prompt = build_image_prompt(_load_spec("walima_anarkali_none"))
+        assert "Drape: dupatta worn as a shoulder drape." in prompt
+
+    def test_bengali_drape_is_named_distinctly_from_nivi(self):
+        # The row-7 failure: a Bengali atpoure drape rendered as a generic nivi
+        # drape. The defining trait — the pallu wrapped around BOTH shoulders,
+        # not one — is now named explicitly.
+        data = _spec_dict("pheras_saree_heavy_no_region")
+        data["source_selections"]["saree_drape"] = "bengali_drape"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "the Bengali atpoure style" in prompt
+        assert "the pallu wrapped around both shoulders" in prompt
+        assert "the classic nivi style" not in prompt
+
+    def test_seedha_pallu_names_the_right_shoulder(self):
+        data = _spec_dict("pheras_saree_heavy_no_region")
+        data["source_selections"]["saree_drape"] = "seedha_pallu"
+        prompt = build_image_prompt(DesignSpec.model_validate(data))
+        assert "the pallu brought over the right shoulder and fanned across the front" in prompt
+
+    def test_lehenga_drape_saree_names_the_fanned_pleats(self):
+        # The row-15 finding: a half-saree's lehenga-style drape rendered as a
+        # standard full nivi drape.
+        prompt = build_image_prompt(_load_spec("mehndi_saree_open_coverage"))
+        assert "the lehenga style, pleats fanned like a lehenga skirt" in prompt
+
+    def test_nivi_drape_names_the_left_shoulder_pallu(self):
+        prompt = build_image_prompt(_load_spec("walima_saree_sweetheart"))
+        assert "the classic nivi style" in prompt
+        assert "the pallu over the left shoulder" in prompt
+
+
 class TestPositivePhrasingOnly:
     """No builder-authored directive uses negation.
 
@@ -760,12 +916,15 @@ class TestPositivePhrasingOnly:
         }
         for map_name in (
             "_GARMENT_CONSTRUCTION",
+            "_SILHOUETTE_CLAUSES",
             "_COVERAGE_CLAUSES",
             "_NECKLINE_CLAUSES",
             "_SLEEVE_CLAUSES",
             "_BACK_CLAUSES",
             "_MIDRIFF_CLAUSES",
             "_HEAD_COVERING_CLAUSES",
+            "_DUPATTA_STYLE_CLAUSES",
+            "_SAREE_DRAPE_CLAUSES",
         ):
             for key, clause in getattr(pb, map_name).items():
                 wording[f"{map_name}[{key}]"] = clause

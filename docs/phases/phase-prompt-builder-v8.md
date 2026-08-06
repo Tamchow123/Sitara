@@ -286,3 +286,128 @@ second live run.
 Provider adherence stays stochastic. Prompt-level correctness is deterministic and
 snapshot-guarded; whether the model honours it needs an operator-run before/after
 comparison on a fixed DesignSpec, exactly as `5.0.0` required.
+
+## Phase 1/2 evaluation and `8.3.0`
+
+`8.2.0` (not narrated above: an explicit `["none"]` embellishment selection was
+still rendering gold borders and scattered motifs on both live `8.x` runs;
+`8.1.0`'s "unworked, undecorated" wording was grammatically positive but named the
+absence it was trying to avoid, so the unembellished clause and finishing
+directive were rewritten to describe what the cloth positively **is**) was
+followed by a full scoped evaluation rather than another single ad hoc run —
+`docs/phases/prompt-fidelity-evaluation-plan.md`. Phase 1 rendered all 20 matrix
+designs live, builder frozen at `8.2.0` (`docs/phases/prompt-fidelity-phase1-results.json`).
+Phase 2 blind-rubric-reviewed all 20 across 19 dimensions, subagent-graded then
+independently reconciled (`docs/phases/prompt-fidelity-phase2-review.md`). This
+section is Phase 3: targeted fixes for the failure modes Phase 2 verdicted
+fixable, and nothing else.
+
+### What Phase 2 found, and what `8.3.0` fixes
+
+**Garment construction (gharara, anarkali) — 3 of 6 renders lost the
+one-piece/two-piece identity**, in both directions: a gharara rendered as "a
+generic fitted-bodice ballgown" and, separately, "a continuous gown, no
+knee-flare"; an anarkali rendered as "a two-piece lehenga with a bare midriff
+gap". `D3`'s construction clause already named one-piece-vs-two-piece, but not
+strongly enough for these two garments specifically, and — for the second gharara
+failure — a bare `"The silhouette is slim modern gharara"` line sat directly
+beside the construction clause's `"flaring below the knee"`, two mandatory
+sentences pulling in opposite directions with nothing reconciling them.
+
+Fix: `_GARMENT_CONSTRUCTION["gharara"]` now says "each leg" and "wide-legged
+trousers" explicitly, rather than a bare "separate trousers" that could as
+easily describe a skirt panel;
+`_GARMENT_CONSTRUCTION["anarkali"]` drops "flared" (shared vocabulary with the
+lehenga clause's "flared skirt") for "unbroken from shoulder to hem". A new
+`_SILHOUETTE_CLAUSES` map — scoped ONLY to gharara's 3 and anarkali's 4
+silhouette values, not a speculative map across all 22 the questionnaire offers —
+carries each silhouette's own flare character as a delta on top of the
+construction clause rather than repeating it, so the two mandatory clauses always
+agree. `front_open_anarkali` and `jacket_style_anarkali` are a deliberate
+exception: the real garment does have a visible front seam or jacket layer, so
+these two name the opening explicitly while still anchoring it as one moving
+ensemble, rather than falsely claiming full continuity.
+
+**Neckline shape (square vs sweetheart) — a square neckline read as a
+sweetheart twice in three renders.** `"a square neckline cut across the chest"`
+gave the model no geometry to weigh against "South Asian bridalwear"'s sweetheart
+prior. Fix: names the flat edge and right-angle corners explicitly — a curved
+heart-shaped dip cannot satisfy that description, and the wording never says what
+the shape is not.
+
+**Drape styling (dupatta_style, saree_drape) — the only two canonical fields in
+this file with no visual clause map at all**, rendering through a bare `"dupatta
+worn as a X"` / `"saree draped as a X"` fallback while every sibling field
+(construction, neckline, sleeves, back, midriff) named a concrete shape. Two
+distinct failure patterns traced to this gap:
+
+- A Bengali atpoure drape and a half-saree's lehenga-style drape both rendered as
+  a generic nivi drape — the single most iconic saree styling in bridalwear
+  imagery, and the one the bare fallback gave the model nothing to compete
+  against.
+- A one-shoulder and a front-draped dupatta both fell forward and occluded an
+  already-rendered neckline requirement stated earlier in the same directive.
+
+Fix: `_DUPATTA_STYLE_CLAUSES` (5 entries) and `_SAREE_DRAPE_CLAUSES` (4 entries),
+following the same source-controlled-map pattern as every sibling field.
+`bengali_drape` names its defining trait (pallu wrapped around **both**
+shoulders, nivi's is one) explicitly. `one_shoulder` anchors its cascade down the
+back and `front_drape` anchors its fall below the neckline — both positive
+placements, not negations of the neckline clause.
+
+### What `8.3.0` deliberately does not touch
+
+Phase 2's single clearest finding: embellishment-density and midriff-coverage
+restraint (`none`/`minimal` selections, bare/semi-sheer midriff choices) fail
+60–83% of the time, always in the same direction — **more** decoration and
+coverage than requested, never less. `8.2.0`'s unembellished-material rewrite was
+already a targeted fix at this exact class and did not resolve it (3 of 5 `none`
+designs in Phase 1 still showed embellishment). A same-direction failure that
+survives a targeted fix, at this rate, reads as the model's own convention prior
+overriding the prompt, not a prompt-clarity gap. The evaluation plan's own
+stopping rule is explicit: no third prompt attempt at the same requirement class.
+This is reported as a finding for a product decision, not chased further here.
+
+Shot orientation (one design rendered back-facing) is left alone too — Phase 2's
+own caveat is that the rubric has no dimension for it yet and one sample out of
+20 is too little to diagnose prompt-level cause versus provider stochasticity.
+
+### Budget cost of the fix
+
+Every new/lengthened clause is mandatory, so it comes out of the same
+`IMAGE_PROMPT_TARGET_CHARS` narrative budget as before. The worst-case fixture
+(`nikah_gharara_hex_colour_hijab` — gharara construction + farshi silhouette +
+front-drape dupatta + heavy embellishment + a hex colour, all in one spec) went
+from 1,467 to 1,598 characters on the first pass, briefly over target; every new
+clause was then trimmed for economy — deduplicating the silhouette clauses
+against the construction clause they sit beside was the single largest saving —
+until all eleven reviewed fixtures cleared the target again,
+`nikah_gharara_hex_colour_hijab` landing back at exactly 1,467: three new,
+more-specific clauses at no net length cost. The visible cost: several fixtures
+now drop the lowest-priority embellishment `placement`/`motifs` narrative (never
+the mandatory density/style selections) under the tighter budget. Acceptable —
+Phase 2 never flagged that narrative detail as a problem, and the requirements
+it verdicted broken (garment identity, neckline shape, drape styling) all rank
+higher in the section-priority order than embellishment narrative already did
+before `8.3.0`.
+
+### Acceptance (`8.3.0`, additive to the criteria above)
+
+1. `PROMPT_BUILDER_VERSION == "8.3.0"`; snapshots and manifest regenerated
+   through the guarded command; all eleven reviewed fixtures reviewed line by
+   line, not just diffed by hash.
+2. Every fixture prompt stays ≤ `IMAGE_PROMPT_TARGET_CHARS`.
+3. `_SILHOUETTE_CLAUSES`, `_DUPATTA_STYLE_CLAUSES` and `_SAREE_DRAPE_CLAUSES` are
+   covered by the same static negation scan as every other clause map.
+4. A silhouette, dupatta or saree-drape value with no entry in its new map
+   renders exactly as it did under `8.2.0` — verified against a legacy-schema
+   fixture for each map, not just asserted.
+5. Embellishment-density and midriff-coverage restraint are unchanged by this
+   version: no clause touching either was edited.
+
+### Next
+
+Phase 4 (re-render only the Phase 1 designs that failed) and Phase 5 (regression
+sample of Phase 1's passes) are next in
+`docs/phases/prompt-fidelity-evaluation-plan.md`, both live-spend and both
+requiring their own fresh authorization — not implied by this commit.
