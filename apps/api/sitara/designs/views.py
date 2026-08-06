@@ -252,9 +252,18 @@ def _workspace_unavailable(exc: WorkspaceCoordinationError) -> Response:
 
 
 def _parse_body(request) -> tuple[dict | list | None, Response | None]:
+    """The decoded JSON body, or a controlled 400.
+
+    ``RecursionError`` alongside ``ParseError`` because a pathologically nested
+    body defeats a byte ceiling. CPython's JSON scanner recurses once per nesting
+    level and raises ``RecursionError`` — a ``RuntimeError``, so it slips past
+    DRF's own ``except ValueError`` and escaped as a 500. Measured: about 40KB of
+    ``[[[[…]]]]`` was enough, on every endpoint that parses a JSON body. The stack
+    has fully unwound to this frame by the time it is caught here, so there is
+    headroom to build the response."""
     try:
         return request.data, None
-    except ParseError:
+    except (ParseError, RecursionError):
         return None, _error(
             "invalid_json", "The request body is not valid JSON.", status.HTTP_400_BAD_REQUEST
         )
