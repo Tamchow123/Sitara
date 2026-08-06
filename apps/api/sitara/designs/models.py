@@ -581,6 +581,78 @@ class DesignVersion(models.Model):
         )
 
 
+class DesignAnnotationDocument(models.Model):
+    """The owner's private editorial marks over one immutable generated image.
+
+    An annotation is feedback attached to a version, not a change to it: it is
+    never a refinement, a new generated version, an AI prompt or a public
+    comment, and it never touches the version's image bytes, storage key,
+    hashes, processor version or DesignSpec. The generated image stays exactly
+    as it was ingested; the marks live here, beside it.
+
+    Ownership is DERIVED, never copied. The only path is::
+
+        DesignAnnotationDocument -> DesignVersion -> Design -> DesignSession
+
+    so this table deliberately carries no user id, no DesignSession id, no raw
+    Django session key, no public token and no storage key or signed URL. A
+    later ownership change or retention purge therefore needs no write here —
+    the CASCADE below removes the document with its version, and the
+    ownership-first query in ``designs.ownership`` remains the single access
+    control.
+
+    One document per version (``OneToOneField``), so a refined version gets its
+    own independent document and annotations are never copied from parent to
+    child. ``revision`` counts WRITES, not content changes, and is the whole of
+    the optimistic-concurrency contract: a client sends the revision it believes
+    it holds, and a mismatch is a conflict rather than a silent overwrite. It
+    starts at 1, so the API can use ``revision: 0`` as the unambiguous
+    "never saved" signal without a separate 404 branch.
+
+    ``document`` holds the validated overlay (see
+    :mod:`sitara.designs.annotation_schema`), including the ``image_width`` and
+    ``image_height`` it was drawn against — bound at first save from the
+    version's own canonical dimensions and re-checked on every write, because a
+    document whose dimensions disagreed with the image would place every mark
+    wrongly."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    design_version = models.OneToOneField(
+        DesignVersion,
+        on_delete=models.CASCADE,
+        related_name="annotation_document",
+    )
+    schema_version = models.PositiveSmallIntegerField()
+    document = models.JSONField()
+    revision = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            # A stored document has always been written at least once; only the
+            # API's synthetic "never saved" response uses revision 0.
+            models.CheckConstraint(
+                condition=Q(revision__gte=1),
+                name="designs_annotation_revision_positive",
+            ),
+            # Pinned to the exact currently-valid version, matching
+            # inspiration_context_schema_version and
+            # refinement_request_schema_version on DesignVersion. This is what
+            # turns "bump only with a documented migration strategy" from prose
+            # into a forcing function: introducing schema 2 requires editing and
+            # reviewing a migration at the moment it happens, rather than a
+            # stray write silently pairing a v2 marker with a v1 document.
+            models.CheckConstraint(
+                condition=Q(schema_version=1),
+                name="designs_annotation_schema_version_valid",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"annotations for version {self.design_version_id}"
+
+
 class GenerationAttempt(models.Model):
     """One durable asynchronous generation job for a Design (Phase 10).
 
