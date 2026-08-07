@@ -516,3 +516,31 @@ class DesignResultSerializer(serializers.Serializer):
 
 class DesignResultResponseSerializer(serializers.Serializer):
     result = DesignResultSerializer()
+
+
+# ---------------------------------------------------------------------------
+# Phase 19: account render email delivery (documentation-only)
+# ---------------------------------------------------------------------------
+
+
+class RenderSendStatusSerializer(serializers.Serializer):
+    """Deliberately only a status.
+
+    No recipient address: the client already knows the account's own address
+    from ``/auth/me`` and uses that for its confirmation copy, so echoing it
+    here would put an address into a response body for no benefit. No job id
+    either — a send is fire-and-forget, with no progress to poll, unlike
+    generation."""
+
+    status = serializers.ChoiceField(
+        choices=["queued"],
+        help_text=(
+            "Always 'queued'. A 202 means the delivery task was enqueued, NOT "
+            "that a message was sent — rendering and SMTP happen afterwards in "
+            "a worker."
+        ),
+    )
+
+
+class RenderSendResponseSerializer(serializers.Serializer):
+    send = RenderSendStatusSerializer()

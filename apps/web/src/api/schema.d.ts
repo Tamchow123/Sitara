@@ -320,6 +320,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/designs/{design_id}/versions/{version_id}/annotations/send/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email yourself this design version's annotated concept
+         * @description Queues the annotated composite — the image with your marks drawn on it and a numbered note legend beneath — as a PNG attachment. Your note text is in the attachment only; the message body never carries it. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        post: operations["designs_versions_annotations_send_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/designs/{design_id}/versions/{version_id}/images/": {
         parameters: {
             query?: never;
@@ -354,6 +374,26 @@ export interface paths {
         get: operations["designs_version_result_retrieve"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/designs/{design_id}/versions/{version_id}/send/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email yourself this design version's concept image
+         * @description Queues the plain canonical render as a PNG attachment. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        post: operations["designs_versions_send_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1012,7 +1052,7 @@ export interface components {
             design_id: string;
             /** Format: uuid */
             design_version_id: string | null;
-            status: components["schemas"]["StatusEnum"];
+            status: components["schemas"]["GenerationJobStatusEnum"];
             error_code: (components["schemas"]["ErrorCodeEnum"] | components["schemas"]["NullEnum"]) | null;
             generation_kind: components["schemas"]["GenerationKindEnum"];
             is_demo: boolean;
@@ -1028,6 +1068,15 @@ export interface components {
         GenerationJobResponse: {
             job: components["schemas"]["GenerationJob"];
         };
+        /**
+         * @description * `queued` - queued
+         *     * `running_text` - running_text
+         *     * `running_image` - running_image
+         *     * `succeeded` - succeeded
+         *     * `failed` - failed
+         * @enum {string}
+         */
+        GenerationJobStatusEnum: "queued" | "running_text" | "running_image" | "succeeded" | "failed";
         /**
          * @description * `initial` - initial
          *     * `refinement` - refinement
@@ -1264,6 +1313,31 @@ export interface components {
             password: string;
             password_confirm: string;
         };
+        RenderSendResponse: {
+            send: components["schemas"]["RenderSendStatus"];
+        };
+        /**
+         * @description Deliberately only a status.
+         *
+         *     No recipient address: the client already knows the account's own address
+         *     from ``/auth/me`` and uses that for its confirmation copy, so echoing it
+         *     here would put an address into a response body for no benefit. No job id
+         *     either — a send is fire-and-forget, with no progress to poll, unlike
+         *     generation.
+         */
+        RenderSendStatus: {
+            /**
+             * @description Always 'queued'. A 202 means the delivery task was enqueued, NOT that a message was sent — rendering and SMTP happen afterwards in a worker.
+             *
+             *     * `queued` - queued
+             */
+            status: components["schemas"]["RenderSendStatusStatusEnum"];
+        };
+        /**
+         * @description * `queued` - queued
+         * @enum {string}
+         */
+        RenderSendStatusStatusEnum: "queued";
         /** @description A rule's ``then`` clause. */
         RuleActionSchema: {
             action: components["schemas"]["ActionEnum"];
@@ -1308,15 +1382,6 @@ export interface components {
             image_url: string;
             thumbnail_url: string;
         };
-        /**
-         * @description * `queued` - queued
-         *     * `running_text` - running_text
-         *     * `running_image` - running_image
-         *     * `succeeded` - succeeded
-         *     * `failed` - failed
-         * @enum {string}
-         */
-        StatusEnum: "queued" | "running_text" | "running_image" | "succeeded" | "failed";
         StepSchema: {
             id: string;
             title: string;
@@ -2275,6 +2340,77 @@ export interface operations {
             };
         };
     };
+    designs_versions_annotations_send_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued for delivery. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenderSendResponse"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description design_image_not_ready, or email_recipient_unavailable when the workspace is anonymous and so has no account address. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description email_send_limit_reached. Carries Retry-After. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description email_delivery_disabled when the operator has not enabled account email, or email_send_unavailable when the throttle store cannot be reached. Neither carries Retry-After. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     designs_version_images_retrieve: {
         parameters: {
             query?: never;
@@ -2363,6 +2499,77 @@ export interface operations {
                 };
             };
             /** @description design_result_unavailable: the stored content is corrupt, unsupported or unsafe. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_versions_send_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued for delivery. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenderSendResponse"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description design_image_not_ready, or email_recipient_unavailable when the workspace is anonymous and so has no account address. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description email_send_limit_reached. Carries Retry-After. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description email_delivery_disabled when the operator has not enabled account email, or email_send_unavailable when the throttle store cannot be reached. Neither carries Retry-After. */
             503: {
                 headers: {
                     [name: string]: unknown;

@@ -45,31 +45,96 @@ def application_modules() -> list[Path]:
     ]
 
 
+MAIL_API = "django.core.mail"
+
+
+def _reaches_the_mail_api(dotted: str) -> bool:
+    """Does binding this dotted name put ``django.core.mail`` within reach?
+
+    Both directions, and they are different questions. ``django.core.mail`` and
+    anything under it (``django.core.mail.backends.smtp``) IS the API. A proper
+    PREFIX of it (``django``, ``django.core``) is not the API but hands over a
+    name from which the API is one attribute chain away.
+
+    Deliberately not ``dotted.startswith(MAIL_API)``, which would also match a
+    sibling like ``django.core.mailer``."""
+    return (
+        dotted == MAIL_API or dotted.startswith(MAIL_API + ".") or MAIL_API.startswith(dotted + ".")
+    )
+
+
 def imports_djangos_mail_api(source: str) -> bool:
-    """Does this module import anything from ``django.core.mail``?
+    """Does this module have Django's mail API within reach?
 
     Parsed, not grepped. A substring search for ``EmailMessage(`` — which is
     what this test did first — misses every other way to send mail:
     ``send_mail()``, ``EmailMultiAlternatives()``, ``mail_admins()``,
     ``get_connection().send_messages()``, and an aliased import
     (``from django.core.mail import EmailMessage as _Msg``) that leaves the
-    substring nowhere in the file. Asking what a module IMPORTS rather than how
+    substring nowhere in the file. Asking what a module REACHES rather than how
     a call site is spelled closes all of them at once, including spellings
     Django has not invented yet.
 
-    It also avoids the false positive that a substring search hits immediately:
+    Two independent checks, because neither alone is enough:
+
+    1. **What each import binds.** Applied symmetrically to ``import x`` and
+       ``from x import y`` — the first version of this check applied the
+       proper-prefix half to ``ast.Import`` only, so ``from django.core import
+       mail``, the single most idiomatic spelling of all, sailed straight
+       through it.
+    2. **Any literal ``django.core.mail...`` attribute chain**, whoever bound
+       the root. ``import django.db.models.deletion`` also binds the name
+       ``django``, so an import check alone cannot be complete without flagging
+       the fourteen migrations that legitimately do exactly that. Reading the
+       chain at the use site closes that class without a single exception.
+
+    It also avoids the false positive a substring search hits immediately:
     ``config/settings.py`` names a backend as a STRING
     (``"django.core.mail.backends.smtp.EmailBackend"``) without importing
-    anything, which is configuration, not a send.
+    anything, which is configuration, not a send. A string is not an
+    ``ast.Attribute``, so neither check sees it.
+
+    What this does NOT catch, all of it one family — reaching the module
+    through a runtime string rather than a name the parser can see:
+    ``importlib.import_module("django.core.mail")``, ``__import__``,
+    ``sys.modules["django.core.mail"]``, ``getattr`` chains, ``exec`` of a
+    source string, or a name laundered through an alias of an alias. Those are
+    deliberate evasions of a visible test rather than the ordinary
+    second-call-site mistake this guards against — and someone willing to write
+    one could equally delete this file.
     """
-    for node in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            if (node.module or "").startswith("django.core.mail"):
-                return True
+            if node.level:
+                continue  # relative — cannot reach django from inside this app
+            for alias in node.names:
+                if _reaches_the_mail_api(f"{node.module}.{alias.name}"):
+                    return True
         elif isinstance(node, ast.Import):
-            if any(alias.name.startswith("django.core.mail") for alias in node.names):
-                return True
+            for alias in node.names:
+                if _reaches_the_mail_api(alias.name):
+                    return True
+        elif isinstance(node, ast.Attribute) and _dotted_chain(node) == MAIL_API:
+            return True
     return False
+
+
+def _dotted_chain(node: ast.Attribute) -> str | None:
+    """``django.core.mail`` for that attribute expression, else ``None``.
+
+    Returns the chain only up to the mail package itself, so both
+    ``django.core.mail.send_mail(...)`` and a bare ``django.core.mail``
+    reference match on their inner node during the walk."""
+    parts: list[str] = []
+    current: ast.expr = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return None
+    parts.append(current.id)
+    return ".".join(reversed(parts))
 
 
 def test_no_other_module_reaches_for_djangos_mail_api():
@@ -99,6 +164,18 @@ def test_no_other_module_reaches_for_djangos_mail_api():
         "import django.core.mail\ndjango.core.mail.send_mail('s', 'b', 'f', ['t'])",
         "import django.core.mail as m\nm.send_mail('s', 'b', 'f', ['t'])",
         "from django.core.mail.backends.smtp import EmailBackend\nEmailBackend().send_messages([])",
+        # A bare root import plus a fully-qualified attribute chain.
+        "import django\ndjango.core.mail.send_mail('s', 'b', 'f', ['t'])",
+        "import django.core\ndjango.core.mail.get_connection().send_messages([])",
+        # The `from x import y` spellings. An earlier version of this check
+        # applied its proper-prefix half to `import x` only, so every one of
+        # these passed — and the first is more idiomatic than anything above it.
+        "from django.core import mail\nmail.send_mail('s', 'b', 'f', ['t'])",
+        "from django.core import mail as m\nm.send_mail('s', 'b', 'f', ['t'])",
+        "from django import core\ncore.mail.send_mail('s', 'b', 'f', ['t'])",
+        # An unrelated submodule import also binds the root name, so the
+        # attribute chain is what has to be read, not the import.
+        "import django.db.models.deletion\ndjango.core.mail.send_mail('s', 'b', 'f', ['t'])",
     ],
 )
 def test_the_choke_point_check_catches_every_evasion(evasion):
@@ -110,12 +187,34 @@ def test_the_choke_point_check_catches_every_evasion(evasion):
     assert imports_djangos_mail_api(evasion)
 
 
-def test_the_choke_point_check_does_not_fire_on_configuration():
-    """A backend named as a string is configuration, not a send — otherwise the
-    guard would flag `config/settings.py` and have to be weakened by exception."""
-    assert not imports_djangos_mail_api(
-        'EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"'
-    )
+@pytest.mark.parametrize(
+    "innocent",
+    [
+        # Configuration, not a send. A string is not an import or an attribute
+        # chain — otherwise the guard would flag `config/settings.py` and have
+        # to be weakened by an exception list.
+        'EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"',
+        # Every `django.core.*` and `from django import ...` spelling the tree
+        # actually uses. Each one binds a name that is NOT a prefix of the mail
+        # package, so none of them may fire.
+        "from django.core.exceptions import ImproperlyConfigured",
+        "from django.core.files.storage import storages",
+        "from django.core.cache import cache",
+        "from django.core.management.base import BaseCommand",
+        "from django import forms",
+        "import django.core.validators",
+        "import django.db.models.deletion",
+        "import django.utils.timezone",
+        # A same-prefixed sibling that is not the mail package.
+        "from django.core import mailer_stub",
+    ],
+)
+def test_the_choke_point_check_does_not_fire_on_innocent_imports(innocent):
+    """The other half of a useful guard.
+
+    A check that flagged these would need an exception list, and an exception
+    list is where a real second call site eventually hides."""
+    assert not imports_djangos_mail_api(innocent)
 
 
 def test_the_send_entry_point_takes_a_user_row_not_an_address():

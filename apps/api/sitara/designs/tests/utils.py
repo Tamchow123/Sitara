@@ -4,6 +4,7 @@ All API flows run with REAL CSRF enforcement (enforce_csrf_checks=True).
 Auth calls get a unique REMOTE_ADDR and email per test so the Redis-backed
 authentication rate limiters never bleed between tests."""
 
+import io
 import json
 import threading
 import uuid
@@ -14,6 +15,7 @@ from django.core.files.storage import storages
 from django.db import connection
 from django.test import Client
 from django.utils import timezone
+from PIL import Image
 
 from sitara.designs.models import DesignVersion
 from sitara.questionnaire.models import QuestionnaireVersion
@@ -191,6 +193,18 @@ def create_pending_design_version(design_id, *, version_number: int = 1) -> Desi
         image_prompt="A test prompt.",
         prompt_builder_version="3.0.0",
     )
+
+
+def synthetic_original(width: int = 384, height: int = 512) -> bytes:
+    """A deterministic synthetic image — never a downloaded or licensed one.
+
+    Shared rather than copied per suite: two independently-tuned copies of the
+    same encoding drift silently, and the one left behind keeps passing while
+    quietly testing a shape nothing produces any more."""
+    image = Image.new("RGB", (width, height), (120, 90, 70))
+    buffer = io.BytesIO()
+    image.save(buffer, format="WEBP", quality=80, method=0)
+    return buffer.getvalue()
 
 
 def create_ready_design_version(

@@ -1417,6 +1417,113 @@
                 }
             }
         },
+        "/api/v1/designs/{design_id}/versions/{version_id}/annotations/send/": {
+            "post": {
+                "operationId": "designs_versions_annotations_send_create",
+                "description": "Queues the annotated composite — the image with your marks drawn on it and a numbered note legend beneath — as a PNG attachment. Your note text is in the attachment only; the message body never carries it. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Email yourself this design version's annotated concept",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RenderSendResponse"
+                                }
+                            }
+                        },
+                        "description": "Queued for delivery."
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "design_image_not_ready, or email_recipient_unavailable when the workspace is anonymous and so has no account address."
+                    },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "email_send_limit_reached. Carries Retry-After."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "email_delivery_disabled when the operator has not enabled account email, or email_send_unavailable when the throttle store cannot be reached. Neither carries Retry-After."
+                    }
+                }
+            }
+        },
         "/api/v1/designs/{design_id}/versions/{version_id}/images/": {
             "get": {
                 "operationId": "designs_version_images_retrieve",
@@ -1569,6 +1676,113 @@
                             }
                         },
                         "description": "design_result_unavailable: the stored content is corrupt, unsupported or unsafe."
+                    }
+                }
+            }
+        },
+        "/api/v1/designs/{design_id}/versions/{version_id}/send/": {
+            "post": {
+                "operationId": "designs_versions_send_create",
+                "description": "Queues the plain canonical render as a PNG attachment. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Email yourself this design version's concept image",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RenderSendResponse"
+                                }
+                            }
+                        },
+                        "description": "Queued for delivery."
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "design_image_not_ready, or email_recipient_unavailable when the workspace is anonymous and so has no account address."
+                    },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "email_send_limit_reached. Carries Retry-After."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "email_delivery_disabled when the operator has not enabled account email, or email_send_unavailable when the throttle store cannot be reached. Neither carries Retry-After."
                     }
                 }
             }
@@ -3079,7 +3293,7 @@
                         "nullable": true
                     },
                     "status": {
-                        "$ref": "#/components/schemas/StatusEnum"
+                        "$ref": "#/components/schemas/GenerationJobStatusEnum"
                     },
                     "error_code": {
                         "nullable": true,
@@ -3141,6 +3355,17 @@
                 "required": [
                     "job"
                 ]
+            },
+            "GenerationJobStatusEnum": {
+                "enum": [
+                    "queued",
+                    "running_text",
+                    "running_image",
+                    "succeeded",
+                    "failed"
+                ],
+                "type": "string",
+                "description": "* `queued` - queued\n* `running_text` - running_text\n* `running_image` - running_image\n* `succeeded` - succeeded\n* `failed` - failed"
             },
             "GenerationKindEnum": {
                 "enum": [
@@ -3692,6 +3917,41 @@
                     "password_confirm"
                 ]
             },
+            "RenderSendResponse": {
+                "type": "object",
+                "properties": {
+                    "send": {
+                        "$ref": "#/components/schemas/RenderSendStatus"
+                    }
+                },
+                "required": [
+                    "send"
+                ]
+            },
+            "RenderSendStatus": {
+                "type": "object",
+                "description": "Deliberately only a status.\n\nNo recipient address: the client already knows the account's own address\nfrom ``/auth/me`` and uses that for its confirmation copy, so echoing it\nhere would put an address into a response body for no benefit. No job id\neither — a send is fire-and-forget, with no progress to poll, unlike\ngeneration.",
+                "properties": {
+                    "status": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/RenderSendStatusStatusEnum"
+                            }
+                        ],
+                        "description": "Always 'queued'. A 202 means the delivery task was enqueued, NOT that a message was sent — rendering and SMTP happen afterwards in a worker.\n\n* `queued` - queued"
+                    }
+                },
+                "required": [
+                    "status"
+                ]
+            },
+            "RenderSendStatusStatusEnum": {
+                "enum": [
+                    "queued"
+                ],
+                "type": "string",
+                "description": "* `queued` - queued"
+            },
             "RuleActionSchema": {
                 "type": "object",
                 "description": "A rule's ``then`` clause.",
@@ -3811,17 +4071,6 @@
                     "thumbnail_url",
                     "title"
                 ]
-            },
-            "StatusEnum": {
-                "enum": [
-                    "queued",
-                    "running_text",
-                    "running_image",
-                    "succeeded",
-                    "failed"
-                ],
-                "type": "string",
-                "description": "* `queued` - queued\n* `running_text` - running_text\n* `running_image` - running_image\n* `succeeded` - succeeded\n* `failed` - failed"
             },
             "StepSchema": {
                 "type": "object",

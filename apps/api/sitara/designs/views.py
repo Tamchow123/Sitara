@@ -62,6 +62,12 @@ from sitara.generation.refinement import (
     normalise_refinement_request,
 )
 from sitara.generation.refinement_service import RefinementLimitReached, RefinementSourceUnavailable
+from sitara.media.account_delivery import (
+    AccountEmailDisabled,
+    AccountEmailRecipientUnavailable,
+    recipient_for,
+    require_account_email_enabled,
+)
 from sitara.media.delivery import issue_design_image_urls
 from sitara.media.exceptions import (
     DesignImageDeliveryUnavailable,
@@ -85,7 +91,13 @@ from .annotation_service import (
     replace_annotation_document,
 )
 from .jobs import _iso, public_job_payload
-from .models import Design, DesignInspirationUpload, DesignVersion, GenerationAttempt
+from .models import (
+    Design,
+    DesignInspirationUpload,
+    DesignRenderDelivery,
+    DesignVersion,
+    GenerationAttempt,
+)
 from .openapi import (
     AnnotationConflictErrorSerializer,
     AnnotationDocumentResponseSerializer,
@@ -98,8 +110,18 @@ from .openapi import (
     GenerationJobResponseSerializer,
     InspirationUploadResponseSerializer,
     InspirationUploadWriteSerializer,
+    RenderSendResponseSerializer,
 )
 from .ownership import accessible_designs, accessible_generation_attempts
+from .render_delivery import (
+    RenderDeliveryThrottled,
+    RenderDeliveryThrottleUnavailable,
+    RenderNotReady,
+    delivery_is_terminal,
+    enforce_send_throttles,
+    owner_of,
+    require_render_ready,
+)
 from .result import (
     DesignResultNotReady,
     DesignResultUnavailable,
@@ -122,6 +144,7 @@ from .services import (
     resolve_current_design_session,
     update_design_draft,
 )
+from .tasks import send_design_render
 from .upload_service import (
     InspirationUploadError,
     InspirationUploadThrottled,
@@ -1066,6 +1089,226 @@ class DesignVersionAnnotationsView(APIView):
         except AnnotationVersionGone:
             return _not_found()
         return Response(status=status.HTTP_204_NO_CONTENT, headers=NO_STORE)
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class _DesignVersionSendView(APIView):
+    """Queue an email of one owned version's render to the owner (Phase 19, §8).
+
+    Two concrete endpoints subclass this — the concept screen sends the plain
+    canonical render, the annotation workspace sends the annotated composite —
+    differing only in ``kind``. Email replaces download entirely; removing the
+    download button is a product decision, **not** a privacy control, since the
+    image renders in the browser and can always be saved.
+
+    **The recipient is never accepted from the caller, in any field, ever.** It
+    is ``request.user.email``, read server-side, and the task re-derives it
+    independently from the design's own session. This view has no request body
+    at all, which is the cheapest way to guarantee it: there is nothing to
+    parse, so there is nothing an address could arrive in. An endpoint that
+    mails an attachment to a caller-chosen address is an open relay.
+
+    Order matters and is fixed: CSRF, then ownership, then the gate, then
+    readiness, then the throttles. Throttling last means a cross-origin page
+    cannot burn a victim's quota, and a throttled caller still cannot
+    distinguish an owned design from one that never existed.
+
+    The response carries no address. The client already knows the account's own
+    address from ``/auth/me`` and uses that for its confirmation copy — echoing
+    it here would put it in a response body for no benefit."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    #: Set by each concrete subclass.
+    kind: str = ""
+
+    def _get_owned_version(self, request, design_id: str, version_id: str):
+        # Ownership filter FIRST, UUID lookup second — never the reverse.
+        design = accessible_designs(request).filter(pk=design_id).first()
+        if design is None:
+            return None
+        return DesignVersion.objects.filter(design=design, pk=version_id).first()
+
+    def post(self, request, design_id: str, version_id: str):
+        version = self._get_owned_version(request, design_id, version_id)
+        if version is None:
+            return _not_found()
+
+        try:
+            require_account_email_enabled()
+        except AccountEmailDisabled:
+            return _error(
+                "email_delivery_disabled",
+                "Emailing your concept is not available at the moment.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            require_render_ready(version)
+        except RenderNotReady:
+            return _error(
+                "design_image_not_ready",
+                "This design version has no viewable image yet.",
+                status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            # The owning account's address, from the row. An anonymous workspace
+            # owns designs but has no account, and there is deliberately no
+            # fallback: no prompt for an address, no silent success.
+            recipient = recipient_for(owner_of(version))
+        except AccountEmailRecipientUnavailable:
+            return _error(
+                "email_recipient_unavailable",
+                "Sign in to have your concept emailed to your account address.",
+                status.HTTP_409_CONFLICT,
+            )
+
+        if delivery_is_terminal(version, self.kind):
+            # This render's delivery row is past the point where a send can
+            # happen, so the task would claim nothing and no-op. Charging four
+            # counters for that would let repeated sends of a finished render
+            # exhaust the quota a genuinely new one needs — the two kinds share
+            # a per-account ceiling. Still 202, and unchanged from the enqueuing
+            # path: the task no-ops either way, so there is nothing here for the
+            # response to distinguish.
+            logger.info(
+                "render_send.already_terminal",
+                extra={"design_version_id": str(version.pk), "kind": self.kind},
+            )
+            return Response(
+                {"send": {"status": "queued"}},
+                status=status.HTTP_202_ACCEPTED,
+                headers=NO_STORE,
+            )
+
+        try:
+            enforce_send_throttles(request, recipient)
+        except RenderDeliveryThrottled as exc:
+            return _error(
+                "email_send_limit_reached",
+                "You have sent this many concepts for now. Please try again later.",
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Cache-Control": "no-store", "Retry-After": str(exc.retry_after)},
+            )
+        except RenderDeliveryThrottleUnavailable:
+            # An infrastructure fault is not the caller's abuse, so this is a
+            # 503 rather than the 429 — and carries no Retry-After, because no
+            # recovery window is known.
+            return _error(
+                "email_send_unavailable",
+                "Emailing your concept is temporarily unavailable. Please try again later.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            # Row UUIDs only. No address, no bytes and no URL crosses the queue.
+            send_design_render.delay(str(version.pk), self.kind)
+        except Exception as exc:
+            # The broker is a SECOND Redis, configured independently of the
+            # throttle cache (CELERY_BROKER_URL vs REDIS_CACHE_URL, different
+            # databases by default), so it can be down while the cache that just
+            # answered is healthy. Without this the caller would get an
+            # unhandled 500 instead of the documented envelope, having already
+            # spent throttle quota on a send that never queued. Same broad catch
+            # at the same boundary as generation/pipeline.py's QueueUnavailable.
+            logger.warning(
+                "render_send.enqueue_failed",
+                extra={
+                    "design_version_id": str(version.pk),
+                    "kind": self.kind,
+                    "exception_type": type(exc).__name__,
+                },
+            )
+            return _error(
+                "email_send_unavailable",
+                "Emailing your concept is temporarily unavailable. Please try again later.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(
+            {"send": {"status": "queued"}},
+            status=status.HTTP_202_ACCEPTED,
+            headers=NO_STORE,
+        )
+
+
+_SEND_RESPONSES = {
+    202: OpenApiResponse(RenderSendResponseSerializer, description="Queued for delivery."),
+    403: OpenApiResponse(ErrorEnvelopeSerializer, description="CSRF token missing/invalid."),
+    404: OpenApiResponse(
+        ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+    ),
+    409: OpenApiResponse(
+        ErrorEnvelopeSerializer,
+        description=(
+            "design_image_not_ready, or email_recipient_unavailable when the "
+            "workspace is anonymous and so has no account address."
+        ),
+    ),
+    429: OpenApiResponse(
+        ErrorEnvelopeSerializer,
+        description="email_send_limit_reached. Carries Retry-After.",
+    ),
+    503: OpenApiResponse(
+        ErrorEnvelopeSerializer,
+        description=(
+            "email_delivery_disabled when the operator has not enabled account "
+            "email, or email_send_unavailable when the throttle store cannot be "
+            "reached. Neither carries Retry-After."
+        ),
+    ),
+}
+
+_SEND_NOTE = (
+    "The recipient is always your own account address, read server-side. No "
+    "request body is accepted and no address may be supplied. The response "
+    "never contains an address. Delivery is asynchronous: a 202 means queued, "
+    "not sent."
+)
+
+
+class DesignVersionSendView(_DesignVersionSendView):
+    kind = DesignRenderDelivery.PLAIN
+
+    @extend_schema(
+        operation_id="designs_versions_send_create",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=None,
+        responses=_SEND_RESPONSES,
+        summary="Email yourself this design version's concept image",
+        description=(
+            "Queues the plain canonical render as a PNG attachment. "
+            + _SEND_NOTE
+            + " "
+            + _OWNERSHIP_NOTE
+        ),
+    )
+    def post(self, request, design_id: str, version_id: str):
+        return super().post(request, design_id, version_id)
+
+
+class DesignVersionAnnotationsSendView(_DesignVersionSendView):
+    kind = DesignRenderDelivery.ANNOTATED
+
+    @extend_schema(
+        operation_id="designs_versions_annotations_send_create",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=None,
+        responses=_SEND_RESPONSES,
+        summary="Email yourself this design version's annotated concept",
+        description=(
+            "Queues the annotated composite — the image with your marks drawn on "
+            "it and a numbered note legend beneath — as a PNG attachment. Your "
+            "note text is in the attachment only; the message body never carries "
+            "it. " + _SEND_NOTE + " " + _OWNERSHIP_NOTE
+        ),
+    )
+    def post(self, request, design_id: str, version_id: str):
+        return super().post(request, design_id, version_id)
 
 
 @method_decorator(csrf_protect, name="dispatch")

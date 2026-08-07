@@ -9,7 +9,6 @@ marker holds nothing private, and that nothing in the suite ever opens SMTP.
 from __future__ import annotations
 
 import copy
-import io
 import logging
 import smtplib
 from datetime import timedelta
@@ -27,7 +26,6 @@ from django.core.mail import EmailMessage, get_connection
 from django.core.mail.backends import locmem
 from django.db import DatabaseError, IntegrityError, transaction
 from django.utils import timezone
-from PIL import Image
 
 from sitara.designs import render_delivery
 from sitara.designs.models import (
@@ -45,7 +43,12 @@ from sitara.designs.tasks import (
 )
 from sitara.media import account_delivery
 
-from .utils import create_ready_design_version, run_simultaneously, unique_email
+from .utils import (
+    create_ready_design_version,
+    run_simultaneously,
+    synthetic_original,
+    unique_email,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -66,14 +69,6 @@ def isolated_design_image_storage(settings):
     configured = copy.deepcopy(settings.STORAGES)
     configured["design_images"] = {"BACKEND": "django.core.files.storage.InMemoryStorage"}
     settings.STORAGES = configured
-
-
-def synthetic_original(width: int = 384, height: int = 512) -> bytes:
-    """A deterministic synthetic image — never a downloaded or licensed one."""
-    image = Image.new("RGB", (width, height), (120, 90, 70))
-    buffer = io.BytesIO()
-    image.save(buffer, format="WEBP", quality=80, method=0)
-    return buffer.getvalue()
 
 
 def owned_version(*, email: str | None = None, with_image: bool = True) -> DesignVersion:
@@ -334,6 +329,38 @@ def test_a_sent_marker_older_than_the_ttl_still_never_sends_again(settings):
     row = DesignRenderDelivery.objects.get(design_version=version, kind="plain")
     assert row.state == DesignRenderDelivery.SENT
     assert row.attempt_count == 1, "a completed send was retried as if abandoned"
+
+
+def test_a_terminal_no_op_is_visible_in_the_log(settings, caplog):
+    """Otherwise this outcome leaves no trace anywhere.
+
+    The endpoint answers 202 whether a send delivered or no-opped, so without a
+    log line an operator watching a run of sends that all quietly did nothing
+    sees exactly what a run that all delivered looks like. ``retry_exhausted``
+    was already logged; the two branches that ``return None`` were not.
+
+    The record carries the version UUID, the kind and the state — never the
+    address, which is what the surrounding tests in this file check is absent
+    from every other line this module emits."""
+    settings.ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS = 60
+    version = owned_version()
+    DesignRenderDelivery.objects.create(
+        design_version=version,
+        kind=DesignRenderDelivery.PLAIN,
+        state=DesignRenderDelivery.SENT,
+        attempt_count=1,
+        claimed_at=timezone.now(),
+        sent_at=timezone.now(),
+    )
+
+    with caplog.at_level(logging.INFO, logger="sitara.designs.render_delivery"):
+        assert deliver_render(version.pk, DesignRenderDelivery.PLAIN) == "noop"
+
+    records = [r for r in caplog.records if r.message == "render_delivery.already_terminal"]
+    assert len(records) == 1
+    assert records[0].design_version_id == str(version.pk)
+    assert records[0].delivery_state == DesignRenderDelivery.SENT
+    assert "@" not in caplog.text
 
 
 def test_a_terminal_retry_exhausted_marker_never_sends_again(settings):

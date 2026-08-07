@@ -8,8 +8,12 @@ That split is deliberate. §8.1 calls the recipient rule the most important in t
 phase, and it is enforced structurally: this module resolves a *row*, never an
 address string, and hands the row on.
 
-The HTTP surface lives in :mod:`sitara.designs.views`; nothing here reads a
-request.
+The HTTP surface lives in :mod:`sitara.designs.views`. Everything here resolves
+from rows and UUIDs and is safe to call off a request — with one deliberate
+exception, :func:`enforce_send_throttles`, which needs the session user and the
+client IP. It is co-located rather than hidden in the view because it guards
+this module's own delivery flow, following ``designs.upload_service``'s
+precedent of a request-reading throttle beside otherwise request-free services.
 
 **Nothing private is logged.** Log lines carry a safe operation name, the
 ``DesignVersion`` UUID, the kind and an exception *type* — never the address,
@@ -27,6 +31,7 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from sitara.accounts.rate_limits import RateLimitUnavailable, check_and_count, client_ip
 from sitara.media.account_delivery import (
     AccountEmailAttachmentTooLarge,
     AccountEmailDisabled,
@@ -49,8 +54,88 @@ from .models import DesignRenderDelivery, DesignVersion
 logger = logging.getLogger(__name__)
 
 
+_THROTTLE_PREFIX = "sendrl"  # its own key namespace, distinct from auth/upload
+
+
 class RenderNotReady(Exception):
     """The version has no permanent image yet, so there is nothing to send."""
+
+
+class RenderDeliveryThrottled(Exception):
+    """A per-account, per-address or per-recipient ceiling was reached.
+
+    ``retry_after`` is the window length — a conservative, non-revealing hint,
+    never a precise countdown. -> 429."""
+
+    def __init__(self, retry_after: int):
+        self.retry_after = int(retry_after)
+        super().__init__("account email send limit reached")
+
+
+class RenderDeliveryThrottleUnavailable(Exception):
+    """The throttle cache cannot be reached, so the request is refused unthrottled.
+
+    Deliberately distinct from :class:`RenderDeliveryThrottled`: an
+    infrastructure fault is never reported to the caller — or to whoever watches
+    the 429 rate — as their own abuse. -> 503 email_send_unavailable, and no
+    ``Retry-After``, because no recovery window is known. Follows
+    ``accounts.rate_limits.RateLimitUnavailable`` and
+    ``generation.admission.AdmissionControlUnavailable``."""
+
+
+def enforce_send_throttles(request, recipient: str) -> None:
+    """Bound how often sends happen, from three independent directions.
+
+    Run AFTER CSRF and ownership, never before: a cross-origin page must not be
+    able to burn a victim's quota, and a throttled caller must still not be able
+    to tell an owned design from one that does not exist.
+
+    The third dimension is keyed on the RECIPIENT and is the one that is easy to
+    leave out. Per-actor ceilings bound what one account or address can do; they
+    do not bound what one mailbox RECEIVES. The account address is unverified
+    (§8.5) and both registration and demo generation are free, so rotating
+    accounts or source IPs would otherwise deliver attachment-bearing mail
+    repeatedly to an address the sender merely typed at registration and does
+    not control. It is sized generously — an abuse backstop, not a usage limit.
+
+    The address is hashed exactly as every other identifier is, so no recipient
+    ever appears in a cache key in the clear.
+
+    Each check short-circuits the next, as the login view's pair does, so one
+    refused request costs one increment rather than four."""
+    checks = (
+        (
+            "send_user_hour",
+            str(request.user.pk),
+            settings.ACCOUNT_EMAIL_SEND_LIMIT_PER_HOUR,
+            3600,
+        ),
+        (
+            "send_user_day",
+            str(request.user.pk),
+            settings.ACCOUNT_EMAIL_SEND_LIMIT_PER_DAY,
+            86_400,
+        ),
+        (
+            "send_ip_hour",
+            client_ip(request),
+            settings.ACCOUNT_EMAIL_SEND_IP_LIMIT_PER_HOUR,
+            3600,
+        ),
+        (
+            "send_recipient_day",
+            recipient,
+            settings.ACCOUNT_EMAIL_RECIPIENT_LIMIT_PER_DAY,
+            86_400,
+        ),
+    )
+    for scope, identifier, limit, window in checks:
+        try:
+            retry_after = check_and_count(scope, identifier, limit, window, prefix=_THROTTLE_PREFIX)
+        except RateLimitUnavailable as exc:
+            raise RenderDeliveryThrottleUnavailable from exc
+        if retry_after is not None:
+            raise RenderDeliveryThrottled(retry_after)
 
 
 def owner_of(version: DesignVersion):
@@ -66,6 +151,33 @@ def owner_of(version: DesignVersion):
 def require_render_ready(version: DesignVersion) -> None:
     if not version.image_storage_key:
         raise RenderNotReady("this version has no permanent image yet")
+
+
+def delivery_is_terminal(version: DesignVersion, kind: str) -> bool:
+    """Is this exact (version, kind) past the point where a send can happen?
+
+    An unlocked read, deliberately: :func:`_claim` remains the only authority on
+    whether a send happens, and this is a cheap hint the endpoint uses to avoid
+    charging quota for a task it can already see will no-op. A race here is
+    harmless in both directions — a false negative costs one wasted enqueue that
+    ``_claim`` then refuses, and a false positive cannot occur, because both
+    states below are terminal and no transition leaves them.
+
+    Both terminal states, not just ``SENT``. This started as a ``SENT``-only
+    check on the reasoning that ``RETRY_EXHAUSTED`` means the send FAILED, so
+    skipping the throttle would answer 202 — "on its way" — for something that
+    never will be. That reasoning does not survive contact with the view: the
+    202 is byte-identical either way, because ``_claim`` no-ops on both states
+    regardless of whether this check fires. So excluding ``RETRY_EXHAUSTED``
+    preserved nothing and left the *more* sympathetic case paying full price —
+    that owner never received their copy, has the strongest reason of anyone to
+    keep pressing Send, and would have burned the shared per-account quota doing
+    it."""
+    return DesignRenderDelivery.objects.filter(
+        design_version=version,
+        kind=kind,
+        state__in=(DesignRenderDelivery.SENT, DesignRenderDelivery.RETRY_EXHAUSTED),
+    ).exists()
 
 
 def _claim(version: DesignVersion, kind: str) -> DesignRenderDelivery | None:
@@ -113,6 +225,18 @@ def _claim(version: DesignVersion, kind: str) -> DesignRenderDelivery | None:
             # Terminal, always — including long after the claim has gone stale.
             # Without this the stale branch below would treat a COMPLETED send as
             # an abandoned one and mail the owner a second copy months later.
+            #
+            # Logged, because otherwise this outcome is invisible: the endpoint
+            # answers 202 either way, so a run of sends that all no-op looks
+            # from outside exactly like a run that all delivered.
+            logger.info(
+                "render_delivery.already_terminal",
+                extra={
+                    "design_version_id": str(version.pk),
+                    "kind": kind,
+                    "delivery_state": row.state,
+                },
+            )
             return None
 
         if (now - row.claimed_at).total_seconds() < ttl:

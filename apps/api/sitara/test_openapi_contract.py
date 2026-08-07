@@ -47,6 +47,11 @@ EXPECTED_OPERATIONS = frozenset(
         ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "get"),
         ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "put"),
         ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "delete"),
+        # Phase 19 section 8: email replaces download entirely. Two surfaces,
+        # because the concept screen sends the plain canonical render and the
+        # annotation workspace sends the annotated composite.
+        ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/send/", "post"),
+        ("/api/v1/designs/{design_id}/versions/{version_id}/send/", "post"),
         ("/api/v1/jobs/{job_id}/", "get"),
         ("/api/v1/questionnaire/active/", "get"),
         ("/api/v1/inspiration-assets/", "get"),
@@ -70,6 +75,8 @@ UNSAFE_OPERATIONS = frozenset(
         ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/", "delete"),
         ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "put"),
         ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "delete"),
+        ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/send/", "post"),
+        ("/api/v1/designs/{design_id}/versions/{version_id}/send/", "post"),
     }
 )
 
