@@ -692,6 +692,20 @@ REPLICATE_POLL_TIMEOUT_SECONDS = env_positive_int("REPLICATE_POLL_TIMEOUT_SECOND
 GENERATION_RAW_MAX_BYTES = env_positive_int("GENERATION_RAW_MAX_BYTES", 20_000_000)
 GENERATION_RAW_MAX_PIXELS = env_positive_int("GENERATION_RAW_MAX_PIXELS", 40_000_000)
 
+# Phase 19 annotated-PNG composition ceilings. Compositing is a genuine memory
+# amplification step — a decoded RGBA buffer is many times the compressed file
+# size, and the export also allocates a taller canvas for the note legend — so
+# these are named, testable numbers rather than prose. Exceeding either raises a
+# controlled DesignAnnotationRenderError, never an unhandled MemoryError. The
+# pixel ceiling is generous against the current 1536x2048 (3.1MP) originals while
+# still refusing a decompression bomb. The read deadline bounds the storage phase
+# in TIME as well as size, the way media/delivery.py bounds its own.
+ANNOTATION_RENDER_MAX_PIXELS = env_positive_int("ANNOTATION_RENDER_MAX_PIXELS", 24_000_000)
+ANNOTATION_RENDER_MAX_BYTES = env_positive_int("ANNOTATION_RENDER_MAX_BYTES", 20_000_000)
+ANNOTATION_RENDER_READ_DEADLINE_SECONDS = env_positive_int(
+    "ANNOTATION_RENDER_READ_DEADLINE_SECONDS", 10
+)
+
 # The poll interval must be strictly smaller than the overall poll timeout, or
 # the pipeline could never poll more than once before giving up.
 if REPLICATE_POLL_INTERVAL_SECONDS >= REPLICATE_POLL_TIMEOUT_SECONDS:
