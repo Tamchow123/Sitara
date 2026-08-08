@@ -15,7 +15,9 @@
 // describing the same accepted exposure differently, which is its own kind of
 // dishonesty.
 
-export function AccountSendDisclosure({ kind }: { kind: "plain" | "annotated" }) {
+import type { RenderSendKind } from "@/lib/api";
+
+export function AccountSendDisclosure({ kind }: { kind: RenderSendKind }) {
   return (
     <>
       Sending this emails the image
