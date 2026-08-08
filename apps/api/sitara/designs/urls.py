@@ -61,6 +61,23 @@ urlpatterns = [
         name="design-version-result",
     ),
     re_path(
+        rf"^designs/{_UUID}/versions/{_VERSION_UUID}/annotations/?$",
+        views.DesignVersionAnnotationsView.as_view(),
+        name="design-version-annotations",
+    ),
+    # The annotations pattern above is anchored with $, so ".../annotations/send/"
+    # cannot be swallowed by it and the order of these two is presentational.
+    re_path(
+        rf"^designs/{_UUID}/versions/{_VERSION_UUID}/annotations/send/?$",
+        views.DesignVersionAnnotationsSendView.as_view(),
+        name="design-version-annotations-send",
+    ),
+    re_path(
+        rf"^designs/{_UUID}/versions/{_VERSION_UUID}/send/?$",
+        views.DesignVersionSendView.as_view(),
+        name="design-version-send",
+    ),
+    re_path(
         rf"^designs/{_UUID}/inspiration-uploads/?$",
         views.DesignInspirationUploadView.as_view(),
         name="design-inspiration-upload-list",

@@ -1,12 +1,52 @@
 # Sitara
 
-AI-assisted South Asian bridalwear **concept design**. A guided questionnaire, an optional pick of up to three rights-cleared inspiration images, and an AI-generated concept: a FLUX-rendered visual plus a structured design description authored by Claude, with one constrained refinement round. A deterministic, zero-cost demo mode runs the complete journey through the same pipeline with no paid provider calls.
+AI-assisted South Asian bridalwear **concept design**. A guided questionnaire, an optional pick of up to three rights-cleared inspiration images, and an AI-generated concept: a FLUX-rendered visual plus a structured design description authored by Claude, with one constrained refinement round. The owner can then mark up their private concept and have the annotated render emailed to their own account address. A deterministic, zero-cost demo mode runs the complete journey through the same pipeline with no paid provider calls.
 
 > Sitara is for concept visualisation only. It does not produce sewing patterns or manufacturing specifications, and does not guarantee a garment can be constructed exactly as shown.
 
 ## Status
 
-**Up next — Phase 17: UI polish and accessibility.** See `docs/phases/PHASES.md`.
+**Up next — deployment.** Phase 18 (E2E tests and deployment) was **skipped**. Its
+E2E half exists anyway: Phase 17 built the Playwright suite and a CI `e2e` job that
+drives the real stack in demo mode, and Phase 19 extended both. Its deployment half
+does not exist at all — no deployment configuration, no smoke script, no runbook, and
+nothing is deployed anywhere. Phase 20 (optional height and body representation)
+remains optional. See `docs/phases/PHASES.md`.
+
+**Phase 19 — private stylist annotation workspace, and email instead of download.**
+The owner of a generated concept can now mark up the private render — pins, arrows,
+rectangles and bounded freehand strokes, each with a short note — and have the
+flattened result emailed to their own account address. The original image is never
+modified, re-encoded or re-ingested: one schema-versioned annotation document per
+`DesignVersion` holds geometry normalised to `[0, 1]` against the version's own
+**server-side** canonical dimensions, so a mark means the same thing at any rendered
+size, at any zoom step, and in the composited PNG (the overlay is an inline SVG whose
+`viewBox` *is* the image's pixel space — there is deliberately no `<canvas>`, so the
+private original's pixels are never read into the page). Saves are debounced and
+coalesced with revision-based optimistic concurrency: a stale `expected_revision`
+returns `409 annotation_conflict`, leaves the stored document untouched, suspends
+autosave, and offers two recovery actions that **both** end at the server's copy —
+nothing is ever overwritten silently. The annotation list is a real accessible
+representation rather than a summary: every mark carries its number, type and
+position in words, an editable note, labelled palette radios and arrow-key nudges,
+with selection synchronised both ways and a `role="toolbar"` roving tabindex.
+Annotation data is memory-only in the browser — never `localStorage`,
+`sessionStorage` or IndexedDB. **The email recipient is always `request.user.email`,
+read server-side**: the endpoints accept no request body at all, the client wrapper
+has no address parameter, an anonymous owner gets `409
+email_recipient_unavailable` with no fallback, and only one module may reach
+`django.core.mail` — enforced by an AST test that catches proper-prefix imports and
+attribute chains alike. Delivery is gated by `ACCOUNT_EMAIL_DELIVERY_ENABLED`, which
+**defaults to false** as its own operator decision on the same pattern as
+`LIVE_GENERATION_ENABLED`; tests and CI open **zero SMTP connections** and no real
+send has ever been performed. The result screen's **Download image** link was
+replaced by **Annotate** and **Send to account** — that removal is UX, not a privacy
+control, since the signed URL still exists and a browser can still save a displayed
+image. Three exposures are recorded as *accepted*, not removed: the account address
+is unverified, a private concept image leaves the system to the SMTP provider and the
+recipient's mail host, and a rare duplicate send is preferred over a silent loss —
+see `docs/decisions/0020-private-stylist-annotation-workspace.md` and
+`docs/decisions/0021-account-render-delivery-by-email.md`.
 
 **Phase 16B — questionnaire feedback, cultural expansion, and visual choice UX.** The first substantial user-feedback revision of the questionnaire and wizard. A new **questionnaire v3** draft (v1 stays active and fingerprint-locked, v2 untouched) adds satin (distinct from silk), a culturally-reviewed **Anand Karaj** Sikh ceremony, a dedicated optional single-choice `neckline_style` question (migrating the old `high_neckline` coverage tag out of `coverage_preferences`), an expanded curated colour vocabulary grouped into source-controlled buckets, and authoritative `restrict_options` coverage/neckline/head-covering/dupatta consistency rules; the strict option shape gains optional bounded `visual_key`/`group` machine-id metadata (never URLs/paths/HTML). Generation introduces **DesignSpec schema version 2** (`source_selections.neckline_style`) via a small explicit version registry with total, fail-safe dispatch — v1's committed JSON Schema stays byte-identical and every historical v1 spec still validates, never rewritten. `PROMPT_BUILDER_VERSION` moves **5.0.0 → 6.0.0** (the canonical neckline is rendered early beside coverage and restated at the close, and the model-authored neckline narrative is suppressed so it can never contradict the canonical choice; v1 golden snapshots are byte-identical, two new v2 fixtures added) and `SPEC_TEMPLATE_VERSION` **2.1.0 → 2.2.0** (Anand-Karaj/neckline-coherence/satin guidance). The deterministic demo engine stays aligned and zero-cost: the manifest schema is bumped to v2 (`+necklines`, expanded vocabulary), the selector to 2.0.0 (neckline scoring plus **fail-closed** hard constraints — an Anand Karaj design requires an asset explicitly tagged for it, a covered-head selection never matches an uncovered-head asset, a full-midriff selection never matches an exposed-midriff asset), and the spec engine to 2.0.0 (produces v2 with corrected head/midriff semantics), with a synthetic Anand Karaj development asset and a pack-wide coverage validator that requires every ceremony. The wizard refactors its schema-driven renderer into accessible visual choice cards, a compact grouped **colour-swatch selector** (grouped, counted, order-preserving, selection shown by ring and order badge — never colour alone), an expandable-description disclosure, and a reversible **"No preference — let Sitara decide"** control for optional single-choice questions (no preference = an absent answer, shown explicitly on the review screen), all backed by a frontend-owned, rights-controlled visual manifest of project-owned assets (colour hex swatches and original schematic neckline SVGs — never reused inspiration-catalogue assets, never sent to a provider, never influencing generation) with `jest-axe` accessibility tests. Activating v3 in production demo mode stays an operator step gated on an approved, culturally-reviewed Anand Karaj asset; the manual Anand-Karaj demo checkpoint and operator-only live cultural/coverage visual validation are recorded, not performed. Explanatory illustrations for garments/silhouettes/dupatta/saree drapes remain a documented text-fallback approved-asset gap — see `docs/decisions/0018-questionnaire-feedback-and-visual-choice-ux.md`.
 

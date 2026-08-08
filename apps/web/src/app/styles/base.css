@@ -312,6 +312,14 @@ dd {
   background: var(--color-neutral-300);
 }
 
+/* A modifier on the shared button, so it lives with the button and not with   */
+/* the one feature that happens to have needed it first. Darker rather than    */
+/* red: the palette has no red, and inventing one for a single confirm button  */
+/* would put an untested colour outside the token set.                         */
+.btn.is-destructive {
+  background: var(--color-accent-800);
+}
+
 .btn-ghost {
   color: var(--color-accent-700);
   padding-inline: var(--space-3);

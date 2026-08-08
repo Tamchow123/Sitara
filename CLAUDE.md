@@ -21,7 +21,7 @@ Sitara is for **concept visualisation only** — no sewing patterns, manufacturi
 
 ## 3. Current repository state
 
-Phases 1–16 are delivered and merged to `main` (Phase 16: live-generation security and cost controls, ADR 0017), followed by the inserted generated-image composition/coverage-first prompt restructure (also merged; `PROMPT_BUILDER_VERSION` 5.0.0, ADR 0010 amended). **Phase 16B is IN PROGRESS on a branch** (not merged): questionnaire feedback, cultural expansion and visual choice UX — satin, Anand Karaj, a dedicated neckline question, expanded grouped colours, no-preference controls, DesignSpec schema v2, then questionnaire v4 / DesignSpec v3 with per-role colour and per-area coverage, a one-question-per-screen wizard, private user inspiration uploads, and the ADR 0019 reference-image conditioning / flux-2-max override. Then **Phase 17** (high-fidelity UI completion and accessibility — delivered to a draft PR; the screen-reader checkpoint remains outstanding), **Phase 18** (E2E tests and deployment), **Phase 19** (private stylist annotation workspace), and **Phase 20** (optional, flag-gated height/body representation). Delivered: Phase 2 image-model evaluation; app foundation; session auth/CSRF; anonymous + authenticated design ownership; versioned questionnaire; rights-controlled catalogue; OpenAPI-generated client; structured DesignSpec generation; deterministic image-prompt builder; async Celery/Replicate generation; permanent design-image storage; generation-progress and private results; curated inspiration-metadata influence on generation; single-round constrained refinement with version comparison; deterministic zero-cost demo generation reusing the same asynchronous pipeline, storage, job/result APIs and frontend UI as live generation; live-generation gating with atomic reserve-before-spend micro-USD budget ceiling, per-session/hashed-IP throttles and a global UTC daily count limit, retention purge and stuck-job reconciliation on Celery Beat, production security hardening (CSP, headers, admin lockdown), correlation-aware structured logging, and privacy-safe DSN-gated Sentry — live generation still disabled, provider pricing operator-configured and unverified.
+Phases 1–16 are delivered and merged to `main` (Phase 16: live-generation security and cost controls, ADR 0017), followed by the inserted generated-image composition/coverage-first prompt restructure (also merged; `PROMPT_BUILDER_VERSION` 5.0.0, ADR 0010 amended). **Phase 16B is IN PROGRESS on a branch** (not merged): questionnaire feedback, cultural expansion and visual choice UX — satin, Anand Karaj, a dedicated neckline question, expanded grouped colours, no-preference controls, DesignSpec schema v2, then questionnaire v4 / DesignSpec v3 with per-role colour and per-area coverage, a one-question-per-screen wizard, private user inspiration uploads, and the ADR 0019 reference-image conditioning / flux-2-max override. Then **Phase 17** (high-fidelity UI completion and accessibility — delivered to a draft PR; the screen-reader checkpoint remains outstanding). **Phase 18** (E2E tests and deployment) is **SKIPPED** by the project owner's decision — nothing in it is delivered, so there is no deployment configuration, no smoke script and no runbook, and CI does not run E2E; deployment must be taken up as its own future phase. **Phase 19** (private stylist annotation workspace) is delivered to a draft PR — ADR 0020 (annotation workspace) and ADR 0021 (account render delivery by email), the latter shipped **disabled** with no SMTP send ever performed. Then **Phase 20** (optional, flag-gated height/body representation). Delivered: Phase 2 image-model evaluation; app foundation; session auth/CSRF; anonymous + authenticated design ownership; versioned questionnaire; rights-controlled catalogue; OpenAPI-generated client; structured DesignSpec generation; deterministic image-prompt builder; async Celery/Replicate generation; permanent design-image storage; generation-progress and private results; curated inspiration-metadata influence on generation; single-round constrained refinement with version comparison; deterministic zero-cost demo generation reusing the same asynchronous pipeline, storage, job/result APIs and frontend UI as live generation; live-generation gating with atomic reserve-before-spend micro-USD budget ceiling, per-session/hashed-IP throttles and a global UTC daily count limit, retention purge and stuck-job reconciliation on Celery Beat, production security hardening (CSP, headers, admin lockdown), correlation-aware structured logging, and privacy-safe DSN-gated Sentry — live generation still disabled, provider pricing operator-configured and unverified; and a private per-version stylist annotation workspace whose flattened render is emailed to the owner's own account address behind a separate closed-by-default gate.
 
 `docs/phases/PHASES.md` is authoritative for future work — always inspect the current branch and that file rather than relying on this paragraph.
 
@@ -49,7 +49,7 @@ documented evaluation.
 
 For any substantial task, read the relevant code plus `README.md`, `docs/PROPOSAL.md`, `docs/phases/PHASES.md`, `docs/decisions/`, `compose.yaml`, `.github/workflows/ci.yml`. For a phase task with its own spec file, read that file in full before editing.
 
-ADRs currently on record: 0001 image model, 0002 application foundation, 0003 session authentication, 0004 private design ownership, 0005 versioned questionnaire schema, 0006 rights-controlled inspiration catalogue, 0007 OpenAPI generated client, 0008 questionnaire draft and wizard, 0009 structured design-spec generation, 0010 deterministic image-prompt builder, 0011 asynchronous generation pipeline, 0012 private design-image storage, 0013 generation progress and results, 0014 rights-safe inspiration metadata influence, 0015 single-round constrained refinement, 0016 deterministic demo mode, 0017 live-generation security and cost controls, 0018 questionnaire feedback and visual choice UX (Phase 16B), 0019 reference-image conditioning and the flux-2-max switch.
+ADRs currently on record: 0001 image model, 0002 application foundation, 0003 session authentication, 0004 private design ownership, 0005 versioned questionnaire schema, 0006 rights-controlled inspiration catalogue, 0007 OpenAPI generated client, 0008 questionnaire draft and wizard, 0009 structured design-spec generation, 0010 deterministic image-prompt builder, 0011 asynchronous generation pipeline, 0012 private design-image storage, 0013 generation progress and results, 0014 rights-safe inspiration metadata influence, 0015 single-round constrained refinement, 0016 deterministic demo mode, 0017 live-generation security and cost controls, 0018 questionnaire feedback and visual choice UX (Phase 16B), 0019 reference-image conditioning and the flux-2-max switch, 0020 private stylist annotation workspace, 0021 account render delivery by email.
 
 ## 5. Repository layout
 
@@ -59,20 +59,23 @@ apps/web/       Next.js App Router frontend with strict TypeScript
 infra/minio/    Local private-bucket initialisation
 experiments/    Phase 2 model-evaluation implementation and evidence
 docs/           Proposal, roadmap, ADRs and project documentation
-design/         Vendored UX handoff bundles (reference only, never imported)
+design_handoff_sitara_flow/
+                Vendored UX handoff bundle (reference only, never imported)
 images/         Source photography for questionnaire visuals (build input)
 compose.yaml    Local PostgreSQL, Redis, MinIO, API, web and Celery stack
 ```
 
-`design/sitara-handoff/` holds the supplied bridalwear-flow UX handoff: its README, the
-`.dc.html` visual references and the "Organic" design-system stylesheet that
+`design_handoff_sitara_flow/` (at the repository root) holds the supplied bridalwear-flow UX
+handoff: its README, the `.dc.html` visual references — including
+`Sitara Annotation.dc.html`, which Phase 19's workspace is built to — and the
+"Organic" design-system stylesheet that
 `apps/web/src/app/globals.css` transcribes its tokens from. It is **reference material only** —
 never imported, bundled or served, and not held to repository code standards. The bundle's
 prototype runtimes (`support.js`, `image-slot.js`) are deliberately excluded and must not be
 ported. `images/` holds the project's own AI-generated source photography; it is a **build input**
 converted into `apps/web/public/questionnaire-visuals/`, never served directly at full size.
 
-Django apps under `apps/api/sitara/`: `accounts`, `designs`, `questionnaire`, `catalogue`, `health`, `ai_gateway` (fail-closed live-provider gateway: gating policy, Anthropic/Replicate wrappers, `resolve_generation_mode()`), `generation` (pipeline orchestration, DesignSpec generation, prompt builder/service, Celery tasks; `generation/demo/` is the deterministic zero-cost demo engine — manifest, selector, local structured/image adapters — reached only through the same asynchronous pipeline, never a mock behind `ai_gateway`). `apps/api/sitara/media/` is a support package (image processing, ingest, signed delivery) for permanent design images — not a Django app.
+Django apps under `apps/api/sitara/`: `accounts`, `designs`, `questionnaire`, `catalogue`, `health`, `ai_gateway` (fail-closed live-provider gateway: gating policy, Anthropic/Replicate wrappers, `resolve_generation_mode()`), `generation` (pipeline orchestration, DesignSpec generation, prompt builder/service, Celery tasks; `generation/demo/` is the deterministic zero-cost demo engine — manifest, selector, local structured/image adapters — reached only through the same asynchronous pipeline, never a mock behind `ai_gateway`). `apps/api/sitara/media/` is a support package (image processing, ingest, signed delivery, Phase 19 annotated-PNG composition and the sole `django.core.mail` choke point in `account_delivery.py`) for permanent design images — not a Django app.
 
 ## 6. Technology and version discipline
 
@@ -80,14 +83,17 @@ Use the versions pinned by the repository; do not opportunistically upgrade. Bas
 
 ## 7. Non-negotiable AI and cost controls
 
-Safety gates (`apps/api/config/settings.py`): `DEMO_MODE=true`, `ALLOW_PAID_AI_CALLS=false`, `LIVE_GENERATION_ENABLED=false`. `LIVE_GENERATION_ENABLED` gates the PUBLIC end-to-end generation API — a present token, both provider gates open, and complete provider config are still not enough; the operator must also set this flag. The Phase 16 rate-limit/cost-ceiling safeguards now exist (ADR 0017), but live generation stays disabled by default and enabling it additionally requires a named pricing profile with real dated prices, a positive `LIVE_GENERATION_DAILY_BUDGET_MICRO_USD`, and a persistent `noeviction` standalone budget Redis — all operator responsibilities; provider prices ship unverified (defaulting to 0). The manual budgeted live checkpoint remains pending.
+Safety gates (`apps/api/config/settings.py`): `DEMO_MODE=true`, `ALLOW_PAID_AI_CALLS=false`, `LIVE_GENERATION_ENABLED=false`, `ACCOUNT_EMAIL_DELIVERY_ENABLED=false`. `LIVE_GENERATION_ENABLED` gates the PUBLIC end-to-end generation API — a present token, both provider gates open, and complete provider config are still not enough; the operator must also set this flag. The Phase 16 rate-limit/cost-ceiling safeguards now exist (ADR 0017), but live generation stays disabled by default and enabling it additionally requires a named pricing profile with real dated prices, a positive `LIVE_GENERATION_DAILY_BUDGET_MICRO_USD`, and a persistent `noeviction` standalone budget Redis — all operator responsibilities; provider prices ship unverified (defaulting to 0). The manual budgeted live checkpoint remains pending.
 
-Related settings: `DEFAULT_IMAGE_MODEL`, `FAST_IMAGE_MODEL`, `ANTHROPIC_MODEL`, `ANTHROPIC_API_KEY`, `REPLICATE_API_TOKEN`, `REPLICATE_TIMEOUT_SECONDS`, `REPLICATE_POLL_INTERVAL_SECONDS`/`_TIMEOUT_SECONDS`, `GENERATION_RAW_MAX_BYTES`/`_MAX_PIXELS`, `DESIGN_SPEC_MAX_INPUT_CHARS`/`_MAX_OUTPUT_TOKENS`, `ANTHROPIC_TIMEOUT_SECONDS`, `MAX_DESIGN_VERSIONS`, `MAX_INSPIRATION_IMAGES`/`MAX_REFINEMENTS`, `DEMO_STAGE_DELAY_MS` (demo-only, strictly bounded 0–5000, never applies to live generation). Some older roadmap text uses superseded names (e.g. `ALLOW_PROVIDER_CALLS`); do not reintroduce them without an explicit migration decision.
+`ACCOUNT_EMAIL_DELIVERY_ENABLED` (Phase 19, ADR 0021) is a **separate** operator decision on exactly the same pattern, and it gates outbound mail rather than provider spend. It is never implied by `DEBUG`, by a configured `EMAIL_HOST`, by working SMTP credentials, or by any other flag — present mail configuration must never enable sending by itself, precisely as a present API key must never enable a provider call. In production, enabling it additionally requires a real `DEFAULT_FROM_EMAIL` and a non-placeholder host, validated at startup. Automated tests and CI open **zero SMTP connections** and assert the locmem backend; do not introduce a real mail connection in tests. No SMTP send has ever been performed — do not describe email delivery as exercised.
+
+Related settings: `DEFAULT_IMAGE_MODEL`, `FAST_IMAGE_MODEL`, `ANTHROPIC_MODEL`, `ANTHROPIC_API_KEY`, `REPLICATE_API_TOKEN`, `REPLICATE_TIMEOUT_SECONDS`, `REPLICATE_POLL_INTERVAL_SECONDS`/`_TIMEOUT_SECONDS`, `GENERATION_RAW_MAX_BYTES`/`_MAX_PIXELS`, `DESIGN_SPEC_MAX_INPUT_CHARS`/`_MAX_OUTPUT_TOKENS`, `ANTHROPIC_TIMEOUT_SECONDS`, `MAX_DESIGN_VERSIONS`, `MAX_INSPIRATION_IMAGES`/`MAX_REFINEMENTS`, `DEMO_STAGE_DELAY_MS` (demo-only, strictly bounded 0–5000, never applies to live generation). Phase 19 mail/render settings: `ANNOTATION_RENDER_MAX_PIXELS`/`_MAX_BYTES`/`_READ_DEADLINE_SECONDS`, `ACCOUNT_EMAIL_MAX_ATTACHMENT_BYTES`, `ACCOUNT_EMAIL_SEND_LIMIT_PER_HOUR`/`_PER_DAY`, `ACCOUNT_EMAIL_SEND_IP_LIMIT_PER_HOUR`, `ACCOUNT_EMAIL_RECIPIENT_LIMIT_PER_DAY`, `ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS`, `ACCOUNT_EMAIL_RENDER_BUDGET_SECONDS`, `EMAIL_TIMEOUT`, `DEFAULT_FROM_EMAIL`. Some older roadmap text uses superseded names (e.g. `ALLOW_PROVIDER_CALLS`); do not reintroduce them without an explicit migration decision.
 
 Rules:
 
-- A present API key must never enable a provider call by itself.
-- Automated tests and CI make zero Anthropic or Replicate calls; do not introduce such network calls in tests.
+- A present API key must never enable a provider call by itself; a present SMTP host must never enable an email by itself.
+- Automated tests and CI make zero Anthropic or Replicate calls and zero SMTP connections; do not introduce such network calls in tests.
+- **Annotation notes are never AI input.** A note is the most personal free text in the product — it says what someone dislikes about a garment they intend to wear. It is never part of a prompt, a `DesignSpec`, a refinement payload or any provider request, under any flag, and it is never logged or sent to Sentry.
 - Do not call providers manually unless the user explicitly authorises a budgeted live checkpoint with all documented gates satisfied.
 - Never log or return API keys/tokens, provider request bodies containing private user data, or provider credentials.
 - All provider access goes through the `ai_gateway` fail-closed wrapper boundary, never directly from views, serializers, models, or frontend code.
@@ -154,6 +160,17 @@ Permanent design images (`media/` package, Phase 11+):
 - The filesystem design-image backend is development-only: no public base URL, browser delivery fails closed, production refuses it.
 - Phase 10 staging objects/metadata are retained after ingest for crash recovery; purging them is Phase 16 work.
 
+Annotations and annotated renders (Phase 19, ADR 0020/0021):
+
+- An annotation document is **additive**. It never modifies `image_storage_key`, image bytes, hashes, `DESIGN_IMAGE_PROCESSOR_VERSION`, the DesignSpec, or anything else on the `DesignVersion`; deleting it returns the version to its exact pre-annotated state. A refined version has its own separate document, never copied from its parent.
+- Coordinates are normalised to `[0, 1]` against the version's **canonical server-side** dimensions, never the browser's `<img>`. Client-supplied `image_width`/`image_height` are validated against the server's values and rejected on mismatch, never trusted. The overlay must never use `object-fit: cover` — a crop silently invalidates every stored coordinate while looking correct.
+- Saves use revision-based optimistic concurrency; a stale `expected_revision` returns `409 annotation_conflict` and leaves the stored document untouched. Nothing is ever overwritten silently, and both client recovery actions end at the server's copy.
+- The annotated PNG is composed **in memory** by `media/annotation_render.py` and never persisted, never given a storage key, and never returned as a URL — its only destination is the email attachment. It is bounded by `ANNOTATION_RENDER_MAX_BYTES`/`_MAX_PIXELS`/`_READ_DEADLINE_SECONDS` and `ACCOUNT_EMAIL_MAX_ATTACHMENT_BYTES`; an oversized render is refused with a controlled code rather than sent.
+- The email recipient is **always** `request.user.email`, read server-side. A client-supplied address is never accepted in any field — the endpoints accept no request body at all, and the frontend client has no address parameter. An anonymous owner gets `409 email_recipient_unavailable` with no fallback. Only `media/account_delivery.py` may reach `django.core.mail`, enforced by an AST test that also catches proper-prefix imports and attribute chains.
+- The delivery marker row stores state, counters and timestamps only — never a recipient address, note text or rendered bytes. A durable row survives into backups and admin views, so it is a worse place to leak an address than a cache key.
+- Annotation data is **memory-only in the browser**: never `localStorage`, `sessionStorage` or IndexedDB.
+- Removing the result screen's Download link is **UX, not a privacy control** — the signed URL still exists and is still a bearer URL. Never describe it as the latter.
+
 Phase 12 results (`GET /designs/<uuid>/versions/<uuid>/result/`) return a curated, DesignSpec-derived result independent of the signed-image endpoint — frontend fetches result data and the signed image via two independent queries so one failing doesn't block the other. Job status is polled at `GET /jobs/<uuid>/`; `Design` detail responses carry an additive `latest_job` field for resume navigation.
 
 ## 15. API conventions
@@ -202,17 +219,30 @@ Start with `git status --short`, `git log -5 --oneline`, `docker compose ps`. Ru
 **Backend**: `docker compose config`; `docker compose build api`; `docker compose up -d`; then inside `api`: `manage.py check`, `manage.py makemigrations --check --dry-run`, `pip check`, `pytest`, `ruff check .`, `ruff format --check .`.
 
 **Frontend**: `npm --prefix apps/web run lint`, `... run typecheck`, `... test -- --run`, `... run build`.
-Run these on the HOST, not inside the `web` container. `design-tokens.test.ts` reads the vendored
-design system from `design_handoff_sitara_flow/` at the repository root, which is outside the
-`apps/web` Docker build context, so `docker compose exec web npm test` reports 32 failures that
-exist neither on the host nor in CI. Lint covers `src`, `e2e` and `playwright.config.ts` at
-`--max-warnings 0`.
+Run these on the HOST, not inside the `web` container. A handful of tests deliberately read files
+outside the `apps/web` Docker build context — `design-tokens.test.ts` reads the vendored design
+system at `design_handoff_sitara_flow/`, and `features/annotations/render-parity.test.ts` reads
+`apps/api/sitara/media/annotation_render.py` — so `docker compose exec web npm test` reports a
+batch of failures (the design-token contrast assertions plus the palette-parity ones) that exist
+neither on the host nor in CI. Both throw rather than skip on purpose: a silently-passing
+transcription check is worse than a loud environment-specific failure. Lint covers `src`, `e2e`
+and `playwright.config.ts` at `--max-warnings 0`.
 
-**End-to-end (Phase 17)**: with the stack up and `DEMO_MODE=true ALLOW_PAID_AI_CALLS=false
-LIVE_GENERATION_ENABLED=false DEMO_STAGE_DELAY_MS=5000`, and after
+**End-to-end (Phase 17, extended by Phase 19 — Phase 18 was skipped, so this is the
+whole E2E story)**: CI's `e2e` job runs the **functional** specs against the real
+stack in demo mode (`needs: [backend, frontend]`); the visual project stays a local
+gate because the committed baselines are `-win32`. Locally, with the stack up and `DEMO_MODE=true
+ALLOW_PAID_AI_CALLS=false LIVE_GENERATION_ENABLED=false
+ACCOUNT_EMAIL_DELIVERY_ENABLED=false DEMO_STAGE_DELAY_MS=5000`, and after
 `docker compose exec api python manage.py install_demo_asset_pack --dev-synthetic`:
-`npm --prefix apps/web run e2e` (journeys + accessibility) and `... run e2e:visual`
-(platform-suffixed baselines, a local gate only). See `apps/web/e2e/README.md`.
+`npm --prefix apps/web run e2e` (journeys + accessibility + annotations) and
+`... run e2e:visual` (platform-suffixed baselines, a local gate only). See
+`apps/web/e2e/README.md`.
+
+Note on the local `.env`: it may have live generation ON. Backend runs therefore need
+`-e DEMO_MODE=true -e ALLOW_PAID_AI_CALLS=false -e LIVE_GENERATION_ENABLED=false`
+explicitly, or a handful of `ai_gateway`/`health` tests fail as an environment
+artefact rather than a regression.
 
 **Celery**: `docker compose exec api python -c "from sitara.health.tasks import ping; print(ping.delay().get(timeout=10))"`.
 
@@ -244,7 +274,7 @@ Keep final reports compact; do not repeat the task specification. Return only: o
 
 ## 26. Prohibited actions
 
-Never do the following without explicit, task-specific authorisation: `docker compose down --volumes`; delete/reset dev volumes; force-push or rewrite Git history; commit real secrets or `.env`; make paid AI calls; enable provider calls because a token exists; change the image model without evaluation; scrape/import unlicensed images; fabricate rights evidence; create public S3/MinIO ACLs; expose private storage keys/URLs; weaken CSRF/ownership/cookie/rate-limit/production validation; introduce JWT or browser-stored auth tokens; reveal whether an inaccessible private object exists; modify Phase 2 output evidence; claim tests/manual checks/provider-call absence/CI success without evidence.
+Never do the following without explicit, task-specific authorisation: `docker compose down --volumes`; delete/reset dev volumes; force-push or rewrite Git history; commit real secrets or `.env`; make paid AI calls; enable provider calls because a token exists; send real email or open an SMTP connection from tests or CI; enable email delivery because mail configuration exists; accept a client-supplied email recipient anywhere; send annotation note text to an AI provider or a log; describe removing the download link as a privacy control; describe ADR 0021's three accepted exposures (or ADR 0019's rights override) as removed rather than accepted; change the image model without evaluation; scrape/import unlicensed images; fabricate rights evidence; create public S3/MinIO ACLs; expose private storage keys/URLs; weaken CSRF/ownership/cookie/rate-limit/production validation; introduce JWT or browser-stored auth tokens; reveal whether an inaccessible private object exists; modify Phase 2 output evidence; claim tests/manual checks/provider-call absence/CI success without evidence.
 
 ## 27. Efficient task prompt
 

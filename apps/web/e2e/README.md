@@ -1,4 +1,4 @@
-# End-to-end and visual-regression tests (Phase 17)
+# End-to-end and visual-regression tests (Phase 17, extended in Phase 19)
 
 Playwright specs that drive the **real** application against a **running stack**,
 always in demo mode. Nothing here mocks a stage: a generation is a genuine Celery
@@ -10,7 +10,32 @@ assertions are written against the terminal state the server actually produces.
 | `safety.spec.ts` | The stack reports demo mode; no browser request reaches a provider host; the questionnaire stores nothing in browser storage |
 | `journeys.spec.ts` | §25 journeys 1–5 — draft persistence, keyboard-only wizard (choose, Back, Skip), the information drawer, the custom colour picker, inspiration selection and synthetic upload/removal |
 | `generation.spec.ts` | §25 journeys 6–10 — generate, resume mid-flight, a failed image with the brief intact, the one refinement, the two-version history |
+| `annotations.spec.ts` | Phase 19 — the private annotation workspace: draw a pin and a rectangle with real pointer gestures, note them, prove persistence across a reload, prove hiding is not deleting, prove nothing reaches browser storage, the anonymous and authenticated send states, a stranger's indistinguishable 404, and the original render left untouched |
 | `visual.spec.ts` | §26 visual regression, 15 baselines per viewport |
+
+## Phase 19 — what `annotations.spec.ts` deliberately does and does not prove
+
+**Marks are drawn, not seeded.** The gestures go through `page.mouse`, because the
+path from a press to a stored normalised coordinate is exactly what a unit test
+cannot cover. `geometry.test.ts` covers the maths exhaustively; this spec covers
+the fact that the maths is wired to a real pointer and a real image box.
+
+**The send stops at QUEUED, and that is not a shortcut.** Delivery is asynchronous
+and the suite opens **no SMTP connection at all** — Django's test environment
+resolves the locmem backend, and `ACCOUNT_EMAIL_DELIVERY_ENABLED` is false by
+default, so the honest terminal states are "queued" or the controlled
+`503 email_delivery_disabled`. The spec accepts either and asserts both are silent
+on SMTP. Asserting on a *delivered* message would need a real mail server or a
+fiction about one.
+
+**Anonymous owners are asserted to be refused, not accommodated.** The first test
+never registers, so its workspace belongs to the anonymous session and the send
+control must be disabled with a sign-in explanation — §8.1's "no fallback, no
+prompt for an address, no silent success", proved rather than assumed.
+
+**The original render is compared by object key, not by URL.** Signed URLs are
+short-lived and minted per request, so a changed query string is expected; what
+must never change is which stored object it points at.
 
 ## Safety
 
@@ -147,6 +172,15 @@ keys, so the wrong placement type-errors but still runs — with reduced motion
 never applied and nothing at runtime to say so. `npm run typecheck` caught it;
 note that the containerised typecheck cannot, because the `web` service mounts
 only `src/` and `public/`.
+
+## Known gap: freehand on a small touch screen
+
+`annotations.spec.ts` draws with a mouse. Freehand strokes on a phone-sized touch
+screen are genuinely coarse — a fingertip is a blunt instrument at that scale, and
+the simplifier thins a stroke to 500 points regardless. The tool stays available
+on mobile rather than being hidden, because a rough circle around a hem is still
+useful, but detailed strokes want a wider screen. Stated here rather than papered
+over; §15 asks for the limitation to be documented honestly.
 
 ## Known gap: the inspiration catalogue
 

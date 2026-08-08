@@ -46,6 +46,15 @@ class DesignImageNotReady(DesignImageError):
     """The DesignVersion has no complete permanent image provenance yet."""
 
 
+class DesignAnnotationRenderError(DesignImageError):
+    """The annotated composite could not be produced.
+
+    Covers every composition failure the caller may surface as one controlled
+    code: the original object missing or unreadable, a storage read exceeding its
+    size/time bound, an image above the pixel ceiling, or a decode failure. The
+    message never names a storage key, bucket, endpoint or note text."""
+
+
 class DesignImageDeliveryUnavailable(DesignImageError):
     """Signed browser delivery is not currently possible.
 

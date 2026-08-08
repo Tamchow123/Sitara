@@ -400,8 +400,29 @@ SPECTACULAR_SETTINGS = {
     # plain literal (rather than a dotted import path) because GenerationKind
     # is a class nested inside the GenerationAttempt model, one level deeper
     # than drf-spectacular's dotted-path resolver supports.
+    #
+    # Phase 19 added ``AnnotationItemSerializer.type``, which shares its FIELD
+    # NAME with ``QuestionSchemaSerializer.type`` while carrying a different
+    # choice set. drf-spectacular resolves that collision by prefixing BOTH
+    # components with their serializer name, silently renaming the long-standing
+    # ``TypeEnum`` to ``QuestionSchemaTypeEnum`` — a rename of a published
+    # questionnaire contract component caused by an unrelated annotation field.
+    # Pinning the questionnaire side keeps the Phase 19 contract diff purely
+    # additive; the annotation side then takes the unambiguous
+    # ``AnnotationItemTypeEnum`` on its own. Nothing guards these literals
+    # directly and nothing needs to: if they ever stop matching the real field
+    # choices the override simply will not apply, the component reverts to
+    # ``QuestionSchemaTypeEnum``, and ``test_questionnaire_schema_is_structurally
+    # _typed`` fails on the missing ``TypeEnum``.
     "ENUM_NAME_OVERRIDES": {
         "GenerationKindEnum": [("initial", "initial"), ("refinement", "refinement")],
+        "TypeEnum": [
+            ("colour_choice", "colour_choice"),
+            ("colour_list", "colour_list"),
+            ("multi_choice", "multi_choice"),
+            ("single_choice", "single_choice"),
+            ("text", "text"),
+        ],
     },
 }
 
@@ -670,6 +691,149 @@ REPLICATE_POLL_INTERVAL_SECONDS = env_positive_int("REPLICATE_POLL_INTERVAL_SECO
 REPLICATE_POLL_TIMEOUT_SECONDS = env_positive_int("REPLICATE_POLL_TIMEOUT_SECONDS", 180)
 GENERATION_RAW_MAX_BYTES = env_positive_int("GENERATION_RAW_MAX_BYTES", 20_000_000)
 GENERATION_RAW_MAX_PIXELS = env_positive_int("GENERATION_RAW_MAX_PIXELS", 40_000_000)
+
+# Phase 19 annotated-PNG composition ceilings. Compositing is a genuine memory
+# amplification step — a decoded RGBA buffer is many times the compressed file
+# size, and the export also allocates a taller canvas for the note legend — so
+# these are named, testable numbers rather than prose. Exceeding either raises a
+# controlled DesignAnnotationRenderError, never an unhandled MemoryError. The
+# pixel ceiling is generous against the current 1536x2048 (3.1MP) originals while
+# still refusing a decompression bomb. The read deadline bounds the storage phase
+# in TIME as well as size, the way media/delivery.py bounds its own.
+ANNOTATION_RENDER_MAX_PIXELS = env_positive_int("ANNOTATION_RENDER_MAX_PIXELS", 24_000_000)
+ANNOTATION_RENDER_MAX_BYTES = env_positive_int("ANNOTATION_RENDER_MAX_BYTES", 20_000_000)
+ANNOTATION_RENDER_READ_DEADLINE_SECONDS = env_positive_int(
+    "ANNOTATION_RENDER_READ_DEADLINE_SECONDS", 10
+)
+
+# ---------------------------------------------------------------------------
+# Account render email delivery (Phase 19, section 8). Fail-closed, and gated
+# SEPARATELY from everything else: ACCOUNT_EMAIL_DELIVERY_ENABLED is its own
+# explicit operator decision, exactly like LIVE_GENERATION_ENABLED. A present
+# SMTP credential never enables sending by itself.
+#
+# Deliberately orthogonal to the AI gates: neither DEMO_MODE nor
+# ALLOW_PAID_AI_CALLS can turn this on or off in either direction. Emailing a
+# user a copy of their own already-generated render spends no provider money, so
+# tying it to the paid-provider gates would be a false coupling — a demo-mode
+# deployment may legitimately deliver demo renders by email.
+# ---------------------------------------------------------------------------
+ACCOUNT_EMAIL_DELIVERY_ENABLED = env_bool("ACCOUNT_EMAIL_DELIVERY_ENABLED", default=False)
+
+# Console outside production, so a developer sees the whole message without a
+# relay; SMTP in production. Django's setup_test_environment() replaces whatever
+# this resolves to with the locmem backend for the entire test session, which is
+# what structurally keeps the suite at zero SMTP connections — asserted in the
+# delivery tests rather than assumed.
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.smtp.EmailBackend"
+    if IS_PRODUCTION
+    else "django.core.mail.backends.console.EmailBackend",
+).strip()
+EMAIL_HOST = os.getenv("EMAIL_HOST", "").strip()
+EMAIL_PORT = env_positive_int("EMAIL_PORT", 587)
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", default=True)
+# Bounds the SMTP handshake so a slow relay cannot hold a Celery worker slot;
+# the delivery task's own time limit is derived partly from this.
+EMAIL_TIMEOUT = env_positive_int("EMAIL_TIMEOUT", 20)
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "").strip()
+
+# Sized from measurement, not guesswork. A production-scale 1536x2048 original
+# composes to ~3.1 MiB for a typical 12-mark export and ~4.2 MiB for a
+# 200-mark one, which is the practical ceiling because that page already sits at
+# 23.9 MP against ANNOTATION_RENDER_MAX_PIXELS. 6 MiB therefore clears the real
+# worst case with room to spare while still refusing anything unexpected, and
+# leaves the base64-encoded message (~1.37x) under a 10 MB relay limit. This is
+# a backstop against a surprise, NOT a limit a legitimate export should meet:
+# refusing a real 200-mark render would be a defect, not protection.
+ACCOUNT_EMAIL_MAX_ATTACHMENT_BYTES = env_positive_int(
+    "ACCOUNT_EMAIL_MAX_ATTACHMENT_BYTES", 6_291_456
+)
+
+# Per-account abuse bounds on a deliberate, user-initiated action.
+ACCOUNT_EMAIL_SEND_LIMIT_PER_HOUR = env_positive_int("ACCOUNT_EMAIL_SEND_LIMIT_PER_HOUR", 10)
+ACCOUNT_EMAIL_SEND_LIMIT_PER_DAY = env_positive_int("ACCOUNT_EMAIL_SEND_LIMIT_PER_DAY", 30)
+ACCOUNT_EMAIL_SEND_IP_LIMIT_PER_HOUR = env_positive_int("ACCOUNT_EMAIL_SEND_IP_LIMIT_PER_HOUR", 20)
+# A third dimension keyed on the RECIPIENT, independent of who is sending.
+# Per-actor limits bound what one account or address can do; they do not bound
+# what one mailbox RECEIVES. The account address is unverified and registration
+# is free, so rotating accounts would otherwise deliver attachment-bearing mail
+# repeatedly to an address the sender merely typed and does not control.
+# Deliberately generous — an abuse backstop, never a normal-usage limit.
+ACCOUNT_EMAIL_RECIPIENT_LIMIT_PER_DAY = env_positive_int(
+    "ACCOUNT_EMAIL_RECIPIENT_LIMIT_PER_DAY", 50
+)
+
+# How long a worker's claim on a send stays authoritative. Beyond this the claim
+# is treated as a dead worker's and retried once — see designs.render_delivery
+# for why that direction was chosen over silent loss.
+ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS = env_positive_int("ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS", 900)
+
+# The delivery task's bounded execution, derived from its stages rather than
+# picked round. Computed HERE, beside the TTL it must stay below, rather than in
+# designs/tasks.py — the invariant at the bottom of this block is the reason.
+#
+# The storage read is already bounded by ANNOTATION_RENDER_READ_DEADLINE_SECONDS
+# and the SMTP handshake by EMAIL_TIMEOUT, so only composition needs its own
+# figure. Profiling put a production-scale render at 1.7s typical and 17.9s for a
+# 200-mark page at the pixel ceiling; 120s is deliberately far above that, to
+# absorb a loaded worker rather than to describe a normal one. The point of a
+# limit is that nothing runs unbounded, not that it runs fast.
+ACCOUNT_EMAIL_RENDER_BUDGET_SECONDS = env_positive_int("ACCOUNT_EMAIL_RENDER_BUDGET_SECONDS", 120)
+_ACCOUNT_EMAIL_SEND_MARGIN_SECONDS = 60
+ACCOUNT_EMAIL_SEND_SOFT_TIME_LIMIT_SECONDS = (
+    ANNOTATION_RENDER_READ_DEADLINE_SECONDS
+    + ACCOUNT_EMAIL_RENDER_BUDGET_SECONDS
+    + EMAIL_TIMEOUT
+    + _ACCOUNT_EMAIL_SEND_MARGIN_SECONDS
+)
+ACCOUNT_EMAIL_SEND_HARD_TIME_LIMIT_SECONDS = (
+    ACCOUNT_EMAIL_SEND_SOFT_TIME_LIMIT_SECONDS + _ACCOUNT_EMAIL_SEND_MARGIN_SECONDS
+)
+
+# The claim TTL MUST outlast the hard time limit, and this is a startup check
+# rather than a comment because all four inputs are independently operator
+# -configurable. If the inequality breaks, a task that is legitimately still
+# running has its claim reclaimed by a redelivery while the first is mid-send —
+# which produces more than the single duplicate section 8.5 accepts, silently.
+# Same fail-closed shape as the REPLICATE_POLL_INTERVAL/TIMEOUT check above, and
+# it runs under `manage.py check` in CI.
+if ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS <= ACCOUNT_EMAIL_SEND_HARD_TIME_LIMIT_SECONDS:
+    raise ImproperlyConfigured(
+        "ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS must be strictly greater than the "
+        "delivery task's hard time limit (ANNOTATION_RENDER_READ_DEADLINE_SECONDS "
+        "+ ACCOUNT_EMAIL_RENDER_BUDGET_SECONDS + EMAIL_TIMEOUT + 120), or a "
+        "still-running send could have its claim reclaimed and deliver twice"
+    )
+
+# With the gate OPEN in production, an unset or placeholder relay host or
+# From address is a misconfiguration rather than an absent optional setting:
+# refuse startup naming only the setting, never the rejected value. A CLOSED
+# gate skips this entirely, so a production deployment that does not use email
+# needs no email configuration at all.
+if IS_PRODUCTION and ACCOUNT_EMAIL_DELIVERY_ENABLED:
+    _email_problems = [
+        problem
+        for problem in (
+            _production_value_problem("EMAIL_HOST"),
+            _production_value_problem("DEFAULT_FROM_EMAIL"),
+        )
+        if problem
+    ]
+    if EMAIL_BACKEND.endswith(".console.EmailBackend") or EMAIL_BACKEND.endswith(
+        ".locmem.EmailBackend"
+    ):
+        _email_problems.append(
+            "EMAIL_BACKEND must not be a development-only backend when "
+            "ACCOUNT_EMAIL_DELIVERY_ENABLED is true"
+        )
+    if _email_problems:
+        raise ImproperlyConfigured(
+            "Invalid production email configuration: " + "; ".join(_email_problems)
+        )
 
 # The poll interval must be strictly smaller than the overall poll timeout, or
 # the pipeline could never poll more than once before giving up.

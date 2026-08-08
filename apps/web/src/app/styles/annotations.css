@@ -1,0 +1,887 @@
+/* ====================================================================== */
+/* The private stylist annotation workspace (Phase 19).                   */
+/*                                                                        */
+/* Measurements come from the handoff's "Sitara Annotation" reference.     */
+/* Two rules here are behaviour rather than decoration and must not be     */
+/* "tidied away":                                                         */
+/*                                                                        */
+/*  - the image is sized by `aspect-ratio` from its own intrinsic          */
+/*    dimensions and is NEVER `object-fit: cover`. A cover box crops, and  */
+/*    a crop silently invalidates every stored coordinate while looking    */
+/*    perfectly fine.                                                     */
+/*  - every mark keeps a white halo under its palette colour. That is an   */
+/*    accessibility requirement: sage on pale silk and ink on a black      */
+/*    lehenga are both invisible without it.                              */
+/*                                                                        */
+/* This screen has no red. Errors stay in the terracotta ramp;             */
+/* `--color-bad` is deliberately not used here.                           */
+/* ====================================================================== */
+
+.annotation-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* --- Header ----------------------------------------------------------- */
+
+.annotation-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+
+.annotation-header-lead,
+.annotation-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.annotation-header-lead {
+  position: relative;
+}
+
+.annotation-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  color: var(--color-neutral-900);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.annotation-back:hover {
+  background: var(--color-accent-100);
+}
+
+.annotation-header-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--color-neutral-300);
+}
+
+.annotation-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 23px;
+  line-height: 1.1;
+}
+
+.annotation-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 var(--space-4);
+}
+
+.annotation-identity-note {
+  color: var(--color-neutral-800);
+  font-size: 13px;
+  max-width: 62ch;
+}
+
+/* --- Save pill -------------------------------------------------------- */
+
+.annotation-save-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.annotation-save-pill.is-saved {
+  background: var(--color-accent-2-100);
+  color: var(--color-accent-2-900);
+}
+
+.annotation-save-pill.is-saving,
+.annotation-save-pill.is-unsaved {
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-800);
+}
+
+/* Terracotta, not red: the notes are still on screen and the save is     */
+/* retryable, so alarm colour would overstate it.                        */
+.annotation-save-pill.is-failed,
+.annotation-save-pill.is-conflict {
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+}
+
+.annotation-pill-action {
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.annotation-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-neutral-400);
+  border-top-color: var(--color-neutral-800);
+  border-radius: 50%;
+  animation: annotation-spin 0.7s linear infinite;
+}
+
+@keyframes annotation-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* No reduced-motion override here on purpose: tokens.css already carries
+   `* { animation: none !important }` inside its own reduced-motion block, which
+   wins over anything this partial could say. A second block would be dead code
+   AND would shadow the one design-tokens.test.ts checks. */
+
+/* --- Body layout ------------------------------------------------------ */
+
+.annotation-body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 300px;
+  align-items: start;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.annotation-canvas-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* --- Tool rail -------------------------------------------------------- */
+
+.annotation-rail {
+  display: flex;
+  flex-direction: column;
+  align-self: center;
+  gap: 4px;
+  padding: 8px 6px;
+  background: var(--color-bg);
+  border-radius: 999px;
+  box-shadow: var(--shadow-md);
+}
+
+.annotation-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-neutral-800);
+  cursor: pointer;
+}
+
+.annotation-tool:hover:not(:disabled) {
+  background: var(--color-accent-100);
+}
+
+.annotation-tool.is-active {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.annotation-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.annotation-rail-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--color-neutral-300);
+}
+
+/* --- Canvas ----------------------------------------------------------- */
+
+.annotation-canvas {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 600px;
+  padding: var(--space-4);
+  background: var(--color-neutral-200);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.annotation-stage-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+}
+
+.annotation-stage {
+  position: relative;
+  height: min(64vh, 620px);
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow: visible;
+  /* So a drawing gesture is not stolen by scrolling. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transform-origin: center center;
+}
+
+/* `contain`, never `cover`: cropping the render would move every mark      */
+/* relative to the garment it was placed on.                              */
+.annotation-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+}
+
+.annotation-image-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: var(--space-4);
+  background: var(--color-neutral-100);
+  border-radius: var(--radius-md);
+  color: var(--color-neutral-800);
+  text-align: center;
+  font-size: 14px;
+}
+
+.annotation-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.annotation-canvas[data-tool="select"] .annotation-stage {
+  cursor: grab;
+}
+
+.annotation-canvas:not([data-tool="select"]) .annotation-stage {
+  cursor: crosshair;
+}
+
+/* --- Marks ------------------------------------------------------------ */
+
+.mark {
+  cursor: pointer;
+}
+
+.mark-terracotta {
+  --mark-color: var(--color-accent);
+}
+
+.mark-sage {
+  --mark-color: var(--color-accent-2);
+}
+
+.mark-ink {
+  --mark-color: var(--color-neutral-900);
+}
+
+.mark-stroke {
+  stroke: var(--mark-color);
+  fill: none;
+}
+
+.mark-fill {
+  fill: var(--mark-color);
+}
+
+.mark-badge {
+  fill: var(--mark-color);
+}
+
+.mark-handle {
+  fill: var(--color-on-accent);
+  stroke: var(--mark-color);
+}
+
+.mark-selection-ring-inner {
+  stroke: var(--mark-color);
+}
+
+.mark.is-preview {
+  opacity: 0.85;
+}
+
+/* Focus on a mark, over photography. Two traps here, both of them real.    */
+/*                                                                          */
+/* The width cannot be a plain number. Stroke widths inside the overlay are  */
+/* in the image's own pixel space, which the marks compensate for by scaling */
+/* every width by `overlayScale` — so a mark is ~2.75 SCREEN pixels wide at  */
+/* any image size. A flat `stroke-width: 2` here therefore painted a THINNER */
+/* outline than the unfocused mark on any render larger than 600px: the      */
+/* indicator shrank exactly when the image got big. `non-scaling-stroke`     */
+/* removes the whole class of mistake — the value is real screen pixels at   */
+/* any image size and any zoom step, which is the unit a focus indicator has */
+/* to be judged in anyway.                                                  */
+/*                                                                          */
+/* And it cannot be colour alone. Whatever single colour is chosen is one of */
+/* the three palettes' near neighbour, so on that palette a recolour-only    */
+/* ring is close to invisible — for `ink` against a dark ring, invisible     */
+/* outright. So focus changes the WIDTH too, from ~2.75px to 5px: roughly    */
+/* double, obvious on every palette, and it survives the white halo every    */
+/* mark already carries. The palette colour returns on blur.                 */
+.mark:focus-visible {
+  outline: none;
+}
+
+.mark:focus-visible .mark-stroke,
+.mark:focus-visible .mark-badge,
+.mark:focus-visible .mark-fill {
+  stroke: var(--color-accent-700);
+  stroke-width: 5;
+  vector-effect: non-scaling-stroke;
+  paint-order: stroke;
+}
+
+/* --- Empty state, hidden pill, zoom ----------------------------------- */
+
+.annotation-empty-card {
+  position: absolute;
+  width: 280px;
+  padding: var(--space-4);
+  background: var(--color-bg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  text-align: center;
+  pointer-events: none;
+}
+
+.annotation-empty-card h2 {
+  margin: var(--space-2) 0 6px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 20px;
+}
+
+.annotation-empty-card p {
+  margin: 0;
+  color: var(--color-neutral-800);
+  font-size: 13.5px;
+}
+
+.annotation-empty-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+}
+
+.annotation-hidden-pill {
+  position: absolute;
+  top: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  margin: 0;
+  padding: 6px 14px;
+  background: var(--color-neutral-900);
+  color: var(--color-neutral-100);
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+}
+
+.annotation-canvas-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.annotation-instructions {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--color-neutral-800);
+  font-size: 12.5px;
+}
+
+.annotation-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--color-bg);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-md);
+}
+
+.annotation-zoom-button {
+  min-width: 30px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-neutral-900);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.annotation-zoom-button:hover {
+  background: var(--color-accent-100);
+}
+
+.annotation-zoom-label {
+  min-width: 46px;
+  text-align: center;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-800);
+}
+
+.annotation-zoom-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--color-neutral-300);
+}
+
+.annotation-zoom-hint,
+.annotation-limit-notice {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-neutral-800);
+  font-size: 12.5px;
+}
+
+.annotation-limit-notice {
+  color: var(--color-accent-800);
+}
+
+/* --- List panel ------------------------------------------------------- */
+
+.annotation-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-bg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.annotation-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.annotation-panel-title {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--color-accent-700);
+}
+
+.annotation-clear-all {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--color-accent-800);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.annotation-panel-empty {
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--color-neutral-100);
+  border-radius: var(--radius-md);
+  color: var(--color-neutral-800);
+  font-size: 13px;
+}
+
+.annotation-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.annotation-row {
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+}
+
+.annotation-row.is-selected {
+  background: var(--color-accent-100);
+  box-shadow: var(--shadow-sm);
+}
+
+.annotation-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.annotation-row-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.annotation-row-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.annotation-row-type {
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--color-accent-2-800);
+}
+
+.annotation-row-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-neutral-800);
+  cursor: pointer;
+}
+
+.annotation-row-action:hover {
+  background: var(--color-bg);
+  color: var(--color-accent-800);
+}
+
+.annotation-row-note {
+  margin: 6px 0 0;
+  color: var(--color-neutral-900);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+.annotation-row-note-empty {
+  color: var(--color-neutral-600);
+  font-style: italic;
+}
+
+.annotation-row-geometry {
+  margin: 4px 0 0;
+  color: var(--color-neutral-700);
+  font-size: 11.5px;
+}
+
+/* --- Row editor ------------------------------------------------------- */
+
+.annotation-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: var(--space-2);
+}
+
+.annotation-editor-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-neutral-800);
+}
+
+.annotation-editor-field {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-accent-300);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13.5px;
+  resize: vertical;
+}
+
+.annotation-editor-counter {
+  margin: 0;
+  align-self: flex-end;
+  color: var(--color-neutral-700);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.annotation-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.annotation-palette legend {
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-neutral-800);
+}
+
+.annotation-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.annotation-swatch-chip {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--color-swatch-edge);
+}
+
+.annotation-swatch-terracotta .annotation-swatch-chip {
+  background: var(--color-accent);
+}
+
+.annotation-swatch-sage .annotation-swatch-chip {
+  background: var(--color-accent-2);
+}
+
+.annotation-swatch-ink .annotation-swatch-chip {
+  background: var(--color-neutral-900);
+}
+
+.annotation-editor-hint {
+  margin: 0;
+  color: var(--color-neutral-700);
+  font-size: 11.5px;
+}
+
+.annotation-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.annotation-panel-footer {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-accent-2-100);
+  color: var(--color-accent-2-900);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+}
+
+/* --- Send button ------------------------------------------------------ */
+
+.annotation-send,
+.annotation-send-disabled {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.annotation-send button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.annotation-send-disabled span {
+  color: var(--color-neutral-800);
+}
+
+.annotation-send-live {
+  color: var(--color-accent-2-900);
+}
+
+/* --- Dialogs and the leave popover ----------------------------------- */
+
+.annotation-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: var(--color-scrim);
+}
+
+.annotation-dialog {
+  width: min(420px, 100%);
+  padding: var(--space-4);
+  background: var(--color-bg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.annotation-dialog-title {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 20px;
+}
+
+.annotation-dialog-body p {
+  margin: 0;
+  color: var(--color-neutral-800);
+  font-size: 13.5px;
+}
+
+.annotation-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: var(--space-4);
+}
+
+.annotation-leave-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  width: min(320px, 80vw);
+  padding: var(--space-3);
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.annotation-leave-popover p {
+  margin: 0 0 var(--space-3);
+  font-size: 13px;
+  color: var(--color-neutral-900);
+}
+
+.annotation-leave-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.annotation-shell-error,
+.annotation-shell-loading {
+  padding: var(--space-6) var(--space-4);
+}
+
+/* --- Focus, at every zoom level -------------------------------------- */
+
+.annotation-workspace :focus-visible {
+  outline: 2px solid var(--color-accent-700);
+  outline-offset: 2px;
+}
+
+/* --- Mobile and tablet (§15) ----------------------------------------- */
+/*                                                                      */
+/* The rail becomes a horizontal toolbar above the canvas and the list   */
+/* moves below the image. Pin, select, note editing, hide/show and zoom  */
+/* all stay directly reachable. Freehand remains available but is        */
+/* genuinely coarse with a fingertip — that is stated in the docs rather  */
+/* than hidden, because the honest answer is to use a wider screen for   */
+/* detailed strokes.                                                    */
+
+@media (max-width: 1080px) {
+  .annotation-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .annotation-rail {
+    flex-direction: row;
+    align-self: stretch;
+    justify-content: center;
+    flex-wrap: wrap;
+    border-radius: var(--radius-pill);
+  }
+
+  .annotation-rail-divider {
+    width: 1px;
+    height: 24px;
+    margin: 0 4px;
+  }
+
+  .annotation-canvas {
+    min-height: 380px;
+    padding: var(--space-3);
+  }
+
+  .annotation-stage {
+    height: min(52vh, 460px);
+  }
+}
+
+@media (max-width: 620px) {
+  .annotation-header,
+  .annotation-identity,
+  .annotation-body {
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+  }
+
+  .annotation-title {
+    font-size: 20px;
+  }
+
+  .annotation-canvas {
+    min-height: 320px;
+  }
+}

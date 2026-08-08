@@ -16,6 +16,7 @@
 /*   styles/questionnaire.css  wizard, choices, inspiration, review     */
 /*   styles/generation.css     progress, result, refinement, compare    */
 /*   styles/demo.css           deterministic demo-mode labelling        */
+/*   styles/annotations.css    the private stylist annotation workspace  */
 /*                                                                      */
 /* New rules belong in the matching partial (or a new partial added     */
 /* here), never inline below. design-tokens.test.ts reads this file    */
@@ -30,3 +31,4 @@
 @import "./styles/questionnaire.css";
 @import "./styles/generation.css";
 @import "./styles/demo.css";
+@import "./styles/annotations.css";

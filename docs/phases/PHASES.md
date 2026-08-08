@@ -399,7 +399,9 @@ Standing rules across all phases:
   must be persistent + `noeviction` + standalone. The manual budgeted live
   checkpoint remains pending. Demo mode is untouched and stays zero-cost. Marked
   Phases 1–16 delivered; Phase 17 delivered to a draft PR with two manual
-  checkpoints outstanding; Phase 18 is next.
+  checkpoints outstanding; **Phase 18 skipped** (deployment deferred to its own
+  future phase); Phase 19 delivered to a draft PR (ADRs 0020 and 0021) with email
+  delivery shipped disabled and no SMTP send performed.
 
 ## Phase 16-composition — Generated-image composition and framing *(inserted; delivered)*
 - **Scope:** restructure the deterministic `build_image_prompt` so the composition/framing directive (full-length, entire garment head-to-hem, one model standing, plain neutral studio background, even lighting) LEADS the prompt instead of being buried at the end, so FLUX reliably produces the intended catalogue framing rather than a cropped editorial shot. Bump `PROMPT_BUILDER_VERSION`, regenerate + review the golden snapshot/manifest, validate with a few budgeted live generations against the Phase 2 eval references, and amend ADR 0010.
@@ -432,7 +434,19 @@ Standing rules across all phases:
 - **Manual checkpoint:** Lighthouse accessibility ≥ 90 on landing, wizard, results; full keyboard-only journey; screen-reader spot check on the progress screen.
 - **Commit:** `feat(frontend): UI polish, accessibility pass, and legal/disclaimer pages`
 
-## Phase 18 — End-to-end tests and deployment
+## Phase 18 — End-to-end tests and deployment *(SKIPPED — deferred, not delivered)*
+> **Skipped by the project owner's decision, before Phase 19 was started.** Nothing
+> in this phase has been delivered: there is no deployment configuration, no
+> `scripts/smoke.py`, no `docs/RUNBOOK.md`, and no public deployment. The E2E
+> obligation is met elsewhere — Phase 17 delivered the Playwright suite
+> (`apps/web/e2e/`, journeys + accessibility + visual baselines) *and* a CI `e2e`
+> job that runs the functional specs against the real stack in demo mode, and
+> Phase 19 extended both with the annotation journeys. What remains outstanding is
+> everything *deployment*: no deployment configuration, no `scripts/smoke.py`, no
+> `docs/RUNBOOK.md`, no public deployment, and no live-generation checkpoint. Phase 19's
+> "requires Phases 1–18" line is therefore satisfied only for 1–17 + 16B; nothing
+> in Phase 19 depends on Phase 18's deliverables. Deployment must be picked up as
+> its own phase before anything is served publicly.
 - **Scope:** Playwright E2E suite running the full journey **against the Phase 15 demo engine** (zero cost, deterministic — the CI E2E environment sets `DEMO_MODE=true` and no provider keys); deployment config (assumption: single VPS or Railway/Render-class PaaS + managed Postgres + Redis + S3-compatible bucket) serving frontend and API from one public origin with `/api/` reverse-proxied to Django (§6), `DEMO_MODE=true, LIVE_GENERATION_ENABLED=false` as the public default; post-deploy smoke script hitting every public endpoint incl. `/healthz` and `/readyz`; `docs/RUNBOOK.md` (deploy, rotate keys, enable live generation safely, budget knobs).
 - **Non-goals:** no autoscaling, no CDN beyond the storage host's default, no uptime SLOs.
 - **Commands:** `npx playwright test`; deploy per runbook; `python scripts/smoke.py --base-url https://…`.
@@ -440,7 +454,28 @@ Standing rules across all phases:
 - **Manual checkpoint:** public deployment reachable; full journey works for an anonymous visitor at zero provider cost; flipping `LIVE_GENERATION_ENABLED=true` with real keys on a private instance performs one successful budgeted live generation; runbook followed verbatim by a cold read.
 - **Commit:** `feat: Playwright E2E suite, deployment configuration, and runbook`
 
-## Phase 19 — Private stylist annotation workspace
+## Phase 19 — Private stylist annotation workspace *(delivered to a draft PR)*
+> **Delivered**, with two deliberate divergences from the scope below and one
+> outstanding checkpoint.
+>
+> **Email replaced export-download entirely.** The "private, on-demand,
+> server-rendered annotated PNG export" is delivered as a *send to the owner's own
+> account address*, not a download — and the result screen's existing **Download
+> image** link was removed in favour of **Annotate** and **Send to account**.
+> Removing that link is UX, not a privacy control: the signed URL still exists and
+> a browser can still save a displayed image. Email delivery is gated by
+> `ACCOUNT_EMAIL_DELIVERY_ENABLED`, which defaults to **false** as its own operator
+> decision — see ADR 0021, which records three accepted exposures (an unverified
+> account address, a private image leaving the system to the SMTP provider and the
+> recipient's mail host, and a rare duplicate preferred over a silent loss).
+>
+> **Phase 18 was skipped**, so the E2E obligation is met by extending Phase 17's
+> Playwright suite (`apps/web/e2e/annotations.spec.ts`) and every deployment-smoke
+> obligation is struck.
+>
+> **Outstanding:** no real SMTP send has been performed — tests and CI open zero
+> SMTP connections and the locmem backend is asserted. The manual checkpoint below
+> is unrun. ADRs: 0020 (workspace) and 0021 (email delivery).
 - **Scope:** an owner-operated annotation workspace letting the owner of a generated `DesignVersion` mark up the private concept image without modifying the original bytes — pins, arrows, rectangles, bounded freehand strokes, a short note per annotation, zoom/pan, keyboard-accessible selection/adjustment, autosave with saved/saving/error states, multi-tab conflict protection, a structured non-canvas annotation list, hide/show overlays, clear-all with confirmation, and a private, on-demand, server-rendered annotated PNG export. Stores one strict bounded JSON annotation document per version (normalised `[0,1]` geometry, positive revision, revision-based optimistic concurrency), with ownership inherited only through annotation → `DesignVersion` → `Design` → `DesignSession`. "Stylist" names the workflow, not a new account role. Reuses existing ownership, CSRF, OpenAPI, image-delivery, retention, logging and Sentry patterns; browser-native SVG/canvas primitives preferred over a whiteboard framework.
 - **Non-goals:** no external stylist accounts or stylist role; no design sharing or invitation links; no real-time collaboration, WebSockets, CRDTs, presence or live cursors; no AI interpretation of annotations or automatic conversion into refinement prompts; no new design versions; no modification of original image bytes; no persistent annotated-image storage; no PDF export; no localStorage of annotation/image data; no paid provider calls.
 - **Commands:** standard §20 backend + frontend checks plus `npx playwright test`; schema/client generation run twice and proven drift-free.

@@ -292,6 +292,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/designs/{design_id}/versions/{version_id}/annotations/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get your private annotations for a design version
+         * @description Returns the owner's annotation overlay. Before anything has been saved this is a 200 with an empty item list and revision 0 — not a 404 — so revision 0 is the unambiguous never-saved signal and the client needs no separate branch. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        get: operations["designs_version_annotations_retrieve"];
+        /**
+         * Replace your private annotations for a design version
+         * @description Replaces the COMPLETE overlay atomically — there is no partial update, so a removed mark is unambiguous. Send the revision you hold as expected_revision (0 to create); a stale value is refused and nothing is overwritten. A successful write returns 200 with the stored document and its incremented revision. The revision counts writes, not content changes, so replaying identical content with the current revision still increments. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        put: operations["designs_version_annotations_replace"];
+        post?: never;
+        /**
+         * Clear your private annotations for a design version
+         * @description Removes the overlay document. The generated image is never touched. Idempotent: clearing when nothing is stored still succeeds. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        delete: operations["designs_version_annotations_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/designs/{design_id}/versions/{version_id}/annotations/send/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email yourself this design version's annotated concept
+         * @description Queues the annotated composite — the image with your marks drawn on it and a numbered note legend beneath — as a PNG attachment. Your note text is in the attachment only; the message body never carries it. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        post: operations["designs_versions_annotations_send_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/designs/{design_id}/versions/{version_id}/images/": {
         parameters: {
             query?: never;
@@ -326,6 +374,26 @@ export interface paths {
         get: operations["designs_version_result_retrieve"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/designs/{design_id}/versions/{version_id}/send/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email yourself this design version's concept image
+         * @description Queues the plain canonical render as a PNG attachment. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        post: operations["designs_versions_send_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -489,6 +557,223 @@ export interface components {
             id: string;
             version: number;
             schema: components["schemas"]["QuestionnaireSchema"];
+        };
+        /**
+         * @description An arrow must span at least the degenerate-geometry floor.
+         *
+         *     OpenAPI cannot express a constraint between two fields, so the rule is stated
+         *     here rather than left for a client to discover by rejection.
+         */
+        AnnotationArrowGeometry: {
+            start: components["schemas"]["AnnotationPoint"];
+            /** @description The straight-line distance from start must be at least 0.005 — hypot(dx, dy), not either axis alone; a zero-length arrow points at nothing. */
+            end: components["schemas"]["AnnotationPoint"];
+        };
+        /**
+         * @description An arrow must span at least the degenerate-geometry floor.
+         *
+         *     OpenAPI cannot express a constraint between two fields, so the rule is stated
+         *     here rather than left for a client to discover by rejection.
+         */
+        AnnotationArrowGeometryRequest: {
+            start: components["schemas"]["AnnotationPointRequest"];
+            /** @description The straight-line distance from start must be at least 0.005 — hypot(dx, dy), not either axis alone; a zero-length arrow points at nothing. */
+            end: components["schemas"]["AnnotationPointRequest"];
+        };
+        /**
+         * @description The 409 body. Deliberately carries the server's current revision and
+         *     nothing else — a conflict must never echo the stored private document.
+         */
+        AnnotationConflictError: {
+            /** @description code=annotation_conflict plus a safe message. */
+            error: {
+                [key: string]: unknown;
+            };
+            /** @description The server's current revision; reload to it. */
+            revision: number;
+        };
+        AnnotationDocument: {
+            schema_version: number;
+            /** @description The canonical image width the marks were placed against. */
+            image_width: number;
+            image_height: number;
+            /** @description At most 100 marks. May be empty. */
+            items: components["schemas"]["AnnotationItem"][];
+            /** @description Counts WRITES to this document. 0 means nothing has ever been saved for this version; a stored document is always 1 or more. Send the revision you hold as expected_revision when replacing. */
+            revision: number;
+            /**
+             * Format: date-time
+             * @description Null when nothing has been saved yet.
+             */
+            updated_at: string | null;
+        };
+        AnnotationDocumentResponse: {
+            annotations: components["schemas"]["AnnotationDocument"];
+        };
+        /**
+         * @description A complete replacement. There is no partial update: the client owns the
+         *     whole overlay and sends all of it, so a dropped item is unambiguous rather
+         *     than indistinguishable from an omitted field.
+         */
+        AnnotationDocumentWriteRequest: {
+            schema_version: number;
+            /** @description Must equal the version's own canonical width. Validated against the server's value and rejected on mismatch — never trusted. */
+            image_width: number;
+            image_height: number;
+            /** @description At most 100 marks. May be empty. */
+            items: components["schemas"]["AnnotationItemRequest"][];
+            /** @description The revision the client believes it holds. Use 0 to create the document for the first time. A stale value is refused with annotation_conflict and the stored document is left unchanged. */
+            expected_revision: number;
+        };
+        AnnotationFreehandGeometry: {
+            /** @description Between 2 and 500 points, already simplified by the client. */
+            points: components["schemas"]["AnnotationPoint"][];
+        };
+        AnnotationFreehandGeometryRequest: {
+            /** @description Between 2 and 500 points, already simplified by the client. */
+            points: components["schemas"]["AnnotationPointRequest"][];
+        };
+        AnnotationGeometry: components["schemas"]["AnnotationPinGeometry"] | components["schemas"]["AnnotationArrowGeometry"] | components["schemas"]["AnnotationRectangleGeometry"] | components["schemas"]["AnnotationFreehandGeometry"];
+        AnnotationGeometryRequest: components["schemas"]["AnnotationPinGeometryRequest"] | components["schemas"]["AnnotationArrowGeometryRequest"] | components["schemas"]["AnnotationRectangleGeometryRequest"] | components["schemas"]["AnnotationFreehandGeometryRequest"];
+        AnnotationItem: {
+            /**
+             * Format: uuid
+             * @description A client-generated UUID, stable for this mark's life and unique within the document.
+             */
+            id: string;
+            /**
+             * @description Must agree with the geometry shape sent alongside it.
+             *
+             *     * `pin` - pin
+             *     * `arrow` - arrow
+             *     * `rectangle` - rectangle
+             *     * `freehand` - freehand
+             */
+            type: components["schemas"]["AnnotationItemTypeEnum"];
+            geometry: components["schemas"]["AnnotationGeometry"];
+            /** @description Short editorial note, at most 140 characters. May be blank for a purely visual mark. Stored and returned as inert text: markup and URLs are rejected, and invisible/bidirectional characters are stripped. */
+            note: string;
+            /**
+             * @description A fixed allowlisted mark colour, never a free colour value.
+             *
+             *     * `terracotta` - terracotta
+             *     * `sage` - sage
+             *     * `ink` - ink
+             */
+            palette: components["schemas"]["PaletteEnum"];
+            /** @description The mark's 1-based placement order; unique within a document. */
+            created_order: number;
+        };
+        AnnotationItemRequest: {
+            /**
+             * Format: uuid
+             * @description A client-generated UUID, stable for this mark's life and unique within the document.
+             */
+            id: string;
+            /**
+             * @description Must agree with the geometry shape sent alongside it.
+             *
+             *     * `pin` - pin
+             *     * `arrow` - arrow
+             *     * `rectangle` - rectangle
+             *     * `freehand` - freehand
+             */
+            type: components["schemas"]["AnnotationItemTypeEnum"];
+            geometry: components["schemas"]["AnnotationGeometryRequest"];
+            /** @description Short editorial note, at most 140 characters. May be blank for a purely visual mark. Stored and returned as inert text: markup and URLs are rejected, and invisible/bidirectional characters are stripped. */
+            note: string;
+            /**
+             * @description A fixed allowlisted mark colour, never a free colour value.
+             *
+             *     * `terracotta` - terracotta
+             *     * `sage` - sage
+             *     * `ink` - ink
+             */
+            palette: components["schemas"]["PaletteEnum"];
+            /** @description The mark's 1-based placement order; unique within a document. */
+            created_order: number;
+        };
+        /**
+         * @description * `pin` - pin
+         *     * `arrow` - arrow
+         *     * `rectangle` - rectangle
+         *     * `freehand` - freehand
+         * @enum {string}
+         */
+        AnnotationItemTypeEnum: "pin" | "arrow" | "rectangle" | "freehand";
+        AnnotationPinGeometry: {
+            point: components["schemas"]["AnnotationPoint"];
+        };
+        AnnotationPinGeometryRequest: {
+            point: components["schemas"]["AnnotationPointRequest"];
+        };
+        /**
+         * @description A normalised point: a fraction of the image's own width and height, in
+         *     the closed range [0, 1]. Never viewport pixels — those would stop meaning
+         *     anything the moment the image were rendered at a different size.
+         */
+        AnnotationPoint: {
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
+        };
+        /**
+         * @description A normalised point: a fraction of the image's own width and height, in
+         *     the closed range [0, 1]. Never viewport pixels — those would stop meaning
+         *     anything the moment the image were rendered at a different size.
+         */
+        AnnotationPointRequest: {
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
+        };
+        /**
+         * @description Origin plus extent, so one shape has exactly one representation.
+         *
+         *     Two rules OpenAPI cannot express, both enforced server-side: each side must
+         *     be at least the degenerate-geometry floor, and the rectangle must stay inside
+         *     the image (``x + width`` and ``y + height`` at most 1).
+         */
+        AnnotationRectangleGeometry: {
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
+            /**
+             * Format: double
+             * @description At least 0.005, and x + width must not exceed 1.
+             */
+            width: number;
+            /**
+             * Format: double
+             * @description At least 0.005, and y + height must not exceed 1.
+             */
+            height: number;
+        };
+        /**
+         * @description Origin plus extent, so one shape has exactly one representation.
+         *
+         *     Two rules OpenAPI cannot express, both enforced server-side: each side must
+         *     be at least the degenerate-geometry floor, and the rectangle must stay inside
+         *     the image (``x + width`` and ``y + height`` at most 1).
+         */
+        AnnotationRectangleGeometryRequest: {
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
+            /**
+             * Format: double
+             * @description At least 0.005, and x + width must not exceed 1.
+             */
+            width: number;
+            /**
+             * Format: double
+             * @description At least 0.005, and y + height must not exceed 1.
+             */
+            height: number;
         };
         AuthSuccessResponse: {
             /** @description True on a successful login/registration. */
@@ -767,7 +1052,7 @@ export interface components {
             design_id: string;
             /** Format: uuid */
             design_version_id: string | null;
-            status: components["schemas"]["StatusEnum"];
+            status: components["schemas"]["GenerationJobStatusEnum"];
             error_code: (components["schemas"]["ErrorCodeEnum"] | components["schemas"]["NullEnum"]) | null;
             generation_kind: components["schemas"]["GenerationKindEnum"];
             is_demo: boolean;
@@ -783,6 +1068,15 @@ export interface components {
         GenerationJobResponse: {
             job: components["schemas"]["GenerationJob"];
         };
+        /**
+         * @description * `queued` - queued
+         *     * `running_text` - running_text
+         *     * `running_image` - running_image
+         *     * `succeeded` - succeeded
+         *     * `failed` - failed
+         * @enum {string}
+         */
+        GenerationJobStatusEnum: "queued" | "running_text" | "running_image" | "succeeded" | "failed";
         /**
          * @description * `initial` - initial
          *     * `refinement` - refinement
@@ -884,6 +1178,13 @@ export interface components {
          * @enum {string}
          */
         OperatorEnum: "equals" | "in" | "not_in";
+        /**
+         * @description * `terracotta` - terracotta
+         *     * `sage` - sage
+         *     * `ink` - ink
+         * @enum {string}
+         */
+        PaletteEnum: "terracotta" | "sage" | "ink";
         PatchedDesignWriteRequest: {
             title?: string;
             /** Format: uuid */
@@ -1012,6 +1313,31 @@ export interface components {
             password: string;
             password_confirm: string;
         };
+        RenderSendResponse: {
+            send: components["schemas"]["RenderSendStatus"];
+        };
+        /**
+         * @description Deliberately only a status.
+         *
+         *     No recipient address: the client already knows the account's own address
+         *     from ``/auth/me`` and uses that for its confirmation copy, so echoing it
+         *     here would put an address into a response body for no benefit. No job id
+         *     either — a send is fire-and-forget, with no progress to poll, unlike
+         *     generation.
+         */
+        RenderSendStatus: {
+            /**
+             * @description Always 'queued'. A 202 means the delivery task was enqueued, NOT that a message was sent — rendering and SMTP happen afterwards in a worker.
+             *
+             *     * `queued` - queued
+             */
+            status: components["schemas"]["RenderSendStatusStatusEnum"];
+        };
+        /**
+         * @description * `queued` - queued
+         * @enum {string}
+         */
+        RenderSendStatusStatusEnum: "queued";
         /** @description A rule's ``then`` clause. */
         RuleActionSchema: {
             action: components["schemas"]["ActionEnum"];
@@ -1056,15 +1382,6 @@ export interface components {
             image_url: string;
             thumbnail_url: string;
         };
-        /**
-         * @description * `queued` - queued
-         *     * `running_text` - running_text
-         *     * `running_image` - running_image
-         *     * `succeeded` - succeeded
-         *     * `failed` - failed
-         * @enum {string}
-         */
-        StatusEnum: "queued" | "running_text" | "running_image" | "succeeded" | "failed";
         StepSchema: {
             id: string;
             title: string;
@@ -1868,6 +2185,232 @@ export interface operations {
             };
         };
     };
+    designs_version_annotations_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                design_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationDocumentResponse"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description design_image_not_ready: no permanent image has been ingested yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_version_annotations_replace: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnotationDocumentWriteRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationDocumentResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorEnvelope"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description annotation_conflict: expected_revision is stale, and the stored document is unchanged. The body carries the server's current revision and never the document itself. Or design_image_not_ready. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationConflictError"];
+                };
+            };
+        };
+    };
+    designs_version_annotations_delete: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cleared. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description design_image_not_ready. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_versions_annotations_send_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued for delivery. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenderSendResponse"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description design_image_not_ready, or email_recipient_unavailable when the workspace is anonymous and so has no account address. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description email_send_limit_reached. Carries Retry-After. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description email_delivery_disabled when the operator has not enabled account email, or email_send_unavailable when the throttle store cannot be reached. Neither carries Retry-After. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     designs_version_images_retrieve: {
         parameters: {
             query?: never;
@@ -1956,6 +2499,77 @@ export interface operations {
                 };
             };
             /** @description design_result_unavailable: the stored content is corrupt, unsupported or unsafe. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_versions_send_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued for delivery. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenderSendResponse"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description design_image_not_ready, or email_recipient_unavailable when the workspace is anonymous and so has no account address. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description email_send_limit_reached. Carries Retry-After. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description email_delivery_disabled when the operator has not enabled account email, or email_send_unavailable when the throttle store cannot be reached. Neither carries Retry-After. */
             503: {
                 headers: {
                     [name: string]: unknown;
