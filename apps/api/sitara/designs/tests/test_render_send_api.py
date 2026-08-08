@@ -7,8 +7,6 @@ place, cannot reveal whether a design exists, and cannot be used as a firehose.
 
 from __future__ import annotations
 
-import copy
-
 import pytest
 from django.contrib.auth import get_user_model
 from django.core import mail
@@ -66,13 +64,6 @@ def delivery_enabled(settings):
     settings.ACCOUNT_EMAIL_SEND_LIMIT_PER_DAY = 1000
     settings.ACCOUNT_EMAIL_SEND_IP_LIMIT_PER_HOUR = 1000
     settings.ACCOUNT_EMAIL_RECIPIENT_LIMIT_PER_DAY = 1000
-
-
-@pytest.fixture(autouse=True)
-def isolated_design_image_storage(settings):
-    configured = copy.deepcopy(settings.STORAGES)
-    configured["design_images"] = {"BACKEND": "django.core.files.storage.InMemoryStorage"}
-    settings.STORAGES = configured
 
 
 @pytest.fixture(autouse=True)

@@ -8,7 +8,6 @@ marker holds nothing private, and that nothing in the suite ever opens SMTP.
 
 from __future__ import annotations
 
-import copy
 import logging
 import smtplib
 from datetime import timedelta
@@ -62,13 +61,6 @@ def delivery_enabled(settings):
     that proves the gate works, rather than the reverse."""
     settings.ACCOUNT_EMAIL_DELIVERY_ENABLED = True
     settings.DEFAULT_FROM_EMAIL = "concepts@sitara.example"
-
-
-@pytest.fixture(autouse=True)
-def isolated_design_image_storage(settings):
-    configured = copy.deepcopy(settings.STORAGES)
-    configured["design_images"] = {"BACKEND": "django.core.files.storage.InMemoryStorage"}
-    settings.STORAGES = configured
 
 
 def owned_version(*, email: str | None = None, with_image: bool = True) -> DesignVersion:
