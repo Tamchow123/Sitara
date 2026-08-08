@@ -219,11 +219,14 @@ Start with `git status --short`, `git log -5 --oneline`, `docker compose ps`. Ru
 **Backend**: `docker compose config`; `docker compose build api`; `docker compose up -d`; then inside `api`: `manage.py check`, `manage.py makemigrations --check --dry-run`, `pip check`, `pytest`, `ruff check .`, `ruff format --check .`.
 
 **Frontend**: `npm --prefix apps/web run lint`, `... run typecheck`, `... test -- --run`, `... run build`.
-Run these on the HOST, not inside the `web` container. `design-tokens.test.ts` reads the vendored
-design system from `design_handoff_sitara_flow/` at the repository root, which is outside the
-`apps/web` Docker build context, so `docker compose exec web npm test` reports 32 failures that
-exist neither on the host nor in CI. Lint covers `src`, `e2e` and `playwright.config.ts` at
-`--max-warnings 0`.
+Run these on the HOST, not inside the `web` container. A handful of tests deliberately read files
+outside the `apps/web` Docker build context — `design-tokens.test.ts` reads the vendored design
+system at `design_handoff_sitara_flow/`, and `features/annotations/render-parity.test.ts` reads
+`apps/api/sitara/media/annotation_render.py` — so `docker compose exec web npm test` reports a
+batch of failures (the design-token contrast assertions plus the palette-parity ones) that exist
+neither on the host nor in CI. Both throw rather than skip on purpose: a silently-passing
+transcription check is worse than a loud environment-specific failure. Lint covers `src`, `e2e`
+and `playwright.config.ts` at `--max-warnings 0`.
 
 **End-to-end (Phase 17, extended by Phase 19 — Phase 18 was skipped, so this is the
 whole E2E story)**: CI's `e2e` job runs the **functional** specs against the real

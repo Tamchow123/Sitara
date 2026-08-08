@@ -203,7 +203,11 @@ def test_every_palette_entry_composes_and_differs(palette):
 
 def test_a_mark_lands_where_its_normalised_coordinates_say():
     """Two pins at opposite corners must differ, and each must differ from the
-    plain render — proving the coordinates are actually used."""
+    plain render — proving the coordinates are actually used at all.
+
+    Note the fixture points are on the x=y diagonal, so this cannot detect an
+    x/y transposition; ``test_a_mark_lands_in_the_half_of_the_image_its_
+    coordinates_name`` below is the test that does."""
     key = store_original()
     plain = compose_annotated_png(storage_key=key, document=document(), annotated=False)
     top_left = compose_annotated_png(
@@ -262,6 +266,61 @@ def test_every_mark_type_is_drawn_over_a_white_halo(kind, geometry):
         storage_key=key, document=document([mark(type=kind, geometry=geometry)])
     )
     assert (255, 255, 255) in image_area_colours(render)
+
+
+def drawn_centroid(render) -> tuple[float, float]:
+    """Where the drawn marks sit, as fractions of the pasted image area.
+
+    Only meaningful over :func:`dark_original`, which contains no white pixel
+    anywhere, so every white pixel inside the image area is one the compositor
+    drew — the halo every mark type is stroked with."""
+    from sitara.media import annotation_render as module
+
+    left = module._MARGIN
+    top = module._HEADER_HEIGHT
+    width = module.PAGE_WIDTH - module._MARGIN * 2
+    with Image.open(io.BytesIO(render.content)) as page:
+        height = min(round(1024 * width / 768), page.height - top)
+        area = page.crop((left, top, left + width, top + height)).convert("RGB")
+        pixels = list(area.getdata())
+    hits = [index for index, pixel in enumerate(pixels) if pixel == (255, 255, 255)]
+    assert hits, "no drawn pixels found inside the image area"
+    return (
+        sum(index % width for index in hits) / len(hits) / width,
+        sum(index // width for index in hits) / len(hits) / height,
+    )
+
+
+@pytest.mark.parametrize(
+    "kind,geometry",
+    [
+        ("pin", {"point": {"x": 0.2, "y": 0.8}}),
+        ("rectangle", {"x": 0.08, "y": 0.62, "width": 0.28, "height": 0.3}),
+        ("arrow", {"start": {"x": 0.1, "y": 0.7}, "end": {"x": 0.3, "y": 0.9}}),
+        (
+            "freehand",
+            {"points": [{"x": 0.1, "y": 0.7}, {"x": 0.2, "y": 0.8}, {"x": 0.3, "y": 0.9}]},
+        ),
+    ],
+)
+def test_a_mark_lands_in_the_half_of_the_image_its_coordinates_name(kind, geometry):
+    """The transposition guard, which a diagonal fixture cannot be.
+
+    Every point here is deliberately asymmetric — x well below 0.5, y well above
+    it — and the original is 768x1024, so denormalising y against the width (or x
+    against the height) moves the mark to the opposite side of the page instead of
+    landing on the same pixel it started from. CLAUDE.md §14 singles out this
+    class of coordinate bug precisely because the output still looks plausible;
+    asserting only that two renders differ would not notice it. A compositor that
+    ignored the coordinates entirely and drew at the centre also fails here."""
+    key = dark_original(f"design-images/test/v1/dark-half-{kind}.webp")
+    render = compose_annotated_png(
+        storage_key=key, document=document([mark(type=kind, geometry=geometry)])
+    )
+
+    x, y = drawn_centroid(render)
+    assert x < 0.45, f"{kind} drawn at x={x:.3f}; its coordinates put it in the left half"
+    assert y > 0.55, f"{kind} drawn at y={y:.3f}; its coordinates put it in the lower half"
 
 
 def test_the_image_area_has_no_white_without_a_mark():

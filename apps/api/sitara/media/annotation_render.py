@@ -105,6 +105,13 @@ _INK = (46, 43, 37)
 _MUTED = (100, 92, 80)
 _WHITE = (255, 255, 255)
 
+# Hand-mirrored from the design tokens the browser overlay draws with —
+# --color-accent, --color-accent-2 and --color-neutral-900 in
+# apps/web/src/app/styles/tokens.css, mapped by the .mark-<palette> rules in
+# styles/annotations.css. There is no shared source, so these must be updated
+# together: a mark drawn in one colour on screen and another in the emailed PNG
+# is a correctness bug, not a styling one. Drift fails
+# apps/web/src/features/annotations/render-parity.test.ts.
 MARK_COLOURS = {
     "terracotta": (198, 113, 57),
     "sage": (122, 138, 94),
