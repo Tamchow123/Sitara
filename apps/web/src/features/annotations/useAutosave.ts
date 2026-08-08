@@ -58,6 +58,24 @@ export type Autosave = {
   cancelPending: () => void;
   /** Has any write been dispatched for this document, confirmed or not? */
   hasEverSent: () => boolean;
+  /**
+   * Block autosave and resolve once nothing is in flight, so a caller can own the
+   * document exclusively for a second mutation path (the clear-all DELETE).
+   *
+   * Cancelling the debounce is not enough on its own: an ALREADY-SENT PUT and a
+   * DELETE are two independent requests, and the server is free to handle them in
+   * either order. If the DELETE were handled first it would delete nothing (the
+   * row does not exist yet), and the PUT — still carrying `expected_revision: 0`
+   * — would then be a legitimate first-ever create, restoring on the server the
+   * exact marks the user had just cleared. The client's epoch guard cannot see
+   * that; it only keeps the stale confirmation out of the local UI. The only
+   * reliable fix is to not have the two requests in flight together.
+   */
+  takeExclusive: () => Promise<void>;
+  /** Release the block taken by `takeExclusive`. Always call it, even on failure. */
+  releaseExclusive: () => void;
+  /** Record that local and server agree — used after a successful clear. */
+  markSaved: () => void;
   /** Explicit, user-initiated retry after a failure. Never automatic. */
   retry: () => void;
   /** Take the server's document, abandoning local edits. */
@@ -86,6 +104,13 @@ export function useAutosave({
   // deciding from the revision alone skips telling the server about a document it
   // may be about to hold.
   const everSent = useRef(false);
+  // Set while another mutation path owns the document. `runSave` refuses to start
+  // under it, so nothing new can be in flight once `takeExclusive` has resolved.
+  const blocked = useRef(false);
+  // The current `runSave` call, so `takeExclusive` can await it. Held rather than
+  // discarded with `void` precisely because "is a write outstanding?" needs an
+  // answer something can wait on, not just a boolean.
+  const pending = useRef<Promise<void> | null>(null);
   // The reducer state is read inside async callbacks and timers that were
   // created on an earlier render. A ref keeps them reading the CURRENT marks
   // rather than a stale closure, which is what makes the coalesced follow-up
@@ -103,7 +128,8 @@ export function useAutosave({
     // cannot be lost, because `commitEdit` dispatched it before calling flush, so
     // it is in `latest.current` and the re-armed effect will carry it. Deliberate:
     // queueing the override would mean two writes racing for one revision.
-    if (inFlight.current) return;
+    // `blocked` is the clear-all path holding the document; see `takeExclusive`.
+    if (blocked.current || inFlight.current) return;
     const snapshot = latest.current;
 
     // `override` exists for exactly one reason: a caller that has just dispatched
@@ -118,17 +144,35 @@ export function useAutosave({
     inFlight.current = true;
     setSave({ status: "saving" });
 
-    const sentAtEpoch = snapshot.epoch;
-    everSent.current = true;
-    const result = await saveAnnotations(designId, versionId, {
-      schema_version: schemaVersion,
-      image_width: imageWidth,
-      image_height: imageHeight,
-      items: sent,
-      expected_revision: snapshot.revision,
+    // Published so `takeExclusive` has something to wait on. Created here, at the
+    // point a write really starts, rather than at the call sites: a call that
+    // early-returned above is not an outstanding write, and publishing its
+    // already-settled promise would let an exclusive caller proceed straight past
+    // a PUT that is genuinely still in flight.
+    let finished: () => void = () => {};
+    pending.current = new Promise<void>((resolve) => {
+      finished = resolve;
     });
 
-    inFlight.current = false;
+    const sentAtEpoch = snapshot.epoch;
+    everSent.current = true;
+    let result;
+    try {
+      result = await saveAnnotations(designId, versionId, {
+        schema_version: schemaVersion,
+        image_width: imageWidth,
+        image_height: imageHeight,
+        items: sent,
+        expected_revision: snapshot.revision,
+      });
+    } finally {
+      // In a `finally` so an unexpected rejection cannot leave the flag set — a
+      // stuck `inFlight` silently disables autosave, and a never-resolved
+      // `pending` would wedge a clear-all waiting on it forever.
+      inFlight.current = false;
+      pending.current = null;
+      finished();
+    }
 
     if (result.ok) {
       dispatch({
@@ -221,6 +265,32 @@ export function useAutosave({
   /** Has any write been dispatched for this document, confirmed or not? */
   const hasEverSent = useCallback(() => everSent.current, []);
 
+  const takeExclusive = useCallback(async () => {
+    // Order matters: block first, THEN wait. Blocking afterwards would leave a
+    // window in which the settling save re-arms the debounce and a fresh PUT
+    // starts under the caller that believes it now owns the document.
+    //
+    // Nothing below this line may throw. Once `blocked` is set, only
+    // `releaseExclusive` clears it, and the caller's `finally` cannot run for a
+    // rejection raised HERE rather than inside its own `try` — which would leave
+    // autosave silently disabled for the rest of the session. Hence the
+    // infallible `cancelPending` and the swallowed rejection on the await; keep it
+    // that way, or move the body into its own try/finally.
+    blocked.current = true;
+    cancelPending();
+    const outstanding = pending.current;
+    if (!outstanding) return;
+    // A rejection is the caller's problem to survive, not a reason to keep
+    // waiting: the request is over either way.
+    await outstanding.catch(() => {});
+  }, [cancelPending]);
+
+  const releaseExclusive = useCallback(() => {
+    blocked.current = false;
+  }, []);
+
+  const markSaved = useCallback(() => setSave({ status: "saved" }), []);
+
   const retry = useCallback(() => {
     // Clearing the status first is what re-arms the debounce effect, so a retry
     // that itself fails lands back in `failed` rather than spinning.
@@ -259,5 +329,17 @@ export function useAutosave({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  return { save, dirty, flush, cancelPending, hasEverSent, retry, reloadLatest, reloading };
+  return {
+    save,
+    dirty,
+    flush,
+    cancelPending,
+    hasEverSent,
+    takeExclusive,
+    releaseExclusive,
+    markSaved,
+    retry,
+    reloadLatest,
+    reloading,
+  };
 }

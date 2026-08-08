@@ -588,16 +588,24 @@ describe("autosave", () => {
     fireEvent.click(screen.getByRole("button", { name: /clear all/i }));
     const dialog = await screen.findByRole("alertdialog");
     fireEvent.click(within(dialog).getByRole("button", { name: /^clear all$/i }));
-    await waitFor(() => expect(api.clearAnnotations).toHaveBeenCalledTimes(1));
-    await screen.findByRole("heading", { name: /annotations · 0/i });
 
-    // Now it lands. Its confirmation names a revision the clear has retired, so
-    // applying it would put two marks back on a document the server says is empty
-    // — and then 409 on the next write.
+    // The DELETE WAITS for the open PUT instead of racing it. The two are
+    // independent requests and the server may handle them in either order; if the
+    // DELETE went first it would remove nothing and the PUT would then write the
+    // marks back, so overlapping them at all is the defect.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.clearAnnotations).not.toHaveBeenCalled();
+
+    // Now the save lands, and only then does the clear go out.
     await act(async () => {
       release?.();
     });
-    expect(screen.getByRole("heading", { name: /annotations · 0/i })).toBeInTheDocument();
+    await waitFor(() => expect(api.clearAnnotations).toHaveBeenCalledTimes(1));
+    // The late confirmation names a revision the clear has retired, so applying it
+    // would put the marks back on a document the server says is empty.
+    expect(await screen.findByRole("heading", { name: /annotations · 0/i })).toBeInTheDocument();
     // And the pill tells the truth about it. Comparing only against what was sent
     // would leave it claiming unsaved changes over a document that is in step.
     expect(await screen.findByText("Saved")).toBeInTheDocument();
@@ -677,14 +685,108 @@ describe("autosave", () => {
     const dialog = await screen.findByRole("alertdialog");
     fireEvent.click(within(dialog).getByRole("button", { name: /^clear all$/i }));
 
-    // The DELETE goes out despite the revision still reading 0.
-    await waitFor(() => expect(api.clearAnnotations).toHaveBeenCalledTimes(1));
+    // The DELETE goes out despite the revision still reading 0 — but only once the
+    // creating PUT has landed, so the server cannot end up handling the DELETE
+    // first (deleting nothing) and then accepting that PUT's `expected_revision:
+    // 0` as a legitimate first-ever save of the marks just cleared.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.clearAnnotations).not.toHaveBeenCalled();
 
-    // And when the first save finally lands, its marks do not come back.
     await act(async () => {
       release?.();
     });
+    await waitFor(() => expect(api.clearAnnotations).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("heading", { name: /annotations · 0/i })).toBeInTheDocument();
+  });
+
+  it("never has a save and a clear in flight at the same time", async () => {
+    // The invariant behind both tests above, asserted directly on the request
+    // ordering rather than on its symptoms. Two concurrent writes to one document
+    // is the whole defect: whichever order the server picks, one of them is
+    // operating on a document state its caller never saw.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    api.fetchAnnotations.mockResolvedValue(emptyDocument({ items: [pin(1)], revision: 2 }));
+    const order: string[] = [];
+    let release: (() => void) | null = null;
+    api.saveAnnotations.mockImplementationOnce(
+      (_d: string, _v: string, body: { expected_revision: number; items: AnnotationItem[] }) => {
+        order.push("save:start");
+        return new Promise((resolve) => {
+          release = () => {
+            order.push("save:end");
+            resolve({
+              ok: true,
+              document: {
+                ...emptyDocument(),
+                items: body.items,
+                revision: body.expected_revision + 1,
+              },
+            });
+          };
+        });
+      },
+    );
+    api.clearAnnotations.mockImplementation(async () => {
+      order.push("clear:start");
+      return { ok: true };
+    });
+    const { container } = await loaded();
+
+    fireEvent.click(screen.getByRole("button", { name: /^pin \(p\)$/i }));
+    drawOnStage(container);
+    await act(async () => {
+      vi.advanceTimersByTime(900);
+    });
+    await waitFor(() => expect(api.saveAnnotations).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: /clear all/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /^clear all$/i }));
+    await act(async () => {
+      release?.();
+    });
+    await waitFor(() => expect(api.clearAnnotations).toHaveBeenCalledTimes(1));
+
+    // The clear starts only after the save has finished — never between its start
+    // and its end.
+    expect(order).toEqual(["save:start", "save:end", "clear:start"]);
+  });
+
+  it("does not report a conflict caused by the user's own clear", async () => {
+    // A save that 409s because the clear removed the row underneath it describes a
+    // write the clear made irrelevant. Showing "Newer notes elsewhere" there blames
+    // another session for the user's own completed action.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    api.fetchAnnotations.mockResolvedValue(emptyDocument({ items: [pin(1)], revision: 3 }));
+    let release: (() => void) | null = null;
+    api.saveAnnotations.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({ ok: false, kind: "conflict", message: "Newer notes elsewhere." });
+        }),
+    );
+    const { container } = await loaded();
+
+    fireEvent.click(screen.getByRole("button", { name: /^pin \(p\)$/i }));
+    drawOnStage(container);
+    await act(async () => {
+      vi.advanceTimersByTime(900);
+    });
+    await waitFor(() => expect(api.saveAnnotations).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: /clear all/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /^clear all$/i }));
+    await act(async () => {
+      release?.();
+    });
+    await waitFor(() => expect(api.clearAnnotations).toHaveBeenCalledTimes(1));
+
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    expect(screen.queryByText(/newer notes elsewhere/i)).not.toBeInTheDocument();
   });
 
   it("never writes annotation state to browser storage", async () => {

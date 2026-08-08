@@ -253,8 +253,8 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
     cancelEdit();
     // A debounced PUT still on the clock would land after the DELETE and write
     // the marks straight back, at a revision the clear had just retired. Dropping
-    // it here closes the common case; the reducer's `saved` guard closes the one
-    // that was already in flight when the button was pressed.
+    // it here closes the common case; a PUT that was ALREADY SENT is handled
+    // below, by waiting for it rather than racing it.
     autosave.cancelPending();
     if (state.revision === 0 && !autosave.hasEverSent()) {
       // Nothing has ever been stored AND nothing is on its way, so there is
@@ -269,21 +269,38 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
       return;
     }
     void (async () => {
-      const outcome = await clearAnnotations(designId, versionId);
-      if (!outcome.ok) return;
-      // DELETE removes the document itself, so the version is back to its
-      // never-annotated state: revision 0, no marks.
-      dispatch({
-        type: "hydrate",
-        document: {
-          schema_version: document?.schema_version ?? 1,
-          image_width: imageWidth,
-          image_height: imageHeight,
-          items: [],
-          revision: 0,
-          updated_at: null,
-        },
-      });
+      // Take the document exclusively BEFORE the DELETE. A PUT already in flight
+      // and a DELETE are two independent requests the server may handle in either
+      // order, and the losing order silently undoes the clear: the DELETE removes
+      // nothing (no row yet), then the PUT's `expected_revision: 0` is treated —
+      // correctly, by its own contract — as a first-ever save and re-creates the
+      // document holding the marks the user just cleared. Nothing client-side can
+      // detect that, so the fix is to never have both in flight at once.
+      await autosave.takeExclusive();
+      try {
+        const outcome = await clearAnnotations(designId, versionId);
+        if (!outcome.ok) return;
+        // DELETE removes the document itself, so the version is back to its
+        // never-annotated state: revision 0, no marks.
+        dispatch({
+          type: "hydrate",
+          document: {
+            schema_version: document?.schema_version ?? 1,
+            image_width: imageWidth,
+            image_height: imageHeight,
+            items: [],
+            revision: 0,
+            updated_at: null,
+          },
+        });
+        // The awaited save may have left a `failed`/`conflict` status behind. It
+        // describes a write this clear has just made irrelevant — the server holds
+        // nothing and the editor is empty — so leaving it up would show the user a
+        // conflict over their own completed clear.
+        autosave.markSaved();
+      } finally {
+        autosave.releaseExclusive();
+      }
     })();
   }, [
     designId,

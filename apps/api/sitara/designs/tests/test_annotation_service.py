@@ -212,6 +212,28 @@ def test_deleting_removes_the_document_row_and_nothing_else():
     assert DesignVersion.objects.filter(pk=version.pk).exists()
 
 
+def test_a_write_after_a_delete_is_a_first_ever_save_again():
+    """Pins a contract the editor depends on knowing about.
+
+    Once the row is gone the version is genuinely un-annotated, so the next write
+    is a create and only ``expected_revision=0`` is accepted — which is why the
+    editor must never leave a PUT in flight while it sends the DELETE. If the
+    server handled the DELETE first, that PUT's ``expected_revision=0`` would be
+    accepted here as a legitimate first save and would restore the very marks the
+    user had just cleared. Sequencing the two requests client-side is what makes
+    that unreachable; this test is the reason it has to."""
+    version = ready_version()
+    replace_annotation_document(version, document(), expected_revision=0)
+    delete_annotation_document(version)
+
+    with pytest.raises(AnnotationConflict) as raised:
+        replace_annotation_document(version, document(), expected_revision=1)
+    assert raised.value.current_revision == UNSAVED_REVISION
+
+    _, revision, _ = replace_annotation_document(version, document(), expected_revision=0)
+    assert revision == 1
+
+
 # --- the wire payload -------------------------------------------------------
 
 
