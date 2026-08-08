@@ -4,20 +4,49 @@ Mirrors ``TestProcessorGolden``. The same-process determinism test next door
 proves ``compose_annotated_png`` is repeatable with itself in one run; it cannot
 catch the class of regression that actually threatens the contract — a Pillow,
 zlib or libm change, or a different wheel build between a developer's host and
-the container CI and production run in. Only a hash committed to the repository
-at one point in time and re-checked later can catch that.
+the environments CI and production run in. Only a hash committed to the
+repository at one point in time and re-checked later can catch that.
+
+**Two guards, because they are not equally portable.** This file originally
+pinned only the sha256 of the *compressed* PNG, and that made it fail the moment
+it first ran anywhere other than where the manifest was generated: identical
+dimensions, identical layout, ~90 bytes different in a ~660 KB file. A PNG's
+compressed bytes depend on the exact zlib the encoder is linked against, which is
+not something this project controls or should pretend to. So:
+
+* ``test_golden_pixels_are_reproduced_exactly`` pins the sha256 of the *decoded*
+  pixels plus the page dimensions. This is the real contract — the picture a
+  stylist receives — and it holds anywhere.
+* ``test_golden_bytes_are_reproduced_exactly`` still pins the compressed bytes,
+  but only when the running environment fingerprint matches the one recorded in
+  the manifest. Elsewhere it SKIPS with the differing components named. A skip is
+  visible in the suite output; it is never silently green.
+
+The original docstring here claimed the manifest should be generated "inside the
+container image CI and production use". That was wrong about CI, which installs
+the same hash-verified lock directly on the runner rather than using the image —
+which is precisely how the byte-level guard came to be unsatisfiable there.
+
+**Expect the byte-level test to skip in CI, by design, indefinitely.** CI's install
+path structurally differs from the container the manifest is regenerated in, so the
+fingerprints will not match there. A routinely-skipped test is easy to misread as a
+passing one, so: its skip message always names the differing components, and if it
+ever begins skipping for a NEW reason — a zlib patch bump, say — that is worth
+reading rather than scrolling past. It is meaningful when run inside the container,
+which is where CLAUDE.md §20 already directs the authoritative local backend run.
 
 Golden hashes are tied to ``DESIGN_ANNOTATION_RENDERER_VERSION``. If composition
-behaviour changes without a version bump these diverge and the suite fails; a
-deliberate bump requires regenerating the manifest in review.
+behaviour changes without a version bump the PIXEL digests diverge and the suite
+fails; a deliberate bump requires regenerating the manifest in review.
 
 Regenerate with ``python -m sitara.media.tests.regenerate_annotation_golden``
-from ``apps/api``, inside the container image CI and production use — never from
-a developer host, whose Pillow build may differ.
+from ``apps/api``, inside the container, and note that the byte digests it
+records are only meaningful in an environment with the same fingerprint.
 """
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -149,15 +178,50 @@ def _render(name: str):
     )
 
 
+def _pixels_sha256(content: bytes) -> str:
+    """Hash the DECODED image, not the file.
+
+    Mode and size go into the digest alongside the pixels so a mode change (say
+    RGB to RGBA) cannot coincide with an identical pixel run and slip through."""
+    with Image.open(io.BytesIO(content)) as opened:
+        opened.load()
+        digest = hashlib.sha256()
+        digest.update(f"{opened.mode}:{opened.width}x{opened.height}:".encode())
+        digest.update(opened.tobytes())
+        return digest.hexdigest()
+
+
+def _environment() -> dict:
+    """The components whose build determines the compressed bytes.
+
+    Pillow bundles zlib, libwebp and FreeType in its wheels, so these versions —
+    not the host distribution's — are what the encoder actually used."""
+    from PIL import __version__ as pillow_version
+    from PIL import features
+
+    return {
+        "pillow": pillow_version,
+        "zlib": features.version("zlib"),
+        "freetype2": features.version("freetype2"),
+        "webp": features.version("webp"),
+    }
+
+
 def _observed(name: str) -> dict:
     render = _render(name)
     return {
         "sha256": render.sha256,
+        "pixels_sha256": _pixels_sha256(render.content),
         "width": render.width,
         "height": render.height,
         "size_bytes": len(render.content),
         "filename": render.filename,
     }
+
+
+def _portable(observed: dict) -> dict:
+    """The environment-independent part of an observation."""
+    return {key: observed[key] for key in ("pixels_sha256", "width", "height", "filename")}
 
 
 def _manifest() -> dict:
@@ -198,12 +262,63 @@ def test_the_page_width_is_pinned():
     assert _manifest()["page_width"] == PAGE_WIDTH
 
 
+def test_the_manifest_records_the_environment_its_byte_hashes_came_from():
+    """Without this the byte guard below could not tell "same environment" from
+    "manifest predates the fingerprint", and would have to trust or skip
+    blindly."""
+    recorded = _manifest()["environment"]
+    assert set(recorded) == set(_environment())
+    assert all(isinstance(value, str) and value for value in recorded.values())
+
+
 @pytest.mark.parametrize("name", sorted(FIXTURES))
-def test_golden_hashes_are_reproduced_exactly(name):
+def test_golden_pixels_are_reproduced_exactly(name):
+    """The portable guard: the picture itself, on any platform.
+
+    This is what DESIGN_ANNOTATION_RENDERER_VERSION actually promises. A layout,
+    palette, font-metric or coordinate change lands here."""
     expected = _manifest()["fixtures"][name]
-    assert _observed(name) == expected, (
-        f"golden mismatch for fixture {name!r}. Either composition changed "
-        f"(bump DESIGN_ANNOTATION_RENDERER_VERSION and regenerate the manifest "
-        f"in review) or a dependency changed underneath it (investigate before "
-        f"regenerating — that is exactly what this guard exists to catch)."
+    observed = _observed(name)
+    assert _portable(observed) == _portable(expected), (
+        f"golden PIXEL mismatch for fixture {name!r}. The rendered image itself "
+        f"changed, not merely its compression. Either composition changed (bump "
+        f"DESIGN_ANNOTATION_RENDERER_VERSION and regenerate the manifest in "
+        f"review) or a dependency changed underneath it — investigate before "
+        f"regenerating, which is exactly what this guard exists to catch. "
+        f"Manifest environment {_manifest()['environment']}, "
+        f"running environment {_environment()}."
+    )
+
+
+@pytest.mark.parametrize("name", sorted(FIXTURES))
+def test_golden_bytes_are_reproduced_exactly(name):
+    """The strict guard, where it is meaningful.
+
+    PNG compression is a property of the zlib the encoder was linked against, so
+    this can only hold in an environment matching the manifest's. It is skipped —
+    visibly, naming what differs — rather than deleted, because within one
+    environment byte-identity is still the sharpest signal available."""
+    manifest = _manifest()
+    recorded, running = manifest["environment"], _environment()
+    if recorded != running:
+        differing = {
+            component: f"manifest {recorded[component]!r} != running {running[component]!r}"
+            for component in running
+            if recorded.get(component) != running[component]
+        }
+        pytest.skip(
+            f"byte-level golden check does not apply here: {differing}. The pixel "
+            f"guard above still ran and is the portable contract."
+        )
+
+    expected = manifest["fixtures"][name]
+    observed = _observed(name)
+    assert (observed["sha256"], observed["size_bytes"]) == (
+        expected["sha256"],
+        expected["size_bytes"],
+    ), (
+        f"golden BYTE mismatch for fixture {name!r} in an environment whose "
+        f"fingerprint matches the manifest ({running}). The pixels may still "
+        f"match — check the pixel test above — in which case the encoder itself "
+        f"changed without its reported version changing."
     )

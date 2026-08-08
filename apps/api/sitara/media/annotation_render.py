@@ -6,14 +6,25 @@ marks drawn over it, and a note legend below. Nothing is persisted — the origi
 object is read, never written, and the composite exists only as bytes handed back
 to the caller.
 
-**Determinism.** Identical input bytes and an identical document produce identical
-output bytes under the pinned Pillow and the pinned vendored font.
-``DESIGN_ANNOTATION_RENDERER_VERSION`` names that exact behaviour; changing any
-observable output requires a version bump plus a reviewed golden-bytes update.
-Everything that could vary is fixed here: no timestamps, no PNG text chunks, no
-locale, no client-supplied sizes or colours. The palette, stroke widths, marker
-radii, page metrics and font are allowlisted constants — a request can choose
-*which* allowlisted palette entry a mark uses, never a value.
+**Determinism, stated precisely.** Identical input bytes and an identical document
+produce identical decoded **pixels** anywhere, and byte-identical PNG *files* only
+within one build of the imaging stack. ``DESIGN_ANNOTATION_RENDERER_VERSION`` names
+the pixel-level behaviour; changing any observable output requires a version bump
+plus a reviewed golden update. Everything that could vary is fixed here: no
+timestamps, no PNG text chunks, no locale, no client-supplied sizes or colours. The
+palette, stroke widths, marker radii, page metrics and font are allowlisted
+constants — a request can choose *which* allowlisted palette entry a mark uses,
+never a value.
+
+This docstring previously promised byte-identical output "under the pinned Pillow".
+That was wrong, and CI disproved it: the same pinned Pillow version, installed on a
+runner rather than in this image, produced renders identical in dimensions and
+layout but ~90 bytes different in ~660 KB. A PNG's compressed bytes are a property
+of the zlib the encoder is linked against, which this project neither controls nor
+should claim to. **Do not build an idempotency key, cache key or dedup check on the
+sha256 of a rendered file** — it is stable only within an environment. Use the
+pixel digest if you need a portable identity. ``test_annotation_golden.py`` enforces
+exactly this split.
 
 **The halo is not decoration.** ``--color-accent`` measures 3.03:1 on cream and
 far less on a maroon lehenga, so every stroke, ring and badge is drawn twice: a

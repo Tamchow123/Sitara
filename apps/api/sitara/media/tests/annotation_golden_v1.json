@@ -4,10 +4,17 @@
     "max_pixels": 24000000,
     "read_deadline_seconds": 10
   },
+  "environment": {
+    "freetype2": "2.13.3",
+    "pillow": "11.3.0",
+    "webp": "1.5.0",
+    "zlib": "1.2.13"
+  },
   "fixtures": {
     "all_mark_types": {
       "filename": "sitara-concept-annotations.png",
       "height": 2477,
+      "pixels_sha256": "35d48eaa80d5f8a10b84e47cf1b05513060cd727ade407480e9ae845058689f1",
       "sha256": "9f1e6e7aeb1dc3ac48770031985bad2553bec17a3eeb25f29747c1b73d1f7caa",
       "size_bytes": 704812,
       "width": 1620
@@ -15,6 +22,7 @@
     "empty": {
       "filename": "sitara-concept-annotations.png",
       "height": 2261,
+      "pixels_sha256": "ff638167844fabc81202aadf520c5795dffc651b533511405eee5c3833186a5b",
       "sha256": "5c5f33b4e4726dbf9acaf74bf40cf2b0278de1a35cef1053295bec0610f0a87b",
       "size_bytes": 657703,
       "width": 1620
@@ -22,6 +30,7 @@
     "empty_and_long_notes": {
       "filename": "sitara-concept-annotations.png",
       "height": 2489,
+      "pixels_sha256": "dbf2a061426635d5954d2430d2850ed609593d73a2d38d5bd4323cce4c88ff4c",
       "sha256": "292534dca1b2b6603b0d77dad2a919137fdbb16035fefa63ab9c52fa7a2674cc",
       "size_bytes": 680976,
       "width": 1620
@@ -29,6 +38,7 @@
     "odd_row_count": {
       "filename": "sitara-concept-annotations.png",
       "height": 2533,
+      "pixels_sha256": "cfdaa200acbe2b23a907238f2370a10798fb1d32ff4d93c50940f2487b075168",
       "sha256": "a54846db88427696e6c733c92dcba38be0665ab288f3ab3c8dc1ca930e7471b7",
       "size_bytes": 674544,
       "width": 1620
@@ -36,6 +46,7 @@
     "one_pin": {
       "filename": "sitara-concept-annotations.png",
       "height": 2421,
+      "pixels_sha256": "33915abda24faa9ace1110e06fb54647acbb18c96b5feba19c376dc625cfaa03",
       "sha256": "bc16fc768d3b625811948be52c126993780c981cad91cb58ab06b95473ca82eb",
       "size_bytes": 668812,
       "width": 1620
@@ -43,6 +54,7 @@
     "plain": {
       "filename": "sitara-concept.png",
       "height": 2261,
+      "pixels_sha256": "aa553c0398a10a3a2f516c16bd1ba8e02fd76ac1afed8baa8ae740edbd8d52b4",
       "sha256": "888dc7c3849595506fa2be95d856408df61a697ccb87c2ab4be6c1654867122e",
       "size_bytes": 656167,
       "width": 1620
@@ -50,6 +62,7 @@
     "unrenderable_script": {
       "filename": "sitara-concept-annotations.png",
       "height": 2455,
+      "pixels_sha256": "2a0f90246721772893afe1dcea899ce4d6227c209b69a6e73660cf372ebd9607",
       "sha256": "892127179ca6ae245b58e5ba058e8cacf5627e96dd5d4d7b3b6e2d0ff01e053c",
       "size_bytes": 673897,
       "width": 1620

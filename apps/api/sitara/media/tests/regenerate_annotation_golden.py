@@ -1,13 +1,18 @@
 """Regenerate the annotated-PNG golden manifest.
 
-Run from ``apps/api`` INSIDE the container image CI and production use — never
-from a developer host, whose Pillow build may link a different zlib and produce
-different bytes:
+Run from ``apps/api`` inside the container:
 
     docker compose run --rm --no-deps -T api \
         python -m sitara.media.tests.regenerate_annotation_golden
 
-Regenerating is a reviewed act. A diff here means either a deliberate renderer
+The manifest holds two kinds of digest, and only one of them travels. The PIXEL
+digests are the portable contract and are asserted everywhere. The compressed-PNG
+digests depend on the zlib the encoder was linked against, so they are recorded
+together with an ``environment`` fingerprint and asserted only where that
+fingerprint matches — see ``test_annotation_golden.py`` for why this file no
+longer claims that generating here makes the bytes reproducible in CI.
+
+Regenerating is a reviewed act. A PIXEL diff means either a deliberate renderer
 change (bump ``DESIGN_ANNOTATION_RENDERER_VERSION`` in the same commit) or a
 dependency moved underneath the renderer — investigate which before accepting.
 """
@@ -43,6 +48,7 @@ def main() -> None:
                 "max_bytes": settings.ANNOTATION_RENDER_MAX_BYTES,
                 "read_deadline_seconds": settings.ANNOTATION_RENDER_READ_DEADLINE_SECONDS,
             },
+            "environment": golden._environment(),
             "fixtures": {name: golden._observed(name) for name in sorted(golden.FIXTURES)},
         }
 
