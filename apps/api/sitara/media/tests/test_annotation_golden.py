@@ -7,33 +7,60 @@ zlib or libm change, or a different wheel build between a developer's host and
 the environments CI and production run in. Only a hash committed to the
 repository at one point in time and re-checked later can catch that.
 
-**Two guards, because they are not equally portable.** This file originally
-pinned only the sha256 of the *compressed* PNG, and that made it fail the moment
-it first ran anywhere other than where the manifest was generated: identical
-dimensions, identical layout, ~90 bytes different in a ~660 KB file. A PNG's
-compressed bytes depend on the exact zlib the encoder is linked against, which is
-not something this project controls or should pretend to. So:
+**What travels between builds, and what does not.** Established empirically, in two
+wrong steps, because the wrong answers are instructive:
 
-* ``test_golden_pixels_are_reproduced_exactly`` pins the sha256 of the *decoded*
-  pixels plus the page dimensions. This is the real contract — the picture a
-  stylist receives — and it holds anywhere.
-* ``test_golden_bytes_are_reproduced_exactly`` still pins the compressed bytes,
-  but only when the running environment fingerprint matches the one recorded in
-  the manifest. Elsewhere it SKIPS with the differing components named. A skip is
-  visible in the suite output; it is never silently green.
+1. This file originally pinned only the sha256 of the *compressed* PNG. It failed
+   the moment it first ran anywhere other than where the manifest was generated:
+   identical dimensions, ~90 bytes different in ~660 KB. Diagnosis: PNG
+   compression belongs to whichever zlib the encoder is linked against.
+2. So the digest was moved to the *decoded pixels*, on the reasoning that the
+   picture itself must surely be portable. **That was also wrong.** CI printed the
+   two fingerprints and they differed in exactly one component — ``zlib 1.2.13``
+   against ``zlib 1.3``, with Pillow, FreeType and libwebp identical — and yet the
+   pixel digests differed too. zlib cannot touch decoded pixels, so the real cause
+   is that the two Pillow 11.3.0 *wheels are different builds*: the LANCZOS resize
+   of the original lands on marginally different rounding between them. Every
+   fixture embeds that resized image, which is why even ``plain`` — no marks, text
+   only — differed.
+
+So neither digest travels, and the split is now by what genuinely does:
+
+* ``test_golden_dimensions_and_filenames_are_portable`` runs **everywhere**. Layout
+  is integer maths over allowlisted constants, so page size and the server-owned
+  filename are reproducible across builds.
+* ``test_golden_digests_are_reproduced_exactly`` pins pixels AND bytes, but only
+  where the fingerprint matches, and SKIPS elsewhere naming the differing
+  components. A skip is visible in the suite output; it is never silently green.
+
+Be honest about what that costs: in CI this module verifies layout, not
+appearance. The substantive appearance guards there are the behavioural tests next
+door — mark placement per type, the white halo over dark photography, numbering by
+``created_order``, legend growth, and same-run byte determinism — none of which
+depend on a committed digest. This manifest is a same-build regeneration guard,
+which is the most it can honestly be.
 
 The original docstring here claimed the manifest should be generated "inside the
 container image CI and production use". That was wrong about CI, which installs
 the same hash-verified lock directly on the runner rather than using the image —
 which is precisely how the byte-level guard came to be unsatisfiable there.
 
-**Expect the byte-level test to skip in CI, by design, indefinitely.** CI's install
-path structurally differs from the container the manifest is regenerated in, so the
+**Expect the digest test to skip in CI, by design, indefinitely.** CI's install path
+structurally differs from the container the manifest is regenerated in, so the
 fingerprints will not match there. A routinely-skipped test is easy to misread as a
 passing one, so: its skip message always names the differing components, and if it
-ever begins skipping for a NEW reason — a zlib patch bump, say — that is worth
-reading rather than scrolling past. It is meaningful when run inside the container,
-which is where CLAUDE.md §20 already directs the authoritative local backend run.
+ever begins skipping for a NEW reason that is worth reading rather than scrolling
+past. It is meaningful when run inside the container, which is where CLAUDE.md §20
+already directs the authoritative local backend run.
+
+**Do not try to make the digests portable again.** Two attempts are recorded above;
+the blocker is that the same pinned Pillow version ships as different builds. The
+option deliberately not taken is a manifest keyed by several observed-good
+fingerprints, so CI could assert its own recorded digests — rejected for now
+because recording digests scraped from a failing run makes the guard assert
+"whatever that environment produced", which is circular unless someone has actually
+reviewed that environment's output. If it is ever wanted, review the render there
+first.
 
 Golden hashes are tied to ``DESIGN_ANNOTATION_RENDERER_VERSION``. If composition
 behaviour changes without a version bump the PIXEL digests diverge and the suite
@@ -219,11 +246,6 @@ def _observed(name: str) -> dict:
     }
 
 
-def _portable(observed: dict) -> dict:
-    """The environment-independent part of an observation."""
-    return {key: observed[key] for key in ("pixels_sha256", "width", "height", "filename")}
-
-
 def _manifest() -> dict:
     with GOLDEN_MANIFEST.open(encoding="utf-8") as handle:
         return json.load(handle)
@@ -262,8 +284,8 @@ def test_the_page_width_is_pinned():
     assert _manifest()["page_width"] == PAGE_WIDTH
 
 
-def test_the_manifest_records_the_environment_its_byte_hashes_came_from():
-    """Without this the byte guard below could not tell "same environment" from
+def test_the_manifest_records_the_environment_its_digests_came_from():
+    """Without this the digest guard could not tell "same environment" from
     "manifest predates the fingerprint", and would have to trust or skip
     blindly."""
     recorded = _manifest()["environment"]
@@ -271,54 +293,65 @@ def test_the_manifest_records_the_environment_its_byte_hashes_came_from():
     assert all(isinstance(value, str) and value for value in recorded.values())
 
 
-@pytest.mark.parametrize("name", sorted(FIXTURES))
-def test_golden_pixels_are_reproduced_exactly(name):
-    """The portable guard: the picture itself, on any platform.
+def _differing_components() -> dict:
+    """Which fingerprint components disagree with the manifest's, if any."""
+    recorded, running = _manifest()["environment"], _environment()
+    return {
+        component: f"manifest {recorded.get(component)!r} != running {running[component]!r}"
+        for component in running
+        if recorded.get(component) != running[component]
+    }
 
-    This is what DESIGN_ANNOTATION_RENDERER_VERSION actually promises. A layout,
-    palette, font-metric or coordinate change lands here."""
+
+@pytest.mark.parametrize("name", sorted(FIXTURES))
+def test_golden_dimensions_and_filenames_are_portable(name):
+    """What actually travels between builds, asserted everywhere.
+
+    Layout arithmetic is integer maths over allowlisted constants and font
+    metrics, so page size and the server-owned filename are reproducible even
+    where the rendered pixels are not. Narrow, but real: a layout regression
+    (a legend that stops growing the page, a wrong page width, a filename
+    leaking a design title) fails here in every environment, including CI."""
     expected = _manifest()["fixtures"][name]
     observed = _observed(name)
-    assert _portable(observed) == _portable(expected), (
-        f"golden PIXEL mismatch for fixture {name!r}. The rendered image itself "
-        f"changed, not merely its compression. Either composition changed (bump "
-        f"DESIGN_ANNOTATION_RENDERER_VERSION and regenerate the manifest in "
-        f"review) or a dependency changed underneath it — investigate before "
-        f"regenerating, which is exactly what this guard exists to catch. "
-        f"Manifest environment {_manifest()['environment']}, "
-        f"running environment {_environment()}."
-    )
+    assert (observed["width"], observed["height"], observed["filename"]) == (
+        expected["width"],
+        expected["height"],
+        expected["filename"],
+    ), f"golden LAYOUT mismatch for fixture {name!r} — this part is portable and must not drift."
 
 
 @pytest.mark.parametrize("name", sorted(FIXTURES))
-def test_golden_bytes_are_reproduced_exactly(name):
-    """The strict guard, where it is meaningful.
+def test_golden_digests_are_reproduced_exactly(name):
+    """The strict guard: exact pixels AND exact bytes, in a matching build.
 
-    PNG compression is a property of the zlib the encoder was linked against, so
-    this can only hold in an environment matching the manifest's. It is skipped —
-    visibly, naming what differs — rather than deleted, because within one
-    environment byte-identity is still the sharpest signal available."""
-    manifest = _manifest()
-    recorded, running = manifest["environment"], _environment()
-    if recorded != running:
-        differing = {
-            component: f"manifest {recorded[component]!r} != running {running[component]!r}"
-            for component in running
-            if recorded.get(component) != running[component]
-        }
+    Gated on the fingerprint because neither digest travels. That was established
+    the hard way — see the module docstring — and the gate covers the pixel digest
+    for the same reason it covers the byte digest, not as a convenience.
+
+    Skipped visibly rather than deleted: within one build this is the sharpest
+    regeneration guard available, and it is the reason a Pillow bump cannot
+    silently change the export."""
+    differing = _differing_components()
+    if differing:
         pytest.skip(
-            f"byte-level golden check does not apply here: {differing}. The pixel "
-            f"guard above still ran and is the portable contract."
+            f"golden digest check does not apply to this build: {differing}. Neither "
+            f"pixels nor compressed bytes are reproducible across builds of the "
+            f"imaging stack; the portable layout guard above still ran. Regenerate "
+            f"the manifest inside the container to assert digests locally."
         )
 
-    expected = manifest["fixtures"][name]
+    expected = _manifest()["fixtures"][name]
     observed = _observed(name)
-    assert (observed["sha256"], observed["size_bytes"]) == (
+    assert (observed["pixels_sha256"], observed["sha256"], observed["size_bytes"]) == (
+        expected["pixels_sha256"],
         expected["sha256"],
         expected["size_bytes"],
     ), (
-        f"golden BYTE mismatch for fixture {name!r} in an environment whose "
-        f"fingerprint matches the manifest ({running}). The pixels may still "
-        f"match — check the pixel test above — in which case the encoder itself "
-        f"changed without its reported version changing."
+        f"golden DIGEST mismatch for fixture {name!r} in a build whose fingerprint "
+        f"MATCHES the manifest ({_environment()}). Nothing environmental explains "
+        f"this: either composition changed (bump DESIGN_ANNOTATION_RENDERER_VERSION "
+        f"and regenerate the manifest in review) or a dependency moved without its "
+        f"reported version changing. Investigate before regenerating — that is "
+        f"exactly what this guard exists to catch."
     )

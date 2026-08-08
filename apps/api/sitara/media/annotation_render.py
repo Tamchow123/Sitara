@@ -6,25 +6,35 @@ marks drawn over it, and a note legend below. Nothing is persisted — the origi
 object is read, never written, and the composite exists only as bytes handed back
 to the caller.
 
-**Determinism, stated precisely.** Identical input bytes and an identical document
-produce identical decoded **pixels** anywhere, and byte-identical PNG *files* only
-within one build of the imaging stack. ``DESIGN_ANNOTATION_RENDERER_VERSION`` names
-the pixel-level behaviour; changing any observable output requires a version bump
-plus a reviewed golden update. Everything that could vary is fixed here: no
-timestamps, no PNG text chunks, no locale, no client-supplied sizes or colours. The
-palette, stroke widths, marker radii, page metrics and font are allowlisted
-constants — a request can choose *which* allowlisted palette entry a mark uses,
-never a value.
+**Determinism, stated precisely.** Within one build of the imaging stack, identical
+input bytes and an identical document produce byte-identical output — that is what
+``DESIGN_ANNOTATION_RENDERER_VERSION`` names, and changing any observable output
+requires a version bump plus a reviewed golden update. Everything this module
+controls is fixed: no timestamps, no PNG text chunks, no locale, no client-supplied
+sizes or colours. The palette, stroke widths, marker radii, page metrics and font
+are allowlisted constants — a request can choose *which* allowlisted palette entry
+a mark uses, never a value.
 
-This docstring previously promised byte-identical output "under the pinned Pillow".
-That was wrong, and CI disproved it: the same pinned Pillow version, installed on a
-runner rather than in this image, produced renders identical in dimensions and
-layout but ~90 bytes different in ~660 KB. A PNG's compressed bytes are a property
-of the zlib the encoder is linked against, which this project neither controls nor
-should claim to. **Do not build an idempotency key, cache key or dedup check on the
-sha256 of a rendered file** — it is stable only within an environment. Use the
-pixel digest if you need a portable identity. ``test_annotation_golden.py`` enforces
-exactly this split.
+**Across builds, only the layout is reproducible — not the pixels.** This was
+learned twice over. The docstring first promised byte-identical output "under the
+pinned Pillow"; CI disproved it with that very pinned version. The claim was then
+narrowed to identical decoded *pixels* anywhere; CI disproved that too. The
+fingerprints differed in one component only — zlib 1.2.13 against 1.3, with Pillow,
+FreeType and libwebp identical — yet the pixels differed, which zlib cannot cause.
+The two Pillow 11.3.0 wheels are different builds, and the LANCZOS resize of the
+original rounds marginally differently between them. Page geometry is integer maths
+and does travel; the rendered surface does not.
+
+Consequences worth respecting:
+
+* **Never build an idempotency key, cache key or dedup check on a rendered file's
+  hash, or on its pixels.** Neither is stable across environments. Nothing in this
+  codebase does; keep it that way.
+* A render produced in one environment is not bit-reproducible in another, so it is
+  evidence of nothing beyond the environment that made it. This matters if a render
+  is ever attached to a support case or a dispute.
+* ``test_annotation_golden.py`` enforces the split and documents why the obvious
+  fixes do not work.
 
 **The halo is not decoration.** ``--color-accent`` measures 3.03:1 on cream and
 far less on a maroon lehenga, so every stroke, ring and badge is drawn twice: a
