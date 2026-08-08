@@ -286,8 +286,22 @@
   overflow: visible;
 }
 
+/* The cursor states name what a press will actually do, which is the only hint
+   a pointer user gets before committing to the gesture. `grab` appears ONLY when
+   the render is zoomed in and something is hidden to pan to — it used to show at
+   every zoom level including a fitted view, promising a pan that could not
+   happen. */
 .annotation-canvas[data-tool="select"] .annotation-stage {
+  cursor: default;
+}
+
+.annotation-canvas[data-pannable="true"] .annotation-stage {
   cursor: grab;
+}
+
+.annotation-canvas[data-panning="true"] .annotation-stage,
+.annotation-canvas[data-panning="true"] .mark {
+  cursor: grabbing;
 }
 
 .annotation-canvas:not([data-tool="select"]) .annotation-stage {
@@ -298,6 +312,12 @@
 
 .mark {
   cursor: pointer;
+}
+
+/* `move` rather than `pointer`: with Select a mark is dragged from where it sits
+   in one gesture, so the cursor has to say "this moves", not "this activates". */
+.annotation-canvas[data-tool="select"] .mark {
+  cursor: move;
 }
 
 .mark-terracotta {

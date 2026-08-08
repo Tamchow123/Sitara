@@ -4,6 +4,7 @@ import {
   anchorOf,
   arrowLength,
   clamp01,
+  clampPan,
   describeGeometry,
   describeItem,
   geometryFromGesture,
@@ -266,5 +267,52 @@ describe("rectFromCorners", () => {
     expect(rect.y).toBeCloseTo(0.1);
     expect(rect.width).toBeCloseTo(0.4);
     expect(rect.height).toBeCloseTo(0.6);
+  });
+});
+
+describe("clampPan", () => {
+  const stage = { width: 500, height: 1000 };
+
+  it("allows no offset at all when nothing is hidden", () => {
+    // At or below a fitted view the whole render is already on screen, so any
+    // offset would push part of it out of frame for no gain.
+    for (const zoom of [1, 0.8, 0.6]) {
+      expect(clampPan({ x: 120, y: -80 }, zoom, stage)).toEqual({ x: 0, y: 0 });
+    }
+  });
+
+  it("allows exactly the region the zoom hid, per axis", () => {
+    // At 2x a 500x1000 stage renders 1000x2000 about its centre, so 250 is clipped
+    // off each side horizontally and 500 vertically. The axes are checked
+    // separately because one shared limit would let a tall render pan sideways
+    // into empty space, or stop a wide one short of its own edge.
+    expect(clampPan({ x: 250, y: 500 }, 2, stage)).toEqual({ x: 250, y: 500 });
+    expect(clampPan({ x: -250, y: -500 }, 2, stage)).toEqual({ x: -250, y: -500 });
+  });
+
+  it("holds an overshoot at the edge instead of letting the render leave frame", () => {
+    expect(clampPan({ x: 9000, y: 9000 }, 2, stage)).toEqual({ x: 250, y: 500 });
+    expect(clampPan({ x: -9000, y: -9000 }, 2, stage)).toEqual({ x: -250, y: -500 });
+  });
+
+  it("scales the limit with the zoom", () => {
+    // 1.25x hides an eighth of the width: (1.25 - 1) * 500 / 2.
+    expect(clampPan({ x: 999, y: 0 }, 1.25, stage).x).toBeCloseTo(62.5);
+    expect(clampPan({ x: 999, y: 0 }, 3, stage).x).toBeCloseTo(500);
+  });
+
+  it("collapses to the origin rather than emitting NaN into a transform", () => {
+    // A NaN in `translate()` invalidates the whole transform and blanks the stage,
+    // so every non-finite input has to land somewhere safe instead.
+    expect(clampPan({ x: Number.NaN, y: 10 }, 2, stage)).toEqual({ x: 0, y: 10 });
+    expect(clampPan({ x: 10, y: Number.NaN }, 2, stage)).toEqual({ x: 10, y: 0 });
+    expect(clampPan({ x: 10, y: 10 }, Number.NaN, stage)).toEqual({ x: 0, y: 0 });
+    expect(clampPan({ x: Number.POSITIVE_INFINITY, y: 0 }, 2, stage).x).toBeCloseTo(250);
+  });
+
+  it("permits no offset before the stage has been measured", () => {
+    // Zero-sized until layout runs. Panning a box of unknown size could only
+    // guess, and a guess here moves the render somewhere the user did not ask.
+    expect(clampPan({ x: 50, y: 50 }, 2, { width: 0, height: 0 })).toEqual({ x: 0, y: 0 });
   });
 });

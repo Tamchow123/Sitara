@@ -68,6 +68,46 @@ export function overlayScale(imageWidth: number, imageHeight: number): number {
   return smaller / 600;
 }
 
+/**
+ * Hold a pan offset inside the region the zoom actually hid.
+ *
+ * At zoom `z` a stage of unscaled width `W` renders `z * W` wide about its own
+ * centre, so exactly `(z - 1) * W / 2` is clipped off each side — that is the
+ * whole travel a pan can usefully have. Clamping to it means every part of the
+ * render is reachable and the image can never be dragged out of its own frame
+ * and abandoned there, which is the failure mode of an unclamped pan: the user
+ * flicks, the concept vanishes, and nothing on screen explains where it went.
+ *
+ * At or below zoom 1 nothing is hidden, so the only valid offset is none. A
+ * non-finite or unmeasured size collapses to the origin rather than producing
+ * NaN in a transform, which would blank the stage entirely.
+ *
+ * Pure and in client pixels, deliberately: this is the one piece of the pan that
+ * can be wrong in a way the eye would not catch, so it is testable without a
+ * browser. Pan offsets are NEVER stored — they are view state, and no annotation
+ * coordinate is expressed in them.
+ */
+export function clampPan(
+  pan: Point,
+  zoom: number,
+  size: { width: number; height: number },
+): Point {
+  if (!Number.isFinite(zoom) || zoom <= 1) return { x: 0, y: 0 };
+  const limit = (extent: number) =>
+    Number.isFinite(extent) && extent > 0 ? ((zoom - 1) * extent) / 2 : 0;
+  const hold = (value: number, max: number) => {
+    // NaN only, exactly as `clamp01` treats it: NaN has no nearest bound, but an
+    // infinity does, and a runaway offset should stop at the edge it ran off
+    // rather than snapping back to centre.
+    if (Number.isNaN(value)) return 0;
+    return Math.min(max, Math.max(-max, value));
+  };
+  return {
+    x: hold(pan.x, limit(size.width)),
+    y: hold(pan.y, limit(size.height)),
+  };
+}
+
 /** A nudge is a fraction of the SMALLER edge, so it moves the same visible
  * distance horizontally and vertically on a non-square image. */
 export function nudgeDelta(

@@ -39,6 +39,18 @@ export type EditorState = {
    * confirmation was let through — restoring the marks the user had just cleared.
    */
   epoch: number;
+  /**
+   * The drag whose undo step has already been recorded, so the rest of that drag
+   * does not record one each. Null between drags.
+   *
+   * Held in reducer state rather than in the canvas because only the reducer knows
+   * whether a move actually CHANGED anything: a move fully absorbed by the edge
+   * clamp returns early and records nothing, and the next move of the same drag
+   * must then still be the one that records. A flag owned by the caller would have
+   * been set on that first no-op move and the whole drag would have become
+   * un-undoable.
+   */
+  moveGesture: number | null;
 };
 
 export type EditorAction =
@@ -48,6 +60,15 @@ export type EditorAction =
   | { type: "setPalette"; id: string; palette: PaletteName }
   | { type: "setGeometry"; id: string; geometry: AnnotationGeometry }
   | { type: "nudge"; id: string; delta: Point }
+  /**
+   * One step of a continuous pointer drag.
+   *
+   * `gesture` identifies the drag. Every move within one drag carries the same
+   * id and only the FIRST records an undo step, so a drag is one Ctrl+Z rather
+   * than one per `pointermove` — a 200px drag fires dozens of those, and
+   * recording each left the user pressing undo forty times to put a mark back.
+   */
+  | { type: "moveBy"; id: string; delta: Point; gesture: number }
   | { type: "remove"; id: string }
   | { type: "clearAll" }
   | { type: "select"; id: string | null }
@@ -72,6 +93,7 @@ export function initialEditorState(): EditorState {
     revision: 0,
     updatedAt: null,
     epoch: 0,
+    moveGesture: null,
   };
 }
 
@@ -180,6 +202,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         revision: action.document.revision,
         updatedAt: action.document.updated_at,
         epoch: state.epoch + 1,
+        // A drag cannot span a document replacement: the marks it was moving are
+        // gone. Leaving the id set would let the first move after a reload join a
+        // drag that ended before it and skip its undo step.
+        moveGesture: null,
       };
     }
 
@@ -230,6 +256,27 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         state,
         state.items.map((item) => (item.id === action.id ? { ...item, geometry } : item)),
       );
+    }
+
+    case "moveBy": {
+      const target = state.items.find((item) => item.id === action.id);
+      if (!target) return state;
+      const geometry = translateGeometry(target.geometry, action.delta);
+      if (JSON.stringify(geometry) === JSON.stringify(target.geometry)) {
+        // Absorbed entirely by the edge clamp. Recorded nothing, so `moveGesture`
+        // is deliberately NOT claimed here — the next move of this same drag is
+        // still the one that owes an undo step.
+        return state;
+      }
+      const items = state.items.map((item) =>
+        item.id === action.id ? { ...item, geometry } : item,
+      );
+      if (state.moveGesture === action.gesture) {
+        // Mid-drag: update the marks without touching the undo stacks, so the
+        // whole drag collapses to the single step recorded on its first move.
+        return { ...state, items };
+      }
+      return { ...record(state, items), moveGesture: action.gesture };
     }
 
     case "remove": {

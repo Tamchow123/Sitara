@@ -14,6 +14,19 @@
 //
 // Zoom and pan transform the image and the overlay TOGETHER, as one wrapper, so
 // marks stay pinned to the garment and geometry is never rewritten to fake it.
+// Both are pure view state and neither is ever stored: a pan offset is client
+// pixels of the viewport, which has no meaning in a document read on another
+// screen. Because `getBoundingClientRect()` reports the TRANSFORMED box, pointer
+// input converts correctly under any zoom or pan with no extra arithmetic — the
+// transform is deliberately kept to translate and scale so that stays true.
+//
+// Gestures, in one place so their precedence is legible:
+//
+//   press on a mark, select tool   -> select it and move it, one gesture
+//   press on a mark, drawing tool  -> select only (unchanged)
+//   press on empty, select, zoomed -> deselect, then pan
+//   press on empty, select, fitted -> deselect
+//   press on empty, drawing tool   -> draw a new mark
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
@@ -27,7 +40,12 @@ import {
   type Point,
   type RenderedBounds,
 } from "./geometry";
-import { TYPE_LABELS, type ItemType, type PaletteName } from "./limits";
+import {
+  DRAG_THRESHOLD_PX,
+  TYPE_LABELS,
+  type ItemType,
+  type PaletteName,
+} from "./limits";
 import { describeItem } from "./geometry";
 import type { AnnotationGeometry, AnnotationItem } from "@/lib/api";
 
@@ -44,6 +62,8 @@ type Props = {
   palette: PaletteName;
   overlaysVisible: boolean;
   zoom: number;
+  /** Viewport offset in client pixels. View state only — never stored. */
+  pan: Point;
   /** The <img> element itself failed to load a URL we did have. */
   imageFailed: boolean;
   /** The URL fetch is still in flight. */
@@ -55,7 +75,21 @@ type Props = {
   onRetryImage: () => void;
   onSelect: (id: string | null) => void;
   onCreate: (type: ItemType, geometry: AnnotationGeometry) => void;
-  onMove: (id: string, delta: Point) => void;
+  /**
+   * One step of a drag. `gesture` is constant for the whole drag so the reducer
+   * can collapse it into a single undo step.
+   */
+  onMoveBy: (id: string, delta: Point, gesture: number) => void;
+  /** A pan step, in client pixels. The parent clamps and stores it. */
+  onPanBy: (delta: Point) => void;
+  /**
+   * The stage's UNSCALED layout size, reported as it changes.
+   *
+   * `offsetWidth`/`offsetHeight`, not the bounding rect: the rect is the
+   * transformed box, so at zoom 2 it reads double and a pan limit derived from it
+   * would be twice the region the zoom actually hid.
+   */
+  onStageSize: (size: { width: number; height: number }) => void;
   onRequestEdit: (id: string) => void;
 };
 
@@ -65,6 +99,28 @@ type Gesture = {
   current: Point;
   trail: Point[];
 };
+
+/**
+ * What the pointer is currently doing, when it is not drawing.
+ *
+ * A press on a mark arms a `mark` drag; a press on empty canvas while zoomed arms
+ * a `pan`. They are one union rather than two refs because they are mutually
+ * exclusive by construction, and two independent nullable refs would allow the
+ * state that must never exist: moving a mark and panning under it at once, which
+ * would move the mark by the sum of both.
+ */
+type Drag =
+  | {
+      kind: "mark";
+      id: string;
+      /** Last position in normalised space, to difference the next move against. */
+      last: Point;
+      /** Where the press landed, in client px, for the movement threshold. */
+      origin: Point;
+      gesture: number;
+      moved: boolean;
+    }
+  | { kind: "pan"; last: Point };
 
 export function AnnotationCanvas({
   imageUrl,
@@ -77,6 +133,7 @@ export function AnnotationCanvas({
   palette,
   overlaysVisible,
   zoom,
+  pan,
   imageFailed,
   imageLoading,
   imageUnavailable,
@@ -85,13 +142,23 @@ export function AnnotationCanvas({
   onRetryImage,
   onSelect,
   onCreate,
-  onMove,
+  onMoveBy,
+  onPanBy,
+  onStageSize,
   onRequestEdit,
 }: Props) {
   const stageRef = useRef<HTMLDivElement>(null);
   const boundsRef = useRef<RenderedBounds>({ left: 0, top: 0, width: 0, height: 0 });
   const [gesture, setGesture] = useState<Gesture | null>(null);
-  const dragRef = useRef<{ id: string; last: Point } | null>(null);
+  const dragRef = useRef<Drag | null>(null);
+  const [panning, setPanning] = useState(false);
+  const gestureIdRef = useRef(0);
+
+  // Read through a ref by the one callback that must stay referentially stable
+  // across a tool change: `grabMark` is handed to every memoised `MarkShape`, and
+  // a new function identity there rebuilds all of them.
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
 
   const measure = useCallback(() => {
     const node = stageRef.current;
@@ -103,7 +170,8 @@ export function AnnotationCanvas({
       width: rect.width,
       height: rect.height,
     };
-  }, []);
+    onStageSize({ width: node.offsetWidth, height: node.offsetHeight });
+  }, [onStageSize]);
 
   useEffect(() => {
     measure();
@@ -139,30 +207,134 @@ export function AnnotationCanvas({
     return toNormalised(event.clientX, event.clientY, boundsRef.current);
   }
 
+  /**
+   * Try to take pointer capture, and never let failing at it break the gesture.
+   *
+   * Capture keeps the closing `pointerup` coming back to the stage after the
+   * pointer has travelled off it, which matters because `finishGesture` is what
+   * disarms a drag. It is an OPTIMISATION for gesture completion, not a
+   * correctness requirement: where it is unavailable (jsdom has no such method)
+   * or refused (`NotFoundError` for a pointer id that is not active), dragging
+   * still has to work, so this swallows both and the gesture proceeds.
+   *
+   * What makes that safe is that a drag left armed is now recovered from at both
+   * ways back in: the next movement with no button held clears it before it can
+   * move anything, and a fresh press clears it outright. Refusing to drag at all
+   * on a failed capture was the first version of this and was a bad trade — it
+   * gave up the whole feature to avoid a state that is already handled.
+   *
+   * Deliberately NOT optional-chained on the call: an uncaught DOMException here
+   * escapes the React event handler, which is how this was written first.
+   */
+  const capturePointer = useCallback((pointerId: number) => {
+    try {
+      stageRef.current?.setPointerCapture?.(pointerId);
+    } catch {
+      // See above: gesture completion degrades, correctness does not depend on it.
+    }
+  }, []);
+
+  /**
+   * A press on a mark: select it and arm a move in the same gesture.
+   *
+   * Stable across tool and zoom changes (both read through refs) because every
+   * memoised `MarkShape` receives this identity.
+   */
+  const grabMark = useCallback(
+    (id: string, event: ReactPointerEvent<Element>) => {
+      // Stopped here rather than in the mark, so one place decides what a press on
+      // a mark means: never a new-mark gesture, never the start of a pan.
+      event.stopPropagation();
+      onSelect(id);
+      // Only the select tool moves marks. With a drawing tool active a press on a
+      // mark still just selects it, which is the behaviour that was already there.
+      if (toolRef.current !== "select") return;
+      measure();
+      dragRef.current = {
+        kind: "mark",
+        id,
+        last: toNormalised(event.clientX, event.clientY, boundsRef.current),
+        origin: { x: event.clientX, y: event.clientY },
+        gesture: (gestureIdRef.current += 1),
+        moved: false,
+      };
+      // Captured on the STAGE, not the mark: a mark is a few pixels wide and the
+      // pointer leaves it on the first real movement. Without this the drag would
+      // stop the instant it started working.
+      capturePointer(event.pointerId);
+    },
+    [onSelect, measure, capturePointer],
+  );
+
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!overlaysVisible) return;
+    // A fresh press owns the drag state outright. Anything left armed by a
+    // gesture that never received its `pointerup` must not leak into this one and
+    // start moving a mark the user pressed nowhere near.
+    dragRef.current = null;
     const point = pointFrom(event);
 
     if (tool === "select") {
-      // A press on empty canvas clears the selection; a press on a mark is
-      // handled by the mark itself and never reaches here.
-      if (selectedId) dragRef.current = { id: selectedId, last: point };
-      else onSelect(null);
+      // Empty canvas. A press on a mark never reaches here — `grabMark` stops it.
+      //
+      // It used to start dragging whatever was selected, from anywhere on the
+      // canvas: pressing empty space with a mark selected moved that mark instead
+      // of deselecting it, and the mark was often nowhere near the pointer. Now
+      // empty space means what it looks like — drop the selection, and pan if
+      // there is anything hidden to pan to.
+      onSelect(null);
+      if (zoom > 1) {
+        dragRef.current = { kind: "pan", last: { x: event.clientX, y: event.clientY } };
+        setPanning(true);
+        capturePointer(event.pointerId);
+      }
       return;
     }
 
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    capturePointer(event.pointerId);
     setGesture({ type: tool, start: point, current: point, trail: [point] });
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
-    if (drag) {
-      const point = pointFrom(event);
-      onMove(drag.id, { x: point.x - drag.last.x, y: point.y - drag.last.y });
-      dragRef.current = { id: drag.id, last: point };
+
+    // Nothing is being held, so this is a hover, not a drag — however the drag
+    // came to still be armed. Treating it as a continuation is the difference
+    // between a stuck gesture and marks that visibly wander under the cursor
+    // while writing themselves to the server, which is far worse than a lost
+    // drag. `buttons` is 1 throughout a real mouse drag and throughout touch and
+    // pen contact, so this only ever catches the case it is meant to.
+    if (drag && event.buttons === 0) {
+      dragRef.current = null;
+      setPanning(false);
       return;
     }
+
+    if (drag?.kind === "pan") {
+      onPanBy({ x: event.clientX - drag.last.x, y: event.clientY - drag.last.y });
+      dragRef.current = { kind: "pan", last: { x: event.clientX, y: event.clientY } };
+      return;
+    }
+
+    if (drag?.kind === "mark") {
+      // Below the threshold this press is still just a click. Moving on the first
+      // stray pixel would mean selecting a mark to read its note nudged it and
+      // left the document unsaved.
+      const travelled = Math.hypot(
+        event.clientX - drag.origin.x,
+        event.clientY - drag.origin.y,
+      );
+      if (!drag.moved && travelled < DRAG_THRESHOLD_PX) return;
+      const point = pointFrom(event);
+      onMoveBy(
+        drag.id,
+        { x: point.x - drag.last.x, y: point.y - drag.last.y },
+        drag.gesture,
+      );
+      dragRef.current = { ...drag, last: point, moved: true };
+      return;
+    }
+
     if (!gesture) return;
     const point = pointFrom(event);
     setGesture({
@@ -174,6 +346,7 @@ export function AnnotationCanvas({
 
   function finishGesture(event: ReactPointerEvent<HTMLDivElement>) {
     dragRef.current = null;
+    setPanning(false);
     if (!gesture) return;
     const point = pointFrom(event);
     const geometry = geometryFromGesture(
@@ -188,13 +361,25 @@ export function AnnotationCanvas({
     if (geometry) onCreate(gesture.type, geometry);
   }
 
+  // `translate` before `scale`, so the offset is in unscaled client pixels and
+  // means the same thing `clampPan` computed it in. Written the other way round it
+  // would be multiplied by the zoom and overshoot at every step above 1.
+  const panned = pan.x !== 0 || pan.y !== 0;
   const stageStyle = {
     aspectRatio: `${imageWidth} / ${imageHeight}`,
-    transform: zoom === 1 ? undefined : `scale(${zoom})`,
+    transform:
+      zoom === 1 && !panned ? undefined : `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
   };
 
   return (
-    <div className="annotation-canvas" data-tool={tool}>
+    <div
+      className="annotation-canvas"
+      data-tool={tool}
+      // Drives the cursor: `grab` only when there is something hidden to pan to,
+      // rather than promising a pan at zoom 1 where nothing can move.
+      data-pannable={tool === "select" && zoom > 1 ? "true" : undefined}
+      data-panning={panning ? "true" : undefined}
+    >
       {!overlaysVisible && (
         <p className="annotation-hidden-pill">Overlays hidden — the eye brings them back</p>
       )}
@@ -274,6 +459,7 @@ export function AnnotationCanvas({
                   scale={scale}
                   selected={item.id === selectedId}
                   onSelect={onSelect}
+                  onGrab={grabMark}
                   onRequestEdit={onRequestEdit}
                   label={describeItem(item, TYPE_LABELS[item.type])}
                 />

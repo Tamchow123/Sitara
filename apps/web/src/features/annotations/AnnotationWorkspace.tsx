@@ -20,12 +20,14 @@ import { ModalDialog } from "./ModalDialog";
 import { SavePill } from "./SavePill";
 import { SendToAccountButton } from "./SendToAccountButton";
 import { ToolRail } from "./ToolRail";
-import { nudgeDelta, type Point } from "./geometry";
+import { clampPan, nudgeDelta, type Point } from "./geometry";
 import {
   DEFAULT_PALETTE,
   MAX_ITEMS,
   NUDGE_STEP,
   NUDGE_STEP_COARSE,
+  PAN_STEP_COARSE_PX,
+  PAN_STEP_PX,
   ZOOM_IN_FACTOR,
   ZOOM_MAX,
   ZOOM_MIN,
@@ -58,6 +60,11 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
   const [palette, setPalette] = useState<PaletteName>(DEFAULT_PALETTE);
   const [overlaysVisible, setOverlaysVisible] = useState(true);
   const [zoom, setZoom] = useState(1);
+  // The viewport: zoom plus a pan offset in client pixels, clamped to the region
+  // the zoom actually hid. `stageSize` is the stage's UNSCALED layout size,
+  // reported by the canvas, which is what that region is computed from.
+  const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftNote, setDraftNote] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
@@ -193,9 +200,47 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
     dispatch({ type: "select", id });
   }, []);
 
-  const moveMark = useCallback((id: string, delta: Point) => {
-    dispatch({ type: "nudge", id, delta });
+  // A pointer drag, which the reducer collapses into one undo step per `gesture`.
+  const moveMark = useCallback((id: string, delta: Point, gesture: number) => {
+    dispatch({ type: "moveBy", id, delta, gesture });
   }, []);
+
+  // ------------------------------------------------------------------
+  // The viewport
+  // ------------------------------------------------------------------
+
+  const onStageSize = useCallback((size: { width: number; height: number }) => {
+    // Same size in, same object out, so the measurement that runs on every press
+    // does not re-render the workspace for no reason.
+    setStageSize((current) =>
+      current.width === size.width && current.height === size.height ? current : size,
+    );
+  }, []);
+
+  const panBy = useCallback(
+    (delta: Point) => {
+      setPan((current) =>
+        clampPan({ x: current.x + delta.x, y: current.y + delta.y }, zoom, stageSize),
+      );
+    },
+    [zoom, stageSize],
+  );
+
+  const zoomTo = useCallback((next: number) => {
+    setZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next)));
+  }, []);
+
+  // Zooming out shrinks the hidden region, so an offset that was legal at 3x can
+  // strand the render off-frame at 1.5x. Re-clamped here rather than in the zoom
+  // handlers because it must also hold when the stage is merely RESIZED — a window
+  // narrowing changes the limit with no zoom change to hook onto. Returning the
+  // same object when nothing moved makes React bail out, so this cannot loop.
+  useEffect(() => {
+    setPan((current) => {
+      const held = clampPan(current, zoom, stageSize);
+      return held.x === current.x && held.y === current.y ? current : held;
+    });
+  }, [zoom, stageSize]);
 
   const focusNoteEditor = useCallback(() => {
     // The `N` shortcut and the rail's Note button: edit the selected mark, or the
@@ -351,15 +396,36 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
         f: () => setTool("freehand"),
         n: focusNoteEditor,
         h: () => setOverlaysVisible((visible) => !visible),
-        "0": () => setZoom(1),
-        "+": () => setZoom((current) => Math.min(ZOOM_MAX, current * ZOOM_IN_FACTOR)),
-        "=": () => setZoom((current) => Math.min(ZOOM_MAX, current * ZOOM_IN_FACTOR)),
-        "-": () => setZoom((current) => Math.max(ZOOM_MIN, current * ZOOM_OUT_FACTOR)),
+        "0": () => zoomTo(1),
+        "+": () => zoomTo(zoom * ZOOM_IN_FACTOR),
+        "=": () => zoomTo(zoom * ZOOM_IN_FACTOR),
+        "-": () => zoomTo(zoom * ZOOM_OUT_FACTOR),
       };
       const action = shortcuts[event.key.toLowerCase()];
       if (action) {
         event.preventDefault();
         action();
+        return;
+      }
+
+      // Arrow keys pan the zoomed render. Guarded on there being no selection,
+      // because with a mark selected the arrows already belong to that mark — the
+      // list rows nudge it — and silently panning instead would move the wrong
+      // thing. A zoom that can only be explored by dragging is not operable by
+      // keyboard at all, which §17 does not allow.
+      const panKeys: Record<string, Point> = {
+        ArrowUp: { x: 0, y: 1 },
+        ArrowDown: { x: 0, y: -1 },
+        ArrowLeft: { x: 1, y: 0 },
+        ArrowRight: { x: -1, y: 0 },
+      };
+      const direction = panKeys[event.key];
+      if (direction && zoom > 1 && !state.selectedId) {
+        event.preventDefault();
+        // The render moves OPPOSITE the key, so ArrowRight looks right — the
+        // viewport travels right, which slides the image left under it.
+        const step = event.shiftKey ? PAN_STEP_COARSE_PX : PAN_STEP_PX;
+        panBy({ x: direction.x * step, y: direction.y * step });
         return;
       }
 
@@ -371,7 +437,17 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editingId, state.selectedId, tool, cancelEdit, focusNoteEditor, remove]);
+  }, [
+    editingId,
+    state.selectedId,
+    tool,
+    zoom,
+    panBy,
+    zoomTo,
+    cancelEdit,
+    focusNoteEditor,
+    remove,
+  ]);
 
   // ------------------------------------------------------------------
   // Render
@@ -517,6 +593,7 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
             palette={palette}
             overlaysVisible={overlaysVisible}
             zoom={zoom}
+            pan={pan}
             imageFailed={imageFailed}
             imageLoading={imageQuery.isPending || imageQuery.isFetching}
             imageUnavailable={imageQuery.isError}
@@ -530,15 +607,18 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
             }}
             onSelect={selectMark}
             onCreate={create}
-            onMove={moveMark}
+            onMoveBy={moveMark}
+            onPanBy={panBy}
+            onStageSize={onStageSize}
             onRequestEdit={startEdit}
           />
 
           <div className="annotation-canvas-foot">
             <p className="annotation-instructions">
-              Pick a tool, then click or drag on the render. Select a mark to move it with the
-              arrow keys — Shift+arrow moves further. Enter edits its note; Escape steps back.
-              H hides and shows every mark.
+              Pick a tool, then click or drag on the render. With Select, drag a mark straight
+              from where it sits to move it, or use the arrow keys on a mark in the list —
+              Shift+arrow moves further. Enter edits a note; Escape steps back. H hides and
+              shows every mark.
             </p>
 
             <div className="annotation-zoom" role="group" aria-label="Zoom">
@@ -547,7 +627,7 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
                 className="annotation-zoom-button"
                 title="Zoom out (−)"
                 aria-label="Zoom out"
-                onClick={() => setZoom((z) => Math.max(ZOOM_MIN, z * ZOOM_OUT_FACTOR))}
+                onClick={() => zoomTo(zoom * ZOOM_OUT_FACTOR)}
               >
                 −
               </button>
@@ -557,7 +637,7 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
                 className="annotation-zoom-button"
                 title="Zoom in (+)"
                 aria-label="Zoom in"
-                onClick={() => setZoom((z) => Math.min(ZOOM_MAX, z * ZOOM_IN_FACTOR))}
+                onClick={() => zoomTo(zoom * ZOOM_IN_FACTOR)}
               >
                 +
               </button>
@@ -567,15 +647,16 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
                 className="annotation-zoom-button"
                 title="Fit to view (0)"
                 aria-label="Fit to view"
-                onClick={() => setZoom(1)}
+                onClick={() => zoomTo(1)}
               >
                 Fit
               </button>
             </div>
 
-            {zoom !== 1 && (
+            {zoom > 1 && (
               <p className="annotation-zoom-hint">
-                Drag with Select / Pan to move around · marks stay pinned to the garment
+                With Select, drag the background to move around — or the arrow keys, with no
+                mark selected · marks stay pinned to the garment
               </p>
             )}
 

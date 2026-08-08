@@ -66,6 +66,28 @@ export const ZOOM_MAX = 3;
 export const ZOOM_IN_FACTOR = 1.25;
 export const ZOOM_OUT_FACTOR = 0.8;
 
+/**
+ * How far a pointer must travel before a press on a mark becomes a MOVE rather
+ * than a click that selects it.
+ *
+ * Without it, the hand tremor in an ordinary click would shift the mark a pixel
+ * or two, so selecting a mark to read its note would quietly edit the document
+ * and mark it unsaved. Measured in client pixels, because that is the space the
+ * tremor happens in — a normalised threshold would mean something different on
+ * every rendered size.
+ */
+export const DRAG_THRESHOLD_PX = 3;
+
+/**
+ * Keyboard pan steps, in client pixels of the rendered stage.
+ *
+ * Panning has to be reachable without a pointer: a zoomed-in render whose hidden
+ * parts can only be brought into view by dragging is unusable for anyone driving
+ * this by keyboard, which §17 does not allow.
+ */
+export const PAN_STEP_PX = 40;
+export const PAN_STEP_COARSE_PX = 140;
+
 /** Idle delay before an automatic save (§14). */
 export const AUTOSAVE_DEBOUNCE_MS = 800;
 

@@ -15,6 +15,7 @@
 // so the palette lives in one place rather than being duplicated as hex here.
 
 import { memo } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { anchorOf } from "./geometry";
 import type { AnnotationItem } from "@/lib/api";
@@ -49,6 +50,12 @@ type Props = {
   scale: number;
   selected: boolean;
   onSelect: (id: string) => void;
+  /**
+   * A press ON this mark. Selects it AND arms a move in one gesture, so a mark is
+   * dragged the way it looks like it should be — press and move — rather than
+   * requiring a click to select and then a second, separate drag.
+   */
+  onGrab: (id: string, event: ReactPointerEvent<Element>) => void;
   /** Focus lands on the group, so a mark is reachable and Enter-editable. */
   label: string;
   onRequestEdit: (id: string) => void;
@@ -71,6 +78,7 @@ export const MarkShape = memo(function MarkShape({
   scale,
   selected,
   onSelect,
+  onGrab,
   label,
   onRequestEdit,
 }: Props) {
@@ -89,12 +97,9 @@ export const MarkShape = memo(function MarkShape({
       tabIndex={0}
       aria-label={label}
       aria-pressed={selected}
-      onPointerDown={(event) => {
-        // Stopped so the canvas does not also treat this as a new-mark gesture
-        // or a pan start on the same press.
-        event.stopPropagation();
-        onSelect(item.id);
-      }}
+      // The canvas stops propagation inside `onGrab`, so this press is never also
+      // read as a new-mark gesture or the start of a pan.
+      onPointerDown={(event) => onGrab(item.id, event)}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
           event.preventDefault();

@@ -84,14 +84,78 @@ function drawOnStage(container: HTMLElement, from = { x: 300, y: 400 }, to = fro
  * client-to-normalised conversion through the component. Defining the properties
  * explicitly is what makes that path testable.
  */
+function pointerEventAt(
+  target: Element,
+  type: string,
+  clientX: number,
+  clientY: number,
+  // 1 = a button is held, which is what a real browser reports throughout a mouse
+  // drag and throughout touch or pen contact. The canvas uses it to tell a
+  // continuing drag from a stray hover over a drag that was never closed off, so
+  // a test that left it at 0 would exercise the abort path instead of the drag.
+  buttons = 1,
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clientX", { value: clientX });
+  Object.defineProperty(event, "clientY", { value: clientY });
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  Object.defineProperty(event, "buttons", { value: buttons });
+  fireEvent(target, event);
+}
+
 function pressAt(stage: HTMLElement, clientX: number, clientY: number) {
-  for (const type of ["pointerdown", "pointerup"]) {
-    const event = new Event(type, { bubbles: true, cancelable: true });
-    Object.defineProperty(event, "clientX", { value: clientX });
-    Object.defineProperty(event, "clientY", { value: clientY });
-    Object.defineProperty(event, "pointerId", { value: 1 });
-    fireEvent(stage, event);
-  }
+  pointerEventAt(stage, "pointerdown", clientX, clientY);
+  pointerEventAt(stage, "pointerup", clientX, clientY);
+}
+
+/**
+ * Give the stage a size, since jsdom performs no layout.
+ *
+ * Both the bounding rect AND `offsetWidth`/`offsetHeight` are stubbed, because
+ * they are read for different jobs: the rect converts a pointer position into
+ * normalised space, while the offsets are the UNSCALED size a pan limit is
+ * computed from. A resize is then fired so the component re-measures against the
+ * stub — without it the stage stays 0x0 as far as the pan is concerned, every
+ * offset clamps to zero, and a pan test passes while asserting nothing.
+ *
+ * A LIMIT worth stating rather than discovering later: they are stubbed to the
+ * SAME numbers, but in a real browser they deliberately diverge under zoom —
+ * `getBoundingClientRect()` reports the TRANSFORMED box (so it scales with the
+ * zoom and shifts with the pan) while `offsetWidth`/`offsetHeight` stay the
+ * layout size. That divergence is exactly what makes pointer conversion work
+ * unchanged under a transform, and jsdom applies no transform, so NO test in this
+ * file exercises it. It was instead verified by measurement in a real browser: at
+ * zoom 1.5625 with a 120px pan, a mark's on-screen position matched its stored
+ * normalised coordinate multiplied through the transformed rect to the pixel.
+ * `clampPan` takes the unscaled size as an explicit argument for the same reason —
+ * so the one calculation that must NOT use the transformed box cannot silently
+ * start doing so.
+ */
+function stubStageBox(stage: HTMLElement, width = 500, height = 1000) {
+  stage.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, width, height, right: width, bottom: height }) as DOMRect;
+  Object.defineProperty(stage, "offsetWidth", { value: width, configurable: true });
+  Object.defineProperty(stage, "offsetHeight", { value: height, configurable: true });
+  fireEvent(window, new Event("resize"));
+}
+
+/** Press on `target`, move across the stage, release. One continuous gesture. */
+function dragFrom(
+  target: Element,
+  stage: HTMLElement,
+  from: { x: number; y: number },
+  ...through: Array<{ x: number; y: number }>
+) {
+  pointerEventAt(target, "pointerdown", from.x, from.y);
+  for (const step of through) pointerEventAt(stage, "pointermove", step.x, step.y);
+  const last = through[through.length - 1] ?? from;
+  // The button is already released by the time `pointerup` is delivered.
+  pointerEventAt(stage, "pointerup", last.x, last.y, 0);
+}
+
+/** Where the list says the first mark is, e.g. "50% across". */
+function reportedPosition() {
+  return screen.getByText(/across/).textContent ?? "";
 }
 
 async function loaded() {
@@ -1292,5 +1356,302 @@ describe("ownership and accessibility", () => {
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(document.activeElement).toBe(trigger);
+  });
+});
+
+describe("moving a mark with the pointer", () => {
+  // The stage is stubbed 500x1000, so a mark at the normalised centre sits at
+  // client (250, 500) and 100px of travel is 0.2 across.
+  const withOnePin = async () => {
+    api.fetchAnnotations.mockResolvedValue(emptyDocument({ items: [pin(1)], revision: 1 }));
+    const view = await loaded();
+    const stage = view.container.querySelector(".annotation-stage") as HTMLElement;
+    stubStageBox(stage);
+    return { ...view, stage, mark: view.container.querySelector(".mark") as Element };
+  };
+
+  it("moves a mark in a single gesture, with no click to select it first", async () => {
+    // THE point of this change. It used to take two separate gestures: a click to
+    // select, then a drag — and the drag had to start on empty canvas rather than
+    // on the mark, which is the opposite of what the cursor implied.
+    const { stage, mark } = await withOnePin();
+    expect(reportedPosition()).toMatch(/50% across/);
+
+    dragFrom(mark, stage, { x: 250, y: 500 }, { x: 350, y: 500 });
+
+    expect(reportedPosition()).toMatch(/70% across/);
+  });
+
+  it("selects without moving when the press barely travels", async () => {
+    // A click carries a pixel or two of hand tremor. Acting on it would mean
+    // opening a mark to read its note silently edited the document and wrote it
+    // back to the server.
+    //
+    // Asserted on whether a SAVE happened, not on the reported position: a 1px
+    // move on a 500px stage is 0.002 normalised, which still rounds to "50%
+    // across". The first version of this test checked the position and passed with
+    // the threshold removed entirely — it could not see the bug it existed to
+    // catch. Dirtiness is the signal that actually distinguishes the two.
+    const { stage, mark } = await withOnePin();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    dragFrom(mark, stage, { x: 250, y: 500 }, { x: 251, y: 501 });
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    expect(api.saveAnnotations).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /annotation 1, pin/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("does not move the selected mark when the press lands on empty canvas", async () => {
+    // The old behaviour: with a mark selected, a press ANYWHERE on the canvas
+    // dragged it — usually from somewhere nowhere near the pointer, and there was
+    // then no way to deselect by clicking away. Empty space now means "deselect".
+    const { stage, mark } = await withOnePin();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    dragFrom(mark, stage, { x: 250, y: 500 });
+    expect(screen.getByRole("button", { name: /annotation 1, pin/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    dragFrom(stage, stage, { x: 40, y: 900 }, { x: 140, y: 900 });
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    // Both axes exactly, plus the save guard — a stray move of a pixel or two
+    // still renders as "50% across", so the write is the assertion that cannot be
+    // fooled by rounding.
+    expect(reportedPosition()).toBe("centred at 50% across, 50% from the top");
+    expect(api.saveAnnotations).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /annotation 1, pin/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("takes one undo to put a dragged mark back, not one per pointermove", async () => {
+    const { stage, mark } = await withOnePin();
+
+    dragFrom(
+      mark,
+      stage,
+      { x: 250, y: 500 },
+      { x: 280, y: 500 },
+      { x: 310, y: 500 },
+      { x: 350, y: 500 },
+    );
+    expect(reportedPosition()).toMatch(/70% across/);
+
+    fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
+
+    expect(reportedPosition()).toMatch(/50% across/);
+  });
+
+  it("keeps moving a mark after the pointer leaves it", async () => {
+    // A pin is a few pixels wide, so the pointer is off it almost immediately. The
+    // moves are dispatched at the STAGE here, which is what pointer capture
+    // delivers in a real browser — if the drag only tracked events on the mark
+    // itself it would stop the instant it started working.
+    const { stage, mark } = await withOnePin();
+
+    dragFrom(mark, stage, { x: 250, y: 500 }, { x: 450, y: 900 });
+
+    expect(reportedPosition()).toMatch(/90% across/);
+    expect(reportedPosition()).toMatch(/90% from the top/);
+  });
+
+  it("still drags when pointer capture is refused", async () => {
+    // `setPointerCapture` throws NotFoundError for a pointer id the browser does
+    // not consider active. Unwrapped, that exception escaped the React event
+    // handler. Contained, it must also not cost the gesture: capture only helps a
+    // drag SURVIVE leaving the stage, so dragging has to work without it — as it
+    // does in jsdom, which has no such method at all.
+    const { stage, mark } = await withOnePin();
+    (stage as HTMLElement & { setPointerCapture: (id: number) => void }).setPointerCapture =
+      () => {
+        throw new DOMException("no such pointer", "NotFoundError");
+      };
+
+    dragFrom(mark, stage, { x: 250, y: 500 }, { x: 350, y: 500 });
+
+    expect(reportedPosition()).toMatch(/70% across/);
+  });
+
+  it("clears a drag left armed by an earlier gesture on the next press", async () => {
+    // The other way back from a drag that never received its `pointerup`: a fresh
+    // press owns the drag state, so a stale one cannot make the new press move a
+    // mark that is nowhere near it.
+    const { stage, mark } = await withOnePin();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    pointerEventAt(mark, "pointerdown", 250, 500);
+    // Abandoned with no pointerup, as a release over the sidebar would be.
+
+    // A new press on empty canvas, well away from the mark, then a drag.
+    dragFrom(stage, stage, { x: 60, y: 900 }, { x: 200, y: 900 });
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    // Both axes, and — the assertion that has no blind spot — that nothing was
+    // saved. A position match alone tolerates a stray move of a pixel or two,
+    // because 0.002 still rounds to "50%"; any movement at all dirties the
+    // document and would show up here as a write.
+    expect(reportedPosition()).toBe("centred at 50% across, 50% from the top");
+    expect(api.saveAnnotations).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a hover as a drag when nothing is held", async () => {
+    // The failure this prevents: a release that lands outside the stage leaves the
+    // drag armed, and because an armed drag is acted on before anything else, every
+    // later movement over the canvas moved the mark and saved it — marks wandering
+    // under the cursor with no gesture behind them.
+    const { stage, mark } = await withOnePin();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    pointerEventAt(mark, "pointerdown", 250, 500);
+    // No pointerup: the gesture is abandoned mid-flight, as it would be by a
+    // release over the sidebar.
+
+    pointerEventAt(stage, "pointermove", 400, 700, 0);
+    pointerEventAt(stage, "pointermove", 450, 750, 0);
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    // As above: the save assertion is the one that a sub-percent stray move
+    // cannot slip past.
+    expect(reportedPosition()).toBe("centred at 50% across, 50% from the top");
+    expect(api.saveAnnotations).not.toHaveBeenCalled();
+  });
+
+  it("disarms a drag that the browser cancels", async () => {
+    const { stage, mark } = await withOnePin();
+    pointerEventAt(mark, "pointerdown", 250, 500);
+    pointerEventAt(stage, "pointermove", 300, 500);
+    pointerEventAt(stage, "pointercancel", 300, 500, 0);
+    const atCancel = reportedPosition();
+
+    // Moves after the cancel belong to nobody.
+    pointerEventAt(stage, "pointermove", 450, 500);
+
+    expect(reportedPosition()).toBe(atCancel);
+  });
+
+  it("does not move marks with a drawing tool active", async () => {
+    // With a drawing tool a press on a mark still only selects it, which is what it
+    // did before. Dragging marks belongs to Select.
+    const { stage, mark } = await withOnePin();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fireEvent.click(screen.getByRole("button", { name: /^pin \(P\)$/i }));
+
+    dragFrom(mark, stage, { x: 250, y: 500 }, { x: 350, y: 500 });
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    // As above: exact on both axes, and no write. This also pins that pressing an
+    // existing mark with a drawing tool does not CREATE a second mark on top of it.
+    expect(reportedPosition()).toBe("centred at 50% across, 50% from the top");
+    expect(api.saveAnnotations).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: /annotations · 1/i })).toBeInTheDocument();
+  });
+});
+
+describe("panning a zoomed render", () => {
+  const zoomedIn = async () => {
+    const view = await loaded();
+    const stage = view.container.querySelector(".annotation-stage") as HTMLElement;
+    stubStageBox(stage);
+    // 1.25x hides (1.25 - 1) * 500 / 2 = 62.5px of width on each side, and 125px
+    // of height.
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    return { ...view, stage };
+  };
+
+  it("cannot be panned at all while the render is fitted", async () => {
+    // Nothing is hidden at 1x, so an offset could only push the concept out of its
+    // own frame.
+    const { container } = await loaded();
+    const stage = container.querySelector(".annotation-stage") as HTMLElement;
+    stubStageBox(stage);
+
+    dragFrom(stage, stage, { x: 100, y: 100 }, { x: 300, y: 300 });
+
+    expect(stage.style.transform).toBe("");
+  });
+
+  it("pans by dragging the background once zoomed in", async () => {
+    const { stage } = await zoomedIn();
+
+    dragFrom(stage, stage, { x: 100, y: 100 }, { x: 140, y: 130 });
+
+    expect(stage.style.transform).toBe("translate(40px, 30px) scale(1.25)");
+  });
+
+  it("holds the pan at the edge of the region the zoom hid", async () => {
+    // Unclamped, a flick would send the concept off-frame with nothing on screen
+    // explaining where it went.
+    const { stage } = await zoomedIn();
+
+    dragFrom(stage, stage, { x: 100, y: 100 }, { x: 9000, y: 9000 });
+
+    expect(stage.style.transform).toBe("translate(62.5px, 125px) scale(1.25)");
+  });
+
+  it("returns the render to the centre when it is fitted again", async () => {
+    const { stage } = await zoomedIn();
+    dragFrom(stage, stage, { x: 100, y: 100 }, { x: 150, y: 150 });
+    expect(stage.style.transform).toContain("translate(50px, 50px)");
+
+    fireEvent.click(screen.getByRole("button", { name: "Fit to view" }));
+
+    // Not merely back to 1x: an offset left behind would hold the render
+    // off-centre in a view with no hidden region to justify it.
+    expect(stage.style.transform).toBe("");
+  });
+
+  it("re-centres what a zoom-out no longer hides", async () => {
+    // Panned to the limit at 1.25x, then zoomed out. The old limit is larger than
+    // the new one, so the offset has to shrink with it.
+    const { stage } = await zoomedIn();
+    dragFrom(stage, stage, { x: 0, y: 0 }, { x: 9000, y: 0 });
+    expect(stage.style.transform).toContain("translate(62.5px");
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
+
+    expect(stage.style.transform).toBe("");
+  });
+
+  it("pans with the arrow keys when no mark is selected", async () => {
+    // A zoom that can only be explored by dragging is not keyboard-operable.
+    const { stage } = await zoomedIn();
+
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+
+    // The viewport travels right, which slides the image left under it.
+    expect(stage.style.transform).toBe("translate(-40px, 0px) scale(1.25)");
+
+    fireEvent.keyDown(document.body, { key: "ArrowLeft", shiftKey: true });
+    expect(stage.style.transform).toBe("translate(62.5px, 0px) scale(1.25)");
+  });
+
+  it("leaves the arrow keys to the selected mark rather than panning", async () => {
+    // With a mark selected the arrows belong to that mark. Panning instead would
+    // move the wrong thing, with no way to tell which was going to happen.
+    api.fetchAnnotations.mockResolvedValue(emptyDocument({ items: [pin(1)], revision: 1 }));
+    const { container } = await loaded();
+    const stage = container.querySelector(".annotation-stage") as HTMLElement;
+    stubStageBox(stage);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    dragFrom(container.querySelector(".mark") as Element, stage, { x: 250, y: 500 });
+
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+
+    expect(stage.style.transform).toBe("translate(0px, 0px) scale(1.25)");
   });
 });

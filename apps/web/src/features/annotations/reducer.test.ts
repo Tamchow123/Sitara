@@ -374,3 +374,106 @@ describe("helpers", () => {
     expect(item.palette).toBe("sage");
   });
 });
+
+describe("moving a mark by pointer drag", () => {
+  const pointOf = (state: EditorState) =>
+    (state.items[0]!.geometry as { point: { x: number; y: number } }).point;
+
+  it("collapses a whole drag into one undo step", () => {
+    // A 200px drag fires dozens of pointermove events. Recording each of them left
+    // the user pressing Ctrl+Z forty times to put one mark back, which is the same
+    // as having no undo for a drag at all.
+    const start = loaded([pin(1)]);
+    const dragged = run(
+      start,
+      { type: "moveBy", id: "id-1", delta: { x: 0.05, y: 0 }, gesture: 1 },
+      { type: "moveBy", id: "id-1", delta: { x: 0.05, y: 0 }, gesture: 1 },
+      { type: "moveBy", id: "id-1", delta: { x: 0.05, y: 0 }, gesture: 1 },
+    );
+
+    expect(pointOf(dragged).x).toBeCloseTo(0.65);
+    expect(dragged.past).toHaveLength(1);
+
+    // One undo returns the mark to where the drag began, not to one step short of
+    // where it ended.
+    const undone = editorReducer(dragged, { type: "undo" });
+    expect(pointOf(undone).x).toBeCloseTo(0.5);
+  });
+
+  it("gives each separate drag its own undo step", () => {
+    const twice = run(
+      loaded([pin(1)]),
+      { type: "moveBy", id: "id-1", delta: { x: 0.1, y: 0 }, gesture: 1 },
+      { type: "moveBy", id: "id-1", delta: { x: 0.1, y: 0 }, gesture: 2 },
+    );
+
+    expect(twice.past).toHaveLength(2);
+    expect(pointOf(editorReducer(twice, { type: "undo" })).x).toBeCloseTo(0.6);
+  });
+
+  it("still records the first move that actually changes something", () => {
+    // The mark starts pinned to the right edge, so the opening move of the drag is
+    // absorbed entirely by the clamp and records nothing. The gesture must NOT be
+    // claimed by that no-op: if it were, every later move in the drag would take
+    // the mid-drag path and the whole drag would be un-undoable.
+    const start = loaded([pin(1, { geometry: { point: { x: 1, y: 0.5 } } })]);
+    const blocked = editorReducer(start, {
+      type: "moveBy",
+      id: "id-1",
+      delta: { x: 0.1, y: 0 },
+      gesture: 7,
+    });
+    expect(blocked).toBe(start);
+    expect(blocked.moveGesture).toBeNull();
+
+    const inward = editorReducer(blocked, {
+      type: "moveBy",
+      id: "id-1",
+      delta: { x: -0.2, y: 0 },
+      gesture: 7,
+    });
+    expect(inward.past).toHaveLength(1);
+    expect(pointOf(editorReducer(inward, { type: "undo" })).x).toBeCloseTo(1);
+  });
+
+  it("does not let a drag continue across a document replacement", () => {
+    // A reload or a clear replaces the marks the drag was moving. If the gesture id
+    // survived, the first move afterwards would be treated as a continuation and
+    // skip the undo step it owes.
+    const dragged = editorReducer(loaded([pin(1)]), {
+      type: "moveBy",
+      id: "id-1",
+      delta: { x: 0.1, y: 0 },
+      gesture: 4,
+    });
+    expect(dragged.moveGesture).toBe(4);
+
+    const reloaded = editorReducer(dragged, { type: "hydrate", document: doc([pin(1)], 9) });
+    expect(reloaded.moveGesture).toBeNull();
+
+    const afterwards = editorReducer(reloaded, {
+      type: "moveBy",
+      id: "id-1",
+      delta: { x: 0.1, y: 0 },
+      gesture: 4,
+    });
+    expect(afterwards.past).toHaveLength(1);
+  });
+
+  it("makes the document dirty, so a drag is saved like any other edit", () => {
+    const dragged = editorReducer(loaded([pin(1)]), {
+      type: "moveBy",
+      id: "id-1",
+      delta: { x: 0.1, y: 0 },
+      gesture: 1,
+    });
+    expect(isDirty(dragged)).toBe(true);
+  });
+
+  it("ignores a drag of a mark that no longer exists", () => {
+    const state = loaded([pin(1)]);
+    expect(
+      editorReducer(state, { type: "moveBy", id: "gone", delta: { x: 0.1, y: 0 }, gesture: 1 }),
+    ).toBe(state);
+  });
+});
