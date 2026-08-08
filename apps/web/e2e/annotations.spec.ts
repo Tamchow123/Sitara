@@ -25,13 +25,29 @@ async function markAt(
   to?: { fx: number; fy: number },
 ) {
   const stage = page.locator(".annotation-stage");
+  // The press is positioned by `hover`, element-relative, rather than by absolute
+  // coordinates computed from a boundingBox read before any scrolling. The
+  // original form failed on the mobile project's first real run: the single-column
+  // layout can leave the stage outside the 390x844 viewport, and `boundingBox()`
+  // is viewport-relative, so the computed y addressed a point the mouse cannot
+  // reach — no mark, no error, and a later assertion failing somewhere else.
+  // `hover` performs Playwright's actionability checks and scrolls the element
+  // into view first, so it cannot address a point off-screen.
+  await stage.scrollIntoViewIfNeeded();
   const box = await stage.boundingBox();
   if (!box) throw new Error("the render has no rendered box");
-  const from = { x: box.x + box.width * fx, y: box.y + box.height * fy };
-  await page.mouse.move(from.x, from.y);
+
+  await stage.hover({ position: { x: box.width * fx, y: box.height * fy } });
   await page.mouse.down();
   if (to) {
-    await page.mouse.move(box.x + box.width * to.fx, box.y + box.height * to.fy, { steps: 8 });
+    // Measured again: the press may itself have scrolled the page, which would
+    // invalidate the first reading.
+    const dragBox = (await stage.boundingBox()) ?? box;
+    await page.mouse.move(
+      dragBox.x + dragBox.width * to.fx,
+      dragBox.y + dragBox.height * to.fy,
+      { steps: 8 },
+    );
   }
   await page.mouse.up();
 }
@@ -67,7 +83,11 @@ test.describe("the private annotation workspace", () => {
     await markAt(page, 0.5, 0.3);
     await expect(page.getByRole("heading", { name: /annotations · 1/i })).toBeVisible();
 
-    const firstNote = page.getByLabel("Note for annotation 1");
+    // `exact` matters: Playwright matches a label as a case-insensitive SUBSTRING,
+    // and the row also carries an "Edit note for annotation 1" button, so the
+    // inexact form resolved to two elements and violated strict mode. The vitest
+    // suite does not catch this because RTL's getByLabelText matches exactly.
+    const firstNote = page.getByLabel("Note for annotation 1", { exact: true });
     await expect(firstNote).toBeVisible();
     await firstNote.fill("Raise the neckline by two fingers");
     await page.getByRole("button", { name: "Save" }).click();
@@ -76,7 +96,7 @@ test.describe("the private annotation workspace", () => {
     await markAt(page, 0.25, 0.6, { fx: 0.75, fy: 0.85 });
     await expect(page.getByRole("heading", { name: /annotations · 2/i })).toBeVisible();
 
-    const secondNote = page.getByLabel("Note for annotation 2");
+    const secondNote = page.getByLabel("Note for annotation 2", { exact: true });
     await secondNote.fill("Champagne hem border is too narrow here");
     await page.getByRole("button", { name: "Save" }).click();
 
@@ -155,7 +175,12 @@ test.describe("the private annotation workspace", () => {
     await page.goto("/register");
     const email = `annotate-${Date.now()}@example.test`;
     await page.getByLabel(/email/i).fill(email);
-    await page.getByLabel("Password", { exact: true }).fill("a-strong-test-password-123");
+    // Anchored rather than exact: the real label is "Password (at least 12
+    // characters)", so `{ exact: true }` on "Password" matched nothing. Anchoring
+    // at the start is what keeps it off "Confirm password" below. This line has
+    // never run — the suite is serial and the test above failed first — so it was
+    // latent until the first green run reached it.
+    await page.getByLabel(/^password \(/i).fill("a-strong-test-password-123");
     await page.getByLabel(/confirm password/i).fill("a-strong-test-password-123");
     await page.getByRole("button", { name: /create account|register|sign up/i }).click();
     await expect(page.getByText(email)).toBeVisible({ timeout: 30_000 });
@@ -170,7 +195,7 @@ test.describe("the private annotation workspace", () => {
 
     await page.getByRole("button", { name: /^pin \(P\)$/i }).click();
     await markAt(page, 0.5, 0.4);
-    await page.getByLabel("Note for annotation 1").fill("Send this one to me");
+    await page.getByLabel("Note for annotation 1", { exact: true }).fill("Send this one to me");
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.locator(".annotation-save-pill")).toHaveText(/saved/i, { timeout: 20_000 });
 
