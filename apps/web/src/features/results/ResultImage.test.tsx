@@ -1,9 +1,24 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ResultImage } from "./ResultImage";
 import { DesignImageQueryError } from "./result-errors";
 import type { DesignImages } from "@/lib/api";
+
+// Only the two send calls are stubbed; everything else in `@/lib/api` this module
+// touches is types. Mocking the module wholesale here (as the workspace suite does)
+// would pull in the rest of the client for no benefit.
+const api = vi.hoisted(() => ({
+  fetchRenderSendState: vi.fn(),
+  sendRenderToAccount: vi.fn(),
+}));
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api")>()),
+  ...api,
+}));
+
+const auth = vi.hoisted(() => ({ user: null as unknown }));
+vi.mock("@/lib/auth", () => ({ useAuth: () => auth }));
 
 function images(overrides: Partial<DesignImages> = {}): DesignImages {
   return {
@@ -18,6 +33,19 @@ function images(overrides: Partial<DesignImages> = {}): DesignImages {
     ...overrides,
   };
 }
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Anonymous by default, which is what every pre-Phase-21 test in this file
+  // assumed and relies on.
+  auth.user = null;
+  api.fetchRenderSendState.mockResolvedValue({
+    used: 0,
+    limit: 3,
+    suggestedFilename: "Ivory lehenga",
+  });
+  api.sendRenderToAccount.mockResolvedValue({ ok: true });
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -183,6 +211,102 @@ describe("ResultImage", () => {
     );
     expect(screen.getByRole("button", { name: /send to account/i })).toBeDisabled();
     expect(screen.getByText(/sign in to send this to your email/i)).toBeInTheDocument();
+  });
+
+  it("asks a signed-in owner to name the file, and sends the plain kind", async () => {
+    // The concept screen is the likelier FIRST send for someone who never opens
+    // Annotate, so the naming prompt has to exist here too and not only in the
+    // workspace — and it must send kind "plain", since the two artefacts have
+    // separate allowances and separate remembered names.
+    auth.user = { id: "u1", email: "bride@example.test" };
+    render(
+      <ResultImage
+        images={images()}
+        isPending={false}
+        isFetching={false}
+        error={null}
+        altText="alt"
+        onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /send to account/i }));
+    const dialog = await screen.findByRole("dialog", { name: /name this file/i });
+    expect(screen.getByLabelText(/file name/i)).toHaveValue("Ivory lehenga");
+    // The accepted-exposure sentence, on this surface too.
+    expect(within(dialog).getByText(/goes into the email/i).textContent).toMatch(/headers/i);
+
+    fireEvent.change(screen.getByLabelText(/file name/i), { target: { value: "Sangeet look" } });
+    fireEvent.click(screen.getByRole("button", { name: /send to my email/i }));
+
+    await waitFor(() =>
+      expect(api.sendRenderToAccount).toHaveBeenCalledWith(
+        "design-1",
+        "version-1",
+        "plain",
+        "Sangeet look",
+      ),
+    );
+    expect(api.fetchRenderSendState).toHaveBeenCalledWith("design-1", "version-1", "plain");
+  });
+
+  it("shows the remaining count on the concept screen before the ceiling", async () => {
+    auth.user = { id: "u1", email: "bride@example.test" };
+    api.fetchRenderSendState.mockResolvedValue({
+      used: 2,
+      limit: 3,
+      suggestedFilename: "Ivory lehenga",
+    });
+    render(
+      <ResultImage
+        images={images()}
+        isPending={false}
+        isFetching={false}
+        error={null}
+        altText="alt"
+        onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+      />,
+    );
+
+    expect(await screen.findByText(/1 of 3 emails left for this image/i)).toBeInTheDocument();
+  });
+
+  it("refuses on the concept screen too once the allowance is spent", async () => {
+    // The same component serves both surfaces, so the ceiling reaches them at the
+    // same moment — but only the workspace had a test for it, which would have let
+    // a kind-conditional regression break this surface while the other stayed
+    // green. The server holds the real cap either way (a spent allowance is a 409
+    // whatever the button does); what this guards is that the concept screen tells
+    // the user before they press rather than after.
+    auth.user = { id: "u1", email: "bride@example.test" };
+    api.fetchRenderSendState.mockResolvedValue({
+      used: 3,
+      limit: 3,
+      suggestedFilename: "Ivory lehenga",
+    });
+    render(
+      <ResultImage
+        images={images()}
+        isPending={false}
+        isFetching={false}
+        error={null}
+        altText="alt"
+        onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /send to account/i })).toBeDisabled(),
+    );
+    expect(screen.getByText(/emailed this 3 times, which is the maximum/i)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(api.sendRenderToAccount).not.toHaveBeenCalled();
   });
 
   it("opens the full-size image in a new tab with noreferrer noopener", () => {

@@ -93,3 +93,18 @@ export const AUTOSAVE_DEBOUNCE_MS = 800;
 
 /** How long the send button holds its confirmation before reverting (§14). */
 export const SEND_FLASH_MS = 2200;
+
+/**
+ * The longest file name that survives to the attachment (Phase 21).
+ *
+ * Deliberately the server's 60-character BASE cap, not its 200-character input
+ * ceiling. The server truncates a longer name rather than refusing it, so a field
+ * that accepted 200 would let someone type 140 characters they will never see
+ * again — the bound that matters to the person typing is the one their name has
+ * to fit inside, not the one an abusive request is stopped at.
+ *
+ * `MAX_FILENAME_BASE_LENGTH` in `media/account_delivery.py` is the authority. If
+ * the two disagree the server still truncates; nothing breaks, the field just
+ * stops matching the result.
+ */
+export const MAX_SEND_FILENAME_LENGTH = 60;
