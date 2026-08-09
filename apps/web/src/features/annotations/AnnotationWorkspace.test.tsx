@@ -1333,6 +1333,21 @@ describe("ownership and accessibility", () => {
     expect(await axeViolations(container)).toHaveNoViolations();
   });
 
+  it("has no axe violations with the help disclosure open", async () => {
+    // Scanned OPEN, because that is the state no other scan reaches: axe respects
+    // the hidden state of a closed <details>, so the grouped lists, the term and
+    // description structure and the key chips inside it were never audited by the
+    // scans above. A disclosure that is fine closed and has barriers open is still
+    // a barrier.
+    const { container } = await loaded();
+    fireEvent.click(screen.getByText("Gestures and shortcuts"));
+    expect(
+      (container.querySelector("details.annotation-help") as HTMLDetailsElement).open,
+    ).toBe(true);
+
+    expect(await axeViolations(container)).toHaveNoViolations();
+  });
+
   it("has no axe violations on the unsaved-leave popover", async () => {
     const { container } = await loaded();
     fireEvent.click(screen.getByRole("button", { name: /^pin \(p\)$/i }));
@@ -1356,6 +1371,97 @@ describe("ownership and accessibility", () => {
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(document.activeElement).toBe(trigger);
+  });
+});
+
+describe("the gestures and shortcuts help", () => {
+  it("stays out of the way until it is asked for", async () => {
+    // The point of the redesign: a returning stylist should not pay vertical space
+    // to be told what they already know. The reference is present and reachable,
+    // but closed.
+    const { container } = await loaded();
+    const help = container.querySelector("details.annotation-help") as HTMLDetailsElement;
+
+    expect(help).toBeTruthy();
+    expect(help.open).toBe(false);
+    expect(screen.getByText("Gestures and shortcuts")).toBeVisible();
+  });
+
+  it("opens to a grouped reference rather than a paragraph", async () => {
+    const { container } = await loaded();
+    const help = container.querySelector("details.annotation-help") as HTMLDetailsElement;
+    // Native <details>: clicking the summary is what a user does, and jsdom
+    // implements the click toggle (it does NOT implement Space or Enter on a
+    // summary, so a keyboard test here would be testing jsdom's missing default
+    // action rather than this code).
+    fireEvent.click(screen.getByText("Gestures and shortcuts"));
+
+    expect(help.open).toBe(true);
+
+    // The exact set of terms, not a count with slack. A floor of 8 against 9 rows
+    // tolerated silently losing one — and asserting the terms rather than the
+    // number also catches a rename or a reorder, and says in the test what the
+    // reference is supposed to contain.
+    const terms = Array.from(help.querySelectorAll(".annotation-help-row dt")).map((term) =>
+      (term.textContent ?? "").replace(/\s+/g, " ").trim(),
+    );
+    expect(terms).toEqual([
+      "Draw",
+      "Move a mark",
+      "Pan",
+      "V P A R F",
+      "Arrow keys",
+      "Enter Esc",
+      "H",
+      "+ − 0",
+      "Ctrl+Z",
+    ]);
+    expect(screen.getByText(/drag it straight from where it sits/i)).toBeVisible();
+  });
+
+  it("names the undo modifier the same way the tool rail does", async () => {
+    // Both read the same helper, so they cannot disagree — one saying ⌘ while the
+    // other said Ctrl on the same machine reads as a bug in the app.
+    //
+    // Asserted as a LITERAL on both sides rather than by deriving the expected
+    // value from the rail. Deriving it was circular: the derivation fell back to
+    // "Ctrl" whenever ⌘ was absent, so corrupting the rail's label template to drop
+    // the modifier entirely still produced "Ctrl" and still matched. jsdom's
+    // userAgent is win32, so "Ctrl" is the correct expectation here; the ⌘ branch
+    // is covered in platform.test.ts, which can vary the userAgent.
+    await loaded();
+    expect(screen.getByRole("button", { name: /^undo/i })).toHaveAttribute(
+      "aria-label",
+      "Undo (Ctrl+Z)",
+    );
+
+    fireEvent.click(screen.getByText("Gestures and shortcuts"));
+
+    const keys = Array.from(document.querySelectorAll(".annotation-help kbd")).map(
+      (key) => key.textContent,
+    );
+    expect(keys).toContain("Ctrl");
+    expect(keys).not.toContain("⌘");
+  });
+
+  it("no longer carries the permanent instructions paragraph", async () => {
+    // The actual request was that this stop taking space on every visit. Without a
+    // negative assertion, leaving the old paragraph in place beside the new
+    // disclosure would satisfy every other test here while costing the same space
+    // it was removed to reclaim.
+    const { container } = await loaded();
+
+    expect(container.querySelector(".annotation-instructions")).toBeNull();
+    expect(screen.queryByText(/Shift\+arrow moves further/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/H hides and shows every mark/i)).not.toBeInTheDocument();
+  });
+
+  it("does not keep the basics only behind the disclosure", async () => {
+    // A newcomer must not have to find a collapsed panel to learn the first step.
+    // The empty-state card over the render carries it, and disappears once it is
+    // no longer true — which is why the help can be closed by default at all.
+    await loaded();
+    expect(screen.getByText(/pick a tool on the left, then click anywhere/i)).toBeVisible();
   });
 });
 

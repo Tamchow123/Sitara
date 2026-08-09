@@ -15,6 +15,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import type { Tool } from "./AnnotationCanvas";
 import { PinGlyph } from "./Glyphs";
+import { undoModifierLabel } from "./platform";
 
 type ToolSpec = {
   id: Tool | "note";
@@ -52,12 +53,7 @@ export function ToolRail({
   canRedo,
 }: Props) {
   const railRef = useRef<HTMLDivElement>(null);
-  // userAgent rather than the deprecated navigator.platform. Only affects the
-  // label text, so a wrong guess costs a slightly odd shortcut hint, never
-  // behaviour — both modifiers are accepted by the key handler regardless.
-  const isMac =
-    typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  const modifier = isMac ? "⌘" : "Ctrl";
+  const modifier = undoModifierLabel();
 
   function activate(spec: ToolSpec) {
     if (spec.id === "note") onFocusNoteEditor();

@@ -443,17 +443,152 @@
 .annotation-canvas-foot {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  /* Top, not centre: the help expands to a few hundred pixels, and centring left
+     the zoom control floating opposite the middle of an open panel, detached from
+     the row it belongs to. The summary is given a matching min-height below so the
+     two still read as one line while the panel is closed. */
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-2);
 }
 
-.annotation-instructions {
-  margin: 0;
-  max-width: 62ch;
+/* --- Gestures and shortcuts ------------------------------------------- */
+
+/* Closed, this is one quiet line; open, a grouped reference. It replaced a
+   permanent four-line paragraph that cost the same vertical space on every visit
+   whether or not the reader needed it. */
+.annotation-help {
+  /* 56ch, not 62: at 62 the open panel plus the zoom control overflowed the canvas
+     column by about twenty pixels, so expanding the help wrapped the zoom control
+     onto a second line and shunted it a few hundred pixels down the page — a
+     control the user may be reaching for. Trimming the measure keeps them side by
+     side, so opening the help moves nothing else. Descriptions still fit on one
+     line at this width. */
+  max-width: 56ch;
   color: var(--color-neutral-800);
   font-size: 12.5px;
 }
+
+.annotation-help > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  /* Close to the zoom control's height, so with the row aligned to the top the
+     two still sit on the same visual line. */
+  min-height: 34px;
+  padding: 3px 10px 3px 6px;
+  border-radius: var(--radius-pill);
+  color: var(--color-neutral-800);
+  cursor: pointer;
+  /* The default triangle is replaced by one that rotates, below. */
+  list-style: none;
+}
+
+/* WebKit needs its own selector to drop the disclosure triangle. */
+.annotation-help > summary::-webkit-details-marker {
+  display: none;
+}
+
+.annotation-help > summary::before {
+  content: "›";
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--color-neutral-700);
+  transition: transform 120ms ease;
+}
+
+.annotation-help[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.annotation-help > summary:hover {
+  background: var(--color-accent-100);
+}
+
+/* Focus has to be visible on the summary itself — it is the control. */
+.annotation-help > summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ONE column, not two. Two fitted inside the 62ch measure at 226px each, which
+   left roughly 100px for a description and wrapped most rows onto three or four
+   lines — a 341px-tall panel that was harder to scan than a single wide column at
+   about 230px. The reading measure is the binding constraint here, not the
+   available width. */
+.annotation-help-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: 6px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.annotation-help-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  min-width: 0;
+}
+
+/* The keys group is a different kind of thing from the gestures group, so it gets
+   a rule rather than relying on the gap alone to say so. */
+.annotation-help-group + .annotation-help-group {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-neutral-200);
+}
+
+/* Term and description on one line, with the terms sharing a column so the
+   descriptions align rather than stepping raggedly across the group. */
+.annotation-help-row {
+  display: grid;
+  grid-template-columns: minmax(6.5em, auto) 1fr;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.annotation-help-row dt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  color: var(--color-neutral-900);
+  font-weight: 600;
+}
+
+.annotation-help-row dd {
+  margin: 0;
+  color: var(--color-neutral-800);
+  /* Explicit, because a global `dd` rule sets 700 — which rendered every
+     description BOLDER than the term it belongs to, inverting the hierarchy and
+     making the whole panel read as emphasis. */
+  font-weight: 400;
+}
+
+.annotation-help kbd {
+  display: inline-block;
+  min-width: 1.5em;
+  padding: 1px 5px;
+  border: 1px solid var(--color-neutral-300);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-900);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+}
+
 
 .annotation-zoom {
   display: inline-flex;

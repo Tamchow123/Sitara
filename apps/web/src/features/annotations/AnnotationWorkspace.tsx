@@ -45,6 +45,7 @@ import {
   itemsEqual,
   selectedItem,
 } from "./reducer";
+import { undoModifierLabel } from "./platform";
 import { useAutosave } from "./useAutosave";
 import { useAuth } from "@/lib/auth";
 import { clearAnnotations, fetchAnnotations, fetchDesignImageUrls, fetchDesignResult } from "@/lib/api";
@@ -455,6 +456,7 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
 
   const result = resultQuery.data;
   const resultRoute = `/design/${designId}/result/${versionId}`;
+  const modifier = undoModifierLabel();
 
   if (annotationsQuery.isError) {
     return (
@@ -614,12 +616,80 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
           />
 
           <div className="annotation-canvas-foot">
-            <p className="annotation-instructions">
-              Pick a tool, then click or drag on the render. With Select, drag a mark straight
-              from where it sits to move it, or use the arrow keys on a mark in the list —
-              Shift+arrow moves further. Enter edits a note; Escape steps back. H hides and
-              shows every mark.
-            </p>
+            {/* Collapsed by default, and native <details> rather than a hand-rolled
+                toggle so it is keyboard-operable and announced as expandable with
+                no state of our own.
+
+                It used to be a permanent four-line paragraph. That is a poor deal
+                for the returning stylist, who pays the vertical space on every
+                visit to be told what they already know — and it was not even the
+                first thing a newcomer read, because the empty-state card over the
+                render already says to pick a tool and click. So the basics stay
+                there, where they are unavoidable and disappear once they are no
+                longer true, and the full reference lives here, out of the way but
+                one keystroke from being read. Grouped, because a run-on sentence
+                is the wrong shape for a list of eight independent facts. */}
+            <details className="annotation-help">
+              <summary>Gestures and shortcuts</summary>
+              <div className="annotation-help-body">
+                <dl className="annotation-help-group">
+                  <div className="annotation-help-row">
+                    <dt>Draw</dt>
+                    <dd>Pick a tool, then click or drag on the render</dd>
+                  </div>
+                  <div className="annotation-help-row">
+                    <dt>Move a mark</dt>
+                    <dd>With Select, drag it straight from where it sits</dd>
+                  </div>
+                  <div className="annotation-help-row">
+                    <dt>Pan</dt>
+                    <dd>Zoomed in, drag the background</dd>
+                  </div>
+                </dl>
+
+                <dl className="annotation-help-group">
+                  <div className="annotation-help-row">
+                    <dt>
+                      <kbd>V</kbd> <kbd>P</kbd> <kbd>A</kbd> <kbd>R</kbd> <kbd>F</kbd>
+                    </dt>
+                    <dd>Select, pin, arrow, rectangle, freehand</dd>
+                  </div>
+                  <div className="annotation-help-row">
+                    <dt>Arrow keys</dt>
+                    <dd>
+                      Nudge the selected mark, <kbd>Shift</kbd> moves further — or pan, with
+                      nothing selected
+                    </dd>
+                  </div>
+                  <div className="annotation-help-row">
+                    <dt>
+                      <kbd>Enter</kbd> <kbd>Esc</kbd>
+                    </dt>
+                    <dd>Edit a note, or step back</dd>
+                  </div>
+                  <div className="annotation-help-row">
+                    <dt>
+                      <kbd>H</kbd>
+                    </dt>
+                    <dd>Hide or show every mark</dd>
+                  </div>
+                  <div className="annotation-help-row">
+                    <dt>
+                      <kbd>+</kbd> <kbd>−</kbd> <kbd>0</kbd>
+                    </dt>
+                    <dd>Zoom in, out, or fit</dd>
+                  </div>
+                  <div className="annotation-help-row">
+                    <dt>
+                      <kbd>{modifier}</kbd>+<kbd>Z</kbd>
+                    </dt>
+                    <dd>
+                      Undo — one press per drag, not per pixel. <kbd>Shift</kbd> redoes
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            </details>
 
             <div className="annotation-zoom" role="group" aria-label="Zoom">
               <button
@@ -653,10 +723,15 @@ export function AnnotationWorkspace({ designId, versionId }: Props) {
               </button>
             </div>
 
+            {/* Kept even though the help now covers panning, because this one is
+                CONTEXTUAL: it appears only while zoomed, which is exactly when the
+                reassurance is wanted. A drawing surface that suddenly scales
+                invites the fear that the marks have moved with it, and they have
+                not. Trimmed to that reassurance plus the gesture — the keyboard
+                route belongs in the help, not repeated here. */}
             {zoom > 1 && (
               <p className="annotation-zoom-hint">
-                With Select, drag the background to move around — or the arrow keys, with no
-                mark selected · marks stay pinned to the garment
+                Drag the background to move around — marks stay pinned to the garment
               </p>
             )}
 
