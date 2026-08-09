@@ -67,6 +67,7 @@ from sitara.media.account_delivery import (
     AccountEmailRecipientUnavailable,
     recipient_for,
     require_account_email_enabled,
+    safe_stored_filename,
 )
 from sitara.media.delivery import issue_design_image_urls
 from sitara.media.exceptions import (
@@ -111,6 +112,7 @@ from .openapi import (
     InspirationUploadResponseSerializer,
     InspirationUploadWriteSerializer,
     RenderSendResponseSerializer,
+    RenderSendStateResponseSerializer,
 )
 from .ownership import accessible_designs, accessible_generation_attempts
 from .render_delivery import (
@@ -120,6 +122,7 @@ from .render_delivery import (
     SendLimitReached,
     enforce_send_throttles,
     owner_of,
+    remembered_filename,
     require_render_ready,
     reserve_send,
     send_allowance,
@@ -135,6 +138,7 @@ from .result import (
 from .serializers import (
     DesignWriteSerializer,
     RefinementWriteSerializer,
+    RenderSendSerializer,
     design_detail_payload,
     design_list_item_payload,
     inspiration_upload_payload,
@@ -1105,15 +1109,27 @@ class _DesignVersionSendView(APIView):
 
     **The recipient is never accepted from the caller, in any field, ever.** It
     is ``request.user.email``, read server-side, and the task re-derives it
-    independently from the design's own session. This view has no request body
-    at all, which is the cheapest way to guarantee it: there is nothing to
-    parse, so there is nothing an address could arrive in. An endpoint that
-    mails an attachment to a caller-chosen address is an open relay.
+    independently from the design's own session. An endpoint that mails an
+    attachment to a caller-chosen address is an open relay.
 
-    Order matters and is fixed: CSRF, then ownership, then the gate, then
-    readiness, then the throttles. Throttling last means a cross-origin page
-    cannot burn a victim's quota, and a throttled caller still cannot
-    distinguish an owned design from one that never existed.
+    Until Phase 21 that guarantee was structural — the view had no request body
+    at all, so there was nothing an address could arrive in. It now takes exactly
+    one optional field, ``filename``, so the guarantee is an explicit and tested
+    one instead: ``RenderSendSerializer`` rejects every other key, and a request
+    naming ``email``/``to``/``cc``/``bcc`` fails whole rather than succeeding
+    partially with the forbidden field quietly dropped. Silently ignoring such a
+    field would teach a client it worked.
+
+    Order matters and is fixed: CSRF, then ownership, then the body, then the
+    gate, then readiness, then the allowance, then the throttles. The body is
+    read early because a malformed request should be answered as one rather than
+    being masked by a capability refusal — it reserves nothing and sends nothing.
+    Throttling last means a cross-origin page cannot burn a victim's quota, and a
+    throttled caller still cannot distinguish an owned design from one that never
+    existed.
+
+    ``GET`` reports the same view's send state (allowance used and the name to
+    pre-fill) so the client can show what is left before the last send is spent.
 
     The response carries no address. The client already knows the account's own
     address from ``/auth/me`` and uses that for its confirmation copy — echoing
@@ -1121,6 +1137,10 @@ class _DesignVersionSendView(APIView):
 
     authentication_classes = [SessionAuthentication]
     permission_classes = [AllowAny]
+    # JSON only. The documented contract is a JSON object, and leaving the form
+    # parsers enabled would give the one caller-influenced value in the delivery
+    # path a second, undocumented way in.
+    parser_classes = [JSONParser]
 
     #: Set by each concrete subclass.
     kind: str = ""
@@ -1147,10 +1167,85 @@ class _DesignVersionSendView(APIView):
             status.HTTP_409_CONFLICT,
         )
 
+    def get(self, request, design_id: str, version_id: str):
+        """What the owner needs before they press Send: how many of this render's
+        sends are left, and what to pre-fill the name field with.
+
+        The only endpoint that returns the remembered filename, and only to the
+        owner of that design — ownership filtering runs before the lookup, so a
+        foreign or nonexistent design is the same 404 as everywhere else.
+        ``no-store`` because the payload carries the owner's own free text.
+
+        Identity-free it is not, so it does not opt out of authentication; but it
+        is a safe method and creates nothing."""
+        version = self._get_owned_version(request, design_id, version_id)
+        if version is None:
+            return _not_found()
+
+        used, limit = send_allowance(version, self.kind)
+        return Response(
+            {
+                "send": {
+                    "used": used,
+                    "limit": limit,
+                    "suggested_filename": self._suggested_filename(version),
+                }
+            },
+            headers=NO_STORE,
+        )
+
+    def _suggested_filename(self, version) -> str:
+        """The name to pre-fill, in order of preference.
+
+        The owner's own last choice for this exact render; failing that, the
+        design's title, sanitised and truncated by the same rules the attachment
+        will use. **Never a note.** A note is the most personal free text in the
+        product — it says what someone dislikes about a garment they intend to
+        wear — and turning it into a default filename would put it in a message
+        header (CLAUDE.md §7)."""
+        remembered = remembered_filename(version, self.kind)
+        if remembered:
+            return remembered
+        return safe_stored_filename(version.design.title)
+
+    def _read_requested_name(self, request) -> tuple[str, Response | None]:
+        """The caller's chosen name, or the 400 that refuses it.
+
+        Accepts a genuinely empty body as well as ``{}``, because the client sent
+        no body at all before this field existed and a stored client should not
+        break on an upgrade. DRF gives an empty body an empty ``QueryDict``, which
+        is dict-like and carries no fields, so no special case is needed — and
+        deliberately none is written: probing ``request.body`` first would raise
+        ``RawPostDataException`` on any request whose stream the CSRF middleware
+        has already read."""
+        body, parse_failure = _parse_body(request)
+        if parse_failure is not None:
+            return "", parse_failure
+        serializer = RenderSendSerializer(data=body)
+        if not serializer.is_valid():
+            if set(serializer.errors) == {"filename"}:
+                # The name itself was refused, which is the stylist's to correct.
+                # Distinct from a client sending a field it has no business
+                # sending, which is a defect in the client.
+                return "", _error(
+                    "filename_invalid",
+                    " ".join(str(message) for message in serializer.errors["filename"]),
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            return "", _validation_failed(serializer.errors)
+        return serializer.validated_data.get("filename", ""), None
+
     def post(self, request, design_id: str, version_id: str):
         version = self._get_owned_version(request, design_id, version_id)
         if version is None:
             return _not_found()
+
+        # Read BEFORE the gate and the throttles, so a malformed body is answered
+        # as a malformed body rather than costing quota or being masked by a
+        # capability refusal. It reserves nothing and sends nothing.
+        requested_name, name_failure = self._read_requested_name(request)
+        if name_failure is not None:
+            return name_failure
 
         try:
             require_account_email_enabled()
@@ -1215,10 +1310,7 @@ class _DesignVersionSendView(APIView):
             # Authoritative, under the row lock: two concurrent last-allowance
             # requests cannot both pass here. Committed before the enqueue below,
             # so the task can never run ahead of its own reservation.
-            # No name can arrive yet: these endpoints still accept no body, and
-            # the serializer that will carry one lands in the next commit. The
-            # durable column and every path that reads it are in place.
-            epoch = reserve_send(version, self.kind, requested_name="")
+            epoch = reserve_send(version, self.kind, requested_name=requested_name)
         except SendLimitReached as exc:
             return self._limit_reached(exc.used, exc.limit)
 
@@ -1301,11 +1393,30 @@ _SEND_RESPONSES = {
     ),
 }
 
+_SEND_STATE_RESPONSES = {
+    200: OpenApiResponse(
+        RenderSendStateResponseSerializer,
+        description="How many sends this render has used, and what to pre-fill the name with.",
+    ),
+    404: OpenApiResponse(
+        ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+    ),
+}
+
 _SEND_NOTE = (
-    "The recipient is always your own account address, read server-side. No "
-    "request body is accepted and no address may be supplied. The response "
-    "never contains an address. Delivery is asynchronous: a 202 means queued, "
-    "not sent."
+    "The recipient is always your own account address, read server-side. The "
+    "ONLY accepted body field is an optional 'filename' — no address may be "
+    "supplied in any field, and a request carrying one fails whole rather than "
+    "partially succeeding. Whatever you type as the file name travels in the "
+    "message headers and is retained by the mail relay and the receiving host. "
+    "The response never contains an address. Delivery is asynchronous: a 202 "
+    "means queued, not sent."
+)
+
+_SEND_STATE_NOTE = (
+    "Read this before offering a send: it reports how many of this render's "
+    "lifetime allowance of sends are used, and the name to pre-fill — the name "
+    "you last chose for this render, or your design's title. Never a note."
 )
 
 
@@ -1313,10 +1424,20 @@ class DesignVersionSendView(_DesignVersionSendView):
     kind = DesignRenderDelivery.PLAIN
 
     @extend_schema(
+        operation_id="designs_versions_send_state",
+        tags=_DESIGN_TAGS,
+        responses=_SEND_STATE_RESPONSES,
+        summary="How many concept-image sends are left, and the name to pre-fill",
+        description=_SEND_STATE_NOTE + " " + _OWNERSHIP_NOTE,
+    )
+    def get(self, request, design_id: str, version_id: str):
+        return super().get(request, design_id, version_id)
+
+    @extend_schema(
         operation_id="designs_versions_send_create",
         tags=_DESIGN_TAGS,
         parameters=[CSRF_HEADER_PARAMETER],
-        request=None,
+        request={"application/json": RenderSendSerializer},
         responses=_SEND_RESPONSES,
         summary="Email yourself this design version's concept image",
         description=(
@@ -1334,10 +1455,20 @@ class DesignVersionAnnotationsSendView(_DesignVersionSendView):
     kind = DesignRenderDelivery.ANNOTATED
 
     @extend_schema(
+        operation_id="designs_versions_annotations_send_state",
+        tags=_DESIGN_TAGS,
+        responses=_SEND_STATE_RESPONSES,
+        summary="How many annotated-concept sends are left, and the name to pre-fill",
+        description=_SEND_STATE_NOTE + " " + _OWNERSHIP_NOTE,
+    )
+    def get(self, request, design_id: str, version_id: str):
+        return super().get(request, design_id, version_id)
+
+    @extend_schema(
         operation_id="designs_versions_annotations_send_create",
         tags=_DESIGN_TAGS,
         parameters=[CSRF_HEADER_PARAMETER],
-        request=None,
+        request={"application/json": RenderSendSerializer},
         responses=_SEND_RESPONSES,
         summary="Email yourself this design version's annotated concept",
         description=(

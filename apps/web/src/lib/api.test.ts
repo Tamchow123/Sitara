@@ -7,6 +7,7 @@ import {
   fetchAnnotations,
   fetchMe,
   fetchReadiness,
+  fetchRenderSendState,
   saveAnnotations,
   sendRenderToAccount,
 } from "./api";
@@ -535,7 +536,9 @@ describe("sendRenderToAccount", () => {
       headers: post.init?.headers ?? null,
     });
     expect(serialised).not.toContain("@");
-    expect(JSON.parse(String(post.init?.body))).toEqual({});
+    // Exactly one key, and it is the file name. Asserted as an equality rather
+    // than a property check so a future field cannot appear here unnoticed.
+    expect(JSON.parse(String(post.init?.body))).toEqual({ filename: "" });
     expect(post.init?.credentials).toBe("same-origin");
   });
 
@@ -591,6 +594,104 @@ describe("sendRenderToAccount", () => {
   it("writes nothing to browser storage on the way through", async () => {
     sendHandler(() => json({ send: { status: "queued" } }, 202));
     await sendRenderToAccount(DESIGN, VERSION, "annotated");
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it("sends the chosen name as the only field", async () => {
+    const calls = sendHandler(() => json({ send: { status: "queued" } }, 202));
+
+    await sendRenderToAccount(DESIGN, VERSION, "plain", "Autumn lehenga");
+
+    const post = calls.find((call) => call.init?.method === "POST")!;
+    expect(JSON.parse(String(post.init?.body))).toEqual({ filename: "Autumn lehenga" });
+  });
+
+  it("puts the name in the body and never in the URL", async () => {
+    // A file name is the stylist's own words about their own concept. In a query
+    // string it would be recorded by every proxy and access log on the way.
+    const calls = sendHandler(() => json({ send: { status: "queued" } }, 202));
+
+    await sendRenderToAccount(DESIGN, VERSION, "plain", "Autumn lehenga");
+
+    const post = calls.find((call) => call.init?.method === "POST")!;
+    expect(post.url).toBe(`/api/v1/designs/${DESIGN}/versions/${VERSION}/send/`);
+    expect(post.url).not.toContain("Autumn");
+  });
+
+  it.each([
+    ["filename_invalid", 400, "name_refused"],
+    ["validation_failed", 400, "name_refused"],
+    ["send_limit_reached", 409, "limit_reached"],
+  ] as const)("maps %s to the %s refusal", async (code, status, kind) => {
+    // A refused name and a spent allowance are the two refusals the UI has to
+    // treat differently from every other: one is fixed in the name field, the
+    // other cannot be fixed at all.
+    sendHandler(() => json({ error: { code, message: "No." } }, status));
+    await expect(sendRenderToAccount(DESIGN, VERSION, "plain", "bad")).resolves.toEqual({
+      ok: false,
+      kind,
+      message: "No.",
+    });
+  });
+});
+
+describe("fetchRenderSendState", () => {
+  it("reads the allowance and the suggested name for the requested kind", async () => {
+    installFetchSpy(() =>
+      json({ send: { used: 1, limit: 3, suggested_filename: "Autumn lehenga" } }),
+    );
+
+    await expect(fetchRenderSendState(DESIGN, VERSION, "annotated")).resolves.toEqual({
+      used: 1,
+      limit: 3,
+      suggestedFilename: "Autumn lehenga",
+    });
+  });
+
+  it("requests the endpoint belonging to the kind", async () => {
+    const calls = installFetchSpy(() => json({ send: { used: 0, limit: 3 } }));
+
+    await fetchRenderSendState(DESIGN, VERSION, "annotated");
+
+    expect(calls[0]?.url).toBe(`/api/v1/designs/${DESIGN}/versions/${VERSION}/annotations/send/`);
+  });
+
+  it.each([
+    ["a 404 error envelope", () => json({ error: { code: "not_found", message: "No." } }, 404)],
+    ["a body with no send block", () => json({})],
+    ["a body with the wrong types", () => json({ send: { used: "1", limit: null } })],
+  ])("returns null for %s rather than throwing", async (_label, response) => {
+    installFetchSpy(response);
+    await expect(fetchRenderSendState(DESIGN, VERSION, "plain")).resolves.toBeNull();
+  });
+
+  it("returns null when the request throws", async () => {
+    // This read only pre-fills a field and shows a remaining count. A concept the
+    // stylist can see must never become unsendable because a convenience read
+    // failed.
+    installFetchSpy(() => {
+      throw new Error("network down");
+    });
+    await expect(fetchRenderSendState(DESIGN, VERSION, "plain")).resolves.toBeNull();
+  });
+
+  it("defaults a missing suggestion to an empty string", async () => {
+    installFetchSpy(() => json({ send: { used: 0, limit: 3 } }));
+    await expect(fetchRenderSendState(DESIGN, VERSION, "plain")).resolves.toEqual({
+      used: 0,
+      limit: 3,
+      suggestedFilename: "",
+    });
+  });
+
+  it("is a read: no CSRF bootstrap and nothing written to storage", async () => {
+    const calls = installFetchSpy(() => json({ send: { used: 0, limit: 3 } }));
+
+    await fetchRenderSendState(DESIGN, VERSION, "plain");
+
+    expect(calls.every((call) => call.url !== "/api/v1/auth/csrf/")).toBe(true);
+    expect(calls.every((call) => (call.init?.method ?? "GET") === "GET")).toBe(true);
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
   });

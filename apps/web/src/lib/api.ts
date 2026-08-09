@@ -1157,13 +1157,15 @@ export function clearAnnotations(
 }
 
 // ---------------------------------------------------------------------------
-// Emailing yourself a render (Phase 19)
+// Emailing yourself a render (Phase 19, named by the stylist in Phase 21)
 // ---------------------------------------------------------------------------
 //
-// The recipient is NEVER supplied here. These endpoints accept no request body
-// at all and resolve the address from the signed-in account server-side, so this
-// wrapper deliberately has no address parameter to pass one through — the same
-// rule the backend enforces structurally, mirrored in the client's shape.
+// The recipient is NEVER supplied here. The address is resolved from the
+// signed-in account server-side, and this wrapper deliberately has no parameter
+// to pass one through — the same rule the backend enforces, mirrored in the
+// client's shape. The one thing the caller may now choose is the FILE NAME, and
+// it is a separate parameter with its own type for exactly that reason: nothing
+// about it is address-shaped, and no code path can turn it into one.
 
 export type RenderSendKind = "plain" | "annotated";
 
@@ -1172,27 +1174,76 @@ export type RenderSendResult =
   | {
       ok: false;
       // Distinguished so the UI can be honest about which one happened: sign in,
-      // feature unavailable, slow down, or a genuine fault.
-      kind: "recipient_unavailable" | "disabled" | "throttled" | "not_ready" | "failed";
+      // feature unavailable, slow down, the name itself, the lifetime allowance,
+      // or a genuine fault. Only two of those are the user's to fix, and they are
+      // fixed in different places.
+      kind:
+        | "recipient_unavailable"
+        | "disabled"
+        | "throttled"
+        | "not_ready"
+        | "name_refused"
+        | "limit_reached"
+        | "failed";
       message: string;
       retryAfterSeconds?: number;
     };
+
+/** How many of this render's lifetime sends are spent, and what to pre-fill. */
+export type RenderSendState = {
+  used: number;
+  limit: number;
+  /** The stylist's own last choice for this render, or their design's title. */
+  suggestedFilename: string;
+};
+
+function renderSendPath(designId: string, versionId: string, kind: RenderSendKind): string {
+  const suffix = kind === "annotated" ? "annotations/send" : "send";
+  return `/api/v1/designs/${encodeURIComponent(designId)}/versions/${encodeURIComponent(
+    versionId,
+  )}/${suffix}/`;
+}
+
+export async function fetchRenderSendState(
+  designId: string,
+  versionId: string,
+  kind: RenderSendKind,
+): Promise<RenderSendState | null> {
+  // Null on ANY failure rather than an error union: this only pre-fills a field
+  // and shows a remaining count. A concept the stylist can see must never become
+  // unsendable because a convenience read failed.
+  try {
+    const body = await getJson<{
+      send?: { used?: unknown; limit?: unknown; suggested_filename?: unknown };
+    }>(renderSendPath(designId, versionId, kind));
+    const send = body.send;
+    // An error envelope parses fine and has no `send`, so the shape is checked
+    // rather than the status — a 404 and a malformed 200 both land here as null.
+    if (typeof send?.used !== "number" || typeof send?.limit !== "number") return null;
+    return {
+      used: send.used,
+      limit: send.limit,
+      suggestedFilename: typeof send.suggested_filename === "string" ? send.suggested_filename : "",
+    };
+  } catch {
+    return null;
+  }
+}
 
 export async function sendRenderToAccount(
   designId: string,
   versionId: string,
   kind: RenderSendKind,
+  filename = "",
 ): Promise<RenderSendResult> {
-  const suffix = kind === "annotated" ? "annotations/send" : "send";
-  const path = `/api/v1/designs/${encodeURIComponent(designId)}/versions/${encodeURIComponent(
-    versionId,
-  )}/${suffix}/`;
+  const path = renderSendPath(designId, versionId, kind);
 
   let envelope: ApiEnvelope<ErrorBody>;
   try {
-    // No body: `{}` is sent because the transport writes JSON, and the endpoint
-    // reads nothing from it. There is deliberately no field here for an address.
-    envelope = await sendJson<ErrorBody>("POST", path, {});
+    // The ONLY field. A blank one is sent as a blank one rather than omitted,
+    // because blank means "no new choice" server-side and keeps whatever name the
+    // stylist chose last time.
+    envelope = await sendJson<ErrorBody>("POST", path, { filename });
   } catch {
     return {
       ok: false,
@@ -1212,6 +1263,12 @@ export async function sendRenderToAccount(
   }
   if (code === "email_delivery_disabled") return { ok: false, kind: "disabled", message };
   if (code === "design_image_not_ready") return { ok: false, kind: "not_ready", message };
+  if (code === "filename_invalid" || code === "validation_failed") {
+    // Answered where the name was typed, not as a general failure — the stylist
+    // can correct this one, and nothing was sent.
+    return { ok: false, kind: "name_refused", message };
+  }
+  if (code === "send_limit_reached") return { ok: false, kind: "limit_reached", message };
   if (status === 429) {
     return { ok: false, kind: "throttled", message };
   }

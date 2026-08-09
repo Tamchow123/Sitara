@@ -327,11 +327,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * How many annotated-concept sends are left, and the name to pre-fill
+         * @description Read this before offering a send: it reports how many of this render's lifetime allowance of sends are used, and the name to pre-fill — the name you last chose for this render, or your design's title. Never a note. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        get: operations["designs_versions_annotations_send_state"];
         put?: never;
         /**
          * Email yourself this design version's annotated concept
-         * @description Queues the annotated composite — the image with your marks drawn on it and a numbered note legend beneath — as a PNG attachment. Your note text is in the attachment only; the message body never carries it. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Queues the annotated composite — the image with your marks drawn on it and a numbered note legend beneath — as a PNG attachment. Your note text is in the attachment only; the message body never carries it. The recipient is always your own account address, read server-side. The ONLY accepted body field is an optional 'filename' — no address may be supplied in any field, and a request carrying one fails whole rather than partially succeeding. Whatever you type as the file name travels in the message headers and is retained by the mail relay and the receiving host. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         post: operations["designs_versions_annotations_send_create"];
         delete?: never;
@@ -387,11 +391,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * How many concept-image sends are left, and the name to pre-fill
+         * @description Read this before offering a send: it reports how many of this render's lifetime allowance of sends are used, and the name to pre-fill — the name you last chose for this render, or your design's title. Never a note. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        get: operations["designs_versions_send_state"];
         put?: never;
         /**
          * Email yourself this design version's concept image
-         * @description Queues the plain canonical render as a PNG attachment. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Queues the plain canonical render as a PNG attachment. The recipient is always your own account address, read server-side. The ONLY accepted body field is an optional 'filename' — no address may be supplied in any field, and a request carrying one fails whole rather than partially succeeding. Whatever you type as the file name travels in the message headers and is retained by the mail relay and the receiving host. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         post: operations["designs_versions_send_create"];
         delete?: never;
@@ -1313,8 +1321,51 @@ export interface components {
             password: string;
             password_confirm: string;
         };
+        /**
+         * @description The send endpoints' request body: exactly one optional ``filename``.
+         *
+         *     The only caller-influenced value in the whole delivery path (Phase 21,
+         *     ADR 0022). Every other field is rejected rather than ignored, which matters
+         *     more here than anywhere else in this API: these endpoints mail an attachment,
+         *     and the guarantee that no request can express a destination used to be
+         *     structural — there was no body to put one in. Now that a body exists the
+         *     guarantee is an explicit, tested one, so ``email``, ``to``, ``cc``, ``bcc``,
+         *     ``from_email``, ``reply_to`` and anything else fail the whole request rather
+         *     than being silently dropped beside a valid ``filename``.
+         *
+         *     Validation is total over arbitrary JSON. A number, ``null``, a list or a
+         *     nested object becomes a controlled 400, never a ``TypeError``.
+         *
+         *     The edge REFUSES what the choke point refuses and accepts what it repairs,
+         *     by asking the sanitiser itself rather than reimplementing its rules. So a
+         *     name carrying a control character is a 400 the stylist can see and correct,
+         *     while one merely containing a path separator is quietly cleaned — the
+         *     difference being that a refusal would otherwise deliver a name nobody chose.
+         */
+        RenderSendRequest: {
+            filename?: string;
+        };
         RenderSendResponse: {
             send: components["schemas"]["RenderSendStatus"];
+        };
+        /**
+         * @description What the owner needs before pressing Send (Phase 21, ADR 0022).
+         *
+         *     Still no recipient address, for the same reason as above. What is new is
+         *     ``suggested_filename``, which is the owner's OWN free text read back to them:
+         *     the name they last chose for this exact render, or their design's title if
+         *     they have not chosen one. It is never derived from an annotation note.
+         */
+        RenderSendState: {
+            /** @description How many times this render has already been emailed. A lifetime total per render, not a rate that refills. */
+            used: number;
+            /** @description The most times this render may EVER be emailed. Reaching it is a 409 send_limit_reached, not a 429 — no waiting returns an allowance that is spent for good. */
+            limit: number;
+            /** @description Pre-fill the name field with this: the name last chosen for this render, else the design's title, else blank. Your annotation notes are never used here. */
+            suggested_filename: string;
+        };
+        RenderSendStateResponse: {
+            send: components["schemas"]["RenderSendState"];
         };
         /**
          * @description Deliberately only a status.
@@ -2340,6 +2391,38 @@ export interface operations {
             };
         };
     };
+    designs_versions_annotations_send_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                design_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description How many sends this render has used, and what to pre-fill the name with. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenderSendStateResponse"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     designs_versions_annotations_send_create: {
         parameters: {
             query?: never;
@@ -2353,7 +2436,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RenderSendRequest"];
+            };
+        };
         responses: {
             /** @description Queued for delivery. */
             202: {
@@ -2509,6 +2596,38 @@ export interface operations {
             };
         };
     };
+    designs_versions_send_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                design_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description How many sends this render has used, and what to pre-fill the name with. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenderSendStateResponse"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     designs_versions_send_create: {
         parameters: {
             query?: never;
@@ -2522,7 +2641,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RenderSendRequest"];
+            };
+        };
         responses: {
             /** @description Queued for delivery. */
             202: {

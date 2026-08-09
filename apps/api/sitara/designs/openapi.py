@@ -544,3 +544,40 @@ class RenderSendStatusSerializer(serializers.Serializer):
 
 class RenderSendResponseSerializer(serializers.Serializer):
     send = RenderSendStatusSerializer()
+
+
+class RenderSendStateSerializer(serializers.Serializer):
+    """What the owner needs before pressing Send (Phase 21, ADR 0022).
+
+    Still no recipient address, for the same reason as above. What is new is
+    ``suggested_filename``, which is the owner's OWN free text read back to them:
+    the name they last chose for this exact render, or their design's title if
+    they have not chosen one. It is never derived from an annotation note."""
+
+    used = serializers.IntegerField(
+        min_value=0,
+        help_text=(
+            "How many times this render has already been emailed. A lifetime "
+            "total per render, not a rate that refills."
+        ),
+    )
+    limit = serializers.IntegerField(
+        min_value=1,
+        help_text=(
+            "The most times this render may EVER be emailed. Reaching it is a "
+            "409 send_limit_reached, not a 429 — no waiting returns an allowance "
+            "that is spent for good."
+        ),
+    )
+    suggested_filename = serializers.CharField(
+        allow_blank=True,
+        help_text=(
+            "Pre-fill the name field with this: the name last chosen for this "
+            "render, else the design's title, else blank. Your annotation notes "
+            "are never used here."
+        ),
+    )
+
+
+class RenderSendStateResponseSerializer(serializers.Serializer):
+    send = RenderSendStateSerializer()

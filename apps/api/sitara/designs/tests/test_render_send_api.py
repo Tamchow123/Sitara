@@ -110,15 +110,27 @@ def anonymous_browser() -> tuple[object, str, DesignVersion]:
     return browser, token, version
 
 
-def post_send(browser, token, version, suffix=PLAIN, ip=None):
+def post_send(browser, token, version, suffix=PLAIN, ip=None, name=None):
+    """A send, optionally naming the file.
+
+    ``name=None`` sends ``{}`` — the shape a client that never learned about the
+    field would send — rather than omitting the body, which is covered separately."""
     return send_json(
         browser,
         "post",
         send_url(version.design_id, version.pk, suffix),
-        None,
+        None if name is None else {"filename": name},
         token=token,
         ip=ip or unique_ip(),
     )
+
+
+def get_send_state(browser, version, suffix=PLAIN):
+    return browser.get(send_url(version.design_id, version.pk, suffix))
+
+
+def attachment_names() -> list[str]:
+    return [message.attachments[0][0] for message in mail.outbox]
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +193,13 @@ def test_a_supplied_address_is_never_honoured(body, settings):
     Whatever the endpoint does with an unexpected body — accept and ignore it,
     or reject it — the one outcome that must never occur is a message reaching
     the supplied address. Asserted on the outbox, not on the status code, so
-    this test keeps its meaning if the body handling ever changes."""
+    this test keeps its meaning if the body handling ever changes.
+
+    Since Phase 21 these bodies are refused outright, which would make an
+    outbox-only assertion vacuously true. So the outbox is asserted EMPTY as well
+    as address-free, and the deliver-to-A-anyway half of the rule is proved where
+    a delivery genuinely happens — see the query-parameter test below, and
+    ``test_a_named_send_still_goes_to_the_account_address``."""
     settings.CELERY_TASK_ALWAYS_EAGER = True
     address = unique_email()
     browser, token, version = signed_in_browser(address)
@@ -195,6 +213,7 @@ def test_a_supplied_address_is_never_honoured(body, settings):
         ip=unique_ip(),
     )
 
+    assert mail.outbox == []
     for message in mail.outbox:
         assert message.to == [address]
         assert "attacker@evil.test" not in str(message.to)
@@ -244,6 +263,586 @@ def test_the_send_goes_to_the_account_address_not_the_session(settings):
     post_send(browser, token, version)
 
     assert [m.to for m in mail.outbox] == [[address]]
+
+
+def test_a_named_send_still_goes_to_the_account_address(settings):
+    """The positive half of the rule, on the request shape that now exists: an
+    accepted body, an address named everywhere a caller can name one, and the
+    message still goes to the account's own address.
+
+    A test that only proves refusals would leave the case where delivery actually
+    happens unexamined — which is the one that would matter."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    address = unique_email()
+    browser, token, version = signed_in_browser(address)
+
+    url = f"{send_url(version.design_id, version.pk, PLAIN)}?to=attacker@evil.test"
+    response = send_json(
+        browser,
+        "post",
+        url,
+        {"filename": "Autumn lehenga"},
+        token=token,
+        ip=unique_ip(),
+    )
+
+    assert response.status_code == 202, response.content
+    assert [m.to for m in mail.outbox] == [[address]]
+    message = mail.outbox[0]
+    assert message.cc == []
+    assert message.bcc == []
+    assert "attacker@evil.test" not in str(message.message())
+    # And the name the caller DID get to choose was honoured, so this is not
+    # passing because the body was ignored wholesale.
+    assert message.attachments[0][0] == "Autumn lehenga.png"
+
+
+# ---------------------------------------------------------------------------
+# The recipient rule, re-proved now that a body exists
+# ---------------------------------------------------------------------------
+#
+# Every test above this line was written when the endpoint parsed nothing. The
+# guarantee they pin was structural then and is an explicit one now, so it is
+# re-proved against the parser rather than inherited.
+
+
+FORBIDDEN_FIELDS = [
+    "email",
+    "to",
+    "recipient",
+    "address",
+    "cc",
+    "bcc",
+    "from_email",
+    "reply_to",
+    "from",
+    "subject",
+    "body",
+    "attachment",
+]
+
+
+@pytest.mark.parametrize("suffix", [PLAIN, ANNOTATED])
+@pytest.mark.parametrize("field", FORBIDDEN_FIELDS)
+def test_a_forbidden_field_fails_the_whole_request_and_queues_nothing(field, suffix, settings):
+    """Rejected, not ignored.
+
+    Accepting the request and dropping the field would send the concept to the
+    right address while telling the client its ``to`` was honoured — the worst of
+    the available outcomes, because nobody would notice until the day a refactor
+    started reading it. ``from``/``subject``/``body`` are in the table alongside
+    the address fields: none of them is a destination, but all of them are header
+    material, and the field this endpoint does accept is already header material."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    address = unique_email()
+    browser, token, version = signed_in_browser(address)
+
+    response = send_json(
+        browser,
+        "post",
+        send_url(version.design_id, version.pk, suffix),
+        {field: "attacker@evil.test"},
+        token=token,
+        ip=unique_ip(),
+    )
+
+    assert response.status_code == 400, response.content
+    assert response.json()["error"]["code"] == "validation_failed"
+    assert response.json()["error"]["fields"] == {field: ["This field cannot be set."]}
+    assert mail.outbox == []
+    assert not DesignRenderDelivery.objects.filter(design_version=version).exists()
+
+
+def test_a_valid_name_beside_a_forbidden_field_fails_whole(settings):
+    """The partial-success case, which is the one a permissive parser produces.
+
+    A body carrying both a usable ``filename`` and a ``to`` must not be answered
+    202 with the name applied — that is an endpoint quietly deciding which half of
+    a request it liked."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    response = send_json(
+        browser,
+        "post",
+        send_url(version.design_id, version.pk, PLAIN),
+        {"filename": "Autumn lehenga", "to": "attacker@evil.test"},
+        token=token,
+        ip=unique_ip(),
+    )
+
+    assert response.status_code == 400
+    assert sorted(response.json()["error"]["fields"]) == ["to"]
+    assert mail.outbox == []
+    assert not DesignRenderDelivery.objects.filter(design_version=version).exists()
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Autumn\r\nBcc: attacker@evil.test",
+        "Autumn\nBcc: attacker@evil.test",
+        "Autumn\rlehenga",
+        "Autumn\x00lehenga",
+        "Autumn\x7flehenga",
+    ],
+)
+def test_a_control_bearing_name_is_refused_and_nothing_is_sent(raw, settings):
+    """A refusal, not a repair.
+
+    The choke point would refuse these too, and a name silently stripped back to
+    "AutumnBcc: attacker@evil.test" is a name nobody chose. Refusing at the edge
+    is what lets the stylist see and correct it."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    response = post_send(browser, token, version, name=raw)
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "filename_invalid"
+    assert mail.outbox == []
+    assert not DesignRenderDelivery.objects.filter(design_version=version).exists()
+
+
+@pytest.mark.parametrize("raw", [12, 1.5, None, True, ["a"], {"a": "b"}])
+def test_a_name_that_is_not_text_is_refused(raw, settings):
+    """DRF's CharField would coerce 12 to "12" and deliver an attachment called
+    that. A name arriving as a number, a null or a list is a client defect, and
+    answering it with a plausible-looking file teaches the client it worked."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    response = send_json(
+        browser,
+        "post",
+        send_url(version.design_id, version.pk, PLAIN),
+        {"filename": raw},
+        token=token,
+        ip=unique_ip(),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "filename_invalid"
+    assert mail.outbox == []
+
+
+@pytest.mark.parametrize("body", ["[]", '"just a string"', "12", "null", "{", "[[[["])
+def test_a_body_that_is_not_a_json_object_is_a_controlled_400(body, settings):
+    """Total over arbitrary JSON: a controlled envelope, never a TypeError."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    response = browser.post(
+        send_url(version.design_id, version.pk, PLAIN),
+        data=body,
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=token,
+        REMOTE_ADDR=unique_ip(),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] in {"invalid_json", "validation_failed"}
+    assert mail.outbox == []
+
+
+def test_a_refused_body_is_answered_before_the_gate_is_consulted(settings):
+    """So a client debugging a 400 is not told the feature is unavailable, and a
+    body that will never be accepted cannot cost quota."""
+    settings.ACCOUNT_EMAIL_DELIVERY_ENABLED = False
+    settings.ACCOUNT_EMAIL_SEND_LIMIT_PER_HOUR = 1
+    browser, token, version = signed_in_browser()
+
+    response = post_send(browser, token, version, name="bad\r\nname")
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "filename_invalid"
+
+    # The quota the malformed request must not have spent.
+    settings.ACCOUNT_EMAIL_DELIVERY_ENABLED = True
+    assert post_send(browser, token, version).status_code == 202
+
+
+def test_a_refused_name_costs_no_part_of_the_lifetime_allowance(settings):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 3
+    browser, token, version = signed_in_browser()
+
+    for _ in range(5):
+        assert post_send(browser, token, version, name="bad\r\nname").status_code == 400
+
+    assert get_send_state(browser, version).json()["send"]["used"] == 0
+    assert post_send(browser, token, version).status_code == 202
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [None, "application/x-www-form-urlencoded"],
+)
+def test_a_form_encoded_body_is_not_a_second_way_in(content_type, settings):
+    """The endpoint documents a JSON object, and only ``JSONParser`` is enabled, so
+    a form body cannot supply the name — or, one refactor later, anything else.
+
+    The two encodings are refused at different depths and it is worth knowing
+    which. A urlencoded body reaches DRF intact and is a clean 415. A multipart one
+    does not: Django's CSRF check reads ``request.POST`` looking for
+    ``csrfmiddlewaretoken`` before the view runs, and the multipart parser consumes
+    the stream without caching it, so DRF finds no body at all and sees an empty
+    request. That is a 202 with the field DROPPED, not honoured — which is why this
+    test asserts on the attachment name rather than only on the status: the
+    guarantee is "a form field never names the file", and it holds either way."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    extra = {} if content_type is None else {"content_type": content_type}
+    response = browser.post(
+        send_url(version.design_id, version.pk, PLAIN),
+        data="filename=Autumn+lehenga" if content_type else {"filename": "Autumn lehenga"},
+        HTTP_X_CSRFTOKEN=token,
+        REMOTE_ADDR=unique_ip(),
+        **extra,
+    )
+
+    assert response.status_code in {202, 415}
+    assert attachment_names() in ([], ["sitara-concept.png"])
+
+
+# ---------------------------------------------------------------------------
+# The stylist names the file
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("suffix", "expected"),
+    [(PLAIN, "Autumn lehenga.png"), (ANNOTATED, "Autumn lehenga.png")],
+)
+def test_the_chosen_name_becomes_the_attachment_filename(suffix, expected, settings):
+    """Both kinds. The extension is the server's to decide — the attachment is a
+    PNG whatever the stylist typed."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    assert post_send(browser, token, version, suffix, name="Autumn lehenga").status_code == 202
+
+    assert attachment_names() == [expected]
+
+
+def test_no_name_falls_back_to_the_default_and_not_to_the_title(settings):
+    """A stylist who presses Send without typing anything gets the neutral
+    default, not a filename derived from something they did not choose here."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    assert post_send(browser, token, version).status_code == 202
+
+    assert attachment_names() == ["sitara-concept.png"]
+
+
+def test_an_absent_body_is_still_accepted(settings):
+    """A client cached before this field existed sent no body at all. An upgrade
+    that turns those requests into 400s would look like an outage."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    response = browser.post(
+        send_url(version.design_id, version.pk, PLAIN),
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=token,
+        REMOTE_ADDR=unique_ip(),
+    )
+
+    assert response.status_code == 202, response.content
+    assert attachment_names() == ["sitara-concept.png"]
+
+
+@pytest.mark.parametrize(
+    ("typed", "expected"),
+    [
+        ("  Autumn   lehenga  ", "Autumn lehenga.png"),
+        ("folder/name", "foldername.png"),
+        ("name.png", "name.png"),
+        ("name.jpeg", "name.png"),
+        ("Lehenga खूबसूरत", "Lehenga खूबसूरत.png"),
+        ("A" * 100, "A" * 60 + ".png"),
+    ],
+)
+def test_a_repairable_name_is_cleaned_rather_than_refused(typed, expected, settings):
+    """Accepted and repaired, because a refusal here would cost the stylist a name
+    they can perfectly well have. The rules themselves belong to the choke point's
+    own suite; what this pins is that the edge does not refuse what the choke point
+    repairs — two layers disagreeing about that is how a name becomes unreachable."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    assert post_send(browser, token, version, name=typed).status_code == 202
+
+    assert attachment_names() == [expected]
+
+
+def test_a_name_that_sanitises_to_nothing_is_refused(settings):
+    """ "...", "///" and "  " differ: the last means "I did not choose a name" and
+    gets the default, while the first two are attempts at a name that cannot be
+    honoured, so the stylist is told rather than handed sitara-concept.png."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    assert post_send(browser, token, version, name="///").status_code == 400
+    assert post_send(browser, token, version, name="../../etc/passwd").status_code == 400
+    assert mail.outbox == []
+
+    assert post_send(browser, token, version, name="   ").status_code == 202
+    assert attachment_names() == ["sitara-concept.png"]
+
+
+def test_an_unbounded_name_never_reaches_the_sanitiser(settings):
+    """An abuse backstop, distinct from the 60-character naming rule that
+    truncates: 100 characters is shortened, 5000 is refused outright."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    response = post_send(browser, token, version, name="A" * 5000)
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "filename_invalid"
+    assert mail.outbox == []
+
+
+def test_the_name_is_remembered_for_the_next_send(settings):
+    """The acceptance criterion: a stylist who named it once does not retype it."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 3
+    browser, token, version = signed_in_browser()
+
+    assert post_send(browser, token, version, name="Autumn lehenga").status_code == 202
+    assert get_send_state(browser, version).json()["send"]["suggested_filename"] == (
+        "Autumn lehenga"
+    )
+
+    # Pressing Send again without retyping reuses it rather than falling back.
+    assert post_send(browser, token, version).status_code == 202
+    assert attachment_names() == ["Autumn lehenga.png", "Autumn lehenga.png"]
+
+
+def test_a_new_name_replaces_the_remembered_one(settings):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 3
+    browser, token, version = signed_in_browser()
+
+    assert post_send(browser, token, version, name="First choice").status_code == 202
+    assert post_send(browser, token, version, name="Second choice").status_code == 202
+
+    assert attachment_names() == ["First choice.png", "Second choice.png"]
+    assert get_send_state(browser, version).json()["send"]["suggested_filename"] == (
+        "Second choice"
+    )
+
+
+def test_the_two_kinds_remember_their_names_separately(settings):
+    """The plain render and the annotated composite are different artefacts with
+    separate allowances, so one's name must not become the other's."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    assert post_send(browser, token, version, PLAIN, name="Just the concept").status_code == 202
+    assert post_send(browser, token, version, ANNOTATED, name="With my marks").status_code == 202
+
+    assert attachment_names() == ["Just the concept.png", "With my marks.png"]
+    assert get_send_state(browser, version, PLAIN).json()["send"]["suggested_filename"] == (
+        "Just the concept"
+    )
+    assert get_send_state(browser, version, ANNOTATED).json()["send"]["suggested_filename"] == (
+        "With my marks"
+    )
+
+
+@pytest.mark.parametrize(("suffix", "kind"), [(PLAIN, "plain"), (ANNOTATED, "annotated")])
+def test_the_chosen_name_never_crosses_the_queue(suffix, kind, monkeypatch):
+    """It is the owner's own free text and Redis is not where it belongs. The task
+    reads it from the row it locks, under the epoch it was queued with.
+
+    Both endpoints, because "the name is never in the queue message" is a privacy
+    invariant rather than a per-endpoint behaviour: proving it for the plain render
+    only would leave a one-sided regression — an annotated-only enqueue that passed
+    the name — invisible."""
+    captured = {}
+    monkeypatch.setattr(
+        "sitara.designs.views.send_design_render.delay",
+        lambda *args, **kwargs: captured.update(args=args, kwargs=kwargs),
+    )
+    browser, token, version = signed_in_browser()
+
+    post_send(browser, token, version, suffix, name="Autumn lehenga")
+
+    assert captured["args"] == (str(version.pk), kind, 1)
+    assert "Autumn" not in f"{captured['args']}{captured['kwargs']}"
+
+
+@pytest.mark.parametrize("suffix", [PLAIN, ANNOTATED])
+def test_no_log_line_carries_the_chosen_name(suffix, settings, caplog):
+    """It is the stylist's own words about their own concept, and a log is the
+    easiest place for private text to end up somewhere it is never reviewed. The
+    refusal paths are exercised too, since an error message quoting the offending
+    input is the usual way this leaks.
+
+    Both endpoints, for the same reason as the queue test above — and the annotated
+    one especially, since its delivery path composes a render from the owner's notes
+    and so has more code in which a name could be logged."""
+    import logging
+
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    with caplog.at_level(logging.DEBUG):
+        assert post_send(browser, token, version, suffix, name="Autumn lehenga").status_code == 202
+        assert post_send(browser, token, version, suffix, name="Refused\r\nname").status_code == 400
+        get_send_state(browser, version, suffix)
+
+    logged = caplog.text
+    assert "Autumn" not in logged
+    assert "lehenga" not in logged
+    assert "Refused" not in logged
+
+
+@pytest.mark.parametrize("suffix", [PLAIN, ANNOTATED])
+def test_the_send_response_never_echoes_the_name(suffix, settings):
+    """Nothing needs it back — the client typed it. Keeping it out of the response
+    keeps it out of any log or proxy that records response bodies.
+
+    Both endpoints, on the same reasoning as the queue and log tests: the envelope
+    happens to be endpoint-agnostic today, and a test that relies on that would stop
+    proving anything the moment one endpoint grew a field of its own."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    browser, token, version = signed_in_browser()
+
+    response = post_send(browser, token, version, suffix, name="Autumn lehenga")
+
+    assert response.json() == {"send": {"status": "queued"}}
+
+
+# ---------------------------------------------------------------------------
+# Send state, which is what lets the client show the ceiling coming
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("suffix", [PLAIN, ANNOTATED])
+def test_the_send_state_reports_the_allowance_and_a_title_derived_name(suffix, settings):
+    settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 3
+    browser, _token, version = signed_in_browser()
+
+    response = get_send_state(browser, version, suffix)
+
+    assert response.status_code == 200, response.content
+    assert response.json() == {
+        "send": {"used": 0, "limit": 3, "suggested_filename": "Owned design"}
+    }
+    assert response["Cache-Control"] == "no-store"
+
+
+def test_the_send_state_counts_up_as_the_allowance_is_spent(settings):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 3
+    browser, token, version = signed_in_browser()
+
+    assert post_send(browser, token, version).status_code == 202
+    assert get_send_state(browser, version).json()["send"]["used"] == 1
+
+    assert post_send(browser, token, version).status_code == 202
+    assert post_send(browser, token, version).status_code == 202
+    assert get_send_state(browser, version).json()["send"] == {
+        "used": 3,
+        "limit": 3,
+        "suggested_filename": "Owned design",
+    }
+    assert post_send(browser, token, version).status_code == 409
+
+
+def test_the_send_state_never_suggests_a_note(settings):
+    """CLAUDE.md §7: a note is the most personal free text in the product. A
+    filename travels in the message headers, so a note-derived default would put
+    it somewhere the note is expressly forbidden to go."""
+    from .test_render_delivery import NOTE_TEXT, annotate
+
+    browser, _token, version = signed_in_browser()
+    annotate(version)
+
+    for suffix in (PLAIN, ANNOTATED):
+        body = get_send_state(browser, version, suffix).content.decode()
+        assert NOTE_TEXT not in body
+        assert "neckline" not in body
+
+
+def test_the_send_state_of_an_untitled_design_suggests_nothing(settings):
+    """An empty suggestion is the honest answer — the client falls back to its own
+    placeholder rather than being handed a name derived from nothing."""
+    browser, _token, version = signed_in_browser()
+    Design.objects.filter(pk=version.design_id).update(title="")
+
+    assert get_send_state(browser, version).json()["send"]["suggested_filename"] == ""
+
+
+def test_a_title_that_cannot_be_a_filename_suggests_nothing(settings):
+    """The suggestion goes through the same sanitiser the attachment will, so a
+    title full of separators cannot pre-fill a name the send would then refuse."""
+    browser, _token, version = signed_in_browser()
+    Design.objects.filter(pk=version.design_id).update(title="///")
+
+    assert get_send_state(browser, version).json()["send"]["suggested_filename"] == ""
+
+
+@pytest.mark.parametrize("suffix", [PLAIN, ANNOTATED])
+def test_the_send_state_of_a_foreign_design_is_an_indistinguishable_404(suffix):
+    """The remembered name is the owner's own free text, so this endpoint is as
+    ownership-bound as the send itself."""
+    _owner, _token, victim = signed_in_browser()
+    stranger = csrf_client()
+    register(stranger, unique_email())
+
+    response = get_send_state(stranger, victim, suffix)
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_the_send_state_of_a_nonexistent_design_is_the_same_404():
+    import uuid
+
+    browser, _token, _version = signed_in_browser()
+    response = browser.get(f"/api/v1/designs/{uuid.uuid4()}/versions/{uuid.uuid4()}/send/")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_the_send_state_never_contains_an_address():
+    address = unique_email()
+    browser, _token, version = signed_in_browser(address)
+
+    body = get_send_state(browser, version).content.decode()
+
+    assert address not in body
+    assert "@" not in body
+
+
+def test_the_send_state_is_readable_by_an_anonymous_owner(settings):
+    """It creates nothing and sends nothing, so it does not need the account the
+    send does. Answering 409 here would leave the client unable to show the
+    allowance on a screen it is perfectly entitled to render."""
+    settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 3
+    browser, _token, version = signed_in_browser()
+    anonymous, _anon_token, anonymous_version = anonymous_browser()
+
+    assert get_send_state(anonymous, anonymous_version).status_code == 200
+    # And still cannot read someone else's.
+    assert get_send_state(anonymous, version).status_code == 404
+
+
+def test_the_send_state_creates_no_delivery_row(settings):
+    """A safe method that wrote a row would give an unauthenticated visitor a way
+    to create durable state, and would make the allowance readable only by
+    starting to spend it."""
+    browser, _token, version = signed_in_browser()
+
+    assert get_send_state(browser, version).status_code == 200
+
+    assert not DesignRenderDelivery.objects.filter(design_version=version).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -777,10 +1376,24 @@ def test_each_endpoint_enqueues_its_own_kind(monkeypatch):
     assert seen == ["plain", "annotated"]
 
 
-def test_a_get_is_not_allowed():
-    browser, _token, version = signed_in_browser()
-    response = browser.get(send_url(version.design_id, version.pk, PLAIN))
+@pytest.mark.parametrize("method", ["put", "patch", "delete"])
+@pytest.mark.parametrize("suffix", [PLAIN, ANNOTATED])
+def test_the_verbs_that_mean_nothing_here_are_refused(method, suffix):
+    """GET became a real method in Phase 21 (it reports send state), so this now
+    pins the verbs that genuinely remain unsupported. A send is not idempotent and
+    there is nothing to update or remove: an allowance that could be DELETEd would
+    not be an allowance."""
+    browser, token, version = signed_in_browser()
+    response = send_json(
+        browser,
+        method,
+        send_url(version.design_id, version.pk, suffix),
+        None,
+        token=token,
+        ip=unique_ip(),
+    )
     assert response.status_code == 405
+    assert mail.outbox == []
 
 
 def test_an_unauthenticated_stranger_cannot_reach_another_workspace():

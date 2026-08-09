@@ -21,6 +21,7 @@ from rest_framework import serializers
 
 from sitara.catalogue.models import InspirationAsset
 from sitara.catalogue.serializers import public_asset_payload
+from sitara.media.account_delivery import safe_stored_filename
 
 from .jobs import latest_generation_attempt, public_job_payload
 from .models import DESIGN_TITLE_MAX_LENGTH, Design
@@ -83,6 +84,77 @@ class RefinementWriteSerializer(serializers.Serializer):
                 {name: ["This field cannot be set."] for name in unknown}
             )
         return super().to_internal_value(data)
+
+
+#: An abuse backstop on the field's length, NOT the naming rule.
+#:
+#: The naming rule is the 60-character base cap in
+#: :func:`sitara.media.account_delivery.safe_attachment_filename`, which
+#: TRUNCATES rather than refusing — a stylist who types a long description
+#: should get a shortened name, not an error. This bound exists only so an
+#: unbounded string cannot arrive at all, and sits far enough above the cap that
+#: no plausible name meets it.
+RENDER_FILENAME_MAX_INPUT_LENGTH = 200
+
+
+class RenderSendSerializer(serializers.Serializer):
+    """The send endpoints' request body: exactly one optional ``filename``.
+
+    The only caller-influenced value in the whole delivery path (Phase 21,
+    ADR 0022). Every other field is rejected rather than ignored, which matters
+    more here than anywhere else in this API: these endpoints mail an attachment,
+    and the guarantee that no request can express a destination used to be
+    structural — there was no body to put one in. Now that a body exists the
+    guarantee is an explicit, tested one, so ``email``, ``to``, ``cc``, ``bcc``,
+    ``from_email``, ``reply_to`` and anything else fail the whole request rather
+    than being silently dropped beside a valid ``filename``.
+
+    Validation is total over arbitrary JSON. A number, ``null``, a list or a
+    nested object becomes a controlled 400, never a ``TypeError``.
+
+    The edge REFUSES what the choke point refuses and accepts what it repairs,
+    by asking the sanitiser itself rather than reimplementing its rules. So a
+    name carrying a control character is a 400 the stylist can see and correct,
+    while one merely containing a path separator is quietly cleaned — the
+    difference being that a refusal would otherwise deliver a name nobody chose."""
+
+    filename = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        # Not trimmed here: the sanitiser owns whitespace handling, and trimming
+        # twice in two places is how the two eventually disagree.
+        trim_whitespace=False,
+        max_length=RENDER_FILENAME_MAX_INPUT_LENGTH,
+    )
+
+    def to_internal_value(self, data):
+        if not isinstance(data, dict):
+            raise serializers.ValidationError(
+                {"non_field_errors": ["The request body must be a JSON object."]}
+            )
+        unknown = sorted(set(data) - set(self.fields))
+        if unknown:
+            raise serializers.ValidationError(
+                {name: ["This field cannot be set."] for name in unknown}
+            )
+        if "filename" in data and not isinstance(data["filename"], str):
+            # DRF's CharField would coerce a number to its string form; a name
+            # arriving as 12, null or a list is a client defect, and answering it
+            # with the attachment called "12" teaches the client it worked.
+            raise serializers.ValidationError({"filename": ["A file name must be text."]})
+        return super().to_internal_value(data)
+
+    def validate_filename(self, value: str) -> str:
+        if not value.strip():
+            # Blank means "no new choice", which is not the same as "forget the
+            # name I chose last time".
+            return ""
+        if not safe_stored_filename(value):
+            raise serializers.ValidationError(
+                "This name cannot be used. Please avoid line breaks and other "
+                "control characters, and try a simpler name."
+            )
+        return value
 
 
 def _questionnaire_payload(design: Design) -> dict | None:

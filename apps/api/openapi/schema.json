@@ -1418,9 +1418,65 @@
             }
         },
         "/api/v1/designs/{design_id}/versions/{version_id}/annotations/send/": {
+            "get": {
+                "operationId": "designs_versions_annotations_send_state",
+                "description": "Read this before offering a send: it reports how many of this render's lifetime allowance of sends are used, and the name to pre-fill — the name you last chose for this render, or your design's title. Never a note. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "How many annotated-concept sends are left, and the name to pre-fill",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RenderSendStateResponse"
+                                }
+                            }
+                        },
+                        "description": "How many sends this render has used, and what to pre-fill the name with."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    }
+                }
+            },
             "post": {
                 "operationId": "designs_versions_annotations_send_create",
-                "description": "Queues the annotated composite — the image with your marks drawn on it and a numbered note legend beneath — as a PNG attachment. Your note text is in the attachment only; the message body never carries it. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Queues the annotated composite — the image with your marks drawn on it and a numbered note legend beneath — as a PNG attachment. Your note text is in the attachment only; the message body never carries it. The recipient is always your own account address, read server-side. The ONLY accepted body field is an optional 'filename' — no address may be supplied in any field, and a request carrying one fails whole rather than partially succeeding. Whatever you type as the file name travels in the message headers and is retained by the mail relay and the receiving host. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "Email yourself this design version's annotated concept",
                 "parameters": [
                     {
@@ -1454,6 +1510,15 @@
                 "tags": [
                     "Designs"
                 ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RenderSendRequest"
+                            }
+                        }
+                    }
+                },
                 "security": [
                     {
                         "cookieAuth": []
@@ -1681,9 +1746,65 @@
             }
         },
         "/api/v1/designs/{design_id}/versions/{version_id}/send/": {
+            "get": {
+                "operationId": "designs_versions_send_state",
+                "description": "Read this before offering a send: it reports how many of this render's lifetime allowance of sends are used, and the name to pre-fill — the name you last chose for this render, or your design's title. Never a note. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "How many concept-image sends are left, and the name to pre-fill",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RenderSendStateResponse"
+                                }
+                            }
+                        },
+                        "description": "How many sends this render has used, and what to pre-fill the name with."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    }
+                }
+            },
             "post": {
                 "operationId": "designs_versions_send_create",
-                "description": "Queues the plain canonical render as a PNG attachment. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Queues the plain canonical render as a PNG attachment. The recipient is always your own account address, read server-side. The ONLY accepted body field is an optional 'filename' — no address may be supplied in any field, and a request carrying one fails whole rather than partially succeeding. Whatever you type as the file name travels in the message headers and is retained by the mail relay and the receiving host. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "Email yourself this design version's concept image",
                 "parameters": [
                     {
@@ -1717,6 +1838,15 @@
                 "tags": [
                     "Designs"
                 ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RenderSendRequest"
+                            }
+                        }
+                    }
+                },
                 "security": [
                     {
                         "cookieAuth": []
@@ -3917,11 +4047,57 @@
                     "password_confirm"
                 ]
             },
+            "RenderSendRequest": {
+                "type": "object",
+                "description": "The send endpoints' request body: exactly one optional ``filename``.\n\nThe only caller-influenced value in the whole delivery path (Phase 21,\nADR 0022). Every other field is rejected rather than ignored, which matters\nmore here than anywhere else in this API: these endpoints mail an attachment,\nand the guarantee that no request can express a destination used to be\nstructural — there was no body to put one in. Now that a body exists the\nguarantee is an explicit, tested one, so ``email``, ``to``, ``cc``, ``bcc``,\n``from_email``, ``reply_to`` and anything else fail the whole request rather\nthan being silently dropped beside a valid ``filename``.\n\nValidation is total over arbitrary JSON. A number, ``null``, a list or a\nnested object becomes a controlled 400, never a ``TypeError``.\n\nThe edge REFUSES what the choke point refuses and accepts what it repairs,\nby asking the sanitiser itself rather than reimplementing its rules. So a\nname carrying a control character is a 400 the stylist can see and correct,\nwhile one merely containing a path separator is quietly cleaned — the\ndifference being that a refusal would otherwise deliver a name nobody chose.",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "maxLength": 200
+                    }
+                }
+            },
             "RenderSendResponse": {
                 "type": "object",
                 "properties": {
                     "send": {
                         "$ref": "#/components/schemas/RenderSendStatus"
+                    }
+                },
+                "required": [
+                    "send"
+                ]
+            },
+            "RenderSendState": {
+                "type": "object",
+                "description": "What the owner needs before pressing Send (Phase 21, ADR 0022).\n\nStill no recipient address, for the same reason as above. What is new is\n``suggested_filename``, which is the owner's OWN free text read back to them:\nthe name they last chose for this exact render, or their design's title if\nthey have not chosen one. It is never derived from an annotation note.",
+                "properties": {
+                    "used": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "How many times this render has already been emailed. A lifetime total per render, not a rate that refills."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "The most times this render may EVER be emailed. Reaching it is a 409 send_limit_reached, not a 429 — no waiting returns an allowance that is spent for good."
+                    },
+                    "suggested_filename": {
+                        "type": "string",
+                        "description": "Pre-fill the name field with this: the name last chosen for this render, else the design's title, else blank. Your annotation notes are never used here."
+                    }
+                },
+                "required": [
+                    "limit",
+                    "suggested_filename",
+                    "used"
+                ]
+            },
+            "RenderSendStateResponse": {
+                "type": "object",
+                "properties": {
+                    "send": {
+                        "$ref": "#/components/schemas/RenderSendState"
                     }
                 },
                 "required": [
