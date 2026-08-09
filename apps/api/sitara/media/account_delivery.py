@@ -191,6 +191,19 @@ def _sanitise_base(raw) -> str:
     return value.strip()[:MAX_FILENAME_BASE_LENGTH].strip().rstrip(".").strip()
 
 
+def safe_stored_filename(raw) -> str:
+    """The sanitised base name, with no extension, or ``""`` if unusable.
+
+    What gets persisted when a name is remembered for a later send. Storing the
+    base rather than the whole filename means the stored value is already
+    header-safe, is what the owner is shown when the field is pre-filled, and
+    cannot accumulate an extension each time it is round-tripped.
+
+    Sanitising before storage rather than only on the way out is the point: a
+    value that lives in a durable row outlives every code path that reads it."""
+    return _sanitise_base(raw)
+
+
 def safe_attachment_filename(raw, *, fallback: str = FALLBACK_FILENAME) -> str:
     """A header-safe ``.png`` attachment name, for any input whatsoever.
 

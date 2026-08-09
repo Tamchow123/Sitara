@@ -529,30 +529,130 @@ def test_a_broker_outage_is_a_503_not_an_unhandled_error(settings, monkeypatch):
     assert mail.outbox == []
 
 
-def test_an_already_sent_render_does_not_spend_quota_the_other_kind_needs(settings):
-    """Repeated sends of something already delivered must not lock out a
+def test_a_second_press_delivers_a_second_copy(settings):
+    """What this endpoint could not do before Phase 21.
+
+    A repeat send used to be a silent no-op answered as 202 — the owner was told
+    their copy was on its way and nothing was sent. It now delivers, up to the
+    render's lifetime allowance."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 3
+    browser, token, version = signed_in_browser()
+
+    assert post_send(browser, token, version, PLAIN).status_code == 202
+    assert post_send(browser, token, version, PLAIN).status_code == 202
+
+    assert len(mail.outbox) == 2
+
+
+def test_the_fourth_send_is_refused_with_the_numbers_that_explain_it(settings):
+    """Not a generic 429. A rate limit says "not now" and carries a Retry-After;
+    this says "not again", and the message names the numbers so a ceiling the
+    owner cannot see coming is not experienced as a bug."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 3
+    browser, token, version = signed_in_browser()
+
+    for _ in range(3):
+        assert post_send(browser, token, version, PLAIN).status_code == 202
+
+    refused = post_send(browser, token, version, PLAIN)
+
+    assert refused.status_code == 409
+    body = refused.json()
+    assert body["error"]["code"] == "send_limit_reached"
+    # The whole message, not a substring search for "3": a message naming only
+    # the ceiling ("a maximum of 3 sends") would satisfy `"3" in message` while
+    # dropping the used count the acceptance criteria ask for.
+    assert body["error"]["message"] == (
+        "You have already emailed this concept 3 times, which is the maximum of 3."
+    )
+    assert "Retry-After" not in refused.headers
+    assert len(mail.outbox) == 3
+
+
+def test_the_refusal_names_the_used_count_and_the_ceiling_separately(settings):
+    """With the two numbers different, so a message that reports one of them twice
+    cannot pass. The point of naming them is that a ceiling the owner cannot see
+    coming is experienced as a bug."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 2
+    browser, token, version = signed_in_browser()
+
+    for _ in range(2):
+        assert post_send(browser, token, version, PLAIN).status_code == 202
+    refused = post_send(browser, token, version, PLAIN)
+
+    message = refused.json()["error"]["message"]
+    assert "2 times" in message
+    assert "maximum of 2" in message
+
+
+def test_a_failed_enqueue_does_not_strand_a_send_that_was_already_queued(settings, monkeypatch):
+    """The reliability gap a busy-check covering only `claimed` left open.
+
+    Press 1 reserves and its task really is queued. Press 2 arrives before any
+    worker has picked that task up. If press 2 were allowed to bump the epoch, the
+    queued task would later find a newer epoch and no-op — and if press 2's own
+    enqueue then failed, the owner would hold a 202 for a message that will never
+    be sent, with nothing to retry it.
+
+    Press 2 must therefore reserve nothing, and — the assertion that matters —
+    press 1's task must still deliver afterwards."""
+    settings.ACCOUNT_EMAIL_SEND_RESERVATION_GRACE_SECONDS = 60
+    settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 3
+    queued = []
+    monkeypatch.setattr(
+        "sitara.designs.views.send_design_render.delay",
+        lambda *args, **kwargs: queued.append(args),
+    )
+    browser, token, version = signed_in_browser()
+
+    assert post_send(browser, token, version, PLAIN).status_code == 202
+    assert len(queued) == 1
+
+    # Press 2, whose own enqueue would fail. It must not have reached the enqueue
+    # at all, because there was nothing to reserve.
+    monkeypatch.setattr(
+        "sitara.designs.views.send_design_render.delay",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("broker down")),
+    )
+    assert post_send(browser, token, version, PLAIN).status_code == 202
+
+    row = DesignRenderDelivery.objects.get(design_version=version, kind="plain")
+    assert row.attempt_epoch == queued[0][2], "the queued task was orphaned"
+
+    # The task press 1 queued still delivers.
+    from sitara.designs.render_delivery import deliver_render
+
+    assert deliver_render(*queued[0]) == "sent"
+    assert len(mail.outbox) == 1
+
+
+def test_a_spent_allowance_does_not_spend_quota_the_other_kind_needs(settings):
+    """Pressing Send on a render that has nothing left must not lock out a
     genuinely new one.
 
-    ``_claim`` makes a repeat send a no-op, but the endpoint used to charge all
-    four counters before enqueuing the task that would discover that — and the
-    per-account counters are shared across both kinds. So an owner unsure
-    whether the first send worked could, by clicking again, exhaust the quota
-    the annotated composite needs for a send that has never been attempted.
+    The per-account rate counters are shared across both kinds, so an owner who
+    keeps pressing a spent render could otherwise exhaust the quota the annotated
+    composite needs for a send that has never been attempted. The refusal is
+    therefore decided BEFORE the throttles — the same reasoning the old
+    already-sent short-circuit carried, applied to the case that now exists.
 
-    With the ceiling at 2: the first plain send charges it, the two repeats are
-    free, and the annotated send — the one that matters — still gets through.
-    Without the pre-check the third plain post is already refused and the
-    annotated one never had a chance."""
+    With the rate ceiling at 2 and the allowance at 1: the first plain send
+    charges the rate, the two refusals are free, and the annotated send — the one
+    that matters — still gets through."""
     settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 1
     settings.ACCOUNT_EMAIL_SEND_LIMIT_PER_HOUR = 2
     browser, token, version = signed_in_browser()
 
     assert post_send(browser, token, version, PLAIN).status_code == 202
     assert len(mail.outbox) == 1
 
-    assert post_send(browser, token, version, PLAIN).status_code == 202
-    assert post_send(browser, token, version, PLAIN).status_code == 202
-    assert len(mail.outbox) == 1, "a repeat send must not deliver a second copy"
+    assert post_send(browser, token, version, PLAIN).status_code == 409
+    assert post_send(browser, token, version, PLAIN).status_code == 409
+    assert len(mail.outbox) == 1
 
     first_annotated = post_send(browser, token, version, ANNOTATED)
 
@@ -561,20 +661,20 @@ def test_an_already_sent_render_does_not_spend_quota_the_other_kind_needs(settin
     assert mail.outbox[1].attachments[0][0] != mail.outbox[0].attachments[0][0]
 
 
-def test_a_permanently_failed_render_does_not_spend_quota_either(settings):
-    """The same protection for the case that deserves it more.
+def test_a_permanently_failed_render_can_be_sent_again_by_a_deliberate_press(settings):
+    """The case that deserves it most, and one this phase improves.
 
-    ``RETRY_EXHAUSTED`` was initially left out of the pre-check, on the reasoning
-    that it means the send FAILED so answering 202 would be misleading. That
-    reasoning did not hold: the 202 is byte-identical whether the pre-check fires
-    or not, because ``_claim`` no-ops on both terminal states anyway. So the
-    exclusion protected nothing and left the worse case exposed — this owner
-    never received their copy, which is exactly why they would keep pressing
-    Send.
+    ``RETRY_EXHAUSTED`` means the automatic retry budget for ONE press is spent —
+    that owner never received their copy, which is exactly why they would keep
+    pressing Send. Before Phase 21 the state was terminal for the lifetime of the
+    row, so every later press was answered 202 and sent nothing, forever. A
+    failure consumes no part of the allowance, so a deliberate new press now
+    starts a new attempt and delivers.
 
-    Seeded directly rather than driven through two worker deaths, which is what
-    it would otherwise take to reach this state."""
-    settings.ACCOUNT_EMAIL_SEND_LIMIT_PER_HOUR = 2
+    Seeded directly rather than driven through two worker deaths, which is what it
+    would otherwise take to reach this state."""
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 3
     browser, token, version = signed_in_browser()
     DesignRenderDelivery.objects.create(
         design_version=version,
@@ -584,22 +684,29 @@ def test_a_permanently_failed_render_does_not_spend_quota_either(settings):
         claimed_at=timezone.now(),
     )
 
-    for _ in range(4):
-        assert post_send(browser, token, version, PLAIN).status_code == 202
-    assert mail.outbox == [], "a permanently failed delivery must not send"
+    assert post_send(browser, token, version, PLAIN).status_code == 202
 
-    # The quota those four no-ops would otherwise have spent is still there for
-    # the annotated composite, which has never been attempted.
-    settings.CELERY_TASK_ALWAYS_EAGER = True
-    assert post_send(browser, token, version, ANNOTATED).status_code == 202
     assert len(mail.outbox) == 1
+    row = DesignRenderDelivery.objects.get(design_version=version, kind="plain")
+    assert row.send_count == 1
+    assert row.attempt_epoch == 2
 
 
-def test_an_already_sent_render_is_not_re_enqueued(settings, monkeypatch):
-    """The pre-check skips the queue too, not just the counters."""
-    settings.CELERY_TASK_ALWAYS_EAGER = True
+def test_a_press_while_one_is_in_flight_is_not_re_enqueued(settings, monkeypatch):
+    """The surviving half of "the pre-check skips the queue too".
+
+    A send already claimed by a worker within its TTL has nothing to reserve, so
+    no second task is queued — a mis-click cannot consume a second epoch, or with
+    it a second of the owner's three sends."""
+    settings.ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS = 900
     browser, token, version = signed_in_browser()
-    assert post_send(browser, token, version).status_code == 202
+    DesignRenderDelivery.objects.create(
+        design_version=version,
+        kind=DesignRenderDelivery.PLAIN,
+        state=DesignRenderDelivery.CLAIMED,
+        attempt_count=1,
+        claimed_at=timezone.now(),
+    )
 
     enqueued = []
     monkeypatch.setattr(
@@ -609,6 +716,7 @@ def test_an_already_sent_render_is_not_re_enqueued(settings, monkeypatch):
 
     assert post_send(browser, token, version).status_code == 202
     assert enqueued == []
+    assert DesignRenderDelivery.objects.get(design_version=version).attempt_epoch == 1
 
 
 def test_the_throttle_runs_after_ownership(settings):
@@ -631,8 +739,11 @@ def test_the_throttle_runs_after_ownership(settings):
 
 
 def test_only_identifiers_are_enqueued(monkeypatch):
-    """No address, no bytes and no URL crosses the broker, where they would rest
-    in Redis in the clear."""
+    """No address, no bytes, no URL and no chosen filename crosses the broker,
+    where they would rest in Redis in the clear.
+
+    The epoch is the one thing added in Phase 21, and it is an integer: it says
+    WHICH press this task is for and nothing about who or what."""
     captured = {}
 
     def capture(*args, **kwargs):
@@ -645,7 +756,7 @@ def test_only_identifiers_are_enqueued(monkeypatch):
     browser, token, version = signed_in_browser(address)
     post_send(browser, token, version)
 
-    assert captured["args"] == (str(version.pk), "plain")
+    assert captured["args"] == (str(version.pk), "plain", 1)
     assert captured["kwargs"] == {}
     payload = f"{captured['args']}{captured['kwargs']}"
     assert address not in payload

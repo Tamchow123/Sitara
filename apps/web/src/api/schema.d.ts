@@ -2382,7 +2382,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description design_image_not_ready, or email_recipient_unavailable when the workspace is anonymous and so has no account address. */
+            /** @description design_image_not_ready; email_recipient_unavailable when the workspace is anonymous and so has no account address; or send_limit_reached when this render's lifetime allowance of sends is spent. The last carries no Retry-After — no waiting returns an allowance that is spent for good. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2551,7 +2551,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description design_image_not_ready, or email_recipient_unavailable when the workspace is anonymous and so has no account address. */
+            /** @description design_image_not_ready; email_recipient_unavailable when the workspace is anonymous and so has no account address; or send_limit_reached when this render's lifetime allowance of sends is spent. The last carries no Retry-After — no waiting returns an allowance that is spent for good. */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -117,10 +117,12 @@ from .render_delivery import (
     RenderDeliveryThrottled,
     RenderDeliveryThrottleUnavailable,
     RenderNotReady,
-    delivery_is_terminal,
+    SendLimitReached,
     enforce_send_throttles,
     owner_of,
     require_render_ready,
+    reserve_send,
+    send_allowance,
 )
 from .result import (
     DesignResultNotReady,
@@ -1130,6 +1132,21 @@ class _DesignVersionSendView(APIView):
             return None
         return DesignVersion.objects.filter(design=design, pk=version_id).first()
 
+    @staticmethod
+    def _limit_reached(used: int, limit: int) -> Response:
+        """The lifetime allowance for this render is spent.
+
+        409, not 429. A rate limit says "not now" and carries a ``Retry-After``;
+        this says "not again", and a recovery window would be a lie. The message
+        names the numbers rather than being generic, because a ceiling the user
+        cannot see coming is one they experience as a bug."""
+        return _error(
+            "send_limit_reached",
+            f"You have already emailed this concept {used} times, "
+            f"which is the maximum of {limit}.",
+            status.HTTP_409_CONFLICT,
+        )
+
     def post(self, request, design_id: str, version_id: str):
         version = self._get_owned_version(request, design_id, version_id)
         if version is None:
@@ -1165,23 +1182,15 @@ class _DesignVersionSendView(APIView):
                 status.HTTP_409_CONFLICT,
             )
 
-        if delivery_is_terminal(version, self.kind):
-            # This render's delivery row is past the point where a send can
-            # happen, so the task would claim nothing and no-op. Charging four
-            # counters for that would let repeated sends of a finished render
-            # exhaust the quota a genuinely new one needs — the two kinds share
-            # a per-account ceiling. Still 202, and unchanged from the enqueuing
-            # path: the task no-ops either way, so there is nothing here for the
-            # response to distinguish.
-            logger.info(
-                "render_send.already_terminal",
-                extra={"design_version_id": str(version.pk), "kind": self.kind},
-            )
-            return Response(
-                {"send": {"status": "queued"}},
-                status=status.HTTP_202_ACCEPTED,
-                headers=NO_STORE,
-            )
+        used, limit = send_allowance(version, self.kind)
+        if used >= limit:
+            # The lifetime allowance for this exact render is spent. Refused
+            # BEFORE the throttles so pressing Send on a finished render cannot
+            # exhaust the quota a genuinely new one needs — the same reasoning
+            # the old already-sent short-circuit carried. An unlocked read is
+            # enough here because reserve_send re-checks under the row lock; this
+            # only decides whether to charge quota for work that will not happen.
+            return self._limit_reached(used, limit)
 
         try:
             enforce_send_throttles(request, recipient)
@@ -1203,8 +1212,36 @@ class _DesignVersionSendView(APIView):
             )
 
         try:
-            # Row UUIDs only. No address, no bytes and no URL crosses the queue.
-            send_design_render.delay(str(version.pk), self.kind)
+            # Authoritative, under the row lock: two concurrent last-allowance
+            # requests cannot both pass here. Committed before the enqueue below,
+            # so the task can never run ahead of its own reservation.
+            # No name can arrive yet: these endpoints still accept no body, and
+            # the serializer that will carry one lands in the next commit. The
+            # durable column and every path that reads it are in place.
+            epoch = reserve_send(version, self.kind, requested_name="")
+        except SendLimitReached as exc:
+            return self._limit_reached(exc.used, exc.limit)
+
+        if epoch is None:
+            # A send for this render is already in flight, or the version was
+            # purged under us. Nothing new to queue. Answered exactly as a fresh
+            # reservation is, because the previous behaviour was to enqueue a
+            # second task the claim then refused — indistinguishable from here,
+            # and queueing work known to no-op is strictly worse.
+            logger.info(
+                "render_send.already_in_flight",
+                extra={"design_version_id": str(version.pk), "kind": self.kind},
+            )
+            return Response(
+                {"send": {"status": "queued"}},
+                status=status.HTTP_202_ACCEPTED,
+                headers=NO_STORE,
+            )
+
+        try:
+            # Row UUIDs and an epoch only. No address, no bytes, no URL and no
+            # filename crosses the queue.
+            send_design_render.delay(str(version.pk), self.kind, epoch)
         except Exception as exc:
             # The broker is a SECOND Redis, configured independently of the
             # throttle cache (CELERY_BROKER_URL vs REDIS_CACHE_URL, different
@@ -1243,8 +1280,11 @@ _SEND_RESPONSES = {
     409: OpenApiResponse(
         ErrorEnvelopeSerializer,
         description=(
-            "design_image_not_ready, or email_recipient_unavailable when the "
-            "workspace is anonymous and so has no account address."
+            "design_image_not_ready; email_recipient_unavailable when the "
+            "workspace is anonymous and so has no account address; or "
+            "send_limit_reached when this render's lifetime allowance of sends "
+            "is spent. The last carries no Retry-After — no waiting returns an "
+            "allowance that is spent for good."
         ),
     ),
     429: OpenApiResponse(

@@ -29,6 +29,7 @@ import smtplib
 from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import F
 from django.utils import timezone
 
 from sitara.accounts.rate_limits import RateLimitUnavailable, check_and_count, client_ip
@@ -38,6 +39,7 @@ from sitara.media.account_delivery import (
     AccountEmailRecipientUnavailable,
     recipient_for,
     require_account_email_enabled,
+    safe_stored_filename,
     send_render_attachment,
 )
 from sitara.media.annotation_render import (
@@ -70,6 +72,21 @@ class RenderDeliveryThrottled(Exception):
     def __init__(self, retry_after: int):
         self.retry_after = int(retry_after)
         super().__init__("account email send limit reached")
+
+
+class SendLimitReached(Exception):
+    """This render has used its whole lifetime allowance of sends.
+
+    Deliberately NOT a subclass of :class:`RenderDeliveryThrottled` and
+    deliberately not a 429: a rate limit says "not now", and this says "not
+    again". A ``Retry-After`` would be a lie, because no amount of waiting
+    returns an allowance that is spent for good. -> 409 send_limit_reached, and
+    the response says how many were used so the ceiling is never a surprise."""
+
+    def __init__(self, used: int, limit: int):
+        self.used = int(used)
+        self.limit = int(limit)
+        super().__init__("this render has been sent the maximum number of times")
 
 
 class RenderDeliveryThrottleUnavailable(Exception):
@@ -153,47 +170,171 @@ def require_render_ready(version: DesignVersion) -> None:
         raise RenderNotReady("this version has no permanent image yet")
 
 
-def delivery_is_terminal(version: DesignVersion, kind: str) -> bool:
-    """Is this exact (version, kind) past the point where a send can happen?
+def send_allowance(version: DesignVersion, kind: str) -> tuple[int, int]:
+    """``(used, limit)`` for this exact ``(version, kind)``.
 
-    An unlocked read, deliberately: :func:`_claim` remains the only authority on
-    whether a send happens, and this is a cheap hint the endpoint uses to avoid
-    charging quota for a task it can already see will no-op. A race here is
-    harmless in both directions — a false negative costs one wasted enqueue that
-    ``_claim`` then refuses, and a false positive cannot occur, because both
-    states below are terminal and no transition leaves them.
+    An unlocked read, deliberately, and used for two different jobs: telling the
+    owner how many sends they have left before they spend the last one, and
+    letting the endpoint refuse a send that is already over the ceiling without
+    first charging four rate counters for work that will not happen. The same
+    reasoning the old ``delivery_is_terminal`` hint carried — that repeatedly
+    pressing Send on a finished render must not exhaust the shared per-account
+    quota a genuinely new render needs.
 
-    Both terminal states, not just ``SENT``. This started as a ``SENT``-only
-    check on the reasoning that ``RETRY_EXHAUSTED`` means the send FAILED, so
-    skipping the throttle would answer 202 — "on its way" — for something that
-    never will be. That reasoning does not survive contact with the view: the
-    202 is byte-identical either way, because ``_claim`` no-ops on both states
-    regardless of whether this check fires. So excluding ``RETRY_EXHAUSTED``
-    preserved nothing and left the *more* sympathetic case paying full price —
-    that owner never received their copy, has the strongest reason of anyone to
-    keep pressing Send, and would have burned the shared per-account quota doing
-    it."""
-    return DesignRenderDelivery.objects.filter(
-        design_version=version,
-        kind=kind,
-        state__in=(DesignRenderDelivery.SENT, DesignRenderDelivery.RETRY_EXHAUSTED),
-    ).exists()
+    It is a hint, not the authority. :func:`reserve_send` re-checks under the row
+    lock, which is what makes two concurrent fourth attempts impossible rather
+    than merely unlikely."""
+    limit = int(settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER)
+    row = (
+        DesignRenderDelivery.objects.filter(design_version=version, kind=kind)
+        .values_list("send_count", flat=True)
+        .first()
+    )
+    return (int(row) if row is not None else 0), limit
 
 
-def _claim(version: DesignVersion, kind: str) -> DesignRenderDelivery | None:
+def remembered_filename(version: DesignVersion, kind: str) -> str:
+    """The name this owner last chose for this render, or ``""``.
+
+    Never logged and never returned by anything but the owner's own pre-fill
+    endpoint — see :class:`~sitara.designs.models.DesignRenderDelivery` for the
+    full set of protections this column carries."""
+    stored = (
+        DesignRenderDelivery.objects.filter(design_version=version, kind=kind)
+        .values_list("requested_filename", flat=True)
+        .first()
+    )
+    return stored or ""
+
+
+def reserve_send(version: DesignVersion, kind: str, *, requested_name: str = "") -> int | None:
+    """Reserve this owner's next send and return the epoch to queue it under.
+
+    Returns ``None`` when a send for this render is already in flight, which the
+    endpoint answers exactly as it answers a fresh reservation. That is not
+    laziness: the previous behaviour was to enqueue a second task that the claim
+    then refused, so the caller could never distinguish the two anyway, and
+    reserving nothing is strictly better than queueing work known to no-op.
+
+    Raises :class:`SendLimitReached` when the lifetime allowance is spent. This
+    check is the authoritative one — it runs under ``select_for_update`` on the
+    row inside the same transaction that records the reservation, so two
+    concurrent fourth attempts cannot both read "two used" and both proceed.
+
+    The reservation deliberately does NOT take the claim. A worker does that, and
+    it has to be a separate step: if the endpoint marked the row ``claimed``, the
+    task it just queued would see a claim younger than the TTL, conclude another
+    worker held it, and no-op — the send would never happen at all.
+
+    The parent ``DesignVersion`` row is locked as well as the delivery row,
+    because ``select_for_update()`` cannot lock a row that does not exist yet and
+    the first reservation has none; two callers would otherwise both find nothing
+    and both insert. Same shape, and the same ``.first()`` idiom and
+    ``IntegrityError`` backstop, as
+    :func:`sitara.designs.annotation_service.replace_annotation_document`."""
+    now = timezone.now()
+    limit = int(settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER)
+    ttl = settings.ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS
+    grace = settings.ACCOUNT_EMAIL_SEND_RESERVATION_GRACE_SECONDS
+    name = safe_stored_filename(requested_name)
+
+    with transaction.atomic():
+        locked_version = DesignVersion.objects.select_for_update().filter(pk=version.pk).first()
+        if locked_version is None:
+            # Purged between the endpoint's own lookup and this lock.
+            return None
+
+        row = (
+            DesignRenderDelivery.objects.select_for_update()
+            .filter(design_version=version, kind=kind)
+            .first()
+        )
+        if row is None:
+            try:
+                created = DesignRenderDelivery.objects.create(
+                    design_version=version,
+                    kind=kind,
+                    state=DesignRenderDelivery.PENDING,
+                    attempt_count=0,
+                    attempt_epoch=1,
+                    send_count=0,
+                    requested_filename=name,
+                    claimed_at=now,
+                )
+            except IntegrityError:
+                # The parent lock should make a duplicate insert unreachable; the
+                # unique constraint is the backstop, and losing that race means
+                # another caller holds the reservation — nothing to queue here.
+                return None
+            return created.attempt_epoch
+
+        if row.send_count >= limit:
+            raise SendLimitReached(row.send_count, limit)
+
+        age = (now - row.claimed_at).total_seconds()
+        if row.state == DesignRenderDelivery.CLAIMED and age < ttl:
+            # A worker holds this send and has not run out of time. A second
+            # press is a mis-click or an impatient one; either way there is
+            # nothing to reserve, and reserving would let one press consume two
+            # epochs.
+            return None
+
+        if row.state == DesignRenderDelivery.PENDING and age < grace:
+            # A reservation nobody has picked up YET — which is not the same as
+            # nobody ever will. Its task may be sitting in the broker perfectly
+            # intact, and bumping the epoch here would orphan it: that task would
+            # later find a newer epoch on the row and no-op, so if THIS press's
+            # own enqueue then failed, the owner would hold a 202 for a message
+            # that will never be sent, with nothing to retry it.
+            #
+            # A shorter window than the claim TTL on purpose. The TTL answers "how
+            # long may a worker hold a send before we presume it dead" and must
+            # exceed the task's hard time limit; this answers "how long may a
+            # queued task go unclaimed", which is queue latency and is measured in
+            # seconds. So a genuinely failed enqueue is retryable soon, while an
+            # impatient double click is still absorbed.
+            return None
+
+        # A fresh press. The attempt counter resets because the retry-once budget
+        # belongs to a press, not to the row: a previous press that exhausted its
+        # retries failed WITHOUT consuming any of the owner's allowance, so it
+        # must not leave them unable to try again. Every press still costs the
+        # per-hour, per-IP and per-recipient rate quota, which is what stops
+        # repeated failure being used to grind.
+        row.attempt_epoch += 1
+        row.state = DesignRenderDelivery.PENDING
+        row.attempt_count = 0
+        row.claimed_at = now
+        if name:
+            # A blank name means "no new choice", not "forget the old one".
+            row.requested_filename = name
+        row.save(
+            update_fields=[
+                "attempt_epoch",
+                "state",
+                "attempt_count",
+                "claimed_at",
+                "requested_filename",
+                "updated_at",
+            ]
+        )
+        return row.attempt_epoch
+
+
+def _claim(version: DesignVersion, kind: str, epoch: int) -> DesignRenderDelivery | None:
     """Take the durable claim on this send, or return None to no-op.
 
     Committed BEFORE the message is handed over, which is the whole point: a
     redelivered task must be able to observe that someone already holds or
-    completed this send. The parent ``DesignVersion`` row is locked rather than
-    the delivery row, because ``select_for_update()`` cannot lock a row that does
-    not exist yet and the first claim has none — two workers would otherwise both
-    find nothing and both insert. Same shape, and the same ``.first()`` idiom and
-    ``IntegrityError`` backstop, as
-    :func:`sitara.designs.annotation_service.replace_annotation_document`.
-    """
+    completed this send.
+
+    Everything here is scoped to ``epoch``. That is what lets one render be sent
+    more than once without a redelivery becoming a duplicate: a task acts only on
+    the press it was queued for, and a task carrying a superseded epoch no-ops no
+    matter what state the row is in."""
     now = timezone.now()
     ttl = settings.ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS
+    limit = int(settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER)
     with transaction.atomic():
         locked_version = DesignVersion.objects.select_for_update().filter(pk=version.pk).first()
         if locked_version is None:
@@ -206,29 +347,59 @@ def _claim(version: DesignVersion, kind: str) -> DesignRenderDelivery | None:
             .first()
         )
         if row is None:
-            try:
-                return DesignRenderDelivery.objects.create(
-                    design_version=version,
-                    kind=kind,
-                    state=DesignRenderDelivery.CLAIMED,
-                    attempt_count=1,
-                    claimed_at=now,
+            # No reservation. A task is never the first to touch this row now —
+            # the endpoint reserves before it queues — so this means the row was
+            # purged, and creating one here would mail a copy nobody asked for.
+            return None
+
+        if row.attempt_epoch != epoch:
+            # A later press superseded this one, or this is a redelivery of a
+            # task from a previous press. Either way the current epoch's own task
+            # owns the row.
+            return None
+
+        # Re-checked here rather than trusted from the endpoint, exactly as the
+        # capability gate and the ownership derivation are: a queued task can
+        # outlive the allowance that admitted it — most plainly when a
+        # long-running worker from an earlier press completes and takes the count
+        # to the ceiling while this press is still pending.
+        #
+        # This is NOT redundant with `reserve_send`'s check, and deleting it as
+        # "defensive" would let the ceiling be exceeded. Two concurrent presses for
+        # a single remaining send can BOTH reserve legitimately: each reads the
+        # same "two used" because neither has sent yet. It is this check, under the
+        # row lock and after the winner's count is committed, that refuses the
+        # loser. Mutation-verified — without it, that race mails two copies.
+        if row.send_count >= limit:
+            if row.state == DesignRenderDelivery.PENDING:
+                # The unhappy version of this branch, and worth its own line at a
+                # louder level: a DELIBERATE press was reserved, and then an
+                # older, slower send finished first and took the last of the
+                # allowance. The owner is told "queued" and receives nothing new —
+                # the only copy that arrives is the one from the press they had
+                # already given up on. Inherent to counting real sends while
+                # gating on the same counter, and TTL-bounded, but an operator
+                # reading `allowance_spent` at info level would not be able to
+                # tell it from an ordinary already-exhausted retry.
+                logger.warning(
+                    "render_delivery.reserved_press_absorbed",
+                    extra={"design_version_id": str(version.pk), "kind": kind},
                 )
-            except IntegrityError:
-                # The parent lock should make a duplicate insert unreachable;
-                # the unique constraint is the backstop, and losing that race
-                # means another worker holds the claim — a no-op here, not an
-                # error to escape into Celery's default handler.
-                return None
+            else:
+                logger.info(
+                    "render_delivery.allowance_spent",
+                    extra={"design_version_id": str(version.pk), "kind": kind},
+                )
+            return None
 
         if row.state in (DesignRenderDelivery.SENT, DesignRenderDelivery.RETRY_EXHAUSTED):
-            # Terminal, always — including long after the claim has gone stale.
-            # Without this the stale branch below would treat a COMPLETED send as
-            # an abandoned one and mail the owner a second copy months later.
+            # Terminal for THIS epoch, always — including long after the claim
+            # has gone stale. Without this the stale branch below would treat a
+            # completed send as an abandoned one and mail the owner a second copy
+            # months later.
             #
-            # Logged, because otherwise this outcome is invisible: the endpoint
-            # answers 202 either way, so a run of sends that all no-op looks
-            # from outside exactly like a run that all delivered.
+            # Logged, because otherwise this outcome is invisible: a redelivery
+            # that no-ops looks from outside exactly like one that delivered.
             logger.info(
                 "render_delivery.already_terminal",
                 extra={
@@ -238,6 +409,15 @@ def _claim(version: DesignVersion, kind: str) -> DesignRenderDelivery | None:
                 },
             )
             return None
+
+        if row.state == DesignRenderDelivery.PENDING:
+            # The ordinary path: the endpoint reserved, and this is the task it
+            # queued.
+            row.state = DesignRenderDelivery.CLAIMED
+            row.attempt_count = 1
+            row.claimed_at = now
+            row.save(update_fields=["state", "attempt_count", "claimed_at", "updated_at"])
+            return row
 
         if (now - row.claimed_at).total_seconds() < ttl:
             # Another worker holds this send and has not run out of time.
@@ -286,12 +466,57 @@ def _log_failure(version_id, kind: str, exc: BaseException) -> None:
     )
 
 
-def deliver_render(design_version_id, kind: str) -> str:
+def _record_sent(version: DesignVersion, kind: str, epoch: int) -> str:
+    """Count the message that just went out, and close this epoch.
+
+    The count is incremented **whether or not the epoch still matches**, and the
+    asymmetry is deliberate. ``send_count`` exists to bound how much mail one
+    render can produce, and a message the backend accepted is mail regardless of
+    whether a later press has since superseded the epoch that produced it. The
+    state and timestamp, by contrast, describe the CURRENT press, so writing them
+    for a superseded epoch would clobber a live reservation and cause the newer
+    press to be skipped.
+
+    ``F()`` rather than a read-modify-write, so the increment survives whatever
+    else touched the row between the claim and here."""
+    with transaction.atomic():
+        row = (
+            DesignRenderDelivery.objects.select_for_update()
+            .filter(design_version=version, kind=kind)
+            .first()
+        )
+        if row is None:
+            # Purged mid-send. The owner has their copy; there is no row left to
+            # record it on and nothing to alert on.
+            return "sent_unrecorded"
+
+        now = timezone.now()
+        if row.attempt_epoch != epoch:
+            DesignRenderDelivery.objects.filter(pk=row.pk).update(
+                send_count=F("send_count") + 1, sent_at=now, updated_at=now
+            )
+            return "sent_superseded"
+
+        DesignRenderDelivery.objects.filter(pk=row.pk).update(
+            send_count=F("send_count") + 1,
+            state=DesignRenderDelivery.SENT,
+            sent_at=now,
+            updated_at=now,
+        )
+        return "sent"
+
+
+def deliver_render(design_version_id, kind: str, attempt_epoch: int = 1) -> str:
     """The Celery task body: compose one render and mail it to its owner.
 
-    Takes UUIDs, not a payload — no address, no bytes and no URL crosses the
-    queue, where they would rest in Redis in the clear and survive any broker
-    inspection. Everything is re-derived here from database state.
+    Takes UUIDs and an integer, not a payload — no address, no bytes, no URL and
+    no filename crosses the queue, where they would rest in Redis in the clear
+    and survive any broker inspection. Everything is re-derived here from
+    database state, the chosen name included.
+
+    ``attempt_epoch`` identifies WHICH press this task is for. Without it a
+    redelivery and a deliberate second send are indistinguishable, and the row
+    would have to choose between refusing legitimate sends and mailing duplicates.
 
     Returns a short outcome string for the task log. Every no-op path returns
     rather than raising, because a redelivery observing "already sent" is the
@@ -323,7 +548,7 @@ def deliver_render(design_version_id, kind: str) -> str:
         _log_failure(version.pk, kind, exc)
         return "precondition_failed"
 
-    claim = _claim(version, kind)
+    claim = _claim(version, kind, attempt_epoch)
     if claim is None:
         return "noop"
 
@@ -331,9 +556,10 @@ def deliver_render(design_version_id, kind: str) -> str:
         content, default_filename = _compose(version, kind)
         send_render_attachment(
             user=owner,
-            # No stylist-chosen name is threaded through yet — the durable one
-            # arrives with the send cap it shares a row with.
-            requested_name=None,
+            # Read from the row the claim just locked, never from the queue
+            # message. The name is the owner's own free text, and Redis is not
+            # where it belongs.
+            requested_name=claim.requested_filename,
             default_filename=default_filename,
             content=content,
             content_type=RENDER_CONTENT_TYPE,
@@ -381,9 +607,7 @@ def deliver_render(design_version_id, kind: str) -> str:
     # this order turns the same crash into at most one duplicate to the owner's
     # own address, which §8.5 accepts deliberately.
     try:
-        claim.state = DesignRenderDelivery.SENT
-        claim.sent_at = timezone.now()
-        claim.save(update_fields=["state", "sent_at", "updated_at"])
+        outcome = _record_sent(version, kind, attempt_epoch)
     except Exception as exc:  # noqa: BLE001 - see the task-boundary note above
         # The narrow window §8.5 is about, and the one place a duplicate becomes
         # LIKELY rather than merely possible: the owner has the message, but the
@@ -392,6 +616,10 @@ def deliver_render(design_version_id, kind: str) -> str:
         # line rather than folded into "failed", because an operator seeing this
         # should expect a duplicate — it is not the same event as a send that
         # never happened.
+        #
+        # It also means the send went uncounted, so the owner keeps an allowance
+        # they have partly used. That is the right way round: over-counting would
+        # deny someone a copy they never received.
         logger.warning(
             "render_delivery.sent_but_unrecorded",
             extra={
@@ -404,6 +632,6 @@ def deliver_render(design_version_id, kind: str) -> str:
 
     logger.info(
         "render_delivery.sent",
-        extra={"design_version_id": str(version.pk), "kind": kind},
+        extra={"design_version_id": str(version.pk), "kind": kind, "outcome": outcome},
     )
-    return "sent"
+    return outcome

@@ -664,47 +664,91 @@ class DesignRenderDelivery(models.Model):
     ownership and readiness rechecks the task also performs guard a different
     failure class entirely and do nothing here.
 
-    **It stores state, counters and timestamps — nothing else.** No recipient
-    address, no note text, no rendered bytes, no storage key, no signed URL. A
-    durable row is a strictly worse place to leak an address than a cache key:
-    it survives into backups, dumps, fixtures and any admin view. The recipient
-    is re-derived server-side from the owning user at send time and never
-    persisted here, and a test asserts this table carries no address- or
-    note-shaped field.
+    **It stores state, counters, timestamps and one bounded piece of the
+    owner's own text — and nothing else.** No recipient address, no note text,
+    no rendered bytes, no storage key, no signed URL. A durable row is a
+    strictly worse place to leak an address than a cache key: it survives into
+    backups, dumps, fixtures and any admin view. The recipient is re-derived
+    server-side from the owning user at send time and never persisted here, and
+    a test asserts this table carries no address- or note-shaped field.
+
+    The one exception is ``requested_filename`` (Phase 21, ADR 0022), which
+    exists so a repeat send arrives under the name the owner chose the first
+    time. Phase 19's claim that this row holds no user content is deliberately
+    narrowed rather than left standing while being false. A filename is none of
+    the three things that claim named, but the reasoning behind it still
+    applies, so this column carries the protections instead of assuming them: it
+    is bounded, sanitised before it is stored, **never logged on any path**, not
+    registered in admin, removed with the design by the existing CASCADE and
+    retention purge, and returned by no endpoint but the one that pre-fills the
+    field for the owner of that design.
 
     Keyed on ``(design_version, kind)`` rather than the version alone, because
     the two surfaces send genuinely different artefacts — the plain canonical
     render from the concept screen and the annotated composite from the
     workspace. One key would let sending either one permanently block the other.
+    The cap below is per row, so the two kinds have independent allowances, as
+    does each version of a refined design.
 
-    Three states, and exactly-once is NOT claimed:
+    **Sending more than once, and what bounds it.** Until Phase 21 ``sent`` was
+    terminal for the lifetime of the row, so each render could be emailed
+    exactly once, ever — a redelivery and a deliberate second press were
+    indistinguishable and both no-opped. The owner may now send the same render
+    up to ``ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER`` times, which makes the two
+    cases distinguishable and therefore something the row has to record.
 
+    ``attempt_epoch`` is what distinguishes them: the endpoint increments it
+    once per deliberate press, and a task only acts on the epoch it was queued
+    for. A redelivered task carries a superseded epoch and no-ops; a new press
+    carries a fresh one. Without it a second press would look exactly like a
+    duplicate delivery, and the row would have to choose between refusing
+    legitimate sends and mailing duplicates.
+
+    ``send_count`` is the durable lifetime total, and the cap is checked against
+    it — never against a rate limiter and never against a cache, because a cache
+    eviction must not hand back three more sends. It counts messages the backend
+    ACCEPTED, so a failed send does not consume one; the existing per-hour,
+    per-IP and per-recipient *rate* limits still apply to every attempt, so
+    repeated failure cannot be used to grind. Unlike ``attempt_count`` it carries
+    no database bound — see the constraint block below for why.
+
+    Four states. Exactly-once is still NOT claimed:
+
+    ``pending``
+        Reserved by the endpoint for the current ``attempt_epoch``. No worker
+        holds it yet. ``attempt_count`` is 0.
     ``claimed``
         A worker holds this send. A redelivery inside
         ``ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS`` no-ops — another worker has it.
         Beyond the TTL the claim is treated as a dead worker's, and the send is
         retried once with ``attempt_count`` incremented.
     ``sent``
-        Terminal. The message reached the backend. A redelivery always no-ops.
+        The message reached the backend. Terminal **for this epoch**: a
+        redelivery always no-ops. A later press starts a new epoch, which is the
+        one thing that has changed here.
     ``retry_exhausted``
-        Terminal. ``attempt_count`` hit ``MAX_SEND_ATTEMPTS``; never sends again.
+        ``attempt_count`` hit ``MAX_SEND_ATTEMPTS``; this epoch never sends
+        again. A later press may start a new one, because the failure consumed
+        no part of the owner's allowance.
 
     Capping ``attempt_count`` is what makes "retry once" enforced rather than
     merely intended — two successive worker deaths cannot produce a third
-    attempt. The stale-claim retry exists at all because a worker that died
-    between claiming and sending would otherwise leave the send permanently
-    stuck with no path back; that branch deliberately prefers **at most one
-    duplicate** over **silent loss** of a copy the owner explicitly asked for,
-    and the duplicate can only ever go to the account's own address.
+    attempt within one press. The stale-claim retry exists at all because a
+    worker that died between claiming and sending would otherwise leave the send
+    stuck until the owner pressed again; that branch deliberately prefers **at
+    most one duplicate** over **silent loss** of a copy the owner explicitly
+    asked for, and the duplicate can only ever go to the account's own address.
 
     Ownership is derived exactly as :class:`DesignAnnotationDocument`'s is —
     through the version to the design to the session — so this table carries no
     user id and the CASCADE removes it with a purged design."""
 
+    PENDING = "pending"
     CLAIMED = "claimed"
     SENT = "sent"
     RETRY_EXHAUSTED = "retry_exhausted"
     STATE_CHOICES = [
+        (PENDING, "Pending"),
         (CLAIMED, "Claimed"),
         (SENT, "Sent"),
         (RETRY_EXHAUSTED, "Retry exhausted"),
@@ -714,8 +758,16 @@ class DesignRenderDelivery(models.Model):
     ANNOTATED = "annotated"
     KIND_CHOICES = [(PLAIN, "Plain render"), (ANNOTATED, "Annotated render")]
 
-    #: A first attempt plus at most one stale-claim retry.
+    #: A first attempt plus at most one stale-claim retry, per press.
     MAX_SEND_ATTEMPTS = 2
+
+    #: The stored name is the sanitised BASE, without the extension this
+    #: application owns, so it is already header-safe and pre-filling the field
+    #: with it shows the owner exactly what their last copy was called. Kept in
+    #: step with ``media.account_delivery.MAX_FILENAME_BASE_LENGTH`` by a test —
+    #: a migration must not import a runtime constant, so the literal is here
+    #: and the pairing is enforced rather than trusted.
+    REQUESTED_FILENAME_MAX_LENGTH = 60
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     design_version = models.ForeignKey(
@@ -726,6 +778,20 @@ class DesignRenderDelivery(models.Model):
     kind = models.CharField(max_length=16, choices=KIND_CHOICES)
     state = models.CharField(max_length=16, choices=STATE_CHOICES)
     attempt_count = models.PositiveSmallIntegerField()
+    #: Bumped once per deliberate press; a task acts only on its own epoch.
+    attempt_epoch = models.PositiveSmallIntegerField(default=1)
+    #: Messages the mail backend accepted, for the lifetime of this row.
+    send_count = models.PositiveSmallIntegerField(default=0)
+    #: The owner's own chosen name for their copy. Blank until they choose one.
+    requested_filename = models.CharField(max_length=60, blank=True, default="")
+    #: When this row last entered ``pending`` or ``claimed`` — so for a
+    #: reservation it is when the owner pressed, and for a claim it is when a
+    #: worker took it. One field for both because both are the same question with
+    #: different answers ("how long has this state been true"), and the two
+    #: windows that read it are each gated on the state they belong to: the claim
+    #: TTL applies only to ``claimed``, the reservation grace only to ``pending``.
+    #: Kept as ``claimed_at`` rather than renamed for a schema change that would
+    #: buy nothing but a migration.
     claimed_at = models.DateTimeField()
     sent_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -744,7 +810,7 @@ class DesignRenderDelivery(models.Model):
             # branches into the stale-claim path and could send. Pinned here so
             # it cannot.
             models.CheckConstraint(
-                condition=Q(state__in=["claimed", "sent", "retry_exhausted"]),
+                condition=Q(state__in=["pending", "claimed", "sent", "retry_exhausted"]),
                 name="designs_render_delivery_state_valid",
             ),
             models.CheckConstraint(
@@ -753,20 +819,46 @@ class DesignRenderDelivery(models.Model):
             ),
             # The cap is an application rule enforced in render_delivery; this
             # is the database backstop that makes a third attempt impossible
-            # even through a stray write.
+            # even through a stray write. The floor is 0 rather than 1 because a
+            # reservation exists before any worker has attempted anything.
             models.CheckConstraint(
-                condition=Q(attempt_count__gte=1) & Q(attempt_count__lte=2),
+                condition=Q(attempt_count__gte=0) & Q(attempt_count__lte=2),
                 name="designs_render_delivery_attempt_count_bounded",
             ),
-            # sent_at is set if and only if the state is terminal-sent, so a
-            # "sent" row can never lack its timestamp and a claimed row can
-            # never carry one.
+            # A pending or claimed row has attempted nothing yet or is mid-flight
+            # within one press, so the attempt counter and the state cannot
+            # disagree: only a state that has actually run a worker may carry a
+            # non-zero count, and one that is mid-flight must carry one.
             models.CheckConstraint(
                 condition=(
-                    Q(state="sent", sent_at__isnull=False)
-                    | (~Q(state="sent") & Q(sent_at__isnull=True))
+                    Q(state="pending", attempt_count=0)
+                    | (~Q(state="pending") & Q(attempt_count__gte=1))
                 ),
-                name="designs_render_delivery_sent_at_matches_state",
+                name="designs_render_delivery_attempt_count_matches_state",
+            ),
+            models.CheckConstraint(
+                condition=Q(attempt_epoch__gte=1),
+                name="designs_render_delivery_attempt_epoch_positive",
+            ),
+            # `send_count` deliberately gets NO matching bound. `MAX_SEND_ATTEMPTS`
+            # is a class constant, so the constraint above can pin it exactly; the
+            # send ceiling is an operator SETTING, and a constraint carrying
+            # today's default would turn raising it into a migration and lowering
+            # it into a source of unexplained integrity errors.
+            # sent_at now tracks the COUNT rather than the state, and it has to:
+            # a row that has sent once and been pressed again is `pending` while
+            # still legitimately carrying the timestamp of the copy that did go
+            # out. Coupling it to `state` (as this did before sending more than
+            # once was possible) would make every repeat send violate the
+            # constraint. The invariant that survives is the one that was always
+            # the point — a row claiming a send has a time for it, and a row that
+            # has never sent has none.
+            models.CheckConstraint(
+                condition=(
+                    Q(send_count__gt=0, sent_at__isnull=False)
+                    | Q(send_count=0, sent_at__isnull=True)
+                ),
+                name="designs_render_delivery_sent_at_matches_send_count",
             ),
         ]
 

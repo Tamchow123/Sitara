@@ -547,6 +547,41 @@ def test_the_final_fallback_constant_is_itself_a_safe_name():
     )
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Rani lehenga", "Rani lehenga"),
+        # The extension is dropped, so a stored name cannot accumulate one each
+        # time it is read back and sent again.
+        ("dress.png", "dress"),
+        ("a\r\nBcc: attacker@example.test", ""),
+        ("../../etc/passwd", ""),
+        ("   ", ""),
+        (None, ""),
+        (12, ""),
+    ],
+)
+def test_the_stored_form_is_the_sanitised_base(raw, expected):
+    """What gets persisted when a name is remembered. Sanitised on the way IN
+    rather than only on the way out, because a value in a durable row outlives
+    every code path that reads it."""
+    assert account_delivery.safe_stored_filename(raw) == expected
+
+
+def test_storing_a_name_is_idempotent():
+    """The stored form round-trips through the sanitiser unchanged, so a name that
+    is remembered and re-sent many times cannot drift."""
+    once = account_delivery.safe_stored_filename("Rani lehenga.png")
+    assert account_delivery.safe_stored_filename(once) == once
+    assert account_delivery.safe_attachment_filename(once) == "Rani lehenga.png"
+
+
+def test_a_stored_name_fits_the_column_it_is_stored_in():
+    """The bound is enforced here, not by database truncation."""
+    stored = account_delivery.safe_stored_filename("R" * 500)
+    assert len(stored) == account_delivery.MAX_FILENAME_BASE_LENGTH
+
+
 def test_the_extension_is_ours_and_the_caller_cannot_choose_it():
     parameters = inspect.signature(account_delivery.send_render_attachment).parameters
     for name in parameters:
