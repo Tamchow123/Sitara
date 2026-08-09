@@ -262,7 +262,7 @@ def _claim(version: DesignVersion, kind: str) -> DesignRenderDelivery | None:
 
 
 def _compose(version: DesignVersion, kind: str) -> tuple[bytes, str]:
-    """The rendered attachment and its server-owned filename."""
+    """The rendered attachment and the server-owned name it falls back to."""
     annotated = kind == DesignRenderDelivery.ANNOTATED
     # Read even for the plain render: read_annotation_document returns a
     # synthetic empty document for an unannotated version, and
@@ -328,9 +328,15 @@ def deliver_render(design_version_id, kind: str) -> str:
         return "noop"
 
     try:
-        content, filename = _compose(version, kind)
+        content, default_filename = _compose(version, kind)
         send_render_attachment(
-            user=owner, filename=filename, content=content, content_type=RENDER_CONTENT_TYPE
+            user=owner,
+            # No stylist-chosen name is threaded through yet — the durable one
+            # arrives with the send cap it shares a row with.
+            requested_name=None,
+            default_filename=default_filename,
+            content=content,
+            content_type=RENDER_CONTENT_TYPE,
         )
     except (
         DesignAnnotationRenderError,

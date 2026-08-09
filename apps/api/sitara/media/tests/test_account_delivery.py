@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import ast
 import inspect
+import logging
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -225,7 +227,23 @@ def test_the_send_entry_point_takes_a_user_row_not_an_address():
     parameters = inspect.signature(account_delivery.send_render_attachment).parameters
     assert "user" in parameters
     for name in parameters:
-        assert name not in {"email", "address", "recipient", "to", "cc", "bcc"}, name
+        assert name not in {
+            "email",
+            "address",
+            "recipient",
+            "to",
+            "cc",
+            "bcc",
+            # Added with the caller-named attachment (Phase 21): the endpoints
+            # now accept a request body, so the signature is the last structural
+            # place the "no destination expressible" guarantee can be read off,
+            # and a header dict would smuggle every one of these back in at once.
+            "from_email",
+            "reply_to",
+            "sender",
+            "headers",
+            "extra_headers",
+        }, name
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +256,8 @@ def test_a_closed_gate_refuses_before_anything_else(settings):
     with pytest.raises(account_delivery.AccountEmailDisabled):
         account_delivery.send_render_attachment(
             user=FakeUser("someone@example.test"),
-            filename="x.png",
+            requested_name=None,
+            default_filename="x.png",
             content=PNG,
             content_type="image/png",
         )
@@ -255,7 +274,8 @@ def test_a_present_credential_does_not_open_the_gate(settings):
     with pytest.raises(account_delivery.AccountEmailDisabled):
         account_delivery.send_render_attachment(
             user=FakeUser("someone@example.test"),
-            filename="x.png",
+            requested_name=None,
+            default_filename="x.png",
             content=PNG,
             content_type="image/png",
         )
@@ -283,7 +303,11 @@ def test_the_send_refuses_a_user_with_no_address(settings):
     settings.ACCOUNT_EMAIL_DELIVERY_ENABLED = True
     with pytest.raises(account_delivery.AccountEmailRecipientUnavailable):
         account_delivery.send_render_attachment(
-            user=FakeUser(""), filename="x.png", content=PNG, content_type="image/png"
+            user=FakeUser(""),
+            requested_name=None,
+            default_filename="x.png",
+            content=PNG,
+            content_type="image/png",
         )
     assert mail.outbox == []
 
@@ -299,7 +323,8 @@ def test_an_oversized_attachment_is_refused_before_the_backend(settings):
     with pytest.raises(account_delivery.AccountEmailAttachmentTooLarge):
         account_delivery.send_render_attachment(
             user=FakeUser("someone@example.test"),
-            filename="x.png",
+            requested_name=None,
+            default_filename="x.png",
             content=PNG,
             content_type="image/png",
         )
@@ -313,7 +338,8 @@ def test_an_attachment_exactly_at_the_bound_is_allowed(settings):
     settings.ACCOUNT_EMAIL_MAX_ATTACHMENT_BYTES = len(PNG)
     account_delivery.send_render_attachment(
         user=FakeUser("someone@example.test"),
-        filename="x.png",
+        requested_name=None,
+        default_filename="x.png",
         content=PNG,
         content_type="image/png",
     )
@@ -331,7 +357,8 @@ def test_the_message_is_plain_text_with_fixed_server_strings(settings):
 
     account_delivery.send_render_attachment(
         user=FakeUser("someone@example.test"),
-        filename="sitara-concept.png",
+        requested_name=None,
+        default_filename="sitara-concept.png",
         content=PNG,
         content_type="image/png",
     )
@@ -361,3 +388,257 @@ def test_the_send_signature_offers_no_way_to_supply_message_text():
     parameters = inspect.signature(account_delivery.send_render_attachment).parameters
     for name in parameters:
         assert name not in {"subject", "body", "message", "html", "template"}, name
+
+
+# ---------------------------------------------------------------------------
+# The one caller-named value: the attachment filename (Phase 21, ADR 0022)
+# ---------------------------------------------------------------------------
+
+
+DEFAULT = "sitara-concept.png"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # The ordinary case.
+        ("Rani lehenga", "Rani lehenga.png"),
+        # HEADER INJECTION — the one that matters most. Refused outright rather
+        # than repaired into the plausible-looking "aBcc: attacker@example.test".
+        ("a\r\nBcc: attacker@example.test", DEFAULT),
+        ("a\nb", DEFAULT),
+        ("a\rb", DEFAULT),
+        ("a\tb", DEFAULT),
+        ("a\x00b", DEFAULT),
+        ("a\x1bb", DEFAULT),
+        ("a\x7fb", DEFAULT),
+        ("a\x85b", DEFAULT),  # C1 NEL
+        # A filename is not a path.
+        ("../../etc/passwd", DEFAULT),  # ".." survives separator stripping
+        ("folder/name", "foldername.png"),
+        ("folder\\name", "foldername.png"),
+        ("C:name", "Cname.png"),
+        ("a..b", DEFAULT),
+        # Leading dots and ragged whitespace.
+        ("..hidden", "hidden.png"),
+        (".hidden", "hidden.png"),
+        ("  spaced   out  ", "spaced out.png"),
+        # NBSP: collapsed as whitespace, and NOT mistaken for a C1 control.
+        ("a b", "a b.png"),
+        # A typed extension is dropped and ours appended — never doubled.
+        ("dress.png", "dress.png"),
+        ("dress.PNG", "dress.png"),
+        ("dress.exe", "dress.png"),
+        ("dress.jpeg", "dress.png"),
+        # ...but a dotted word that is not extension-shaped keeps its text.
+        ("my.dress", "my.dress.png"),
+        # A bare trailing dot is not an extension (nothing follows it), so the
+        # extension rule leaves it and the final tidy has to remove it. Without
+        # that tidy this is "dress..png".
+        ("dress.", "dress.png"),
+        # Only an extension, no base. The leading dot goes, what is left is a
+        # perfectly good name, and it gets OUR extension — the typed one never
+        # survives even when it is the whole input.
+        (".exe", "exe.png"),
+        # A lone surrogate: legal in a Python str, unencodable as UTF-8, and so
+        # refused here rather than left to raise inside the header encoder and
+        # turn a bad name into a failed send.
+        ("a\ud800b", DEFAULT),
+        ("\udfff", DEFAULT),
+        # Nothing usable survives.
+        ("", DEFAULT),
+        ("   ", DEFAULT),
+        ("...", DEFAULT),
+        ("/", DEFAULT),
+        # Not a string at all. Total by construction, because the choke point
+        # must not depend on the edge having validated first.
+        (None, DEFAULT),
+        (12, DEFAULT),
+        ([], DEFAULT),
+        ({"filename": "x"}, DEFAULT),
+        (b"bytes", DEFAULT),
+    ],
+)
+def test_the_filename_sanitiser_is_total_and_header_safe(raw, expected):
+    assert account_delivery.safe_attachment_filename(raw, fallback=DEFAULT) == expected
+
+
+def test_an_over_long_name_is_cut_to_the_bound():
+    name = account_delivery.safe_attachment_filename("R" * 200, fallback=DEFAULT)
+    base = name.removesuffix(".png")
+    assert len(base) == account_delivery.MAX_FILENAME_BASE_LENGTH
+    assert name == "R" * account_delivery.MAX_FILENAME_BASE_LENGTH + ".png"
+
+
+def test_truncation_never_leaves_a_trailing_space_or_dot():
+    """The cut lands mid-name, so tidying has to happen AFTER it, not before."""
+    ragged = "R" * (account_delivery.MAX_FILENAME_BASE_LENGTH - 1) + " tail"
+    assert account_delivery.safe_attachment_filename(ragged, fallback=DEFAULT) == (
+        "R" * (account_delivery.MAX_FILENAME_BASE_LENGTH - 1) + ".png"
+    )
+
+
+def test_the_tidy_after_truncation_runs_in_the_right_order():
+    """The one input that tells the two tidy steps apart.
+
+    The cut lands so that the tail is ``". "`` — a dot followed by a space. The
+    trailing whitespace has to go BEFORE the trailing dot is looked for,
+    otherwise the dot is still behind a space when the dot-strip runs and
+    survives into the name as "…R..png". Ordinary ragged input cannot
+    distinguish the two orders, which is why this case exists."""
+    stem = "R" * (account_delivery.MAX_FILENAME_BASE_LENGTH - 2)
+    assert account_delivery.safe_attachment_filename(stem + ". tail", fallback=DEFAULT) == (
+        stem + ".png"
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "रानी का लहंगा",  # Devanagari
+        "شادی کا جوڑا",  # Urdu
+        "বিয়ের শাড়ি",  # Bengali
+    ],
+)
+def test_a_name_in_a_south_asian_script_survives(name):
+    """Refusing non-ASCII letters would mean a stylist cannot name a concept in
+    their own script — precisely the flattening CLAUDE.md §2 forbids."""
+    expected = unicodedata.normalize("NFC", name) + ".png"
+    assert account_delivery.safe_attachment_filename(name, fallback=DEFAULT) == expected
+
+
+def test_a_joiner_is_kept_because_scripts_need_it():
+    """ZWNJ and ZWJ are category Cf, like the bidi controls stripped below, and
+    stripping the whole category would corrupt the very names above.
+
+    Written as escapes, not literals: an invisible character in source is a
+    character nobody can review."""
+    joined = "क‍ष"
+    assert account_delivery.safe_attachment_filename(joined, fallback=DEFAULT) == joined + ".png"
+
+
+def test_bidi_overrides_are_stripped():
+    """No place in a filename, and they make one read as something it is not."""
+    assert account_delivery.safe_attachment_filename("a‮b", fallback=DEFAULT) == "ab.png"
+
+
+def test_two_spellings_of_one_name_behave_identically():
+    """NFC first, so a decomposed name is not a different name."""
+    composed = account_delivery.safe_attachment_filename("é", fallback=DEFAULT)
+    decomposed = account_delivery.safe_attachment_filename("é", fallback=DEFAULT)
+    assert composed == decomposed == "é.png"
+
+
+def test_an_unusable_caller_default_still_yields_a_safe_name():
+    """The fallback is sanitised on the same path, so a caller that mistakenly
+    passed user text as its default cannot reach the header unchecked."""
+    assert account_delivery.safe_attachment_filename(None, fallback="a\r\nBcc: x") == (
+        account_delivery.FALLBACK_FILENAME
+    )
+
+
+def test_the_final_fallback_constant_is_itself_a_safe_name():
+    """Otherwise the last resort would be the one unvalidated value."""
+    assert (
+        account_delivery.safe_attachment_filename(
+            account_delivery.FALLBACK_FILENAME, fallback=account_delivery.FALLBACK_FILENAME
+        )
+        == account_delivery.FALLBACK_FILENAME
+    )
+
+
+def test_the_extension_is_ours_and_the_caller_cannot_choose_it():
+    parameters = inspect.signature(account_delivery.send_render_attachment).parameters
+    for name in parameters:
+        assert name not in {"extension", "suffix", "content_disposition"}, name
+    assert account_delivery.ATTACHMENT_EXTENSION == ".png"
+
+
+def _attachment_disposition(message) -> str:
+    """The raw Content-Disposition header of the one attachment part.
+
+    Read off the generated MIME message rather than the ``attachments`` list,
+    because the encoding of a non-ASCII filename is exactly what the list does
+    not show — and it is the encoding, not the Python string, that a mail client
+    and a relay actually see."""
+    return _attachment_part(message)[1]
+
+
+def _attachment_part(message) -> tuple[object, str]:
+    """The one attachment part and its raw ``Content-Disposition`` header."""
+    parts = [part for part in message.message().walk() if part.get_filename() is not None]
+    assert len(parts) == 1, parts
+    return parts[0], str(parts[0]["Content-Disposition"])
+
+
+def test_a_non_ascii_filename_is_encoded_per_rfc_2231_in_the_real_header(settings):
+    """Asserted against the generated header, not trusted from the library."""
+    settings.ACCOUNT_EMAIL_DELIVERY_ENABLED = True
+    account_delivery.send_render_attachment(
+        user=FakeUser("someone@example.test"),
+        requested_name="रानी",
+        default_filename=DEFAULT,
+        content=PNG,
+        content_type="image/png",
+    )
+    part, disposition = _attachment_part(mail.outbox[0])
+    assert "filename*=utf-8''" in disposition
+    # The raw bytes of the name must not appear unencoded, and no header may be
+    # split by anything the name contained.
+    assert "रानी" not in disposition
+    assert "\n" not in disposition and "\r" not in disposition
+    # ...and the encoding is only worth having if it ROUND-TRIPS. Asserting the
+    # header is well-formed proves nothing about whether the name inside it is
+    # still the stylist's: a sanitiser that truncated it to "रा" would satisfy
+    # every assertion above. Decoded by the same email machinery a mail client
+    # uses, so this is what the recipient actually sees.
+    assert part.get_filename() == "रानी.png"
+
+
+def test_an_ascii_filename_with_spaces_is_quoted_not_split(settings):
+    settings.ACCOUNT_EMAIL_DELIVERY_ENABLED = True
+    account_delivery.send_render_attachment(
+        user=FakeUser("someone@example.test"),
+        requested_name="Rani lehenga",
+        default_filename=DEFAULT,
+        content=PNG,
+        content_type="image/png",
+    )
+    disposition = _attachment_disposition(mail.outbox[0])
+    assert 'filename="Rani lehenga.png"' in disposition
+    assert mail.outbox[0].attachments[0][0] == "Rani lehenga.png"
+
+
+def test_a_header_injection_attempt_reaches_no_header_and_no_extra_recipient(settings):
+    """The whole point of refusing controls, proved end to end at the choke
+    point: one recipient, the row's own, and nothing added to the headers."""
+    settings.ACCOUNT_EMAIL_DELIVERY_ENABLED = True
+    account_delivery.send_render_attachment(
+        user=FakeUser("someone@example.test"),
+        requested_name="concept\r\nBcc: attacker@example.test",
+        default_filename=DEFAULT,
+        content=PNG,
+        content_type="image/png",
+    )
+    message = mail.outbox[0]
+    assert message.to == ["someone@example.test"]
+    assert message.bcc == [] and message.cc == []
+    assert message.attachments[0][0] == DEFAULT
+    generated = message.message().as_string()
+    assert "attacker@example.test" not in generated
+
+
+def test_the_filename_is_never_logged(settings, caplog):
+    """It is free text about a garment someone intends to wear — the same
+    category as an annotation note, and it must not reach a log or Sentry."""
+    settings.ACCOUNT_EMAIL_DELIVERY_ENABLED = True
+    with caplog.at_level(logging.DEBUG):
+        account_delivery.send_render_attachment(
+            user=FakeUser("someone@example.test"),
+            requested_name="Rani secret lehenga",
+            default_filename=DEFAULT,
+            content=PNG,
+            content_type="image/png",
+        )
+    logged = "\n".join(record.getMessage() + str(record.__dict__) for record in caplog.records)
+    assert "Rani" not in logged and "lehenga" not in logged
