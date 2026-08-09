@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="_ds/organic-ccb06f12-17fe-45b2-9248-ebf010085646/styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+  <script src="_ds/organic-ccb06f12-17fe-45b2-9248-ebf010085646/_ds_bundle.js"></script>
+  <style>
+    html, body { margin: 0; background: var(--color-bg); }
+    a { color: var(--color-accent-700); } a:hover { color: var(--color-accent-800); }
+    @keyframes sitaraSpin { to { transform: rotate(360deg); } }
+    @keyframes sitaraUp { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  </style>
+</helmet>
+<div style="min-height:100vh;font-family:var(--font-body);color:var(--color-text);font-size:15px;display:flex;flex-direction:column">
+
+  <sc-if value="{{ workView }}" hint-placeholder-val="{{ true }}">
+  <div style="flex:1;display:flex;flex-direction:column">
+    <header style="position:relative;display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) var(--space-4);flex-wrap:wrap">
+      <a href="Sitara Concept.dc.html" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:var(--color-text);font-weight:600;font-size:14px;border-radius:999px;padding:8px 14px;white-space:nowrap" style-hover="background:var(--color-accent-100)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5 L8 12 L15 19"></path></svg>
+        Concept
+      </a>
+      <sc-if value="{{ leaveOpen }}" hint-placeholder-val="{{ false }}">
+        <div role="alertdialog" aria-label="Unsaved changes" style="position:absolute;top:calc(100% - 4px);left:var(--space-4);z-index:50;background:var(--color-bg);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);padding:var(--space-4);width:300px;animation:sitaraUp .2s both">
+          <p style="margin:0 0 4px;font-weight:700;font-size:14.5px">Unsaved changes</p>
+          <p style="margin:0 0 var(--space-3);font-size:13.5px;line-height:1.55;color:var(--color-neutral-800)">Your last edits haven&rsquo;t saved yet. Leaving now will lose them.</p>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary" onClick="{{ stay }}" style="font-size:13px;padding:8px 18px;white-space:nowrap">Stay</button>
+            <a href="Sitara Concept.dc.html" class="btn btn-ghost" style="text-decoration:none;font-size:13px;padding:8px 14px;white-space:nowrap">Leave anyway</a>
+          </div>
+        </div>
+      </sc-if>
+      <div style="width:1px;height:24px;background:var(--color-neutral-300)"></div>
+      <div style="display:flex;align-items:baseline;gap:10px;flex:1;min-width:240px;flex-wrap:wrap">
+        <h1 style="margin:0;font-family:'Cormorant Garamond',serif;font-weight:600;font-size:23px;line-height:1.1">Annotate this concept</h1>
+        <span class="tag tag-accent-2" style="font-size:11.5px;white-space:nowrap">Private &mdash; only you</span>
+      </div>
+      <div style="display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:6px 14px;font-size:12.5px;font-weight:600;white-space:nowrap;background:{{ pillBg }};color:{{ pillFg }}" role="status">
+        <sc-if value="{{ pillSaved }}" hint-placeholder-val="{{ true }}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 L9.5 17.5 L20 7"></path></svg>
+          <span>Saved</span>
+        </sc-if>
+        <sc-if value="{{ pillSaving }}" hint-placeholder-val="{{ false }}">
+          <span style="width:11px;height:11px;border-radius:999px;border:2px solid currentColor;border-top-color:transparent;animation:sitaraSpin .8s linear infinite;flex:none"></span>
+          <span>Saving&hellip;</span>
+        </sc-if>
+        <sc-if value="{{ pillError }}" hint-placeholder-val="{{ false }}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 L22 20 L2 20 Z"></path><path d="M12 10 L12 14.5"></path><path d="M12 17 L12 17.2"></path></svg>
+          <span>Couldn&rsquo;t save</span>
+          <button onClick="{{ retry }}" style="border:none;background:none;font-family:var(--font-body);font-size:12.5px;font-weight:700;color:currentColor;text-decoration:underline;cursor:pointer;padding:0" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">Retry</button>
+        </sc-if>
+      </div>
+      <button class="btn btn-ghost btn-icon" onClick="{{ toggleOverlays }}" title="{{ eyeTitle }}" aria-pressed="{{ hidden }}" style="width:38px;height:38px">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12 C5 6.5 8.5 4.5 12 4.5 C15.5 4.5 19 6.5 22 12 C19 17.5 15.5 19.5 12 19.5 C8.5 19.5 5 17.5 2 12 Z"></path><circle cx="12" cy="12" r="3"></circle><path d="{{ eyeSlash }}"></path></svg>
+      </button>
+      <button class="btn btn-secondary" onClick="{{ goExport }}" style="font-size:13.5px;padding:9px 18px;display:inline-flex;align-items:center;gap:8px;white-space:nowrap">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 L11 13"></path><path d="M22 2 L15 22 L11 13 L2 9 Z"></path></svg>
+        Send to account
+      </button>
+      <div style="position:relative">
+        <button class="btn btn-ghost btn-icon" onClick="{{ toggleMenu }}" title="Prototype: demo-only states" aria-haspopup="true" aria-expanded="{{ menuOpen }}" style="width:38px;height:38px">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="12" cy="19" r="1.8"></circle></svg>
+        </button>
+        <sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+          <div role="menu" aria-label="Demo-only states" style="position:absolute;top:calc(100% + 6px);right:0;z-index:60;width:260px;background:var(--color-bg);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);padding:8px;display:flex;flex-direction:column;gap:2px;animation:sitaraUp .18s both">
+            <p style="margin:0;padding:6px 10px 8px;font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--color-neutral-600)">Demo-only states</p>
+            <sc-for list="{{ demoItems }}" as="d" hint-placeholder-count="4">
+              <button role="menuitem" onClick="{{ d.act }}" style="border:none;background:none;cursor:pointer;font-family:var(--font-body);font-size:13.5px;color:var(--color-text);text-align:left;border-radius:8px;padding:9px 10px" style-hover="background:var(--color-accent-100)" style-focus="outline:2px solid var(--color-accent);outline-offset:-2px">{{ d.label }}</button>
+            </sc-for>
+            <p style="margin:2px 0 0;padding:8px 10px;border-top:1px solid var(--color-neutral-200);font-size:12px;line-height:1.5;color:var(--color-neutral-600)">States the prototype can&rsquo;t reach naturally &mdash; errors, another tab saving, leaving unsaved.</p>
+          </div>
+        </sc-if>
+      </div>
+    </header>
+
+    <main style="flex:1;display:flex;gap:var(--space-3);align-items:stretch;padding:0 var(--space-4) var(--space-4);min-height:0">
+      <div style="order:{{ railOrder }};flex:none;display:flex;flex-direction:column;justify-content:center">
+        <div role="toolbar" aria-label="Annotation tools" style="background:var(--color-bg);box-shadow:var(--shadow-md);border-radius:999px;padding:8px 6px;display:flex;flex-direction:column;gap:4px">
+          <sc-for list="{{ tools }}" as="t" hint-placeholder-count="6">
+            <button onClick="{{ t.pick }}" title="{{ t.label }}" aria-label="{{ t.label }}" aria-pressed="{{ t.on }}" style="position:relative;width:40px;height:40px;border-radius:999px;border:none;cursor:pointer;display:grid;place-items:center;background:{{ t.bg }};color:{{ t.fg }};box-shadow:{{ t.ring }};transition:background .15s" style-hover="background:{{ t.hoverBg }}" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">
+              {{ t.icon }}
+              <sc-if value="{{ t.keysChip }}" hint-placeholder-val="{{ false }}">
+                <span style="position:absolute;top:-6px;right:-8px;width:18px;height:18px;border-radius:999px;background:var(--color-accent-2-700);color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;box-shadow:0 0 0 2px var(--color-bg)">1</span>
+              </sc-if>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="order:{{ canvasOrder }};flex:1;position:relative;background:var(--color-neutral-200);border-radius:var(--radius-lg);overflow:hidden;display:grid;place-items:center;padding:var(--space-4);min-height:600px">
+        <div style="transform:{{ zoomT }};transform-origin:44% 30%;transition:transform .35s ease">
+          <div style="position:relative;height:min(64vh, 620px);aspect-ratio:3/4;border-radius:var(--radius-md);overflow:visible;box-shadow:var(--shadow-lg)">
+            <img src="uploads/images/03-garments/sitara__garments__lehenga__v2.jpg" alt="Generated concept render: maroon and champagne lehenga" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:var(--radius-md)">
+            <sc-if value="{{ overlaysShown }}" hint-placeholder-val="{{ true }}">
+              <svg viewBox="0 0 600 800" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible" aria-hidden="true">
+                <g opacity="{{ keysOp }}">
+                  <circle cx="300" cy="140" r="21" fill="none" stroke="#fff" stroke-width="5"></circle>
+                  <circle cx="300" cy="140" r="21" fill="none" stroke="var(--color-accent)" stroke-width="2.5"></circle>
+                  <circle cx="325" cy="116" r="12" fill="#fff"></circle>
+                  <circle cx="325" cy="116" r="10" fill="var(--color-accent-2-700)"></circle>
+                  <text x="325" y="120" text-anchor="middle" font-size="11" font-weight="700" fill="#fff" font-family="var(--font-body)">2</text>
+                </g>
+                <g opacity="{{ m4op }}">
+                  <path d="M170 210 C150 180 165 140 205 128 C240 117 268 133 262 160 C256 184 224 196 205 214" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"></path>
+                  <path d="M170 210 C150 180 165 140 205 128 C240 117 268 133 262 160 C256 184 224 196 205 214" fill="none" stroke="var(--color-accent)" stroke-width="2.75" stroke-linecap="round"></path>
+                  <g opacity="{{ r4op }}"><circle cx="170" cy="212" r="20" fill="none" stroke="#fff" stroke-width="5"></circle><circle cx="170" cy="212" r="20" fill="none" stroke="var(--color-accent)" stroke-width="2.5"></circle></g>
+                  <circle cx="170" cy="212" r="16" fill="#fff"></circle>
+                  <circle cx="170" cy="212" r="13.5" fill="var(--color-accent)"></circle>
+                  <text x="170" y="216.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff" font-family="var(--font-body)">4</text>
+                </g>
+                <g opacity="{{ m2op }}">
+                  <line x1="468" y1="332" x2="408" y2="383" stroke="#fff" stroke-width="7" stroke-linecap="round"></line>
+                  <line x1="468" y1="332" x2="408" y2="383" stroke="var(--color-accent)" stroke-width="2.75" stroke-linecap="round"></line>
+                  <polygon points="400,390 406.7,376.3 414.5,385.5" fill="var(--color-accent)" stroke="#fff" stroke-width="3" stroke-linejoin="round" paint-order="stroke"></polygon>
+                  <g opacity="{{ r2op }}"><circle cx="482" cy="320" r="20" fill="none" stroke="#fff" stroke-width="5"></circle><circle cx="482" cy="320" r="20" fill="none" stroke="var(--color-accent)" stroke-width="2.5"></circle></g>
+                  <circle cx="482" cy="320" r="16" fill="#fff"></circle>
+                  <circle cx="482" cy="320" r="13.5" fill="var(--color-accent)"></circle>
+                  <text x="482" y="324.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff" font-family="var(--font-body)">2</text>
+                </g>
+                <g opacity="{{ m3op }}">
+                  <rect x="160" y="590" width="290" height="126" rx="10" fill="none" stroke="#fff" stroke-width="6"></rect>
+                  <rect x="160" y="590" width="290" height="126" rx="10" fill="none" stroke="var(--color-accent)" stroke-width="{{ rectW }}"></rect>
+                  <g opacity="{{ handlesOp }}">
+                    <rect x="155" y="585" width="10" height="10" fill="#fff" stroke="var(--color-accent)" stroke-width="2"></rect>
+                    <rect x="445" y="585" width="10" height="10" fill="#fff" stroke="var(--color-accent)" stroke-width="2"></rect>
+                    <rect x="155" y="711" width="10" height="10" fill="#fff" stroke="var(--color-accent)" stroke-width="2"></rect>
+                    <rect x="445" y="711" width="10" height="10" fill="#fff" stroke="var(--color-accent)" stroke-width="2"></rect>
+                  </g>
+                  <circle cx="160" cy="590" r="16" fill="#fff"></circle>
+                  <circle cx="160" cy="590" r="13.5" fill="var(--color-accent)"></circle>
+                  <text x="160" y="594.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff" font-family="var(--font-body)">3</text>
+                </g>
+                <g opacity="{{ m1op }}">
+                  <g opacity="{{ r1op }}"><circle cx="300" cy="140" r="21" fill="none" stroke="#fff" stroke-width="5"></circle><circle cx="300" cy="140" r="21" fill="none" stroke="var(--color-accent)" stroke-width="2.5"></circle></g>
+                  <path d="M300 169 L289 150 L311 150 Z" fill="#fff"></path>
+                  <circle cx="300" cy="140" r="16" fill="#fff"></circle>
+                  <path d="M300 165 L291 151 L309 151 Z" fill="var(--color-accent)"></path>
+                  <circle cx="300" cy="140" r="13.5" fill="var(--color-accent)"></circle>
+                  <text x="300" y="144.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff" font-family="var(--font-body)">1</text>
+                </g>
+              </svg>
+              <sc-if value="{{ noteChipOn }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;left:{{ chipLeft }};top:{{ chipTop }};transform:{{ chipT }};background:var(--color-bg);border-radius:10px;box-shadow:var(--shadow-md);padding:7px 12px;font-size:12.5px;max-width:220px;line-height:1.45;width:max-content"><strong style="color:var(--color-accent-700)">{{ chipN }} &middot; {{ chipType }}</strong><br>{{ chipNote }}</div>
+              </sc-if>
+            </sc-if>
+            <sc-if value="{{ emptyMode }}" hint-placeholder-val="{{ false }}">
+              <div style="position:absolute;inset:0;display:grid;place-items:center">
+              <div style="width:280px;background:var(--color-bg);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);padding:var(--space-4);text-align:center;animation:sitaraUp .3s both">
+                <span style="width:44px;height:44px;border-radius:999px;background:var(--color-accent-100);color:var(--color-accent-700);display:inline-grid;place-items:center;margin-bottom:10px">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21 C12 21 5 14.8 5 10 A7 7 0 0 1 19 10 C19 14.8 12 21 12 21 Z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
+                </span>
+                <p style="margin:0 0 4px;font-family:'Cormorant Garamond',serif;font-weight:600;font-size:20px">Nothing marked yet</p>
+                <p style="margin:0;font-size:13px;line-height:1.55;color:var(--color-neutral-700)">Pick a tool on the left, then click anywhere on the render. Every mark takes a short note.</p>
+              </div>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+        <sc-if value="{{ hidden }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;top:14px;left:50%;transform:translateX(-50%);background:var(--color-neutral-900);color:var(--color-neutral-100);border-radius:999px;padding:7px 16px;font-size:12.5px;font-weight:600;white-space:nowrap">Overlays hidden &mdash; the eye brings them back</div>
+        </sc-if>
+        <div style="position:absolute;right:14px;bottom:14px;display:flex;align-items:center;gap:2px;background:var(--color-bg);border-radius:999px;box-shadow:var(--shadow-md);padding:4px">
+          <button onClick="{{ zoomOut }}" title="Zoom out (&minus;)" aria-label="Zoom out" style="width:32px;height:32px;border-radius:999px;border:none;background:none;cursor:pointer;display:grid;place-items:center;color:var(--color-text)" style-hover="background:var(--color-accent-100)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><path d="M6 12 L18 12"></path></svg></button>
+          <span style="min-width:44px;text-align:center;font-size:12.5px;font-weight:700">{{ zoomLabel }}</span>
+          <button onClick="{{ zoomIn }}" title="Zoom in (+)" aria-label="Zoom in" style="width:32px;height:32px;border-radius:999px;border:none;background:none;cursor:pointer;display:grid;place-items:center;color:var(--color-text)" style-hover="background:var(--color-accent-100)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><path d="M12 6 L12 18"></path><path d="M6 12 L18 12"></path></svg></button>
+          <div style="width:1px;height:18px;background:var(--color-neutral-300);margin:0 3px"></div>
+          <button onClick="{{ zoomFit }}" title="Fit to view (0)" aria-label="Fit to view" style="width:32px;height:32px;border-radius:999px;border:none;background:none;cursor:pointer;display:grid;place-items:center;color:var(--color-text)" style-hover="background:var(--color-accent-100)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9 L4 4 L9 4"></path><path d="M20 9 L20 4 L15 4"></path><path d="M4 15 L4 20 L9 20"></path><path d="M20 15 L20 20 L15 20"></path></svg></button>
+        </div>
+        <sc-if value="{{ zoomHint }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;left:14px;bottom:14px;background:var(--color-bg);border-radius:var(--radius-md);box-shadow:var(--shadow-sm);padding:8px 14px;font-size:12.5px;color:var(--color-neutral-800)">Drag with Select / Pan to move around &middot; marks stay pinned to the garment</div>
+        </sc-if>
+        <sc-if value="{{ keysMode }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;left:14px;right:14px;bottom:14px;background:var(--color-accent-2-100);color:var(--color-accent-2-900);border-radius:var(--radius-md);padding:10px 16px;font-size:13px;line-height:1.55;box-shadow:var(--shadow-sm)"><strong>Focus order:</strong> 1 toolbar tools &rarr; 2 canvas marks &rarr; 3 note rows. Enter edits the note &middot; arrow keys nudge a mark &middot; Delete removes it &middot; Esc deselects.</div>
+        </sc-if>
+      </div>
+
+      <aside style="order:{{ panelOrder }};flex:none;width:300px;background:var(--color-bg);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2);align-self:stretch">
+        <div style="display:flex;align-items:center;gap:8px;padding:2px 6px">
+          <h2 style="flex:1;margin:0;font-size:12px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--color-accent-700)">Annotations &middot; {{ count }}</h2>
+          <sc-if value="{{ hasRows }}" hint-placeholder-val="{{ true }}">
+            <button onClick="{{ goClear }}" style="border:none;background:none;cursor:pointer;font-family:var(--font-body);font-size:12.5px;font-weight:600;color:var(--color-neutral-700);padding:4px 8px;border-radius:999px;white-space:nowrap" style-hover="background:var(--color-accent-100);color:var(--color-accent-800)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">Clear all</button>
+          </sc-if>
+        </div>
+        <sc-if value="{{ emptyMode }}" hint-placeholder-val="{{ false }}">
+          <div style="border-radius:var(--radius-md);background:var(--color-neutral-100);padding:var(--space-4);font-size:13px;line-height:1.55;color:var(--color-neutral-700);text-align:center;display:flex;flex-direction:column;gap:12px;align-items:center">
+            <span>Marks you place will list here, numbered to match the canvas.</span>
+            <button class="btn btn-secondary" onClick="{{ restore }}" style="font-size:12.5px;padding:7px 16px;white-space:nowrap">Restore sample marks</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{ hasRows }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-direction:column;gap:6px;overflow:auto">
+            <sc-for list="{{ rows }}" as="r" hint-placeholder-count="4">
+              <div role="button" tabindex="0" onClick="{{ r.sel }}" aria-label="{{ r.aria }}" style="position:relative;display:flex;gap:10px;padding:10px 10px 10px 12px;border-radius:var(--radius-md);background:{{ r.bg }};box-shadow:{{ r.ring }};cursor:pointer;align-items:flex-start" style-hover="filter:brightness(.985)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px">
+                <span style="flex:none;width:22px;height:22px;border-radius:999px;background:var(--color-accent);color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;margin-top:1px">{{ r.n }}</span>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+                  <div style="display:flex;align-items:center;gap:2px">
+                    <span style="font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--color-accent-2-800)">{{ r.type }}</span>
+                    <span style="flex:1"></span>
+                    <button onClick="{{ r.edit }}" title="Edit note" aria-label="Edit note" style="width:26px;height:26px;border-radius:999px;border:none;background:none;cursor:pointer;display:grid;place-items:center;color:var(--color-neutral-600)" style-hover="background:var(--color-accent-100);color:var(--color-accent-800)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3 L21 7 L8 20 L4 20 L4 16 Z"></path></svg></button>
+                    <button onClick="{{ r.del }}" title="Delete annotation" aria-label="Delete annotation" style="width:26px;height:26px;border-radius:999px;border:none;background:none;cursor:pointer;display:grid;place-items:center;color:var(--color-neutral-600)" style-hover="background:var(--color-accent-100);color:var(--color-accent-800)" style-focus="outline:2px solid var(--color-accent);outline-offset:2px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7 L20 7"></path><path d="M9 7 L9 5 A1 1 0 0 1 10 4 L14 4 A1 1 0 0 1 15 5 L15 7"></path><path d="M6 7 L7 20 L17 20 L18 7"></path></svg></button>
+                  </div>
+                  <sc-if value="{{ r.showText }}" hint-placeholder-val="{{ true }}">
+                    <p style="margin:0;font-size:13.5px;line-height:1.5;color:var(--color-neutral-900)">{{ r.note }}</p>
+                  </sc-if>
+                  <sc-if value="{{ r.editing }}" hint-placeholder-val="{{ false }}">
+                    <textarea value="{{ draft }}" onChange="{{ setDraft }}" rows="3" aria-label="Annotation note" style="width:100%;box-sizing:border-box;font-family:var(--font-body);font-size:13.5px;line-height:1.5;color:var(--color-text);background:#fff;border:1px solid var(--color-accent-300);border-radius:10px;padding:8px 10px;resize:vertical" style-focus="outline:2px solid var(--color-accent);outline-offset:1px"></textarea>
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <span style="font-size:11.5px;color:var(--color-neutral-600)">{{ draftCount }}/140</span>
+                      <span style="flex:1"></span>
+                      <button onClick="{{ cancelEdit }}" class="btn btn-ghost" style="font-size:12.5px;padding:6px 12px;white-space:nowrap">Cancel</button>
+                      <button onClick="{{ saveEdit }}" class="btn btn-primary" style="font-size:12.5px;padding:6px 16px;white-space:nowrap">Save</button>
+                    </div>
+                  </sc-if>
+                </div>
+                <sc-if value="{{ r.keysChip }}" hint-placeholder-val="{{ false }}">
+                  <span style="position:absolute;top:-7px;right:-7px;width:18px;height:18px;border-radius:999px;background:var(--color-accent-2-700);color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;box-shadow:0 0 0 2px var(--color-bg)">3</span>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <span style="flex:1"></span>
+        <p style="margin:0;padding:10px 12px;border-radius:var(--radius-md);background:var(--color-accent-2-100);color:var(--color-accent-2-900);font-size:12px;line-height:1.55">These marks are your private worktable. They never appear on shared concept views &mdash; only in the PNG emailed to you.</p>
+      </aside>
+    </main>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ exportMode }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;background:var(--color-neutral-200);display:flex;flex-direction:column;align-items:center;padding:var(--space-6) var(--space-4) var(--space-8);gap:var(--space-3)">
+      <div style="width:min(620px,100%);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="display:inline-flex;align-items:center;gap:7px;background:var(--color-accent-2-100);color:var(--color-accent-2-900);border-radius:999px;padding:6px 13px;font-size:12px;font-weight:700;white-space:nowrap"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 L9.5 17.5 L20 7"></path></svg>Sent to your account email</span>
+        <span style="font-size:12.5px;font-weight:600;color:var(--color-neutral-800);flex:1;font-variant-numeric:tabular-nums;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">sitara-walima-lehenga&mdash;annotations.png &middot; 1620&times;2560</span>
+        <button class="btn btn-secondary" onClick="{{ noop }}" style="font-size:12.5px;padding:7px 14px;white-space:nowrap">Send again</button>
+        <button class="btn btn-ghost" onClick="{{ backToWork }}" style="font-size:12.5px;padding:7px 12px;white-space:nowrap">Back to workspace</button>
+      </div>
+      <div style="width:min(620px,100%);background:var(--color-bg);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);padding:22px;animation:sitaraUp .3s both">
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:14px">
+          <span style="font-family:'Cormorant Garamond',serif;font-weight:600;font-size:19px">Sitara &mdash; concept annotations</span>
+          <span style="flex:1"></span>
+          <span style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--color-neutral-600);white-space:nowrap">Private copy &middot; 6 Aug 2026</span>
+        </div>
+        <div style="position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden">
+          <img src="uploads/images/03-garments/sitara__garments__lehenga__v2.jpg" alt="Annotated concept render" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">
+          <svg viewBox="0 0 600 800" style="position:absolute;inset:0;width:100%;height:100%" aria-hidden="true">
+            <g opacity="{{ m4op }}">
+              <path d="M170 210 C150 180 165 140 205 128 C240 117 268 133 262 160 C256 184 224 196 205 214" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"></path>
+              <path d="M170 210 C150 180 165 140 205 128 C240 117 268 133 262 160 C256 184 224 196 205 214" fill="none" stroke="var(--color-accent)" stroke-width="2.75" stroke-linecap="round"></path>
+              <circle cx="170" cy="212" r="16" fill="#fff"></circle><circle cx="170" cy="212" r="13.5" fill="var(--color-accent)"></circle>
+              <text x="170" y="216.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff" font-family="var(--font-body)">4</text>
+            </g>
+            <g opacity="{{ m2op }}">
+              <line x1="468" y1="332" x2="408" y2="383" stroke="#fff" stroke-width="7" stroke-linecap="round"></line>
+              <line x1="468" y1="332" x2="408" y2="383" stroke="var(--color-accent)" stroke-width="2.75" stroke-linecap="round"></line>
+              <polygon points="400,390 406.7,376.3 414.5,385.5" fill="var(--color-accent)" stroke="#fff" stroke-width="3" stroke-linejoin="round" paint-order="stroke"></polygon>
+              <circle cx="482" cy="320" r="16" fill="#fff"></circle><circle cx="482" cy="320" r="13.5" fill="var(--color-accent)"></circle>
+              <text x="482" y="324.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff" font-family="var(--font-body)">2</text>
+            </g>
+            <g opacity="{{ m3op }}">
+              <rect x="160" y="590" width="290" height="126" rx="10" fill="none" stroke="#fff" stroke-width="6"></rect>
+              <rect x="160" y="590" width="290" height="126" rx="10" fill="none" stroke="var(--color-accent)" stroke-width="2.75"></rect>
+              <circle cx="160" cy="590" r="16" fill="#fff"></circle><circle cx="160" cy="590" r="13.5" fill="var(--color-accent)"></circle>
+              <text x="160" y="594.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff" font-family="var(--font-body)">3</text>
+            </g>
+            <g opacity="{{ m1op }}">
+              <path d="M300 169 L289 150 L311 150 Z" fill="#fff"></path>
+              <circle cx="300" cy="140" r="16" fill="#fff"></circle>
+              <path d="M300 165 L291 151 L309 151 Z" fill="var(--color-accent)"></path>
+              <circle cx="300" cy="140" r="13.5" fill="var(--color-accent)"></circle>
+              <text x="300" y="144.5" text-anchor="middle" font-size="13" font-weight="700" fill="#fff" font-family="var(--font-body)">1</text>
+            </g>
+          </svg>
+          <sc-if value="{{ exportInline }}" hint-placeholder-val="{{ false }}">
+            <div>
+              <sc-if value="{{ has1 }}" hint-placeholder-val="{{ true }}"><div style="position:absolute;left:54%;top:13%;background:#fff;border-radius:8px;box-shadow:var(--shadow-sm);padding:5px 9px;font-size:10.5px;line-height:1.4;max-width:160px"><strong>1</strong> &mdash; {{ n1 }}</div></sc-if>
+              <sc-if value="{{ has2 }}" hint-placeholder-val="{{ true }}"><div style="position:absolute;right:3%;top:33.5%;background:#fff;border-radius:8px;box-shadow:var(--shadow-sm);padding:5px 9px;font-size:10.5px;line-height:1.4;max-width:150px"><strong>2</strong> &mdash; {{ n2 }}</div></sc-if>
+              <sc-if value="{{ has3 }}" hint-placeholder-val="{{ true }}"><div style="position:absolute;left:27%;top:70%;transform:translateY(-100%);background:#fff;border-radius:8px;box-shadow:var(--shadow-sm);padding:5px 9px;font-size:10.5px;line-height:1.4;max-width:170px"><strong>3</strong> &mdash; {{ n3 }}</div></sc-if>
+              <sc-if value="{{ has4 }}" hint-placeholder-val="{{ true }}"><div style="position:absolute;left:31%;top:27.5%;background:#fff;border-radius:8px;box-shadow:var(--shadow-sm);padding:5px 9px;font-size:10.5px;line-height:1.4;max-width:150px"><strong>4</strong> &mdash; {{ n4 }}</div></sc-if>
+            </div>
+          </sc-if>
+        </div>
+        <sc-if value="{{ exportBlock }}" hint-placeholder-val="{{ true }}">
+          <div style="margin-top:16px">
+            <p style="margin:0 0 10px;font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--color-accent-700)">Annotations</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 18px">
+              <sc-for list="{{ legend }}" as="l" hint-placeholder-count="4">
+                <div style="display:flex;gap:8px;align-items:flex-start">
+                  <span style="flex:none;width:19px;height:19px;border-radius:999px;background:var(--color-accent);color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center">{{ l.n }}</span>
+                  <span style="font-size:12.5px;line-height:1.5;color:var(--color-neutral-900)">{{ l.note }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+      <p style="width:min(620px,100%);margin:0;font-size:12.5px;line-height:1.55;color:var(--color-neutral-700)">This is the artifact itself, not a screen &mdash; Send to account flattens the canvas to PNG at 2&times;, renders the note legend in, and emails it to the address on your account. The live canvas stays editable.</p>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ conflictOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop" style="position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:var(--space-4)">
+      <div class="dialog" role="alertdialog" aria-label="Newer changes exist" style="max-width:420px">
+        <p class="dialog-title" style="font-family:'Cormorant Garamond',serif;font-size:24px;margin:0 0 6px">Newer notes from another tab</p>
+        <p class="dialog-body" style="margin:0 0 var(--space-4);font-size:14px;line-height:1.6;color:var(--color-neutral-800)">This concept was annotated in another tab two minutes ago. Reload to see the latest marks, or discard this tab&rsquo;s unsaved changes &mdash; nothing is overwritten silently.</p>
+        <div class="dialog-actions" style="display:flex;gap:10px;justify-content:flex-end">
+          <button class="btn btn-ghost" onClick="{{ closeModal }}" style="font-size:14px;white-space:nowrap">Discard my changes</button>
+          <button class="btn btn-primary" onClick="{{ closeModal }}" style="font-size:14px;padding:10px 22px;white-space:nowrap">Reload latest</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ clearOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop" style="position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:var(--space-4)">
+      <div class="dialog" role="alertdialog" aria-label="Clear all annotations" style="max-width:400px">
+        <p class="dialog-title" style="font-family:'Cormorant Garamond',serif;font-size:24px;margin:0 0 6px">Clear all {{ count }} annotations?</p>
+        <p class="dialog-body" style="margin:0 0 var(--space-4);font-size:14px;line-height:1.6;color:var(--color-neutral-800)">Every pin, arrow, shape and note on this concept will be removed. This can&rsquo;t be undone.</p>
+        <div class="dialog-actions" style="display:flex;gap:10px;justify-content:flex-end">
+          <button class="btn btn-ghost" onClick="{{ closeModal }}" style="font-size:14px;white-space:nowrap">Keep them</button>
+          <button class="btn btn-primary" onClick="{{ confirmClear }}" style="font-size:14px;padding:10px 22px;background:var(--color-accent-800);white-space:nowrap">Clear all</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;panelSide&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;right&quot;,&quot;left&quot;],&quot;default&quot;:&quot;right&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;exportLegend&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Legend below image&quot;,&quot;Notes inline on image&quot;],&quot;default&quot;:&quot;Legend below image&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Export artifact&quot;}}">
+class Component extends DCLogic {
+  defaults() {
+    return [
+      { n: 1, type: 'Pin', note: 'Raise the neckline ~2 cm \u2014 it sits lower than the brief.' },
+      { n: 2, type: 'Arrow', note: 'Mirror clusters should read denser toward the cuff.' },
+      { n: 3, type: 'Rectangle', note: 'Champagne hem border is too narrow here \u2014 widen it.' },
+      { n: 4, type: 'Freehand', note: 'Soften this fold of the dupatta; it stacks stiffly.' }
+    ];
+  }
+  state = { marks: this.defaults(), tool: 'Select / Pan', selectedId: 0, editingId: 0, draft: '', hidden: false, zoom: 1, view: 'work', modal: null, leaveOpen: false, keysMode: false, pill: 'saved', menuOpen: false };
+  touch() {
+    this.setState({ pill: 'saving' });
+    clearTimeout(this._t);
+    this._t = setTimeout(() => this.setState({ pill: 'saved' }), 900);
+  }
+  icon(paths, circles) {
+    const kids = (paths || []).map((d, i) => React.createElement('path', { key: 'p' + i, d }));
+    (circles || []).forEach((c, i) => kids.push(React.createElement('circle', { key: 'c' + i, cx: c[0], cy: c[1], r: c[2] })));
+    return React.createElement('svg', { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }, kids);
+  }
+  renderVals() {
+    const I = this.icon.bind(this), st = this.state;
+    const has = {}; st.marks.forEach((m) => { has[m.n] = m; });
+    const empty = st.marks.length === 0;
+    const side = this.props.panelSide || 'right';
+    const toolDefs = [
+      ['Select / Pan (V)', 'Select / Pan', I(['M5 4 L11.5 20 L13.6 13.6 L20 11.5 Z'])],
+      ['Pin (P)', 'Pin', I(['M12 21 C12 21 5 14.8 5 10 A7 7 0 0 1 19 10 C19 14.8 12 21 12 21 Z'], [[12, 10, 2.5]])],
+      ['Arrow (A)', 'Arrow', I(['M6 18 L18 6', 'M9 6 L18 6 L18 15'])],
+      ['Rectangle (R)', 'Rectangle', I(['M4 5 L20 5 L20 19 L4 19 Z'])],
+      ['Freehand (F)', 'Freehand', I(['M4 17 C7 10 9 10 10 14 C11 18 13 18 15 12 C16 9 18 8 20 9'])],
+      ['Note (N)', 'Note', I(['M21 15 A2 2 0 0 1 19 17 L8 17 L4 21 L4 5 A2 2 0 0 1 6 3 L19 3 A2 2 0 0 1 21 5 Z'])]
+    ];
+    const tools = toolDefs.map((t) => {
+      const on = t[1] === st.tool, keysChip = st.keysMode && t[1] === 'Pin';
+      return { label: t[0], icon: t[2], on, keysChip,
+        pick: () => this.setState({ tool: t[1] }),
+        bg: on ? 'var(--color-accent)' : 'transparent', fg: on ? '#fff' : 'var(--color-neutral-800)',
+        hoverBg: on ? 'var(--color-accent-600)' : 'var(--color-accent-100)',
+        ring: keysChip ? '0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent)' : 'none' };
+    });
+    const rows = st.marks.map((m, i) => {
+      const sel = m.n === st.selectedId, editing = m.n === st.editingId;
+      return { n: m.n, type: m.type, note: m.note, editing, showText: !editing,
+        keysChip: st.keysMode && i === 0,
+        aria: 'Annotation ' + m.n + ': ' + m.note,
+        bg: sel ? 'var(--color-accent-100)' : 'var(--color-neutral-100)',
+        ring: (st.keysMode && i === 0) ? '0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent)' : (sel ? 'var(--shadow-sm)' : 'none'),
+        sel: () => this.setState({ selectedId: m.n, editingId: 0 }),
+        edit: (e) => { e.stopPropagation(); this.setState({ selectedId: m.n, editingId: m.n, draft: m.note }); },
+        del: (e) => { e.stopPropagation(); this.setState((s) => ({ marks: s.marks.filter((x) => x.n !== m.n), selectedId: s.selectedId === m.n ? 0 : s.selectedId, editingId: 0 })); this.touch(); } };
+    });
+    const chipPos = { 1: ['50%', '13.5%', 'translate(-50%,-115%)'], 2: ['80.3%', '36.5%', 'translate(-85%,-115%)'], 3: ['26.7%', '71%', 'translate(-10%,-115%)'], 4: ['28.3%', '23%', 'translate(-30%,-115%)'] };
+    const sel = has[st.selectedId];
+    const pos = sel ? chipPos[sel.n] : ['0', '0', 'none'];
+    return {
+      workView: st.view === 'work', exportMode: st.view === 'export',
+      conflictOpen: st.modal === 'conflict', clearOpen: st.modal === 'clear', leaveOpen: st.leaveOpen,
+      emptyMode: empty, hasRows: !empty, count: st.marks.length,
+      hidden: st.hidden, overlaysShown: !st.hidden && !empty,
+      keysMode: st.keysMode, keysOp: st.keysMode ? 1 : 0,
+      m1op: has[1] ? 1 : 0, m2op: has[2] ? 1 : 0, m3op: has[3] ? 1 : 0, m4op: has[4] ? 1 : 0,
+      r1op: st.selectedId === 1 ? 1 : 0, r2op: st.selectedId === 2 ? 1 : 0, r4op: st.selectedId === 4 ? 1 : 0,
+      rectW: st.selectedId === 3 ? 4 : 2.75, handlesOp: st.selectedId === 3 ? 1 : 0,
+      noteChipOn: !!sel && st.editingId === 0 && !st.hidden,
+      chipN: sel ? sel.n : '', chipType: sel ? sel.type : '', chipNote: sel ? sel.note : '',
+      chipLeft: pos[0], chipTop: pos[1], chipT: pos[2],
+      pillSaved: st.pill === 'saved', pillSaving: st.pill === 'saving', pillError: st.pill === 'error',
+      pillBg: st.pill === 'error' ? 'var(--color-accent-100)' : st.pill === 'saving' ? 'var(--color-neutral-100)' : 'var(--color-accent-2-100)',
+      pillFg: st.pill === 'error' ? 'var(--color-accent-800)' : st.pill === 'saving' ? 'var(--color-neutral-800)' : 'var(--color-accent-2-900)',
+      retry: () => this.touch(),
+      toggleOverlays: () => this.setState((s) => ({ hidden: !s.hidden })),
+      eyeTitle: st.hidden ? 'Show annotations (H)' : 'Hide annotations (H)',
+      eyeSlash: st.hidden ? 'M4 4 L20 20' : 'M0 0',
+      goExport: () => this.setState({ view: 'export', menuOpen: false, leaveOpen: false }),
+      backToWork: () => this.setState({ view: 'work' }),
+      goClear: () => this.setState({ modal: 'clear' }),
+      closeModal: () => this.setState({ modal: null }),
+      confirmClear: () => { this.setState({ modal: null, marks: [], selectedId: 0, editingId: 0 }); this.touch(); },
+      restore: () => { this.setState({ marks: this.defaults() }); this.touch(); },
+      stay: () => this.setState({ leaveOpen: false }),
+      zoomIn: () => this.setState((s) => ({ zoom: Math.min(3, Math.round(s.zoom * 125) / 100) })),
+      zoomOut: () => this.setState((s) => ({ zoom: Math.max(0.6, Math.round(s.zoom * 80) / 100) })),
+      zoomFit: () => this.setState({ zoom: 1 }),
+      zoomT: 'scale(' + st.zoom + ')',
+      zoomLabel: Math.round(st.zoom * 100) + '%',
+      zoomHint: st.zoom !== 1,
+      toggleMenu: () => this.setState((s) => ({ menuOpen: !s.menuOpen })),
+      menuOpen: st.menuOpen,
+      demoItems: [
+        { label: 'Simulate: autosave failure', act: () => { clearTimeout(this._t); this.setState({ pill: 'error', menuOpen: false }); } },
+        { label: 'Simulate: conflict from another tab', act: () => this.setState({ modal: 'conflict', menuOpen: false }) },
+        { label: 'Show: unsaved-leave warning', act: () => this.setState({ leaveOpen: true, menuOpen: false }) },
+        { label: st.keysMode ? 'Hide: keyboard-focus pass' : 'Show: keyboard-focus pass', act: () => this.setState((s) => ({ keysMode: !s.keysMode, menuOpen: false })) }
+      ],
+      tools, rows,
+      draft: st.draft, draftCount: st.draft.length,
+      setDraft: (e) => this.setState({ draft: e.target.value.slice(0, 140) }),
+      saveEdit: (e) => { e.stopPropagation(); this.setState((s) => ({ marks: s.marks.map((m) => m.n === s.editingId ? Object.assign({}, m, { note: s.draft }) : m), editingId: 0 })); this.touch(); },
+      cancelEdit: (e) => { e.stopPropagation(); this.setState({ editingId: 0 }); },
+      railOrder: side === 'left' ? 1 : 0,
+      canvasOrder: side === 'left' ? 2 : 1,
+      panelOrder: side === 'left' ? 0 : 2,
+      exportBlock: (this.props.exportLegend || 'Legend below image') === 'Legend below image',
+      exportInline: (this.props.exportLegend || 'Legend below image') !== 'Legend below image',
+      has1: !!has[1], has2: !!has[2], has3: !!has[3], has4: !!has[4],
+      n1: has[1] ? has[1].note : '', n2: has[2] ? has[2].note : '', n3: has[3] ? has[3].note : '', n4: has[4] ? has[4].note : '',
+      legend: st.marks.map((m) => ({ n: m.n, note: m.note })),
+      noop: () => {}
+    };
+  }
+}
+</script>
+</body>
+</html>

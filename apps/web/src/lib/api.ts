@@ -48,13 +48,13 @@ type ErrorBody = {
   error?: { code?: string; message?: string; fields?: Record<string, string[]> };
 };
 
-// One CSRF-aware unsafe request for BOTH POST and PATCH. The token lives in
+// One CSRF-aware unsafe request for POST, PATCH and PUT. The token lives in
 // memory only; on a stale-token 403 it clears, re-bootstraps and retries
 // EXACTLY once. Same-origin/no-store/5s-timeout all come from the shared
 // transport. Malformed JSON or a network/timeout error throws (the caller
 // turns that into a controlled failure — never a false success).
 async function sendJson<T>(
-  method: "POST" | "PATCH",
+  method: "POST" | "PATCH" | "PUT",
   path: string,
   body: unknown,
   hasRetried = false,
@@ -1014,4 +1014,206 @@ export function removeInspirationUpload(
 
 export function inspirationUploadImageUrl(designId: string, uploadId: string): string {
   return `/api/v1/designs/${designId}/inspiration-uploads/${uploadId}/image/`;
+}
+
+// ---------------------------------------------------------------------------
+// Private annotations (Phase 19) — the stylist worktable
+// ---------------------------------------------------------------------------
+//
+// Wire types are aliases of the generated schema, never hand-maintained
+// duplicates. The document is memory-only on the client: nothing here writes to
+// localStorage, sessionStorage or IndexedDB, and the caller must not either.
+//
+// Concurrency lives in `expected_revision` inside the body, never an If-Match
+// header. A stale value comes back as a 409 that leaves the stored document
+// untouched — surfaced here as a distinguishable `conflict` result so the UI can
+// offer reload-or-discard rather than silently dropping either copy.
+
+export type AnnotationDocument = components["schemas"]["AnnotationDocument"];
+export type AnnotationItem = components["schemas"]["AnnotationItem"];
+export type AnnotationGeometry = components["schemas"]["AnnotationGeometry"];
+export type AnnotationPoint = components["schemas"]["AnnotationPoint"];
+export type AnnotationItemType = components["schemas"]["AnnotationItemTypeEnum"];
+export type Palette = components["schemas"]["PaletteEnum"];
+export type AnnotationDocumentWrite =
+  components["schemas"]["AnnotationDocumentWriteRequest"];
+
+export type AnnotationSaveResult =
+  | { ok: true; document: AnnotationDocument }
+  | { ok: false; kind: "conflict"; revision: number; message: string }
+  | { ok: false; kind: "failed"; status: number; code: string; message: string };
+
+function annotationsPath(designId: string, versionId: string): string {
+  return `/api/v1/designs/${encodeURIComponent(designId)}/versions/${encodeURIComponent(
+    versionId,
+  )}/annotations/`;
+}
+
+// GET the stored document. Before anything has been saved the server still
+// returns 200 with `items: []`, `revision: 0` and its own canonical image
+// dimensions — so there is no "not found" state to special-case here, and the
+// dimensions always come from the server rather than being assumed.
+export async function fetchAnnotations(
+  designId: string,
+  versionId: string,
+): Promise<AnnotationDocument> {
+  const { annotations } = await getJson<{ annotations: AnnotationDocument }>(
+    annotationsPath(designId, versionId),
+  );
+  return annotations;
+}
+
+export async function saveAnnotations(
+  designId: string,
+  versionId: string,
+  body: AnnotationDocumentWrite,
+): Promise<AnnotationSaveResult> {
+  let envelope: ApiEnvelope<
+    { annotations: AnnotationDocument } & ErrorBody & { revision?: number }
+  >;
+  try {
+    envelope = await sendJson("PUT", annotationsPath(designId, versionId), body);
+  } catch {
+    // Timeout, network fault or unparseable body. The write may or may not have
+    // landed, so this is reported as a failure and never as a save — and the
+    // local revision is deliberately not advanced. If it did land, the next
+    // attempt is the ordinary stale-revision 409, which is recoverable.
+    return {
+      ok: false,
+      kind: "failed",
+      status: 0,
+      code: "unavailable",
+      message: "Your notes could not be saved. They are still here — try again.",
+    };
+  }
+
+  const { ok, status, data } = envelope;
+  if (ok) return { ok: true, document: data.annotations };
+
+  if (status === 409 && data.error?.code === "annotation_conflict") {
+    return {
+      ok: false,
+      kind: "conflict",
+      // The server tells us where it actually is. Falling back to 0 rather than
+      // guessing keeps a malformed body from silently becoming a valid revision.
+      revision: typeof data.revision === "number" ? data.revision : 0,
+      message:
+        data.error?.message ?? "These notes were changed somewhere else since your last save.",
+    };
+  }
+
+  const failure = toDraftFailure(status, data);
+  return {
+    ok: false,
+    kind: "failed",
+    status: failure.status,
+    code: failure.code,
+    message: failure.message,
+  };
+}
+
+export type AnnotationClearResult = { ok: true } | { ok: false; message: string };
+
+async function sendAnnotationsDelete(
+  designId: string,
+  versionId: string,
+  hasRetried = false,
+): Promise<AnnotationClearResult> {
+  const token = await ensureCsrfToken();
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(annotationsPath(designId, versionId), {
+      method: "DELETE",
+      headers: { "X-CSRFToken": token },
+    });
+  } catch {
+    return { ok: false, message: "Your notes could not be cleared. Please try again." };
+  }
+
+  if (response.status === 204) return { ok: true };
+
+  let body: ErrorBody = {};
+  try {
+    body = (await response.json()) as ErrorBody;
+  } catch {
+    body = {};
+  }
+  if (response.status === 403 && body?.error?.code === "csrf_failed" && !hasRetried) {
+    csrfToken = null;
+    return sendAnnotationsDelete(designId, versionId, true);
+  }
+  return {
+    ok: false,
+    message:
+      body.error?.message ?? "Your notes could not be cleared. Please try again.",
+  };
+}
+
+export function clearAnnotations(
+  designId: string,
+  versionId: string,
+): Promise<AnnotationClearResult> {
+  return sendAnnotationsDelete(designId, versionId);
+}
+
+// ---------------------------------------------------------------------------
+// Emailing yourself a render (Phase 19)
+// ---------------------------------------------------------------------------
+//
+// The recipient is NEVER supplied here. These endpoints accept no request body
+// at all and resolve the address from the signed-in account server-side, so this
+// wrapper deliberately has no address parameter to pass one through — the same
+// rule the backend enforces structurally, mirrored in the client's shape.
+
+export type RenderSendKind = "plain" | "annotated";
+
+export type RenderSendResult =
+  | { ok: true }
+  | {
+      ok: false;
+      // Distinguished so the UI can be honest about which one happened: sign in,
+      // feature unavailable, slow down, or a genuine fault.
+      kind: "recipient_unavailable" | "disabled" | "throttled" | "not_ready" | "failed";
+      message: string;
+      retryAfterSeconds?: number;
+    };
+
+export async function sendRenderToAccount(
+  designId: string,
+  versionId: string,
+  kind: RenderSendKind,
+): Promise<RenderSendResult> {
+  const suffix = kind === "annotated" ? "annotations/send" : "send";
+  const path = `/api/v1/designs/${encodeURIComponent(designId)}/versions/${encodeURIComponent(
+    versionId,
+  )}/${suffix}/`;
+
+  let envelope: ApiEnvelope<ErrorBody>;
+  try {
+    // No body: `{}` is sent because the transport writes JSON, and the endpoint
+    // reads nothing from it. There is deliberately no field here for an address.
+    envelope = await sendJson<ErrorBody>("POST", path, {});
+  } catch {
+    return {
+      ok: false,
+      kind: "failed",
+      message: "We could not reach the service. Nothing was sent.",
+    };
+  }
+
+  const { ok, status, data } = envelope;
+  if (ok) return { ok: true };
+
+  const code = data.error?.code ?? "";
+  const message = data.error?.message ?? "Your concept could not be sent. Please try again.";
+
+  if (code === "email_recipient_unavailable") {
+    return { ok: false, kind: "recipient_unavailable", message };
+  }
+  if (code === "email_delivery_disabled") return { ok: false, kind: "disabled", message };
+  if (code === "design_image_not_ready") return { ok: false, kind: "not_ready", message };
+  if (status === 429) {
+    return { ok: false, kind: "throttled", message };
+  }
+  return { ok: false, kind: "failed", message };
 }

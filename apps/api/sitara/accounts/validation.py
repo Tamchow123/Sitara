@@ -32,7 +32,12 @@ def parse_json_body(request) -> dict[str, Any]:
         )
     try:
         body = json.loads(request.body.decode("utf-8") or "{}")
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        # RecursionError because a pathologically nested body defeats a byte
+        # ceiling: the JSON scanner recurses once per nesting level, and
+        # RecursionError is a RuntimeError, so a ValueError-only guard lets it
+        # escape as a 500. Same defect and same fix as designs.views._parse_body,
+        # which guards the other JSON bodies this application accepts.
         raise RequestValidationError(
             "invalid_json", "The request body is not valid JSON."
         ) from None

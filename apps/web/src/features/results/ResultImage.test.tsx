@@ -101,7 +101,57 @@ describe("ResultImage", () => {
     expect(img).toHaveAttribute("referrerpolicy", "no-referrer");
   });
 
-  it("uses the download URL and a fixed filename for the download link", () => {
+  it("offers Annotate and Send to account in place of the download link", () => {
+    // Phase 19 replaced Download entirely. Removing it is a UX decision, NOT a
+    // privacy control — the signed URL is still a bearer URL and the browser can
+    // still save a displayed image — so this asserts what the product now points
+    // at, not that the image became unreachable.
+    render(
+      <ResultImage
+        images={images()}
+        isPending={false}
+        isFetching={false}
+        error={null}
+        altText="alt"
+        onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+      />,
+    );
+    expect(screen.getByRole("link", { name: /annotate/i })).toHaveAttribute(
+      "href",
+      "/design/design-1/result/version-1/annotate",
+    );
+    expect(screen.getByRole("button", { name: /send to account/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /download image/i })).not.toBeInTheDocument();
+  });
+
+  it("discloses that sending takes the image out of Sitara, on this surface too", () => {
+    // §8.5's disclosure has to be here and not only in the annotation workspace.
+    // This button is one click from the concept screen and is the likelier first
+    // send for someone who never opens Annotate, so a workspace-only sentence left
+    // the more direct path undisclosed. It must also not claim the exposure was
+    // removed — it is recorded as accepted.
+    render(
+      <ResultImage
+        images={images()}
+        isPending={false}
+        isFetching={false}
+        error={null}
+        altText="alt"
+        onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+      />,
+    );
+    const note = screen.getByText(/may keep a copy outside sitara/i);
+    expect(note).toBeInTheDocument();
+    expect(note.textContent).toMatch(/your mail provider and your inbox/i);
+  });
+
+  it("omits both actions when it is not given a design and version", () => {
+    // The comparison view renders two renders read-only; neither is the one the
+    // page is "about", so neither gets an Annotate or Send action.
     render(
       <ResultImage
         images={images()}
@@ -112,10 +162,27 @@ describe("ResultImage", () => {
         onRetry={vi.fn()}
       />,
     );
-    const link = screen.getByRole("link", { name: /download image/i });
-    expect(link).toHaveAttribute("href", "https://minio.local/signed-original-download");
-    expect(link).toHaveAttribute("download", "sitara-concept.webp");
-    expect(link).toHaveAttribute("referrerpolicy", "no-referrer");
+    expect(screen.queryByRole("link", { name: /annotate/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send to account/i })).not.toBeInTheDocument();
+  });
+
+  it("disables Send to account for an anonymous owner and says why", () => {
+    // No account means no address the server could resolve, and the endpoint
+    // deliberately has no field to supply one. The honest answer is to sign in.
+    render(
+      <ResultImage
+        images={images()}
+        isPending={false}
+        isFetching={false}
+        error={null}
+        altText="alt"
+        onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+      />,
+    );
+    expect(screen.getByRole("button", { name: /send to account/i })).toBeDisabled();
+    expect(screen.getByText(/sign in to send this to your email/i)).toBeInTheDocument();
   });
 
   it("opens the full-size image in a new tab with noreferrer noopener", () => {
@@ -134,7 +201,7 @@ describe("ResultImage", () => {
     expect(anchor).toHaveAttribute("rel", "noreferrer noopener");
   });
 
-  it("does not render the image or the download action once past expiry", () => {
+  it("does not render the image or its actions once past expiry", () => {
     render(
       <ResultImage
         images={images({ expires_at: new Date(Date.now() - 1000).toISOString() })}
@@ -143,10 +210,13 @@ describe("ResultImage", () => {
         error={null}
         altText="alt"
         onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
       />,
     );
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /download image/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /annotate/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send to account/i })).not.toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent(/expired/i);
   });
 

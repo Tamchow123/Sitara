@@ -62,6 +62,12 @@ from sitara.generation.refinement import (
     normalise_refinement_request,
 )
 from sitara.generation.refinement_service import RefinementLimitReached, RefinementSourceUnavailable
+from sitara.media.account_delivery import (
+    AccountEmailDisabled,
+    AccountEmailRecipientUnavailable,
+    recipient_for,
+    require_account_email_enabled,
+)
 from sitara.media.delivery import issue_design_image_urls
 from sitara.media.exceptions import (
     DesignImageDeliveryUnavailable,
@@ -74,9 +80,28 @@ from sitara.schema import (
     ValidationErrorEnvelopeSerializer,
 )
 
+from .annotation_service import (
+    AnnotationConflict,
+    AnnotationDocumentInvalid,
+    AnnotationImageNotReady,
+    AnnotationVersionGone,
+    annotation_payload,
+    delete_annotation_document,
+    read_annotation_document,
+    replace_annotation_document,
+)
 from .jobs import _iso, public_job_payload
-from .models import Design, DesignInspirationUpload, DesignVersion, GenerationAttempt
+from .models import (
+    Design,
+    DesignInspirationUpload,
+    DesignRenderDelivery,
+    DesignVersion,
+    GenerationAttempt,
+)
 from .openapi import (
+    AnnotationConflictErrorSerializer,
+    AnnotationDocumentResponseSerializer,
+    AnnotationDocumentWriteSerializer,
     DesignDetailResponseSerializer,
     DesignListResponseSerializer,
     DesignResultResponseSerializer,
@@ -85,8 +110,18 @@ from .openapi import (
     GenerationJobResponseSerializer,
     InspirationUploadResponseSerializer,
     InspirationUploadWriteSerializer,
+    RenderSendResponseSerializer,
 )
 from .ownership import accessible_designs, accessible_generation_attempts
+from .render_delivery import (
+    RenderDeliveryThrottled,
+    RenderDeliveryThrottleUnavailable,
+    RenderNotReady,
+    delivery_is_terminal,
+    enforce_send_throttles,
+    owner_of,
+    require_render_ready,
+)
 from .result import (
     DesignResultNotReady,
     DesignResultUnavailable,
@@ -109,6 +144,7 @@ from .services import (
     resolve_current_design_session,
     update_design_draft,
 )
+from .tasks import send_design_render
 from .upload_service import (
     InspirationUploadError,
     InspirationUploadThrottled,
@@ -252,9 +288,18 @@ def _workspace_unavailable(exc: WorkspaceCoordinationError) -> Response:
 
 
 def _parse_body(request) -> tuple[dict | list | None, Response | None]:
+    """The decoded JSON body, or a controlled 400.
+
+    ``RecursionError`` alongside ``ParseError`` because a pathologically nested
+    body defeats a byte ceiling. CPython's JSON scanner recurses once per nesting
+    level and raises ``RecursionError`` — a ``RuntimeError``, so it slips past
+    DRF's own ``except ValueError`` and escaped as a 500. Measured: about 40KB of
+    ``[[[[…]]]]`` was enough, on every endpoint that parses a JSON body. The stack
+    has fully unwound to this frame by the time it is caught here, so there is
+    headroom to build the response."""
     try:
         return request.data, None
-    except ParseError:
+    except (ParseError, RecursionError):
         return None, _error(
             "invalid_json", "The request body is not valid JSON.", status.HTTP_400_BAD_REQUEST
         )
@@ -847,6 +892,423 @@ class DesignVersionResultView(APIView):
         return Response(
             design_result_payload(version, spec, acknowledgements, lineage), headers=NO_STORE
         )
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class DesignVersionAnnotationsView(APIView):
+    """The owner's private editorial overlay for one owned DesignVersion (Phase 19).
+
+    Ownership filtering runs BEFORE the design UUID lookup, and the version must
+    belong to that owned design — an inaccessible or nonexistent design OR
+    version is one indistinguishable 404, so a caller knowing only a
+    DesignVersion UUID gains nothing.
+
+    ``csrf_protect`` on dispatch, not DRF's SessionAuthentication alone: these
+    endpoints accept anonymous unsafe requests (an anonymous browser workspace is
+    a feature), and SessionAuthentication only enforces CSRF for already
+    authenticated callers.
+
+    Nothing here touches the generated image. DELETE clears the overlay only, and
+    no response exposes a storage key, hash, user id, DesignSession id or signed
+    URL."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+    parser_classes = [JSONParser]
+
+    def _get_owned_version(self, request, design_id: str, version_id: str):
+        # Ownership filter FIRST, UUID lookup second — never the reverse.
+        design = accessible_designs(request).filter(pk=design_id).first()
+        if design is None:
+            return None
+        return DesignVersion.objects.filter(design=design, pk=version_id).first()
+
+    @staticmethod
+    def _not_ready() -> Response:
+        return _error(
+            "design_image_not_ready",
+            "This design version has no viewable image yet.",
+            status.HTTP_409_CONFLICT,
+        )
+
+    @staticmethod
+    def _conflict(current_revision: int) -> Response:
+        # Only the code, a safe message and the server's current revision. The
+        # stored document is never echoed back — a conflict must not become a
+        # channel for reading private note text.
+        return Response(
+            {
+                "error": {
+                    "code": "annotation_conflict",
+                    "message": (
+                        "These annotations changed since your last save. "
+                        "Reload to see the latest marks."
+                    ),
+                },
+                "revision": current_revision,
+            },
+            status=status.HTTP_409_CONFLICT,
+            headers=NO_STORE,
+        )
+
+    @extend_schema(
+        operation_id="designs_version_annotations_retrieve",
+        tags=_DESIGN_TAGS,
+        responses={
+            200: AnnotationDocumentResponseSerializer,
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="design_image_not_ready: no permanent image has been ingested yet.",
+            ),
+        },
+        summary="Get your private annotations for a design version",
+        description=(
+            "Returns the owner's annotation overlay. Before anything has been "
+            "saved this is a 200 with an empty item list and revision 0 — not a "
+            "404 — so revision 0 is the unambiguous never-saved signal and the "
+            "client needs no separate branch. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def get(self, request, design_id: str, version_id: str):
+        version = self._get_owned_version(request, design_id, version_id)
+        if version is None:
+            return _not_found()
+        try:
+            document, revision, updated_at = read_annotation_document(version)
+        except AnnotationImageNotReady:
+            return self._not_ready()
+        return Response(annotation_payload(document, revision, updated_at), headers=NO_STORE)
+
+    @extend_schema(
+        operation_id="designs_version_annotations_replace",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request={"application/json": AnnotationDocumentWriteSerializer},
+        responses={
+            200: AnnotationDocumentResponseSerializer,
+            400: ValidationErrorEnvelopeSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(
+                AnnotationConflictErrorSerializer,
+                description=(
+                    "annotation_conflict: expected_revision is stale, and the stored "
+                    "document is unchanged. The body carries the server's current "
+                    "revision and never the document itself. Or design_image_not_ready."
+                ),
+            ),
+        },
+        summary="Replace your private annotations for a design version",
+        description=(
+            "Replaces the COMPLETE overlay atomically — there is no partial "
+            "update, so a removed mark is unambiguous. Send the revision you hold "
+            "as expected_revision (0 to create); a stale value is refused and "
+            "nothing is overwritten. A successful write returns 200 with the "
+            "stored document and its incremented revision. The revision counts "
+            "writes, not content changes, so replaying identical content with the "
+            "current revision still increments. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def put(self, request, design_id: str, version_id: str):
+        version = self._get_owned_version(request, design_id, version_id)
+        if version is None:
+            return _not_found()
+        body, parse_failure = _parse_body(request)
+        if parse_failure is not None:
+            return parse_failure
+        if not isinstance(body, dict):
+            return _error(
+                "annotation_invalid",
+                "The annotation document is not valid.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        # expected_revision is a transport concern, not part of the stored
+        # document, so it is split off before the document is validated.
+        payload = {key: value for key, value in body.items() if key != "expected_revision"}
+        expected = body.get("expected_revision")
+        if not isinstance(expected, int) or isinstance(expected, bool) or expected < 0:
+            return _error(
+                "annotation_invalid",
+                "A valid expected_revision is required.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            document, revision, updated_at = replace_annotation_document(
+                version, payload, expected_revision=expected
+            )
+        except AnnotationImageNotReady:
+            return self._not_ready()
+        except AnnotationVersionGone:
+            # Purged between the ownership lookup and the lock. The same 404 a
+            # fresh request would get, so the answer stays consistent.
+            return _not_found()
+        except AnnotationConflict as exc:
+            return self._conflict(exc.current_revision)
+        except AnnotationDocumentInvalid as exc:
+            # The service's message is already generic; it never quotes the
+            # rejected note back.
+            return _error(exc.code, exc.message, status.HTTP_400_BAD_REQUEST)
+        return Response(annotation_payload(document, revision, updated_at), headers=NO_STORE)
+
+    @extend_schema(
+        operation_id="designs_version_annotations_delete",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=None,
+        responses={
+            204: OpenApiResponse(description="Cleared."),
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(ErrorEnvelopeSerializer, description="design_image_not_ready."),
+        },
+        summary="Clear your private annotations for a design version",
+        description=(
+            "Removes the overlay document. The generated image is never touched. "
+            "Idempotent: clearing when nothing is stored still succeeds. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def delete(self, request, design_id: str, version_id: str):
+        version = self._get_owned_version(request, design_id, version_id)
+        if version is None:
+            return _not_found()
+        try:
+            delete_annotation_document(version)
+        except AnnotationImageNotReady:
+            return self._not_ready()
+        except AnnotationVersionGone:
+            return _not_found()
+        return Response(status=status.HTTP_204_NO_CONTENT, headers=NO_STORE)
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class _DesignVersionSendView(APIView):
+    """Queue an email of one owned version's render to the owner (Phase 19, §8).
+
+    Two concrete endpoints subclass this — the concept screen sends the plain
+    canonical render, the annotation workspace sends the annotated composite —
+    differing only in ``kind``. Email replaces download entirely; removing the
+    download button is a product decision, **not** a privacy control, since the
+    image renders in the browser and can always be saved.
+
+    **The recipient is never accepted from the caller, in any field, ever.** It
+    is ``request.user.email``, read server-side, and the task re-derives it
+    independently from the design's own session. This view has no request body
+    at all, which is the cheapest way to guarantee it: there is nothing to
+    parse, so there is nothing an address could arrive in. An endpoint that
+    mails an attachment to a caller-chosen address is an open relay.
+
+    Order matters and is fixed: CSRF, then ownership, then the gate, then
+    readiness, then the throttles. Throttling last means a cross-origin page
+    cannot burn a victim's quota, and a throttled caller still cannot
+    distinguish an owned design from one that never existed.
+
+    The response carries no address. The client already knows the account's own
+    address from ``/auth/me`` and uses that for its confirmation copy — echoing
+    it here would put it in a response body for no benefit."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    #: Set by each concrete subclass.
+    kind: str = ""
+
+    def _get_owned_version(self, request, design_id: str, version_id: str):
+        # Ownership filter FIRST, UUID lookup second — never the reverse.
+        design = accessible_designs(request).filter(pk=design_id).first()
+        if design is None:
+            return None
+        return DesignVersion.objects.filter(design=design, pk=version_id).first()
+
+    def post(self, request, design_id: str, version_id: str):
+        version = self._get_owned_version(request, design_id, version_id)
+        if version is None:
+            return _not_found()
+
+        try:
+            require_account_email_enabled()
+        except AccountEmailDisabled:
+            return _error(
+                "email_delivery_disabled",
+                "Emailing your concept is not available at the moment.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            require_render_ready(version)
+        except RenderNotReady:
+            return _error(
+                "design_image_not_ready",
+                "This design version has no viewable image yet.",
+                status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            # The owning account's address, from the row. An anonymous workspace
+            # owns designs but has no account, and there is deliberately no
+            # fallback: no prompt for an address, no silent success.
+            recipient = recipient_for(owner_of(version))
+        except AccountEmailRecipientUnavailable:
+            return _error(
+                "email_recipient_unavailable",
+                "Sign in to have your concept emailed to your account address.",
+                status.HTTP_409_CONFLICT,
+            )
+
+        if delivery_is_terminal(version, self.kind):
+            # This render's delivery row is past the point where a send can
+            # happen, so the task would claim nothing and no-op. Charging four
+            # counters for that would let repeated sends of a finished render
+            # exhaust the quota a genuinely new one needs — the two kinds share
+            # a per-account ceiling. Still 202, and unchanged from the enqueuing
+            # path: the task no-ops either way, so there is nothing here for the
+            # response to distinguish.
+            logger.info(
+                "render_send.already_terminal",
+                extra={"design_version_id": str(version.pk), "kind": self.kind},
+            )
+            return Response(
+                {"send": {"status": "queued"}},
+                status=status.HTTP_202_ACCEPTED,
+                headers=NO_STORE,
+            )
+
+        try:
+            enforce_send_throttles(request, recipient)
+        except RenderDeliveryThrottled as exc:
+            return _error(
+                "email_send_limit_reached",
+                "You have sent this many concepts for now. Please try again later.",
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Cache-Control": "no-store", "Retry-After": str(exc.retry_after)},
+            )
+        except RenderDeliveryThrottleUnavailable:
+            # An infrastructure fault is not the caller's abuse, so this is a
+            # 503 rather than the 429 — and carries no Retry-After, because no
+            # recovery window is known.
+            return _error(
+                "email_send_unavailable",
+                "Emailing your concept is temporarily unavailable. Please try again later.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            # Row UUIDs only. No address, no bytes and no URL crosses the queue.
+            send_design_render.delay(str(version.pk), self.kind)
+        except Exception as exc:
+            # The broker is a SECOND Redis, configured independently of the
+            # throttle cache (CELERY_BROKER_URL vs REDIS_CACHE_URL, different
+            # databases by default), so it can be down while the cache that just
+            # answered is healthy. Without this the caller would get an
+            # unhandled 500 instead of the documented envelope, having already
+            # spent throttle quota on a send that never queued. Same broad catch
+            # at the same boundary as generation/pipeline.py's QueueUnavailable.
+            logger.warning(
+                "render_send.enqueue_failed",
+                extra={
+                    "design_version_id": str(version.pk),
+                    "kind": self.kind,
+                    "exception_type": type(exc).__name__,
+                },
+            )
+            return _error(
+                "email_send_unavailable",
+                "Emailing your concept is temporarily unavailable. Please try again later.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(
+            {"send": {"status": "queued"}},
+            status=status.HTTP_202_ACCEPTED,
+            headers=NO_STORE,
+        )
+
+
+_SEND_RESPONSES = {
+    202: OpenApiResponse(RenderSendResponseSerializer, description="Queued for delivery."),
+    403: OpenApiResponse(ErrorEnvelopeSerializer, description="CSRF token missing/invalid."),
+    404: OpenApiResponse(
+        ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+    ),
+    409: OpenApiResponse(
+        ErrorEnvelopeSerializer,
+        description=(
+            "design_image_not_ready, or email_recipient_unavailable when the "
+            "workspace is anonymous and so has no account address."
+        ),
+    ),
+    429: OpenApiResponse(
+        ErrorEnvelopeSerializer,
+        description="email_send_limit_reached. Carries Retry-After.",
+    ),
+    503: OpenApiResponse(
+        ErrorEnvelopeSerializer,
+        description=(
+            "email_delivery_disabled when the operator has not enabled account "
+            "email, or email_send_unavailable when the throttle store cannot be "
+            "reached. Neither carries Retry-After."
+        ),
+    ),
+}
+
+_SEND_NOTE = (
+    "The recipient is always your own account address, read server-side. No "
+    "request body is accepted and no address may be supplied. The response "
+    "never contains an address. Delivery is asynchronous: a 202 means queued, "
+    "not sent."
+)
+
+
+class DesignVersionSendView(_DesignVersionSendView):
+    kind = DesignRenderDelivery.PLAIN
+
+    @extend_schema(
+        operation_id="designs_versions_send_create",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=None,
+        responses=_SEND_RESPONSES,
+        summary="Email yourself this design version's concept image",
+        description=(
+            "Queues the plain canonical render as a PNG attachment. "
+            + _SEND_NOTE
+            + " "
+            + _OWNERSHIP_NOTE
+        ),
+    )
+    def post(self, request, design_id: str, version_id: str):
+        return super().post(request, design_id, version_id)
+
+
+class DesignVersionAnnotationsSendView(_DesignVersionSendView):
+    kind = DesignRenderDelivery.ANNOTATED
+
+    @extend_schema(
+        operation_id="designs_versions_annotations_send_create",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=None,
+        responses=_SEND_RESPONSES,
+        summary="Email yourself this design version's annotated concept",
+        description=(
+            "Queues the annotated composite — the image with your marks drawn on "
+            "it and a numbered note legend beneath — as a PNG attachment. Your "
+            "note text is in the attachment only; the message body never carries "
+            "it. " + _SEND_NOTE + " " + _OWNERSHIP_NOTE
+        ),
+    )
+    def post(self, request, design_id: str, version_id: str):
+        return super().post(request, design_id, version_id)
 
 
 @method_decorator(csrf_protect, name="dispatch")

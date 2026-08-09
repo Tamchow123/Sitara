@@ -18,6 +18,29 @@ def inmemory_storage(settings):
 
 
 @pytest.fixture(autouse=True)
+def inmemory_design_image_storage(settings):
+    """Resolve the ``design_images`` alias to in-memory storage for EVERY test in
+    this package. Mirrors ``generation/tests/conftest.py``.
+
+    Autouse and unconditional, deliberately. ``inmemory_storage`` above covers
+    only the ``default`` alias and is opt-in, but
+    ``create_ready_design_version`` writes through ``design_images`` whenever
+    ``with_storage_objects`` is left at its default of True — so a test that
+    simply uses the helper reaches the configured S3 backend unless something
+    stops it. That passes on a developer machine running MinIO and fails in CI,
+    which has none: it is exactly how the Phase 19 retention-purge tests broke,
+    and the reason three separate modules here had each grown their own private
+    copy of this override. One fixture at the package boundary means a NEW test
+    module cannot repeat it, which an opt-in fixture could not promise.
+
+    Nothing in this package deliberately exercises the real configured backend.
+    A test that ever needs to must override this explicitly and say why."""
+    configured = copy.deepcopy(settings.STORAGES)
+    configured["design_images"] = {"BACKEND": "django.core.files.storage.InMemoryStorage"}
+    settings.STORAGES = configured
+
+
+@pytest.fixture(autouse=True)
 def live_mode_by_default(settings):
     """Most generation/refinement HTTP tests exercise the LIVE pipeline
     (mocking ``generation_is_available``) and predate Phase 15's demo/live

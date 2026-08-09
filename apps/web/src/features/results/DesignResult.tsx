@@ -230,6 +230,8 @@ export function DesignResult({ designId, versionId }: Props) {
             error={imageQuery.error}
             altText={result.image_alt_text}
             onRetry={() => void imageQuery.refetch()}
+            designId={designId}
+            versionId={versionId}
           />
         </div>
 

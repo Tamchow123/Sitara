@@ -581,6 +581,199 @@ class DesignVersion(models.Model):
         )
 
 
+class DesignAnnotationDocument(models.Model):
+    """The owner's private editorial marks over one immutable generated image.
+
+    An annotation is feedback attached to a version, not a change to it: it is
+    never a refinement, a new generated version, an AI prompt or a public
+    comment, and it never touches the version's image bytes, storage key,
+    hashes, processor version or DesignSpec. The generated image stays exactly
+    as it was ingested; the marks live here, beside it.
+
+    Ownership is DERIVED, never copied. The only path is::
+
+        DesignAnnotationDocument -> DesignVersion -> Design -> DesignSession
+
+    so this table deliberately carries no user id, no DesignSession id, no raw
+    Django session key, no public token and no storage key or signed URL. A
+    later ownership change or retention purge therefore needs no write here —
+    the CASCADE below removes the document with its version, and the
+    ownership-first query in ``designs.ownership`` remains the single access
+    control.
+
+    One document per version (``OneToOneField``), so a refined version gets its
+    own independent document and annotations are never copied from parent to
+    child. ``revision`` counts WRITES, not content changes, and is the whole of
+    the optimistic-concurrency contract: a client sends the revision it believes
+    it holds, and a mismatch is a conflict rather than a silent overwrite. It
+    starts at 1, so the API can use ``revision: 0`` as the unambiguous
+    "never saved" signal without a separate 404 branch.
+
+    ``document`` holds the validated overlay (see
+    :mod:`sitara.designs.annotation_schema`), including the ``image_width`` and
+    ``image_height`` it was drawn against — bound at first save from the
+    version's own canonical dimensions and re-checked on every write, because a
+    document whose dimensions disagreed with the image would place every mark
+    wrongly."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    design_version = models.OneToOneField(
+        DesignVersion,
+        on_delete=models.CASCADE,
+        related_name="annotation_document",
+    )
+    schema_version = models.PositiveSmallIntegerField()
+    document = models.JSONField()
+    revision = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            # A stored document has always been written at least once; only the
+            # API's synthetic "never saved" response uses revision 0.
+            models.CheckConstraint(
+                condition=Q(revision__gte=1),
+                name="designs_annotation_revision_positive",
+            ),
+            # Pinned to the exact currently-valid version, matching
+            # inspiration_context_schema_version and
+            # refinement_request_schema_version on DesignVersion. This is what
+            # turns "bump only with a documented migration strategy" from prose
+            # into a forcing function: introducing schema 2 requires editing and
+            # reviewing a migration at the moment it happens, rather than a
+            # stray write silently pairing a v2 marker with a v1 document.
+            models.CheckConstraint(
+                condition=Q(schema_version=1),
+                name="designs_annotation_schema_version_valid",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"annotations for version {self.design_version_id}"
+
+
+class DesignRenderDelivery(models.Model):
+    """The durable claim on emailing one render of one version to its owner.
+
+    This row exists for exactly one reason: SMTP is a non-transactional external
+    side effect, and ``CELERY_TASK_ACKS_LATE``/``CELERY_TASK_REJECT_ON_WORKER_LOST``
+    are both on project-wide. A worker killed AFTER handing the message to the
+    backend but BEFORE its ack reaches the broker gets the task redelivered, and
+    without a durable marker that redelivery is a second real email. The
+    ownership and readiness rechecks the task also performs guard a different
+    failure class entirely and do nothing here.
+
+    **It stores state, counters and timestamps — nothing else.** No recipient
+    address, no note text, no rendered bytes, no storage key, no signed URL. A
+    durable row is a strictly worse place to leak an address than a cache key:
+    it survives into backups, dumps, fixtures and any admin view. The recipient
+    is re-derived server-side from the owning user at send time and never
+    persisted here, and a test asserts this table carries no address- or
+    note-shaped field.
+
+    Keyed on ``(design_version, kind)`` rather than the version alone, because
+    the two surfaces send genuinely different artefacts — the plain canonical
+    render from the concept screen and the annotated composite from the
+    workspace. One key would let sending either one permanently block the other.
+
+    Three states, and exactly-once is NOT claimed:
+
+    ``claimed``
+        A worker holds this send. A redelivery inside
+        ``ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS`` no-ops — another worker has it.
+        Beyond the TTL the claim is treated as a dead worker's, and the send is
+        retried once with ``attempt_count`` incremented.
+    ``sent``
+        Terminal. The message reached the backend. A redelivery always no-ops.
+    ``retry_exhausted``
+        Terminal. ``attempt_count`` hit ``MAX_SEND_ATTEMPTS``; never sends again.
+
+    Capping ``attempt_count`` is what makes "retry once" enforced rather than
+    merely intended — two successive worker deaths cannot produce a third
+    attempt. The stale-claim retry exists at all because a worker that died
+    between claiming and sending would otherwise leave the send permanently
+    stuck with no path back; that branch deliberately prefers **at most one
+    duplicate** over **silent loss** of a copy the owner explicitly asked for,
+    and the duplicate can only ever go to the account's own address.
+
+    Ownership is derived exactly as :class:`DesignAnnotationDocument`'s is —
+    through the version to the design to the session — so this table carries no
+    user id and the CASCADE removes it with a purged design."""
+
+    CLAIMED = "claimed"
+    SENT = "sent"
+    RETRY_EXHAUSTED = "retry_exhausted"
+    STATE_CHOICES = [
+        (CLAIMED, "Claimed"),
+        (SENT, "Sent"),
+        (RETRY_EXHAUSTED, "Retry exhausted"),
+    ]
+
+    PLAIN = "plain"
+    ANNOTATED = "annotated"
+    KIND_CHOICES = [(PLAIN, "Plain render"), (ANNOTATED, "Annotated render")]
+
+    #: A first attempt plus at most one stale-claim retry.
+    MAX_SEND_ATTEMPTS = 2
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    design_version = models.ForeignKey(
+        DesignVersion,
+        on_delete=models.CASCADE,
+        related_name="render_deliveries",
+    )
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES)
+    state = models.CharField(max_length=16, choices=STATE_CHOICES)
+    attempt_count = models.PositiveSmallIntegerField()
+    claimed_at = models.DateTimeField()
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["design_version", "kind"],
+                name="designs_render_delivery_unique_version_kind",
+            ),
+            # `choices` is validation, not enforcement — it does not reach the
+            # database, and _claim's state machine reasons by exclusion ("not
+            # terminal, therefore claimed"). An unexpected value written by a
+            # migration, a fixture or a stray update would fall through those
+            # branches into the stale-claim path and could send. Pinned here so
+            # it cannot.
+            models.CheckConstraint(
+                condition=Q(state__in=["claimed", "sent", "retry_exhausted"]),
+                name="designs_render_delivery_state_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(kind__in=["plain", "annotated"]),
+                name="designs_render_delivery_kind_valid",
+            ),
+            # The cap is an application rule enforced in render_delivery; this
+            # is the database backstop that makes a third attempt impossible
+            # even through a stray write.
+            models.CheckConstraint(
+                condition=Q(attempt_count__gte=1) & Q(attempt_count__lte=2),
+                name="designs_render_delivery_attempt_count_bounded",
+            ),
+            # sent_at is set if and only if the state is terminal-sent, so a
+            # "sent" row can never lack its timestamp and a claimed row can
+            # never carry one.
+            models.CheckConstraint(
+                condition=(
+                    Q(state="sent", sent_at__isnull=False)
+                    | (~Q(state="sent") & Q(sent_at__isnull=True))
+                ),
+                name="designs_render_delivery_sent_at_matches_state",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind} render delivery for version {self.design_version_id}"
+
+
 class GenerationAttempt(models.Model):
     """One durable asynchronous generation job for a Design (Phase 10).
 

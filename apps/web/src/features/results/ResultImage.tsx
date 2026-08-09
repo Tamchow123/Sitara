@@ -9,6 +9,9 @@
 import { useRef } from "react";
 
 import { classifyImageError, imageErrorCopy } from "./result-errors";
+import { AccountSendDisclosure } from "@/features/annotations/AccountSendDisclosure";
+import { SendToAccountButton } from "@/features/annotations/SendToAccountButton";
+import { useAuth } from "@/lib/auth";
 import type { DesignImages } from "@/lib/api";
 
 type Props = {
@@ -18,9 +21,22 @@ type Props = {
   error: unknown;
   altText: string;
   onRetry: () => void;
+  /** Omitted on the comparison view, which shows two renders read-only. */
+  designId?: string;
+  versionId?: string;
 };
 
-export function ResultImage({ images, isPending, isFetching, error, altText, onRetry }: Props) {
+export function ResultImage({
+  images,
+  isPending,
+  isFetching,
+  error,
+  altText,
+  onRetry,
+  designId,
+  versionId,
+}: Props) {
+  const { user } = useAuth();
   // Guards "attempt one signed-URL refresh, never an infinite loop": the
   // backend mints a brand-new signed URL on every refetch, so a guard keyed
   // on URL identity never actually caps a sustained failure (each refresh
@@ -97,15 +113,36 @@ export function ResultImage({ images, isPending, isFetching, error, altText, onR
           onError={handleImageLoadError}
         />
       </a>
-      <figcaption className="result-image-actions">
-        <a
-          href={images.original.download_url}
-          download="sitara-concept.webp"
-          referrerPolicy="no-referrer"
-        >
-          Download image
-        </a>
-      </figcaption>
+      {/* Phase 19 replaced the download link with these two actions. Removing
+          the link is a UX decision, NOT a privacy control: the signed image URL
+          is still a temporary bearer URL that anyone holding it can fetch, and
+          the browser can still save the image it is already displaying. What
+          changed is where the product points the user — a private worktable, and
+          a copy sent to their own account address. */}
+      {designId && versionId && (
+        <figcaption className="result-image-actions">
+          <a className="btn btn-secondary" href={`/design/${designId}/result/${versionId}/annotate`}>
+            Annotate
+          </a>
+          <SendToAccountButton
+            designId={designId}
+            versionId={versionId}
+            kind="plain"
+            label="Send to account"
+            accountEmail={user?.email ?? null}
+          />
+          {/* §8.5's disclosure, on THIS surface too. It was originally written
+              only into the annotation workspace's panel footer — but this button
+              is one click from the concept screen and is the likelier first send
+              for someone who never opens Annotate, so scoping the sentence to the
+              annotated flow left the more direct path undisclosed. Shared
+              component, so the two surfaces cannot describe the same accepted
+              exposure differently. */}
+          <p className="result-image-send-note">
+            <AccountSendDisclosure kind="plain" />
+          </p>
+        </figcaption>
+      )}
     </figure>
   );
 }

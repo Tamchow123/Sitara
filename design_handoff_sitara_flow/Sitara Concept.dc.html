@@ -48,7 +48,8 @@
           <image-slot id="concept-render" src="uploads/images/03-garments/sitara__garments__lehenga__v2.jpg" shape="rounded" radius="16" placeholder="AI concept render — drop image here"></image-slot>
         </div>
         <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-          <button class="btn btn-secondary" onClick="{{ noop }}" style="font-size:13.5px">Download image</button>
+          <a href="Sitara Annotation.dc.html" class="btn btn-secondary" style="text-decoration:none;font-size:13.5px;display:inline-flex;align-items:center;gap:7px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21 C12 21 5 14.8 5 10 A7 7 0 0 1 19 10 C19 14.8 12 21 12 21 Z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>Annotate</a>
+          <button class="btn btn-secondary" onClick="{{ sendPng }}" style="font-size:13.5px;display:inline-flex;align-items:center;gap:7px;white-space:nowrap"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 L11 13"></path><path d="M22 2 L15 22 L11 13 L2 9 Z"></path></svg>{{ sendLabel }}</button>
           <button class="btn btn-secondary" onClick="{{ copyBrief }}" style="font-size:13.5px">{{ copyLabel }}</button>
         </div>
         <p style="margin:0;font-size:13px;line-height:1.55;color:var(--color-neutral-700);background:var(--color-neutral-100);border-radius:var(--radius-md);padding:var(--space-3) var(--space-4)"><strong>An AI-assisted visual concept</strong>, not a photograph of a finished garment. Colours, materials and fine details may differ when interpreted by your tailor.</p>
@@ -97,7 +98,7 @@
 </x-dc>
 <script type="text/x-dc" data-dc-script>
 class Component extends DCLogic {
-  state = { open: {}, copied: false, all: false };
+  state = { open: {}, copied: false, all: false, sent: false };
   icon(paths) {
     return React.createElement('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.4, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
       paths.map((d, i) => React.createElement('path', { key: i, d })));
@@ -179,6 +180,10 @@ class Component extends DCLogic {
         this.setState({ copied: true }); setTimeout(() => this.setState({ copied: false }), 1800);
       },
       copyLabel: st.copied ? 'Copied \u2713' : 'Copy brief',
+      sendPng: () => {
+        this.setState({ sent: true }); setTimeout(() => this.setState({ sent: false }), 2200);
+      },
+      sendLabel: st.sent ? 'Sent to your email \u2713' : 'Send to account',
       noop: () => {}
     };
   }

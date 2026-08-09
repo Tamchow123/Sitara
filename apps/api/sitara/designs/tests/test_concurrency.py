@@ -6,65 +6,24 @@ barrier. ``transaction=True`` gives each thread its own committed view of
 PostgreSQL (required for SELECT ... FOR UPDATE to coordinate anything);
 each worker closes its thread-local database connection when done."""
 
-import threading
-from http.cookies import SimpleCookie
-
 import pytest
-from django.db import connection
-from django.test import Client
 
 from sitara.designs.models import Design, DesignSession
 
 from .utils import (
     DESIGNS_URL,
     bootstrap_csrf,
+    clone_browser,
     create_design,
     csrf_client,
     design_url,
     register,
+    run_simultaneously,
     send_json,
     unique_email,
 )
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-def clone_browser(browser: Client) -> Client:
-    """A second client carrying the SAME cookies — one browser, two tabs."""
-    twin = csrf_client()
-    twin.cookies = SimpleCookie()
-    twin.cookies.load({name: morsel.value for name, morsel in browser.cookies.items()})
-    return twin
-
-
-def run_simultaneously(workers):
-    """Run callables on their own threads, released together by a barrier.
-
-    Worker exceptions surface in the assertion; every thread closes its own
-    database connection safely."""
-    barrier = threading.Barrier(len(workers), timeout=10)
-    results = [None] * len(workers)
-    failures: list[BaseException] = []
-
-    def runner(index, work):
-        try:
-            barrier.wait()
-            results[index] = work()
-        except BaseException as exc:  # noqa: BLE001 - surfaced in the assert
-            failures.append(exc)
-        finally:
-            connection.close()
-
-    threads = [
-        threading.Thread(target=runner, args=(index, work)) for index, work in enumerate(workers)
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=30)
-    assert failures == []
-    assert all(result is not None for result in results)
-    return results
 
 
 class TestConcurrentAnonymousCreation:

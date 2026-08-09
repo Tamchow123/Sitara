@@ -223,6 +223,27 @@ class TestRegistration:
         assert response.status_code == 400
         assert response.json()["error"]["code"] == "invalid_content_type"
 
+    @pytest.mark.parametrize("path", ["/api/v1/auth/register/", "/api/v1/auth/login/"])
+    @pytest.mark.parametrize("depth", [5_000, 20_000, 60_000])
+    def test_a_pathologically_nested_body_is_a_controlled_400(self, path, depth):
+        """A byte ceiling cannot stop this: 120KB of ``[[[[…]]]]`` is only 120KB,
+        but the JSON scanner recurses once per nesting level and raises
+        ``RecursionError`` — a ``RuntimeError``, so a ValueError-only guard let it
+        escape as a 500. These endpoints are anonymous, so they were the most
+        exposed parsers in the application. Depths sit either side of the
+        interpreter's threshold, which moves between versions."""
+        client = csrf_client()
+        token = bootstrap_csrf(client)
+        response = client.post(
+            path,
+            data="[" * depth + "]" * depth,
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=token,
+            REMOTE_ADDR=unique_ip(),
+        )
+        assert response.status_code == 400, response.status_code
+        assert response.json()["error"]["code"] == "invalid_json"
+
 
 class TestLogin:
     def test_login_canonicalises_email(self):

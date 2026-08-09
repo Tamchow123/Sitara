@@ -7,8 +7,6 @@ no-store/no-referrer/no-provenance response contract. Presigning is a local
 computation — no network is touched.
 """
 
-import copy
-
 import pytest
 from django.utils import timezone
 
@@ -27,13 +25,6 @@ from .utils import (
 )
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture(autouse=True)
-def inmemory_design_image_storage(settings):
-    storages_config = copy.deepcopy(settings.STORAGES)
-    storages_config["design_images"] = {"BACKEND": "django.core.files.storage.InMemoryStorage"}
-    settings.STORAGES = storages_config
 
 
 def _images_url(design_id, version_id) -> str:

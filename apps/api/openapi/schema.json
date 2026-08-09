@@ -1166,6 +1166,364 @@
                 }
             }
         },
+        "/api/v1/designs/{design_id}/versions/{version_id}/annotations/": {
+            "get": {
+                "operationId": "designs_version_annotations_retrieve",
+                "description": "Returns the owner's annotation overlay. Before anything has been saved this is a 200 with an empty item list and revision 0 — not a 404 — so revision 0 is the unambiguous never-saved signal and the client needs no separate branch. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Get your private annotations for a design version",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AnnotationDocumentResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "design_image_not_ready: no permanent image has been ingested yet."
+                    }
+                }
+            },
+            "put": {
+                "operationId": "designs_version_annotations_replace",
+                "description": "Replaces the COMPLETE overlay atomically — there is no partial update, so a removed mark is unambiguous. Send the revision you hold as expected_revision (0 to create); a stale value is refused and nothing is overwritten. A successful write returns 200 with the stored document and its incremented revision. The revision counts writes, not content changes, so replaying identical content with the current revision still increments. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Replace your private annotations for a design version",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AnnotationDocumentWriteRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AnnotationDocumentResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AnnotationConflictError"
+                                }
+                            }
+                        },
+                        "description": "annotation_conflict: expected_revision is stale, and the stored document is unchanged. The body carries the server's current revision and never the document itself. Or design_image_not_ready."
+                    }
+                }
+            },
+            "delete": {
+                "operationId": "designs_version_annotations_delete",
+                "description": "Removes the overlay document. The generated image is never touched. Idempotent: clearing when nothing is stored still succeeds. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Clear your private annotations for a design version",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Cleared."
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "design_image_not_ready."
+                    }
+                }
+            }
+        },
+        "/api/v1/designs/{design_id}/versions/{version_id}/annotations/send/": {
+            "post": {
+                "operationId": "designs_versions_annotations_send_create",
+                "description": "Queues the annotated composite — the image with your marks drawn on it and a numbered note legend beneath — as a PNG attachment. Your note text is in the attachment only; the message body never carries it. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Email yourself this design version's annotated concept",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RenderSendResponse"
+                                }
+                            }
+                        },
+                        "description": "Queued for delivery."
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "design_image_not_ready, or email_recipient_unavailable when the workspace is anonymous and so has no account address."
+                    },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "email_send_limit_reached. Carries Retry-After."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "email_delivery_disabled when the operator has not enabled account email, or email_send_unavailable when the throttle store cannot be reached. Neither carries Retry-After."
+                    }
+                }
+            }
+        },
         "/api/v1/designs/{design_id}/versions/{version_id}/images/": {
             "get": {
                 "operationId": "designs_version_images_retrieve",
@@ -1318,6 +1676,113 @@
                             }
                         },
                         "description": "design_result_unavailable: the stored content is corrupt, unsupported or unsafe."
+                    }
+                }
+            }
+        },
+        "/api/v1/designs/{design_id}/versions/{version_id}/send/": {
+            "post": {
+                "operationId": "designs_versions_send_create",
+                "description": "Queues the plain canonical render as a PNG attachment. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Email yourself this design version's concept image",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RenderSendResponse"
+                                }
+                            }
+                        },
+                        "description": "Queued for delivery."
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "design_image_not_ready, or email_recipient_unavailable when the workspace is anonymous and so has no account address."
+                    },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "email_send_limit_reached. Carries Retry-After."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "email_delivery_disabled when the operator has not enabled account email, or email_send_unavailable when the throttle store cannot be reached. Neither carries Retry-After."
                     }
                 }
             }
@@ -1642,6 +2107,461 @@
                     "id",
                     "schema",
                     "version"
+                ]
+            },
+            "AnnotationArrowGeometry": {
+                "type": "object",
+                "description": "An arrow must span at least the degenerate-geometry floor.\n\nOpenAPI cannot express a constraint between two fields, so the rule is stated\nhere rather than left for a client to discover by rejection.",
+                "properties": {
+                    "start": {
+                        "$ref": "#/components/schemas/AnnotationPoint"
+                    },
+                    "end": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/AnnotationPoint"
+                            }
+                        ],
+                        "description": "The straight-line distance from start must be at least 0.005 — hypot(dx, dy), not either axis alone; a zero-length arrow points at nothing."
+                    }
+                },
+                "required": [
+                    "end",
+                    "start"
+                ]
+            },
+            "AnnotationArrowGeometryRequest": {
+                "type": "object",
+                "description": "An arrow must span at least the degenerate-geometry floor.\n\nOpenAPI cannot express a constraint between two fields, so the rule is stated\nhere rather than left for a client to discover by rejection.",
+                "properties": {
+                    "start": {
+                        "$ref": "#/components/schemas/AnnotationPointRequest"
+                    },
+                    "end": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/AnnotationPointRequest"
+                            }
+                        ],
+                        "description": "The straight-line distance from start must be at least 0.005 — hypot(dx, dy), not either axis alone; a zero-length arrow points at nothing."
+                    }
+                },
+                "required": [
+                    "end",
+                    "start"
+                ]
+            },
+            "AnnotationConflictError": {
+                "type": "object",
+                "description": "The 409 body. Deliberately carries the server's current revision and\nnothing else — a conflict must never echo the stored private document.",
+                "properties": {
+                    "error": {
+                        "type": "object",
+                        "additionalProperties": {},
+                        "description": "code=annotation_conflict plus a safe message."
+                    },
+                    "revision": {
+                        "type": "integer",
+                        "description": "The server's current revision; reload to it."
+                    }
+                },
+                "required": [
+                    "error",
+                    "revision"
+                ]
+            },
+            "AnnotationDocument": {
+                "type": "object",
+                "properties": {
+                    "schema_version": {
+                        "type": "integer"
+                    },
+                    "image_width": {
+                        "type": "integer",
+                        "description": "The canonical image width the marks were placed against."
+                    },
+                    "image_height": {
+                        "type": "integer"
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AnnotationItem"
+                        },
+                        "description": "At most 100 marks. May be empty."
+                    },
+                    "revision": {
+                        "type": "integer",
+                        "description": "Counts WRITES to this document. 0 means nothing has ever been saved for this version; a stored document is always 1 or more. Send the revision you hold as expected_revision when replacing."
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true,
+                        "description": "Null when nothing has been saved yet."
+                    }
+                },
+                "required": [
+                    "image_height",
+                    "image_width",
+                    "items",
+                    "revision",
+                    "schema_version",
+                    "updated_at"
+                ]
+            },
+            "AnnotationDocumentResponse": {
+                "type": "object",
+                "properties": {
+                    "annotations": {
+                        "$ref": "#/components/schemas/AnnotationDocument"
+                    }
+                },
+                "required": [
+                    "annotations"
+                ]
+            },
+            "AnnotationDocumentWriteRequest": {
+                "type": "object",
+                "description": "A complete replacement. There is no partial update: the client owns the\nwhole overlay and sends all of it, so a dropped item is unambiguous rather\nthan indistinguishable from an omitted field.",
+                "properties": {
+                    "schema_version": {
+                        "type": "integer"
+                    },
+                    "image_width": {
+                        "type": "integer",
+                        "description": "Must equal the version's own canonical width. Validated against the server's value and rejected on mismatch — never trusted."
+                    },
+                    "image_height": {
+                        "type": "integer"
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AnnotationItemRequest"
+                        },
+                        "description": "At most 100 marks. May be empty."
+                    },
+                    "expected_revision": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "The revision the client believes it holds. Use 0 to create the document for the first time. A stale value is refused with annotation_conflict and the stored document is left unchanged."
+                    }
+                },
+                "required": [
+                    "expected_revision",
+                    "image_height",
+                    "image_width",
+                    "items",
+                    "schema_version"
+                ]
+            },
+            "AnnotationFreehandGeometry": {
+                "type": "object",
+                "properties": {
+                    "points": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AnnotationPoint"
+                        },
+                        "description": "Between 2 and 500 points, already simplified by the client."
+                    }
+                },
+                "required": [
+                    "points"
+                ]
+            },
+            "AnnotationFreehandGeometryRequest": {
+                "type": "object",
+                "properties": {
+                    "points": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AnnotationPointRequest"
+                        },
+                        "description": "Between 2 and 500 points, already simplified by the client."
+                    }
+                },
+                "required": [
+                    "points"
+                ]
+            },
+            "AnnotationGeometry": {
+                "oneOf": [
+                    {
+                        "$ref": "#/components/schemas/AnnotationPinGeometry"
+                    },
+                    {
+                        "$ref": "#/components/schemas/AnnotationArrowGeometry"
+                    },
+                    {
+                        "$ref": "#/components/schemas/AnnotationRectangleGeometry"
+                    },
+                    {
+                        "$ref": "#/components/schemas/AnnotationFreehandGeometry"
+                    }
+                ]
+            },
+            "AnnotationGeometryRequest": {
+                "oneOf": [
+                    {
+                        "$ref": "#/components/schemas/AnnotationPinGeometryRequest"
+                    },
+                    {
+                        "$ref": "#/components/schemas/AnnotationArrowGeometryRequest"
+                    },
+                    {
+                        "$ref": "#/components/schemas/AnnotationRectangleGeometryRequest"
+                    },
+                    {
+                        "$ref": "#/components/schemas/AnnotationFreehandGeometryRequest"
+                    }
+                ]
+            },
+            "AnnotationItem": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "A client-generated UUID, stable for this mark's life and unique within the document."
+                    },
+                    "type": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/AnnotationItemTypeEnum"
+                            }
+                        ],
+                        "description": "Must agree with the geometry shape sent alongside it.\n\n* `pin` - pin\n* `arrow` - arrow\n* `rectangle` - rectangle\n* `freehand` - freehand"
+                    },
+                    "geometry": {
+                        "$ref": "#/components/schemas/AnnotationGeometry"
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Short editorial note, at most 140 characters. May be blank for a purely visual mark. Stored and returned as inert text: markup and URLs are rejected, and invisible/bidirectional characters are stripped.",
+                        "maxLength": 140
+                    },
+                    "palette": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PaletteEnum"
+                            }
+                        ],
+                        "description": "A fixed allowlisted mark colour, never a free colour value.\n\n* `terracotta` - terracotta\n* `sage` - sage\n* `ink` - ink"
+                    },
+                    "created_order": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "The mark's 1-based placement order; unique within a document."
+                    }
+                },
+                "required": [
+                    "created_order",
+                    "geometry",
+                    "id",
+                    "note",
+                    "palette",
+                    "type"
+                ]
+            },
+            "AnnotationItemRequest": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "A client-generated UUID, stable for this mark's life and unique within the document."
+                    },
+                    "type": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/AnnotationItemTypeEnum"
+                            }
+                        ],
+                        "description": "Must agree with the geometry shape sent alongside it.\n\n* `pin` - pin\n* `arrow` - arrow\n* `rectangle` - rectangle\n* `freehand` - freehand"
+                    },
+                    "geometry": {
+                        "$ref": "#/components/schemas/AnnotationGeometryRequest"
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Short editorial note, at most 140 characters. May be blank for a purely visual mark. Stored and returned as inert text: markup and URLs are rejected, and invisible/bidirectional characters are stripped.",
+                        "maxLength": 140
+                    },
+                    "palette": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PaletteEnum"
+                            }
+                        ],
+                        "description": "A fixed allowlisted mark colour, never a free colour value.\n\n* `terracotta` - terracotta\n* `sage` - sage\n* `ink` - ink"
+                    },
+                    "created_order": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "The mark's 1-based placement order; unique within a document."
+                    }
+                },
+                "required": [
+                    "created_order",
+                    "geometry",
+                    "id",
+                    "note",
+                    "palette",
+                    "type"
+                ]
+            },
+            "AnnotationItemTypeEnum": {
+                "enum": [
+                    "pin",
+                    "arrow",
+                    "rectangle",
+                    "freehand"
+                ],
+                "type": "string",
+                "description": "* `pin` - pin\n* `arrow` - arrow\n* `rectangle` - rectangle\n* `freehand` - freehand"
+            },
+            "AnnotationPinGeometry": {
+                "type": "object",
+                "properties": {
+                    "point": {
+                        "$ref": "#/components/schemas/AnnotationPoint"
+                    }
+                },
+                "required": [
+                    "point"
+                ]
+            },
+            "AnnotationPinGeometryRequest": {
+                "type": "object",
+                "properties": {
+                    "point": {
+                        "$ref": "#/components/schemas/AnnotationPointRequest"
+                    }
+                },
+                "required": [
+                    "point"
+                ]
+            },
+            "AnnotationPoint": {
+                "type": "object",
+                "description": "A normalised point: a fraction of the image's own width and height, in\nthe closed range [0, 1]. Never viewport pixels — those would stop meaning\nanything the moment the image were rendered at a different size.",
+                "properties": {
+                    "x": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 1,
+                        "minimum": 0
+                    },
+                    "y": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 1,
+                        "minimum": 0
+                    }
+                },
+                "required": [
+                    "x",
+                    "y"
+                ]
+            },
+            "AnnotationPointRequest": {
+                "type": "object",
+                "description": "A normalised point: a fraction of the image's own width and height, in\nthe closed range [0, 1]. Never viewport pixels — those would stop meaning\nanything the moment the image were rendered at a different size.",
+                "properties": {
+                    "x": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 1,
+                        "minimum": 0
+                    },
+                    "y": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 1,
+                        "minimum": 0
+                    }
+                },
+                "required": [
+                    "x",
+                    "y"
+                ]
+            },
+            "AnnotationRectangleGeometry": {
+                "type": "object",
+                "description": "Origin plus extent, so one shape has exactly one representation.\n\nTwo rules OpenAPI cannot express, both enforced server-side: each side must\nbe at least the degenerate-geometry floor, and the rectangle must stay inside\nthe image (``x + width`` and ``y + height`` at most 1).",
+                "properties": {
+                    "x": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 1,
+                        "minimum": 0
+                    },
+                    "y": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 1,
+                        "minimum": 0
+                    },
+                    "width": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 1,
+                        "minimum": 0,
+                        "description": "At least 0.005, and x + width must not exceed 1."
+                    },
+                    "height": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 1,
+                        "minimum": 0,
+                        "description": "At least 0.005, and y + height must not exceed 1."
+                    }
+                },
+                "required": [
+                    "height",
+                    "width",
+                    "x",
+                    "y"
+                ]
+            },
+            "AnnotationRectangleGeometryRequest": {
+                "type": "object",
+                "description": "Origin plus extent, so one shape has exactly one representation.\n\nTwo rules OpenAPI cannot express, both enforced server-side: each side must\nbe at least the degenerate-geometry floor, and the rectangle must stay inside\nthe image (``x + width`` and ``y + height`` at most 1).",
+                "properties": {
+                    "x": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 1,
+                        "minimum": 0
+                    },
+                    "y": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 1,
+                        "minimum": 0
+                    },
+                    "width": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 1,
+                        "minimum": 0,
+                        "description": "At least 0.005, and x + width must not exceed 1."
+                    },
+                    "height": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 1,
+                        "minimum": 0,
+                        "description": "At least 0.005, and y + height must not exceed 1."
+                    }
+                },
+                "required": [
+                    "height",
+                    "width",
+                    "x",
+                    "y"
                 ]
             },
             "AuthSuccessResponse": {
@@ -2373,7 +3293,7 @@
                         "nullable": true
                     },
                     "status": {
-                        "$ref": "#/components/schemas/StatusEnum"
+                        "$ref": "#/components/schemas/GenerationJobStatusEnum"
                     },
                     "error_code": {
                         "nullable": true,
@@ -2435,6 +3355,17 @@
                 "required": [
                     "job"
                 ]
+            },
+            "GenerationJobStatusEnum": {
+                "enum": [
+                    "queued",
+                    "running_text",
+                    "running_image",
+                    "succeeded",
+                    "failed"
+                ],
+                "type": "string",
+                "description": "* `queued` - queued\n* `running_text` - running_text\n* `running_image` - running_image\n* `succeeded` - succeeded\n* `failed` - failed"
             },
             "GenerationKindEnum": {
                 "enum": [
@@ -2650,6 +3581,15 @@
                 ],
                 "type": "string",
                 "description": "* `equals` - equals\n* `in` - in\n* `not_in` - not_in"
+            },
+            "PaletteEnum": {
+                "enum": [
+                    "terracotta",
+                    "sage",
+                    "ink"
+                ],
+                "type": "string",
+                "description": "* `terracotta` - terracotta\n* `sage` - sage\n* `ink` - ink"
             },
             "PatchedDesignWriteRequest": {
                 "type": "object",
@@ -2977,6 +3917,41 @@
                     "password_confirm"
                 ]
             },
+            "RenderSendResponse": {
+                "type": "object",
+                "properties": {
+                    "send": {
+                        "$ref": "#/components/schemas/RenderSendStatus"
+                    }
+                },
+                "required": [
+                    "send"
+                ]
+            },
+            "RenderSendStatus": {
+                "type": "object",
+                "description": "Deliberately only a status.\n\nNo recipient address: the client already knows the account's own address\nfrom ``/auth/me`` and uses that for its confirmation copy, so echoing it\nhere would put an address into a response body for no benefit. No job id\neither — a send is fire-and-forget, with no progress to poll, unlike\ngeneration.",
+                "properties": {
+                    "status": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/RenderSendStatusStatusEnum"
+                            }
+                        ],
+                        "description": "Always 'queued'. A 202 means the delivery task was enqueued, NOT that a message was sent — rendering and SMTP happen afterwards in a worker.\n\n* `queued` - queued"
+                    }
+                },
+                "required": [
+                    "status"
+                ]
+            },
+            "RenderSendStatusStatusEnum": {
+                "enum": [
+                    "queued"
+                ],
+                "type": "string",
+                "description": "* `queued` - queued"
+            },
             "RuleActionSchema": {
                 "type": "object",
                 "description": "A rule's ``then`` clause.",
@@ -3096,17 +4071,6 @@
                     "thumbnail_url",
                     "title"
                 ]
-            },
-            "StatusEnum": {
-                "enum": [
-                    "queued",
-                    "running_text",
-                    "running_image",
-                    "succeeded",
-                    "failed"
-                ],
-                "type": "string",
-                "description": "* `queued` - queued\n* `running_text` - running_text\n* `running_image` - running_image\n* `succeeded` - succeeded\n* `failed` - failed"
             },
             "StepSchema": {
                 "type": "object",
