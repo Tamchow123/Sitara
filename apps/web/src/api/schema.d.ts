@@ -1876,6 +1876,15 @@ export interface operations {
                     "application/json": components["schemas"]["ValidationErrorEnvelope"];
                 };
             };
+            /** @description authentication_required — producing a concept needs an account (ADR 0023). Answering the questionnaire, saving a draft and uploading references do NOT; only this last step does. Never a redirect: route to your own sign-in screen on seeing this code, then repeat the request. The draft and its answers are untouched and still there afterwards. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description CSRF token missing/invalid. */
             403: {
                 headers: {
@@ -2137,6 +2146,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ValidationErrorEnvelope"];
+                };
+            };
+            /** @description authentication_required — producing a concept needs an account (ADR 0023). Answering the questionnaire, saving a draft and uploading references do NOT; only this last step does. Never a redirect: route to your own sign-in screen on seeing this code, then repeat the request. The draft and its answers are untouched and still there afterwards. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description CSRF token missing/invalid. */

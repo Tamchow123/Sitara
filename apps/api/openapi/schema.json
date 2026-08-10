@@ -639,6 +639,16 @@
                         },
                         "description": ""
                     },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "authentication_required — producing a concept needs an account (ADR 0023). Answering the questionnaire, saving a draft and uploading references do NOT; only this last step does. Never a redirect: route to your own sign-in screen on seeing this code, then repeat the request. The draft and its answers are untouched and still there afterwards."
+                    },
                     "403": {
                         "content": {
                             "application/json": {
@@ -1034,6 +1044,16 @@
                             }
                         },
                         "description": ""
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "authentication_required — producing a concept needs an account (ADR 0023). Answering the questionnaire, saving a draft and uploading references do NOT; only this last step does. Never a redirect: route to your own sign-in screen on seeing this code, then repeat the request. The draft and its answers are untouched and still there afterwards."
                     },
                     "403": {
                         "content": {

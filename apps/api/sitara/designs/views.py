@@ -555,6 +555,46 @@ _IDEMPOTENCY_KEY_PARAMETER = OpenApiParameter(
 
 _GENERATION_TAGS = ["Generation"]
 
+_ACCOUNT_REQUIRED_RESPONSE = OpenApiResponse(
+    ErrorEnvelopeSerializer,
+    description=(
+        "authentication_required — producing a concept needs an account (ADR "
+        "0023). Answering the questionnaire, saving a draft and uploading "
+        "references do NOT; only this last step does. Never a redirect: route to "
+        "your own sign-in screen on seeing this code, then repeat the request. "
+        "The draft and its answers are untouched and still there afterwards."
+    ),
+)
+
+
+def _require_account(request) -> Response | None:
+    """Refuse an anonymous caller, or None to continue (Phase 21, ADR 0023).
+
+    Producing a concept is the one action in this API that requires an account.
+    Everything before it does not: a visitor answers the whole questionnaire,
+    picks colours, uploads references and saves a draft without signing in, and
+    ADR 0004's anonymous ownership continues to govern all of that. Only the last
+    step — the one that costs a provider call and produces something worth keeping
+    — needs somewhere durable to keep it.
+
+    Checked BEFORE ownership deliberately, which is the opposite of the usual
+    order in this module. Everywhere else the ownership filter runs first so that
+    a foreign UUID is indistinguishable from a nonexistent one; here the refusal
+    is about the CALLER's capability and says nothing whatever about the
+    resource, so answering it first leaks strictly less than a 404 would — and
+    spares an anonymous visitor a "not found" for a design they are looking at.
+
+    A 401 with a stable code, never a redirect: an API that redirects a JSON
+    request to a login page produces an HTML body a client cannot read. The
+    frontend routes to /login itself on seeing this code."""
+    if request.user.is_authenticated:
+        return None
+    return _error(
+        "authentication_required",
+        "Sign in or create an account to generate your concept. Your answers are saved.",
+        status.HTTP_401_UNAUTHORIZED,
+    )
+
 
 def _read_idempotency_key(request) -> tuple[uuid.UUID | None, Response | None]:
     raw = request.headers.get("Idempotency-Key")
@@ -590,6 +630,7 @@ class DesignGenerateView(APIView):
         responses={
             202: GenerationJobResponseSerializer,
             400: ValidationErrorEnvelopeSerializer,
+            401: _ACCOUNT_REQUIRED_RESPONSE,
             403: OpenApiResponse(
                 ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
             ),
@@ -624,7 +665,20 @@ class DesignGenerateView(APIView):
         ),
     )
     def post(self, request, design_id: str):
+        # An account first (ADR 0023) — before ownership, and see _require_account
+        # for why that order is the safer one here rather than the usual reverse.
+        account_failure = _require_account(request)
+        if account_failure is not None:
+            return account_failure
+
         # Ownership filter FIRST, UUID lookup second — indistinguishable 404.
+        # This is also where a just-signed-in visitor's anonymous workspace is
+        # claimed, so someone who answered everything anonymously and then signed
+        # in finds their own design here. If the claim could not happen — their
+        # browser session pointed at a workspace another user already owns, which
+        # ADR 0004 deliberately never transfers — this is a plain not_found. The
+        # honest answer is that we cannot see that design, NEVER that generation
+        # failed.
         design = accessible_designs(request).filter(pk=design_id).first()
         if design is None:
             return _not_found()
@@ -633,21 +687,49 @@ class DesignGenerateView(APIView):
         if key_failure is not None:
             return key_failure
 
+        # The content type is checked here rather than left entirely to DRF's
+        # parser negotiation, because a multipart body never reaches DRF intact:
+        # Django's CSRF check reads request.POST looking for csrfmiddlewaretoken,
+        # and the upload parser consumes the stream WITHOUT caching it. DRF then
+        # sees an empty request — its Request._parse catches the resulting
+        # RawPostDataException and, since this view lists no form parser, hands
+        # back empty data rather than raising — so a form submission would be
+        # read as the empty body this endpoint accepts, and would enqueue paid
+        # work. That is the reason for the check. (This view ALSO used to read
+        # request.body directly, which is not protected by DRF's rescue and
+        # escaped as an unhandled 500; that read is gone.)
+        #
+        # Exact match on the normalised main type, not a prefix: media types are
+        # case-insensitive per RFC 7231, and a startswith test would also admit
+        # application/json-patch+json, leaving the unrelated exact-{} body check
+        # as the only thing refusing it. The parameters are split off here rather
+        # than trusted to Django — `request.content_type` keeps them, so
+        # "application/json; charset=utf-8" arrives with the charset attached
+        # (measured; an earlier version of this comment claimed otherwise and the
+        # test below is what corrected it).
+        media_type = (request.content_type or "").split(";")[0].strip().lower()
+        if media_type not in {"", "application/json"}:
+            return _error(
+                "unsupported_media_type",
+                "This endpoint accepts application/json only.",
+                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            )
+
         # Accept EITHER a genuinely empty request body OR exactly the JSON
         # object {}. Anything else — including JSON null (which parses to
         # None), arrays and scalars — is rejected, so no out-of-contract shape
-        # can enqueue paid work. The raw-body check runs BEFORE parsing so an
-        # empty body never reaches the JSON parser.
-        if request.body:
-            body, parse_failure = _parse_body(request)
-            if parse_failure is not None:
-                return parse_failure
-            if not isinstance(body, dict) or body != {}:
-                return _error(
-                    "validation_failed",
-                    "This endpoint accepts no body or exactly {}.",
-                    status.HTTP_400_BAD_REQUEST,
-                )
+        # can enqueue paid work. DRF represents an empty body as an empty
+        # QueryDict, which is dict-like and compares equal to {}, so both
+        # accepted shapes fall out of the one check below.
+        body, parse_failure = _parse_body(request)
+        if parse_failure is not None:
+            return parse_failure
+        if not isinstance(body, dict) or body != {}:
+            return _error(
+                "validation_failed",
+                "This endpoint accepts no body or exactly {}.",
+                status.HTTP_400_BAD_REQUEST,
+            )
 
         # Live admission AFTER ownership (an inaccessible design already 404'd
         # above): session/IP throttles, mode errors, budget preflight. Demo
@@ -1217,7 +1299,16 @@ class _DesignVersionSendView(APIView):
         is dict-like and carries no fields, so no special case is needed — and
         deliberately none is written: probing ``request.body`` first would raise
         ``RawPostDataException`` on any request whose stream the CSRF middleware
-        has already read."""
+        has already read.
+
+        Note WHY ``request.data`` is safe here where ``request.body`` was not,
+        because it is not obvious and has been misread: DRF's ``Request._parse``
+        catches ``RawPostDataException`` itself, and for a view that lists no form
+        parser it returns empty data instead of raising. So a multipart body
+        reaches this method as an empty mapping — measured, not assumed — and the
+        chosen name is simply absent rather than crashing the request. A
+        ``request.body`` read has no such rescue, which is why the generate
+        endpoint's own probe of it produced an unhandled 500 until Phase 21."""
         body, parse_failure = _parse_body(request)
         if parse_failure is not None:
             return "", parse_failure
@@ -1502,6 +1593,7 @@ class DesignRefineView(APIView):
         responses={
             202: GenerationJobResponseSerializer,
             400: ValidationErrorEnvelopeSerializer,
+            401: _ACCOUNT_REQUIRED_RESPONSE,
             403: OpenApiResponse(
                 ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
             ),
@@ -1540,6 +1632,15 @@ class DesignRefineView(APIView):
         ),
     )
     def post(self, request, design_id: str):
+        # An account first (ADR 0023). In practice a refiner already has one —
+        # they cannot have reached a version-1 concept without it — so this is
+        # defence in depth against a session that expired between generating and
+        # refining, which would otherwise spend a provider call for a caller with
+        # nowhere to keep the result.
+        account_failure = _require_account(request)
+        if account_failure is not None:
+            return account_failure
+
         # Ownership filter FIRST, UUID lookup second — indistinguishable 404.
         design = accessible_designs(request).filter(pk=design_id).first()
         if design is None:

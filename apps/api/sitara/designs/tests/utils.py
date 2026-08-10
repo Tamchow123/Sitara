@@ -111,6 +111,20 @@ def register(client: Client, email: str, password: str = STRONG_PASSWORD):
     return response
 
 
+def signed_in_client(email: str | None = None) -> tuple[Client, str]:
+    """A registered, signed-in browser and a live CSRF token.
+
+    Shared because Phase 21 (ADR 0023) made an account a precondition for
+    generation, so three test modules needed the same three lines. The token is
+    captured AFTER registering, never before: registration rotates the session
+    key, which rotates the CSRF token with it, so a token taken earlier is
+    already dead.
+    """
+    client = csrf_client()
+    register(client, email or unique_email())
+    return client, bootstrap_csrf(client)
+
+
 def login(client: Client, email: str, password: str = STRONG_PASSWORD):
     token = bootstrap_csrf(client)
     response = send_json(

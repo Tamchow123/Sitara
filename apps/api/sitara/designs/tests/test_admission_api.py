@@ -3,6 +3,13 @@ the global daily count, controlled error responses, ownership-first ordering,
 and demo bypass — all provider-free. The autouse ``live_admission_ready``
 fixture (conftest) puts every request in live mode with generous limits and an
 in-memory budget ledger; each test tightens exactly one knob.
+
+Since Phase 21 (ADR 0023) every caller here signs in first, via
+``signed_in_client``. Admission control is only reachable behind the account
+gate now, so an anonymous client would never get far enough to exercise a
+throttle -- and note this is what makes the per-SESSION throttle still meaningful
+to test: an account may hold several browser sessions, so the session counter is
+not merely a slower spelling of a per-account one.
 """
 
 import json
@@ -17,10 +24,9 @@ from sitara.generation import cost_control
 from .utils import (
     COMPLETE_ANSWERS,
     DESIGNS_URL,
-    bootstrap_csrf,
-    csrf_client,
     make_active_questionnaire,
     send_json,
+    signed_in_client,
 )
 
 pytestmark = pytest.mark.django_db
@@ -76,8 +82,7 @@ def _generate(client, design_id, *, token, ip=_FIXED_IP, key=None, available=Tru
 class TestSessionAndIpThrottles:
     def test_session_limit_returns_429_generation_limit_reached(self, settings):
         settings.LIVE_GENERATION_SESSION_LIMIT = 2
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         # Three distinct complete designs, same session, same IP (generous IP
         # limit). The third request exceeds the per-session limit.
         statuses = []
@@ -99,8 +104,7 @@ class TestSessionAndIpThrottles:
         # Three DIFFERENT sessions sharing ONE IP: the IP counter still trips.
         statuses = []
         for _ in range(3):
-            client = csrf_client()
-            token = bootstrap_csrf(client)
+            client, token = signed_in_client()
             design_id = _complete_design(client, token)
             statuses.append(_generate(client, design_id, token=token, ip=_FIXED_IP).status_code)
         assert statuses.count(429) >= 1
@@ -109,8 +113,7 @@ class TestSessionAndIpThrottles:
     def test_a_second_ip_has_its_own_counter(self, settings):
         settings.LIVE_GENERATION_IP_LIMIT = 1
         settings.LIVE_GENERATION_SESSION_LIMIT = 100
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         first = _generate(client, _complete_design(client, token), token=token, ip="203.0.113.1")
         # A different IP, fresh counter — admitted despite the first IP being spent.
         second = _generate(client, _complete_design(client, token), token=token, ip="203.0.113.2")
@@ -121,8 +124,7 @@ class TestSessionAndIpThrottles:
 class TestGlobalDailyCount:
     def test_count_cannot_exceed_limit(self, settings):
         settings.LIVE_GENERATION_DAILY_COUNT_LIMIT = 1
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         first = _generate(client, _complete_design(client, token), token=token)
         second = _generate(client, _complete_design(client, token), token=token)
         assert first.status_code == 202
@@ -131,8 +133,7 @@ class TestGlobalDailyCount:
 
     def test_idempotent_replay_consumes_no_additional_slot(self, settings):
         settings.LIVE_GENERATION_DAILY_COUNT_LIMIT = 1
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         design_id = _complete_design(client, token)
         key = str(uuid.uuid4())
         first = _generate(client, design_id, token=token, key=key)
@@ -146,8 +147,7 @@ class TestGlobalDailyCount:
 class TestControlledErrors:
     def test_live_disabled_returns_live_generation_disabled(self, settings):
         settings.LIVE_GENERATION_ENABLED = False
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         design_id = _complete_design(client, token)
         response = _generate(client, design_id, token=token)
         assert response.status_code == 503
@@ -155,8 +155,7 @@ class TestControlledErrors:
 
     def test_ledger_outage_is_a_controlled_503(self, settings):
         cost_control.get_ledger().fail = True
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         design_id = _complete_design(client, token)
         response = _generate(client, design_id, token=token)
         assert response.status_code == 503
@@ -164,11 +163,9 @@ class TestControlledErrors:
 
     def test_foreign_design_stays_404_even_when_count_exhausted(self, settings):
         settings.LIVE_GENERATION_DAILY_COUNT_LIMIT = 0  # every live attempt would be rejected
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         # A design owned by a DIFFERENT session.
-        other = csrf_client()
-        other_token = bootstrap_csrf(other)
+        other, other_token = signed_in_client()
         foreign_id = _complete_design(other, other_token)
         response = _generate(client, foreign_id, token=token)
         assert response.status_code == 404
@@ -176,8 +173,7 @@ class TestControlledErrors:
 
     def test_nonexistent_design_stays_404_even_when_throttled(self, settings):
         settings.LIVE_GENERATION_SESSION_LIMIT = 0
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         response = _generate(client, str(uuid.uuid4()), token=token)
         assert response.status_code == 404
 
@@ -189,8 +185,7 @@ class TestDemoBypass:
         call_command("install_demo_asset_pack", "--dev-synthetic")
         settings.DEMO_MODE = True
         settings.LIVE_GENERATION_DAILY_COUNT_LIMIT = 0  # would reject any LIVE attempt
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         design_id = _complete_design(client, token)
         # Demo bypasses the (exhausted) live count entirely.
         response = _generate(client, design_id, token=token)
@@ -202,8 +197,7 @@ class TestDemoBypass:
         # DEMO_MODE on but no demo pack installed (fresh empty storage): fail
         # closed as unavailable, never a live attempt, and no live count consumed.
         settings.DEMO_MODE = True
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         design_id = _complete_design(client, token)
         response = _generate(client, design_id, token=token)
         assert response.status_code == 503
@@ -217,8 +211,7 @@ class TestRefinementConsistency:
         from .test_refine_api import _generated_design, _post_refine
 
         settings.LIVE_GENERATION_ENABLED = False
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         design_id, version = _generated_design(client, token)
         response = _post_refine(client, design_id, token=token, source_version_id=version.pk)
         assert response.status_code == 503
@@ -228,8 +221,7 @@ class TestRefinementConsistency:
         from .test_refine_api import _generated_design, _post_refine
 
         settings.LIVE_GENERATION_DAILY_COUNT_LIMIT = 0  # no live attempt admitted
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         design_id, version = _generated_design(client, token)
         response = _post_refine(client, design_id, token=token, source_version_id=version.pk)
         assert response.status_code == 429
@@ -241,8 +233,7 @@ class TestIdempotentReplaySkipsThrottle:
         # SEC-001: a legitimate retry reusing the same Idempotency-Key must not
         # be throttled out — the replay produces no new attempt.
         settings.LIVE_GENERATION_SESSION_LIMIT = 1
-        client = csrf_client()
-        token = bootstrap_csrf(client)
+        client, token = signed_in_client()
         design_id = _complete_design(client, token)
         key = str(uuid.uuid4())
         first = _generate(client, design_id, token=token, key=key)
