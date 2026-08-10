@@ -1,4 +1,4 @@
-# End-to-end and visual-regression tests (Phase 17, extended in Phase 19)
+# End-to-end and visual-regression tests (Phase 17, extended in Phases 19 and 21)
 
 Playwright specs that drive the **real** application against a **running stack**,
 always in demo mode. Nothing here mocks a stage: a generation is a genuine Celery
@@ -10,8 +10,51 @@ assertions are written against the terminal state the server actually produces.
 | `safety.spec.ts` | The stack reports demo mode; no browser request reaches a provider host; the questionnaire stores nothing in browser storage |
 | `journeys.spec.ts` | §25 journeys 1–5 — draft persistence, keyboard-only wizard (choose, Back, Skip), the information drawer, the custom colour picker, inspiration selection and synthetic upload/removal |
 | `generation.spec.ts` | §25 journeys 6–10 — generate, resume mid-flight, a failed image with the brief intact, the one refinement, the two-version history |
-| `annotations.spec.ts` | Phase 19 — the private annotation workspace: draw a pin and a rectangle with real pointer gestures, note them, prove persistence across a reload, prove hiding is not deleting, prove nothing reaches browser storage, the anonymous and authenticated send states, a stranger's indistinguishable 404, and the original render left untouched |
+| `annotations.spec.ts` | Phase 19, extended in 21 — the private annotation workspace: draw a pin and a rectangle with real pointer gestures, note them, prove persistence across a reload, prove hiding is not deleting, prove nothing reaches browser storage, a stranger's indistinguishable 404, the original render left untouched, and the naming prompt: its pre-fill, its stated exposure, the allowance stated before it is spent, and a refused name answered in the dialog |
 | `visual.spec.ts` | §26 visual regression, 15 baselines per viewport |
+
+## Phase 21 — one account, shared by every journey that generates
+
+An account is required for the last press before a concept is produced (ADR 0023).
+`auth.setup.ts` registers **one** account for the whole run as its own Playwright
+project, and `generation.spec.ts`, `annotations.spec.ts`, `visual.spec.ts` and the
+signed-in half of `accessibility.spec.ts` reuse its session through
+`test.use({ storageState })`.
+
+**Why one and not one per spec.** Registration is throttled at
+`AUTH_REGISTER_IP_LIMIT` (5) per IP per hour, and the whole suite arrives from a
+single IP. Registering per generating spec across the desktop and mobile projects
+is five or more, which trips the limit — the first attempt at this phase failed
+exactly there, with the register form showing "Too many attempts". Lowering the
+limit for the e2e stack would be weakening a security control to make a test pass.
+Registering once is also closer to the truth: one account holding several concepts
+is the shape the account gallery exists to show.
+
+`journeys.spec.ts` deliberately stays anonymous — journeys 1–5 never generate, and
+they exist to prove the questionnaire is still walkable end to end with no account.
+`accessibility.spec.ts` keeps its landing, questionnaire and **review** axe passes
+anonymous for the same reason, and adds the review screen's new sign-in state to
+them; only its generation/result test is signed in.
+
+The session lands in `e2e/.auth/` (gitignored) as a storage-state file — the
+session cookie, which is what a browser holds. No password is written to disk.
+
+Two consequences worth stating plainly rather than discovering later:
+
+**The `review` visual baseline still means what it always meant.** A signed-in
+review screen shows the generate button; an anonymous one now shows a sign-in link
+instead. `visual.spec.ts` registers so the baseline keeps capturing the same
+screen rather than being silently re-pointed at a different one.
+
+**One assertion moved from the browser to the API, and was not dropped.** The
+private-workspace journey used to end by proving an anonymous workspace owner is
+refused a send — no fallback, no prompt for an address, no silent success. That
+journey can no longer own a concept anonymously, so the assertion had nowhere left
+to stand. It is now proved by
+`test_an_anonymous_owner_is_told_to_sign_in_and_nothing_is_sent` in
+`apps/api/sitara/designs/tests/test_render_send_api.py`, which builds an
+anonymously-owned version directly and asserts `409 email_recipient_unavailable`
+with an empty outbox. That test's docstring records that it is now the only proof.
 
 ## Phase 19 — what `annotations.spec.ts` deliberately does and does not prove
 
@@ -28,10 +71,18 @@ default, so the honest terminal states are "queued" or the controlled
 on SMTP. Asserting on a *delivered* message would need a real mail server or a
 fiction about one.
 
-**Anonymous owners are asserted to be refused, not accommodated.** The first test
-never registers, so its workspace belongs to the anonymous session and the send
-control must be disabled with a sign-in explanation — §8.1's "no fallback, no
-prompt for an address, no silent success", proved rather than assumed.
+**The lifetime ceiling is not driven from a browser, and that is a limitation, not
+a claim.** Nothing is reserved while `ACCOUNT_EMAIL_DELIVERY_ENABLED` is false — the
+gate is checked before the reservation — so the per-render counter never moves and
+a "fourth send" is unreachable through the UI. Reaching it would mean configuring
+outbound mail on the e2e stack, which CLAUDE.md §7 forbids. The ceiling, its
+refusal wording and the remembered name are proved against the real reservation in
+`test_render_send_api.py`
+(`test_the_fourth_send_is_refused_with_the_numbers_that_explain_it`,
+`test_the_refusal_names_the_used_count_and_the_ceiling_separately`,
+`test_the_name_is_remembered_for_the_next_send`). What the browser specs do prove
+is the part only a browser can: that the remaining count is on screen **before**
+the last send rather than only in the refusal after it.
 
 **The original render is compared by object key, not by URL.** Signed URLs are
 short-lived and minted per request, so a changed query string is expected; what
@@ -52,16 +103,28 @@ because a developer's local `.env` may well have live generation switched on.
 
 ## Running locally
 
+**Rebuild `api` first if the backend changed.** The `api` service has no source
+mount — it runs its baked image — so `docker compose up -d` alone will happily
+start a container whose Python predates whatever you just wrote. The failure this
+produces is *plausible*, which is what makes it expensive: a route added in the
+working tree answers `405 Method Not Allowed`, and a spec asserting on the new
+behaviour fails as if the feature were broken. This cost a full e2e cycle in Phase
+21, when the new send-state `GET` returned 405 from a stale image.
+
 ```powershell
-# 1. Bring the stack up with the gates closed and stages slowed enough to observe.
+# 1. Rebuild the API image if anything under apps/api changed. Cheap, and the
+#    alternative is debugging the wrong thing.
+docker compose build api
+
+# 2. Bring the stack up with the gates closed and stages slowed enough to observe.
 $env:DEMO_MODE="true"; $env:ALLOW_PAID_AI_CALLS="false"
 $env:LIVE_GENERATION_ENABLED="false"; $env:DEMO_STAGE_DELAY_MS="5000"
 docker compose up -d
 
-# 2. Install the deterministic demo fixture pack (zero-cost, locally generated).
+# 3. Install the deterministic demo fixture pack (zero-cost, locally generated).
 docker compose exec api python manage.py install_demo_asset_pack --dev-synthetic
 
-# 3. Run.
+# 4. Run.
 cd apps\web
 npm run e2e              # functional journeys + safety
 npm run e2e:visual       # visual regression only

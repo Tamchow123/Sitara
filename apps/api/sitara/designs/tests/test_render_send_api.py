@@ -244,7 +244,16 @@ def test_a_query_parameter_address_is_never_honoured(param, settings):
 
 
 def test_an_anonymous_owner_is_told_to_sign_in_and_nothing_is_sent(settings):
-    """No fallback, no prompt for an address, no silent success."""
+    """No fallback, no prompt for an address, no silent success.
+
+    Since Phase 21 this test is the ONLY proof of the rule. It used to be checked
+    from a browser as well, at the end of the private-workspace journey in
+    ``apps/web/e2e/annotations.spec.ts``, where the journey never registered and so
+    owned its concept anonymously. An account is now required to generate at all
+    (ADR 0023), so an anonymously-owned version cannot be produced through the UI
+    and that browser assertion had nowhere left to stand. The rule did not go
+    away: the row is built directly here instead, which reaches the same view by
+    the same route and does not depend on a journey that can no longer happen."""
     settings.CELERY_TASK_ALWAYS_EAGER = True
     browser, token, version = anonymous_browser()
 

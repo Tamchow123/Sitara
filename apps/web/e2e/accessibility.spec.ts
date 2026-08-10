@@ -2,6 +2,7 @@ import { join } from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { STYLIST_STATE_PATH } from "./helpers/account";
 import { advanceUntilQuestion, completeQuestionnaire, waitForDesignQuiescent } from "./helpers/wizard";
 
 // Phase 17 §31 and §32, executed rather than asserted by hand.
@@ -104,10 +105,35 @@ test.describe("§31 axe: no serious or critical violations", () => {
     await expectNoSeriousViolations(page, "questionnaire: colours");
   });
 
+  test("the review screen an anonymous visitor reaches, where sign-in is asked for", async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    // Phase 21's new screen state: the same review, with the generate button
+    // replaced by a sign-in link and an explanation. It is now the LAST thing
+    // every first-time visitor sees before registering, so it gets its own axe
+    // pass rather than being covered only by the signed-in version below.
+    await completeQuestionnaire(page);
+    await expect(page.getByRole("link", { name: /sign in to generate/i })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expectNoSeriousViolations(page, "review (anonymous, sign-in asked for)");
+  });
+});
+
+// Its own describe purely so the shared signed-in session applies HERE and not to
+// the tests above. Those check the anonymous shell, which is what most first-time
+// visitors see; signing the whole file in would quietly stop checking it.
+test.describe("§31 axe: generation and result, signed in", () => {
+  test.use({ storageState: STYLIST_STATE_PATH });
+
   test("generation and result", async ({ page }) => {
     test.setTimeout(240_000);
+    // An account is required for the generate button since Phase 21 (ADR 0023),
+    // so without the shared session this test would stop at the review screen and
+    // never reach the two screens it exists for.
     const designId = await completeQuestionnaire(page);
-    await expectNoSeriousViolations(page, "review");
+    await expectNoSeriousViolations(page, "review (signed in)");
 
     await waitForDesignQuiescent(page, designId);
     await page.getByRole("button", { name: /generate my concept/i }).click();

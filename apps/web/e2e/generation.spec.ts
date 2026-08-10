@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { STYLIST_STATE_PATH } from "./helpers/account";
 import { completeQuestionnaire, waitForDesignQuiescent } from "./helpers/wizard";
 
 // Phase 17 §25 journeys 6-10: a real generation driven by real server state,
@@ -15,6 +16,12 @@ import { completeQuestionnaire, waitForDesignQuiescent } from "./helpers/wizard"
 
 // A full demo generation runs two pipeline stages and an image ingest.
 test.describe.configure({ mode: "serial", timeout: 180_000 });
+
+// Signed in as the run's shared account: since Phase 21 the last press before a
+// concept is produced needs one (ADR 0023). The questionnaire itself is still
+// walked exactly as an anonymous visitor walks it — only that button is gated —
+// and journeys.spec.ts covers the anonymous half without ever registering.
+test.use({ storageState: STYLIST_STATE_PATH });
 
 test.describe("generation, result, refinement and history", () => {
   test("journeys 6-10: generate, resume, refine once, then compare versions", async ({ page }) => {
