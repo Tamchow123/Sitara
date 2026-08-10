@@ -133,7 +133,7 @@ export interface paths {
         };
         /**
          * List your designs
-         * @description Returns the private designs owned by the current session or account as compact rows (no questionnaire schema, no inspiration records). A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Returns the private designs owned by the current session or account as compact rows (no questionnaire schema, no inspiration records, no job snapshot), newest first, each with its versions in creation order. Carries no signed image URL — a gallery mints one per card through the ownership-checked images endpoint. Bounded page size. A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         get: operations["designs_list"];
         put?: never;
@@ -878,7 +878,7 @@ export interface components {
              */
             expires_at: string;
         };
-        /** @description A compact list row — no questionnaire schema, no inspiration records. */
+        /** @description A gallery row — no questionnaire schema, no inspiration records, no job. */
         DesignListItem: {
             /** Format: uuid */
             id: string;
@@ -888,9 +888,33 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            is_demo: boolean | null;
+            version_count: number;
+            versions: components["schemas"]["DesignListVersion"][];
         };
         DesignListResponse: {
             designs: components["schemas"]["DesignListItem"][];
+            total: number;
+            limit: number;
+            offset: number;
+        };
+        /**
+         * @description One version inside a gallery row (Phase 21).
+         *
+         *     No signed URL, storage key, hash, prompt or note text — see
+         *     ``serializers._version_row_payload`` for why a list is the wrong place for a
+         *     bearer token. ``job_status`` is this version's own progress and may be null on
+         *     a legacy row whose attempt was deleted.
+         */
+        DesignListVersion: {
+            /** Format: uuid */
+            id: string;
+            version_number: number;
+            is_demo: boolean;
+            has_image: boolean;
+            job_status: (components["schemas"]["JobStatusEnum"] | components["schemas"]["NullEnum"]) | null;
+            /** Format: date-time */
+            created_at: string;
         };
         /**
          * @description The original image additionally carries a separately signed
@@ -1154,6 +1178,15 @@ export interface components {
             /** @description Must be true: the user affirms they hold the rights to this image. */
             rights_acknowledged: boolean;
         };
+        /**
+         * @description * `queued` - Queued
+         *     * `running_text` - Running text
+         *     * `running_image` - Running image
+         *     * `succeeded` - Succeeded
+         *     * `failed` - Failed
+         * @enum {string}
+         */
+        JobStatusEnum: "queued" | "running_text" | "running_image" | "succeeded" | "failed";
         LiveResponse: {
             /** @description Always "ok" when the process answers. */
             status: string;
@@ -1682,7 +1715,12 @@ export interface operations {
     };
     designs_list: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description How many designs to return, newest first. Defaults to 20 and is capped at 50. */
+                limit?: number;
+                /** @description How many designs to skip, for paging through the gallery. Must be between 0 and 1000000. */
+                offset?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1695,6 +1733,14 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DesignListResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorEnvelope"];
                 };
             };
         };

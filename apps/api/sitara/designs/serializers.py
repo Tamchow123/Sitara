@@ -15,6 +15,14 @@ inspiration records, no job data); only the detail payload embeds the linked
 questionnaire, the selected inspirations and, since Phase 12, one sanitised
 public snapshot of the latest generation job (``latest_job``) — still no
 private provenance (provider, model, prediction id, seed, storage key).
+
+Since Phase 21 the list payload also carries each design's versions, so the
+account gallery can group a refinement with the concept it came from. That adds
+an id, a version number, a demo flag, whether an image exists and that version's
+own job status — and nothing else. In particular it adds NO signed image URL: the
+gallery mints one per card through the ownership-checked images endpoint, because a
+signed URL is a short-lived bearer token and a list is the worst possible place to
+put a fistful of them.
 """
 
 from rest_framework import serializers
@@ -248,12 +256,93 @@ def design_detail_payload(design: Design) -> dict:
     }
 
 
+# The account gallery's page size (Phase 21). Bounded because the list is the one
+# design endpoint whose result set grows without limit as someone keeps designing,
+# and an unbounded response would eventually carry every version of every concept
+# they have ever made in one payload.
+GALLERY_PAGE_SIZE_DEFAULT = 20
+GALLERY_PAGE_SIZE_MAX = 50
+
+# ``offset`` needs a ceiling for a different reason than ``limit`` needs one, which
+# is why it is a separate constant rather than a reuse. Django writes LIMIT/OFFSET
+# into the SQL text with ``%d`` interpolation instead of binding a parameter, so a
+# Python int of any size becomes a SQL literal of any size; PostgreSQL raises
+# ``DataError: bigint out of range`` above 2**63-1 (measured), and a raw database
+# error is not an APIException, so DRF would let it through unwrapped as an HTML
+# 500 rather than this project's JSON envelope. A million pages past the start of
+# a personal gallery is not a request any real client makes, so the ceiling sits
+# far below the point where the database would object.
+GALLERY_OFFSET_MAX = 1_000_000
+
+
+def _version_row_payload(version) -> dict:
+    """One version inside a gallery card.
+
+    Enough to draw a card and know whether it can show a picture, and nothing
+    else. Explicitly NOT here: any signed URL, storage key, bucket, endpoint,
+    image hash, byte size, prompt, DesignSpec, inspiration provenance or note
+    text. The gallery mints its own short-lived URL per card through the
+    ownership-checked images endpoint, which is the only issuer of one
+    (CLAUDE.md §14) — putting one in a list payload would multiply a bearer
+    token by the number of concepts someone owns, and cache it in whatever
+    holds the list.
+
+    ``job_status`` is this version's own progress, taken from the attempt that
+    produced it. It is not a constant: a DesignVersion is created before the
+    permanent image ingest completes, so a row can legitimately exist with the
+    image still arriving, or with a failed job and no image at all. That is
+    exactly the case the gallery must label rather than render as a broken
+    image."""
+    # Newest attempt wins, and from the PREFETCHED list — sorting in Python
+    # rather than with .order_by() is what keeps the gallery's query count flat
+    # instead of one query per version.
+    attempts = sorted(
+        version.generation_attempts.all(), key=lambda a: (a.created_at, a.id), reverse=True
+    )
+    latest = attempts[0] if attempts else None
+    return {
+        "id": str(version.id),
+        "version_number": version.version_number,
+        "is_demo": version.is_demo,
+        # Whether an image can be requested for this version at all — both
+        # derivatives are written together by the one ingest service, so either
+        # missing means there is nothing to show yet.
+        "has_image": bool(version.image_storage_key and version.thumbnail_storage_key),
+        "job_status": latest.status if latest is not None else None,
+        "created_at": _DATETIME.to_representation(version.created_at),
+    }
+
+
 def design_list_item_payload(design: Design) -> dict:
-    """A compact list row: no questionnaire schema, no inspiration records."""
+    """A gallery row: no questionnaire schema, no inspiration records, no job.
+
+    Since Phase 21 this carries the design's versions, because the gallery has to
+    group them visually to show that a refinement belongs to the same sitting as
+    the concept it came from. It still carries no ``latest_job``: that snapshot is
+    documented as belonging to design detail only, and ``status`` here plus each
+    version's own ``job_status`` — one lifecycle enum, NOT the snapshot, and never
+    its id, error code, kind or timestamps — already say everything a card needs to
+    label itself. Read that as a ceiling rather than a precedent: the next job
+    field does not get in because this one did.
+
+    ``is_demo`` is the design's newest version's value rather than a field of its
+    own. A demo and a live version can never mix in one lineage — a refinement
+    inherits its source's value, enforced by the refinement enqueue service — so
+    the newest version speaks for the design. It is null before there is any
+    version to speak for it, which is honest: nothing has been generated, so
+    there is no mode to report. Never re-derived from the current DEMO_MODE
+    setting, which would relabel old concepts every time an operator changed it."""
+    # Meta.ordering on DesignVersion is ["version_number"], so this is creation
+    # order already; sorted() again in Python so a future ordering change cannot
+    # silently reverse the gallery, and so it reads from the prefetch.
+    versions = sorted(design.versions.all(), key=lambda v: v.version_number)
     return {
         "id": str(design.id),
         "title": design.title,
         "status": design.status,
         "created_at": _DATETIME.to_representation(design.created_at),
         "updated_at": _DATETIME.to_representation(design.updated_at),
+        "is_demo": versions[-1].is_demo if versions else None,
+        "version_count": len(versions),
+        "versions": [_version_row_payload(version) for version in versions],
     }

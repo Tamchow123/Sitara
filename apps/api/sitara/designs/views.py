@@ -136,6 +136,9 @@ from .result import (
     load_validated_design_spec,
 )
 from .serializers import (
+    GALLERY_OFFSET_MAX,
+    GALLERY_PAGE_SIZE_DEFAULT,
+    GALLERY_PAGE_SIZE_MAX,
     DesignWriteSerializer,
     RefinementWriteSerializer,
     RenderSendSerializer,
@@ -331,6 +334,56 @@ def _detail(design_id) -> dict:
     return design_detail_payload(design)
 
 
+def _read_gallery_page(request) -> tuple[tuple[int, int], Response | None]:
+    """``(limit, offset)`` for the design list, or a controlled 400.
+
+    Refused rather than clamped when the value is not a non-negative integer, so a
+    client with a bug is told about it instead of silently getting page one — the
+    same reason every write endpoint here rejects an unknown field. An oversized
+    ``limit`` IS clamped, because asking for more than the ceiling is a reasonable
+    request that has a correct answer; asking with ``limit=banana`` is not. An
+    ``offset`` past ``GALLERY_OFFSET_MAX`` is refused for the same reason as
+    ``banana`` rather than clamped like an oversized ``limit``: no row lives there,
+    so there is nothing correct to return — and an unbounded one would reach
+    PostgreSQL as an out-of-range SQL literal.
+
+    Reads ``request.query_params``, never a body: this is a safe method."""
+    raw_limit = request.query_params.get("limit")
+    raw_offset = request.query_params.get("offset")
+    values: dict[str, int] = {}
+    errors: dict[str, list[str]] = {}
+    for name, raw, default in (
+        ("limit", raw_limit, GALLERY_PAGE_SIZE_DEFAULT),
+        ("offset", raw_offset, 0),
+    ):
+        if raw is None:
+            values[name] = default
+            continue
+        try:
+            parsed = int(raw)
+        except (TypeError, ValueError):
+            errors[name] = ["This must be a whole number."]
+            continue
+        if parsed < 0:
+            errors[name] = ["This cannot be negative."]
+            continue
+        # Refused, not clamped: unlike an oversized ``limit``, an offset this far
+        # out cannot name a row that exists, so there is no correct answer to
+        # give it. It has to be caught here rather than left to the slice, because
+        # the offset reaches PostgreSQL as a SQL literal and one past bigint raises
+        # a DataError that DRF does not wrap — an HTML 500 instead of JSON.
+        if name == "offset" and parsed > GALLERY_OFFSET_MAX:
+            errors[name] = ["This is beyond the largest page that can be requested."]
+            continue
+        values[name] = parsed
+    if errors:
+        return (GALLERY_PAGE_SIZE_DEFAULT, 0), _validation_failed(errors)
+    # A limit of 0 would mean "give me nothing", which no caller wants and which
+    # makes an empty page indistinguishable from the end of the list.
+    limit = min(values["limit"], GALLERY_PAGE_SIZE_MAX) or GALLERY_PAGE_SIZE_DEFAULT
+    return (limit, values["offset"]), None
+
+
 @method_decorator(csrf_protect, name="dispatch")
 class DesignListCreateView(APIView):
     authentication_classes = [SessionAuthentication]
@@ -339,21 +392,68 @@ class DesignListCreateView(APIView):
     @extend_schema(
         operation_id="designs_list",
         tags=_DESIGN_TAGS,
-        responses={200: DesignListResponseSerializer},
+        parameters=[
+            OpenApiParameter(
+                name="limit",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    f"How many designs to return, newest first. Defaults to "
+                    f"{GALLERY_PAGE_SIZE_DEFAULT} and is capped at {GALLERY_PAGE_SIZE_MAX}."
+                ),
+            ),
+            OpenApiParameter(
+                name="offset",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    f"How many designs to skip, for paging through the gallery. "
+                    f"Must be between 0 and {GALLERY_OFFSET_MAX}."
+                ),
+            ),
+        ],
+        responses={
+            200: DesignListResponseSerializer,
+            400: ValidationErrorEnvelopeSerializer,
+        },
         summary="List your designs",
         description=(
             "Returns the private designs owned by the current session or "
             "account as compact rows (no questionnaire schema, no inspiration "
-            "records). A list request never creates a workspace. " + _OWNERSHIP_NOTE
+            "records, no job snapshot), newest first, each with its versions in "
+            "creation order. Carries no signed image URL — a gallery mints one "
+            "per card through the ownership-checked images endpoint. Bounded page "
+            "size. A list request never creates a workspace. " + _OWNERSHIP_NOTE
         ),
     )
     def get(self, request):
+        page, page_failure = _read_gallery_page(request)
+        if page_failure is not None:
+            return page_failure
+        limit, offset = page
+
         # Listing never creates a workspace (accessible_designs resolves
         # with create=False); an anonymous browser that has not designed
         # anything gets an empty list and no database row.
-        designs = accessible_designs(request)
+        owned = accessible_designs(request)
+        # Counted before slicing, so a caller can tell "that is all of them" from
+        # "there is another page" without asking for one.
+        total = owned.count()
+        # Both levels prefetched together: without the second, every version in
+        # every card would ask for its own attempt, and the query count would grow
+        # with the number of concepts someone owns rather than staying flat.
+        designs = owned.prefetch_related("versions", "versions__generation_attempts")[
+            offset : offset + limit
+        ]
         return Response(
-            {"designs": [design_list_item_payload(design) for design in designs]},
+            {
+                "designs": [design_list_item_payload(design) for design in designs],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            },
             headers=NO_STORE,
         )
 

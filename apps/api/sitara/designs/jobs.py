@@ -29,7 +29,17 @@ def latest_generation_attempt(design: Design) -> GenerationAttempt | None:
     revisiting a generated one, or returning to a failed one with a linked
     version — always lands on the same attempt. Used only to expose one
     sanitised public job snapshot on design detail; never on design-list
-    responses."""
+    responses.
+
+    Phase 21 note, so the sentence above is not read as more than it says: the
+    SNAPSHOT (``public_job_payload`` — job id, error code, kind, timestamps) is
+    still confined to design detail, and this function is still never called for a
+    list row. What the gallery's list rows do carry is each version's own
+    ``job_status`` enum, read from that version's prefetched attempts rather than
+    from here (see ``serializers._version_row_payload``). That is a narrower thing
+    on purpose: it is one lifecycle value the owner can already see through the job
+    API, it names no attempt and no error, and the gallery needs it to label a
+    concept whose image has not arrived instead of drawing a broken one."""
     return design.generation_attempts.order_by("-created_at", "-id").first()
 
 

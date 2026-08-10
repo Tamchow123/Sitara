@@ -26,18 +26,43 @@ from .annotation_schema import (
 from .models import GenerationAttempt
 
 
+class DesignListVersionSerializer(serializers.Serializer):
+    """One version inside a gallery row (Phase 21).
+
+    No signed URL, storage key, hash, prompt or note text — see
+    ``serializers._version_row_payload`` for why a list is the wrong place for a
+    bearer token. ``job_status`` is this version's own progress and may be null on
+    a legacy row whose attempt was deleted."""
+
+    id = serializers.UUIDField()
+    version_number = serializers.IntegerField(min_value=1)
+    is_demo = serializers.BooleanField()
+    has_image = serializers.BooleanField()
+    job_status = serializers.ChoiceField(choices=GenerationAttempt.Status.choices, allow_null=True)
+    created_at = serializers.DateTimeField()
+
+
 class DesignListItemSerializer(serializers.Serializer):
-    """A compact list row — no questionnaire schema, no inspiration records."""
+    """A gallery row — no questionnaire schema, no inspiration records, no job."""
 
     id = serializers.UUIDField()
     title = serializers.CharField()
     status = serializers.CharField()
     created_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()
+    # Null until there is a version to report a mode for.
+    is_demo = serializers.BooleanField(allow_null=True)
+    version_count = serializers.IntegerField(min_value=0)
+    versions = DesignListVersionSerializer(many=True)
 
 
 class DesignListResponseSerializer(serializers.Serializer):
     designs = DesignListItemSerializer(many=True)
+    # How many the caller owns in total, so "that is all of them" is
+    # distinguishable from "there is another page" without asking for one.
+    total = serializers.IntegerField(min_value=0)
+    limit = serializers.IntegerField(min_value=1)
+    offset = serializers.IntegerField(min_value=0)
 
 
 class DesignQuestionnaireSerializer(serializers.Serializer):

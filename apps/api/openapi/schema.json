@@ -330,8 +330,26 @@
         "/api/v1/designs/": {
             "get": {
                 "operationId": "designs_list",
-                "description": "Returns the private designs owned by the current session or account as compact rows (no questionnaire schema, no inspiration records). A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Returns the private designs owned by the current session or account as compact rows (no questionnaire schema, no inspiration records, no job snapshot), newest first, each with its versions in creation order. Carries no signed image URL — a gallery mints one per card through the ownership-checked images endpoint. Bounded page size. A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "List your designs",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "limit",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "description": "How many designs to return, newest first. Defaults to 20 and is capped at 50."
+                    },
+                    {
+                        "in": "query",
+                        "name": "offset",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "description": "How many designs to skip, for paging through the gallery. Must be between 0 and 1000000."
+                    }
+                ],
                 "tags": [
                     "Designs"
                 ],
@@ -347,6 +365,16 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/DesignListResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationErrorEnvelope"
                                 }
                             }
                         },
@@ -2983,7 +3011,7 @@
             },
             "DesignListItem": {
                 "type": "object",
-                "description": "A compact list row — no questionnaire schema, no inspiration records.",
+                "description": "A gallery row — no questionnaire schema, no inspiration records, no job.",
                 "properties": {
                     "id": {
                         "type": "string",
@@ -3002,14 +3030,31 @@
                     "updated_at": {
                         "type": "string",
                         "format": "date-time"
+                    },
+                    "is_demo": {
+                        "type": "boolean",
+                        "nullable": true
+                    },
+                    "version_count": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "versions": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DesignListVersion"
+                        }
                     }
                 },
                 "required": [
                     "created_at",
                     "id",
+                    "is_demo",
                     "status",
                     "title",
-                    "updated_at"
+                    "updated_at",
+                    "version_count",
+                    "versions"
                 ]
             },
             "DesignListResponse": {
@@ -3020,10 +3065,68 @@
                         "items": {
                             "$ref": "#/components/schemas/DesignListItem"
                         }
+                    },
+                    "total": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0
                     }
                 },
                 "required": [
-                    "designs"
+                    "designs",
+                    "limit",
+                    "offset",
+                    "total"
+                ]
+            },
+            "DesignListVersion": {
+                "type": "object",
+                "description": "One version inside a gallery row (Phase 21).\n\nNo signed URL, storage key, hash, prompt or note text — see\n``serializers._version_row_payload`` for why a list is the wrong place for a\nbearer token. ``job_status`` is this version's own progress and may be null on\na legacy row whose attempt was deleted.",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "version_number": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "is_demo": {
+                        "type": "boolean"
+                    },
+                    "has_image": {
+                        "type": "boolean"
+                    },
+                    "job_status": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/JobStatusEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": [
+                    "created_at",
+                    "has_image",
+                    "id",
+                    "is_demo",
+                    "job_status",
+                    "version_number"
                 ]
             },
             "DesignOriginalImage": {
@@ -3633,6 +3736,17 @@
                     "image",
                     "rights_acknowledged"
                 ]
+            },
+            "JobStatusEnum": {
+                "enum": [
+                    "queued",
+                    "running_text",
+                    "running_image",
+                    "succeeded",
+                    "failed"
+                ],
+                "type": "string",
+                "description": "* `queued` - Queued\n* `running_text` - Running text\n* `running_image` - Running image\n* `succeeded` - Succeeded\n* `failed` - Failed"
             },
             "LiveResponse": {
                 "type": "object",

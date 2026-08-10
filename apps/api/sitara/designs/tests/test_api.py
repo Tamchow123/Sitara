@@ -61,7 +61,11 @@ class TestList:
         client = csrf_client()
         response = client.get(DESIGNS_URL)
         assert response.status_code == 200
-        assert response.json() == {"designs": []}
+        # The paging fields arrived with the Phase 21 gallery; the list itself is
+        # still empty and still creates nothing. test_gallery_api.py owns the
+        # paging behaviour — this stays an exact-shape assertion so a field cannot
+        # be added to the list response without a test noticing.
+        assert response.json() == {"designs": [], "total": 0, "limit": 20, "offset": 0}
         assert response["Cache-Control"] == "no-store"
 
     def test_listing_never_creates_a_design_session(self):
