@@ -12,6 +12,13 @@ const mocks = vi.hoisted(() => ({
   startDesignGeneration: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
+  refreshUser: vi.fn(),
+  // Phase 21: the screen's final control depends on whether there is an account,
+  // so every test now has an authentication status. It defaults to authenticated
+  // in beforeEach so the pre-existing generate tests describe the same journey
+  // they always did.
+  authStatus: { current: "authenticated" as string },
+  pathname: { current: "/design/d1/review" as string | null },
 }));
 
 vi.mock("./api", () => ({
@@ -24,6 +31,11 @@ vi.mock("./api", () => ({
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
   useParams: () => ({}),
+  usePathname: () => mocks.pathname.current,
+}));
+
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ status: mocks.authStatus.current, refreshUser: mocks.refreshUser }),
 }));
 
 const SCHEMA: QuestionnaireSchema = {
@@ -88,6 +100,8 @@ function design(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.authStatus.current = "authenticated";
+  mocks.pathname.current = "/design/d1/review";
   mocks.fetchDesign.mockResolvedValue(design());
   mocks.validateDesignDraft.mockResolvedValue({ ok: true, data: { valid: true } });
   // The exact payload the running stack returns under DEMO_MODE=true. The
@@ -562,6 +576,189 @@ describe("ReviewSummary", () => {
       const button = await screen.findByRole("button", { name: /Generate my concept/i });
       fireEvent.click(button);
       await vi.waitFor(() => expect(mocks.replace).toHaveBeenCalled());
+      expect(localStorage.length).toBe(0);
+      expect(sessionStorage.length).toBe(0);
+    });
+  });
+
+  // Phase 21 / ADR 0023. The whole questionnaire stays open to an anonymous
+  // visitor; the one action that produces a concept does not.
+  describe("an account is required to generate", () => {
+    it("offers sign-in instead of the generate button when there is no account", async () => {
+      mocks.authStatus.current = "anonymous";
+      render(<ReviewSummary designId="d1" />);
+
+      const signIn = await screen.findByRole("link", { name: /sign in to generate/i });
+      expect(signIn).toHaveAttribute("href", "/login?next=%2Fdesign%2Fd1%2Freview");
+      expect(screen.queryByRole("button", { name: /Generate my concept/i })).not.toBeInTheDocument();
+    });
+
+    it("offers registration to the same destination", async () => {
+      mocks.authStatus.current = "anonymous";
+      render(<ReviewSummary designId="d1" />);
+
+      const create = await screen.findByRole("link", { name: /create an account/i });
+      expect(create).toHaveAttribute("href", "/register?next=%2Fdesign%2Fd1%2Freview");
+    });
+
+    it("promises the answers are kept, and still shows every one of them", async () => {
+      // The reassurance is only worth printing if it is true on screen: the
+      // review is fully rendered behind the sign-in prompt, not replaced by it.
+      mocks.authStatus.current = "anonymous";
+      render(<ReviewSummary designId="d1" />);
+
+      expect(await screen.findByText(/nothing you have entered is lost/i)).toBeInTheDocument();
+      expect(screen.getByText("Lehenga")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Edit Which garment?" })).toBeInTheDocument();
+    });
+
+    it("never starts a generation for an anonymous visitor", async () => {
+      mocks.authStatus.current = "anonymous";
+      render(<ReviewSummary designId="d1" />);
+      await screen.findByRole("link", { name: /sign in to generate/i });
+      expect(mocks.startDesignGeneration).not.toHaveBeenCalled();
+    });
+
+    it("sends the visitor back to a safe path even if the route is hostile", async () => {
+      // pathname is not user input today, but it is the value that becomes a
+      // ?next= this application prints itself — so it goes through safeNextPath
+      // on the way OUT as well as on the way back in.
+      mocks.authStatus.current = "anonymous";
+      mocks.pathname.current = "//evil.example/phish";
+      render(<ReviewSummary designId="d1" />);
+
+      expect(await screen.findByRole("link", { name: /sign in to generate/i })).toHaveAttribute(
+        "href",
+        "/login?next=%2Faccount",
+      );
+    });
+
+    it("falls back to this design's own review route when there is no pathname", async () => {
+      mocks.authStatus.current = "anonymous";
+      mocks.pathname.current = null;
+      render(<ReviewSummary designId="d1" />);
+
+      expect(await screen.findByRole("link", { name: /sign in to generate/i })).toHaveAttribute(
+        "href",
+        "/login?next=%2Fdesign%2Fd1%2Freview",
+      );
+    });
+
+    it("waits for a deliberate press while the account status is still unknown", async () => {
+      // "loading" is not "anonymous": showing the sign-in link here would send a
+      // signed-in user to a login page they do not need.
+      mocks.authStatus.current = "loading";
+      render(<ReviewSummary designId="d1" />);
+
+      const button = await screen.findByRole("button", { name: /Generate my concept/i });
+      expect(button).toBeDisabled();
+      expect(screen.getByText(/checking your account/i)).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /sign in to generate/i })).not.toBeInTheDocument();
+    });
+
+    it("still offers generation when the account check itself failed", async () => {
+      // A failed /auth/me read is not evidence of being signed out, and it must
+      // not stand between a signed-in user and their concept. The endpoint is the
+      // authority and will refuse if they really are anonymous.
+      mocks.authStatus.current = "unavailable";
+      mocks.startDesignGeneration.mockResolvedValue({ ok: true, data: { job: { id: "job-1" } } });
+      render(<ReviewSummary designId="d1" />);
+
+      fireEvent.click(await screen.findByRole("button", { name: /Generate my concept/i }));
+      await vi.waitFor(() =>
+        expect(mocks.replace).toHaveBeenCalledWith("/design/d1/generation/job-1"),
+      );
+    });
+
+    it("turns a server refusal into the same sign-in routing, not a failure", async () => {
+      // The session expired while the review was open. The client believed it was
+      // signed in, so the up-front check cannot catch this — only the response can.
+      mocks.startDesignGeneration.mockResolvedValue({
+        ok: false,
+        status: 401,
+        code: "authentication_required",
+        message: "unused — the page substitutes its own copy",
+      });
+      render(<ReviewSummary designId="d1" />);
+      fireEvent.click(await screen.findByRole("button", { name: /Generate my concept/i }));
+
+      const signIn = await screen.findByRole("link", { name: /sign in to generate/i });
+      expect(signIn).toHaveAttribute("href", "/login?next=%2Fdesign%2Fd1%2Freview");
+      // Not an apology, and not a "Try again" that could only fail again.
+      expect(screen.queryByText(/could not start your generation/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Try again/i })).not.toBeInTheDocument();
+      // Announced politely, and it says the answers survived — the one thing a
+      // person whose session just expired mid-journey needs to be told.
+      const announcement = screen.getByRole("status");
+      expect(announcement).toHaveTextContent(/your answers are saved/i);
+      expect(announcement).toHaveTextContent(/sign in or create an account/i);
+    });
+
+    it("re-reads the account after a server refusal so the shell stops showing a stale one", async () => {
+      mocks.startDesignGeneration.mockResolvedValue({
+        ok: false,
+        status: 401,
+        code: "authentication_required",
+        message: "Sign in or create an account to generate your concept.",
+      });
+      render(<ReviewSummary designId="d1" />);
+      fireEvent.click(await screen.findByRole("button", { name: /Generate my concept/i }));
+
+      // Settle on the rendered outcome first, then assert the side effect — the
+      // other way round leaves React re-rendering after the assertion.
+      await screen.findByRole("link", { name: /sign in to generate/i });
+      expect(mocks.refreshUser).toHaveBeenCalled();
+    });
+
+    it("shows an enabled button and waits, on a fresh mount with an account", async () => {
+      // Coming back from sign-in is a fresh mount of this screen with an account
+      // present. It must offer the button and WAIT for a press (assumption Q4).
+      // Deliberately named for what it renders rather than for the journey it
+      // stands in for: starting from "authenticated" cannot by itself prove that
+      // nothing fires on an authentication CHANGE — the test below does that.
+      mocks.authStatus.current = "authenticated";
+      render(<ReviewSummary designId="d1" />);
+
+      const button = await screen.findByRole("button", { name: /Generate my concept/i });
+      expect(button).toBeEnabled();
+      expect(mocks.startDesignGeneration).not.toHaveBeenCalled();
+
+      mocks.startDesignGeneration.mockResolvedValue({ ok: true, data: { job: { id: "job-2" } } });
+      fireEvent.click(button);
+      await vi.waitFor(() => expect(mocks.startDesignGeneration).toHaveBeenCalledTimes(1));
+    });
+
+    it("does not fire a generation when an account appears while the screen is open", async () => {
+      // The case a fresh authenticated mount cannot catch: signing in elsewhere
+      // (another tab, or a client-side navigation that keeps this tree mounted)
+      // flips the status under a screen that is already showing. If anyone ever
+      // adds an effect keyed on authStatus, this is the test that fails.
+      mocks.authStatus.current = "anonymous";
+      const { rerender } = render(<ReviewSummary designId="d1" />);
+      await screen.findByRole("link", { name: /sign in to generate/i });
+
+      mocks.authStatus.current = "authenticated";
+      rerender(<ReviewSummary designId="d1" />);
+
+      const button = await screen.findByRole("button", { name: /Generate my concept/i });
+      expect(button).toBeEnabled();
+      expect(mocks.startDesignGeneration).not.toHaveBeenCalled();
+    });
+
+    it("has no axe violations on the anonymous review", async () => {
+      mocks.authStatus.current = "anonymous";
+      const { container } = render(<ReviewSummary designId="d1" />);
+      await screen.findByRole("link", { name: /sign in to generate/i });
+      expect(await axeViolations(container)).toHaveNoViolations();
+    });
+
+    it("writes nothing to browser storage while routing to sign-in", async () => {
+      mocks.authStatus.current = "anonymous";
+      render(<ReviewSummary designId="d1" />);
+      const signIn = await screen.findByRole("link", { name: /sign in to generate/i });
+      // The press as well as the render: stashing the design or the return path
+      // in storage on the way out is exactly the shortcut this asserts against.
+      fireEvent.click(signIn);
       expect(localStorage.length).toBe(0);
       expect(sessionStorage.length).toBe(0);
     });

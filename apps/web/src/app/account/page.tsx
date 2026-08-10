@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
+import { DEFAULT_AUTHENTICATED_PATH, signInHref } from "@/lib/navigation";
 
 const SIGN_OUT_FAILED_MESSAGE =
   "Sign-out could not be completed. Your session may still be active. " +
@@ -23,7 +24,9 @@ export default function AccountPage() {
   useEffect(() => {
     // Covers stale/expired session cookies that slipped past middleware.
     if (status === "anonymous") {
-      router.replace("/login?next=/account");
+      // Through the shared builder rather than a hand-written string, so this
+      // route cannot drift from the one the review screen now prints.
+      router.replace(signInHref(DEFAULT_AUTHENTICATED_PATH));
     }
   }, [status, router]);
 

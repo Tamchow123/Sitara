@@ -8,7 +8,15 @@
 // never displays an internal amount, and never invites an automatic retry — the
 // copy points the user to "later" and reassures them their design is saved.
 
+// The Phase 21 sign-in gate. Kept as a named constant because two callers must
+// recognise it as something other than a failure: it is the one submit-time
+// refusal the user can act on immediately, in a different place (sign in or
+// register), and the copy must say so without implying the answers are lost.
+export const GENERATION_SIGN_IN_REQUIRED_CODE = "authentication_required";
+
 export const GENERATION_SUBMIT_MESSAGES: Record<string, string> = {
+  [GENERATION_SIGN_IN_REQUIRED_CODE]:
+    "Please sign in or create an account to generate your concept. Your answers are saved.",
   live_generation_disabled:
     "Live concept generation is currently turned off. Your design has been saved.",
   generation_limit_reached:
@@ -22,7 +30,12 @@ export const GENERATION_SUBMIT_MESSAGES: Record<string, string> = {
 
 // Terminal-for-now admission codes: retrying immediately cannot succeed, so a
 // consumer should not offer an instant retry or poll — the user comes back later.
+// The sign-in gate belongs here too, for the opposite reason: pressing the same
+// button again while still signed out can only produce the same refusal. A
+// consumer that can route to sign-in should do that INSTEAD of an error block
+// (see ReviewSummary); one that cannot at least stops offering a useless retry.
 export const GENERATION_SUBMIT_TERMINAL_CODES: ReadonlySet<string> = new Set([
+  GENERATION_SIGN_IN_REQUIRED_CODE,
   "live_generation_disabled",
   "generation_limit_reached",
   "live_generation_budget_exhausted",

@@ -64,7 +64,7 @@ describe("account page", () => {
     mockBackend(ME_ANONYMOUS);
     renderPage();
     await waitFor(() =>
-      expect(replace).toHaveBeenCalledWith("/login?next=/account"),
+      expect(replace).toHaveBeenCalledWith("/login?next=%2Faccount"),
     );
   });
 
@@ -75,7 +75,7 @@ describe("account page", () => {
     renderPage();
     expect(await screen.findByText(/redirecting to sign in/i)).toBeInTheDocument();
     await waitFor(() =>
-      expect(replace).toHaveBeenCalledWith("/login?next=/account"),
+      expect(replace).toHaveBeenCalledWith("/login?next=%2Faccount"),
     );
   });
 

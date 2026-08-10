@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { safeNextPath } from "@/lib/navigation";
+import { registerHref, safeNextPath } from "@/lib/navigation";
 
 function errorMessageFor(code: string, fallback: string): string {
   if (code === "auth_rate_limited") {
@@ -90,7 +90,10 @@ function LoginForm() {
           </button>
         </form>
         <p>
-          New to Sitara? <Link href="/register">Create an account</Link>
+          {/* Carries the destination across, so someone who came here from the
+              review screen and turns out to have no account still lands back on
+              their design rather than on the account page. */}
+          New to Sitara? <Link href={registerHref(searchParams.get("next"))}>Create an account</Link>
         </p>
       </section>
     </AppShell>
