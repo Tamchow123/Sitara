@@ -347,6 +347,15 @@ dd {
   font-size: 17px;
 }
 
+/* Tighter horizontally for a row of secondary actions inside a card, but
+   min-height is deliberately NOT reduced: 44px is the WCAG 2.2 target size,
+   and a control that lives in a grid of cards on a phone is the last place to
+   shave it. Only the padding and the type scale down. */
+.btn-small {
+  padding: var(--space-1) var(--space-3);
+  font-size: 14px;
+}
+
 /* A button waiting on the network. `aria-busy` carries the state to
    assistive technology; the spinner is decorative and stops under
    reduced motion (the blanket rule in tokens.css kills the animation,

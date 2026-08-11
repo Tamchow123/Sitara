@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
   saveAnnotations: vi.fn(),
   clearAnnotations: vi.fn(),
   sendRenderToAccount: vi.fn(),
+  fetchRenderSendState: vi.fn(),
   fetchDesignResult: vi.fn(),
   fetchDesignImageUrls: vi.fn(),
 }));
@@ -174,6 +175,11 @@ beforeEach(() => {
   }));
   api.clearAnnotations.mockResolvedValue({ ok: true });
   api.sendRenderToAccount.mockResolvedValue({ ok: true });
+  api.fetchRenderSendState.mockResolvedValue({
+    used: 0,
+    limit: 3,
+    suggestedFilename: "Ivory lehenga",
+  });
   api.fetchDesignResult.mockResolvedValue({
     ok: true,
     result: {
@@ -1218,17 +1224,41 @@ describe("the workspace's own claims", () => {
 // ---------------------------------------------------------------------------
 
 describe("send to account", () => {
+  /** Open the naming prompt. Since Phase 21 the press is never the send. */
+  async function openPrompt() {
+    fireEvent.click(screen.getByRole("button", { name: /send to account/i }));
+    return screen.findByRole("dialog", { name: /name this file/i });
+  }
+
+  const nameField = () => screen.getByLabelText(/file name/i);
+  const confirm = () => screen.getByRole("button", { name: /send to my email/i });
+
+  /** The whole two-step gesture: open, optionally retype, confirm. */
+  async function sendWithName(typed?: string) {
+    await openPrompt();
+    if (typed !== undefined) fireEvent.change(nameField(), { target: { value: typed } });
+    fireEvent.click(confirm());
+  }
+
   it("flashes a confirmation naming the account's own address", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     await loaded();
-    fireEvent.click(screen.getByRole("button", { name: /send to account/i }));
+    await sendWithName();
 
     await waitFor(() =>
-      expect(api.sendRenderToAccount).toHaveBeenCalledWith("design-1", "version-1", "annotated"),
+      expect(api.sendRenderToAccount).toHaveBeenCalledWith(
+        "design-1",
+        "version-1",
+        "annotated",
+        "Ivory lehenga",
+      ),
     );
     expect(await screen.findByText(/sent to your email/i)).toBeInTheDocument();
     expect(
-      screen.getAllByRole("status").map((node) => node.textContent).join(" "),
+      screen
+        .getAllByRole("status")
+        .map((node) => node.textContent)
+        .join(" "),
     ).toContain("bride@example.test");
 
     await act(async () => {
@@ -1241,7 +1271,7 @@ describe("send to account", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     await loaded();
     const button = () => screen.getByRole("button", { name: /send to account|sent to your email/i });
-    fireEvent.click(button());
+    await sendWithName();
     await waitFor(() => expect(api.sendRenderToAccount).toHaveBeenCalledTimes(1));
 
     // A press on a button that says "Sent to your email ✓" is a mis-click, and the
@@ -1264,7 +1294,7 @@ describe("send to account", () => {
       message: "You have sent this many concepts for now. Please try again later.",
     });
     await loaded();
-    fireEvent.click(screen.getByRole("button", { name: /send to account/i }));
+    await sendWithName();
 
     expect(await screen.findByText(/sent this many concepts for now/i)).toBeInTheDocument();
   });
@@ -1276,6 +1306,9 @@ describe("send to account", () => {
     expect(screen.getByRole("button", { name: /send to account/i })).toBeDisabled();
     expect(screen.getByText(/sign in to send this to your email/i)).toBeInTheDocument();
     expect(api.sendRenderToAccount).not.toHaveBeenCalled();
+    // Nothing to read either: an account-less visitor has no allowance to show, and
+    // asking would be a request that can only 409.
+    expect(api.fetchRenderSendState).not.toHaveBeenCalled();
   });
 
   it("reports a closed capability gate honestly", async () => {
@@ -1285,7 +1318,7 @@ describe("send to account", () => {
       message: "Emailing your concept is not available at the moment.",
     });
     await loaded();
-    fireEvent.click(screen.getByRole("button", { name: /send to account/i }));
+    await sendWithName();
 
     expect(await screen.findByText(/not available at the moment/i)).toBeInTheDocument();
   });
@@ -1295,6 +1328,257 @@ describe("send to account", () => {
     // policy page.
     await loaded();
     expect(screen.getByText(/may keep a copy outside Sitara/i)).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Naming the file (Phase 21)
+  // -------------------------------------------------------------------------
+
+  it("asks for a name before sending anything", async () => {
+    await loaded();
+    fireEvent.click(screen.getByRole("button", { name: /send to account/i }));
+
+    expect(await screen.findByRole("dialog", { name: /name this file/i })).toBeInTheDocument();
+    // The press opened a prompt. It did NOT send.
+    expect(api.sendRenderToAccount).not.toHaveBeenCalled();
+  });
+
+  it("pre-fills the field from the server's suggestion and focuses it", async () => {
+    await loaded();
+    await openPrompt();
+
+    const field = nameField();
+    expect(field).toHaveValue("Ivory lehenga");
+    expect(field).toHaveFocus();
+  });
+
+  it("sends the name the user typed instead of the suggestion", async () => {
+    await loaded();
+    await sendWithName("Autumn mehndi look");
+
+    await waitFor(() =>
+      expect(api.sendRenderToAccount).toHaveBeenCalledWith(
+        "design-1",
+        "version-1",
+        "annotated",
+        "Autumn mehndi look",
+      ),
+    );
+  });
+
+  it("bounds the field at the length the attachment will actually keep", async () => {
+    await loaded();
+    await openPrompt();
+    // 60, the server's base cap — not its 200-character abuse ceiling. A field that
+    // accepted 200 would let someone type 140 characters they never see again.
+    expect(nameField()).toHaveAttribute("maxlength", "60");
+  });
+
+  it("says the name goes into the email headers before the user types", async () => {
+    // ADR 0021 records this as an ACCEPTED exposure. The wording must never
+    // suggest it has been removed or mitigated.
+    await loaded();
+    const dialog = await openPrompt();
+
+    const hint = within(dialog).getByText(/goes into the email/i);
+    expect(hint.textContent).toMatch(/headers/i);
+    expect(hint.textContent).toMatch(/your mail provider and your inbox keep it/i);
+    expect(hint.textContent).toMatch(/outside sitara/i);
+    // The field is described BY it, so it is announced rather than merely present.
+    expect(nameField()).toHaveAccessibleDescription(/goes into the email/i);
+  });
+
+  it("shows how many sends are left before the ceiling is reached", async () => {
+    api.fetchRenderSendState.mockResolvedValue({
+      used: 2,
+      limit: 3,
+      suggestedFilename: "Ivory lehenga",
+    });
+    await loaded();
+
+    expect(await screen.findByText(/1 of 3 emails left for this image/i)).toBeInTheDocument();
+  });
+
+  it("refuses and explains once the allowance is spent, without asking for a name", async () => {
+    api.fetchRenderSendState.mockResolvedValue({
+      used: 3,
+      limit: 3,
+      suggestedFilename: "Ivory lehenga",
+    });
+    await loaded();
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /send to account/i })).toBeDisabled(),
+    );
+    expect(screen.getByText(/emailed this 3 times, which is the maximum/i)).toBeInTheDocument();
+    // No prompt, and nothing sent: the ceiling is not a name problem.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(api.sendRenderToAccount).not.toHaveBeenCalled();
+  });
+
+  it("cannot hold the characters that make a refusal likely in the first place", async () => {
+    // Worth pinning rather than assuming. A single-line <input> discards CR and LF
+    // outright — typed OR pasted — so the header-injection name this field is most
+    // often imagined carrying is not expressible here at all. That does not make
+    // the server's refusal redundant; it makes it defence in depth, which is the
+    // only reason it is safe for this dialog to treat a refused name as a
+    // correctable typo rather than an attack.
+    await loaded();
+    await openPrompt();
+
+    fireEvent.change(nameField(), { target: { value: "Autumn\r\nBcc: attacker@evil.test" } });
+
+    expect((nameField() as HTMLInputElement).value).not.toMatch(/[\r\n]/);
+  });
+
+  it("keeps the dialog open and explains when the server refuses the name", async () => {
+    // "///" is refused server-side (it sanitises to nothing) AND is typeable here,
+    // unlike a CR/LF name — so this exercises the refusal path through a gesture a
+    // real stylist could actually make.
+    api.sendRenderToAccount.mockResolvedValue({
+      ok: false,
+      kind: "name_refused",
+      message: "This name cannot be used. Please try a simpler name.",
+    });
+    await loaded();
+    await sendWithName("///");
+
+    // Closing would throw away what they wrote and leave them guessing.
+    expect(await screen.findByRole("alert")).toHaveTextContent(/cannot be used/i);
+    expect(screen.getByRole("dialog", { name: /name this file/i })).toBeInTheDocument();
+    expect(nameField()).toHaveValue("///");
+    expect(nameField()).toHaveAttribute("aria-invalid", "true");
+    // And the hint is still described, so the error did not silence the one thing
+    // the user has to know.
+    expect(nameField()).toHaveAccessibleDescription(/goes into the email/i);
+  });
+
+  it("clears the refusal as soon as the name is edited", async () => {
+    api.sendRenderToAccount.mockResolvedValue({
+      ok: false,
+      kind: "name_refused",
+      message: "This name cannot be used. Please try a simpler name.",
+    });
+    await loaded();
+    await sendWithName("///");
+    await screen.findByRole("alert");
+
+    fireEvent.change(nameField(), { target: { value: "A better name" } });
+
+    expect(screen.queryByText(/cannot be used/i)).not.toBeInTheDocument();
+    expect(nameField()).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("cancelling sends nothing and returns focus to the button", async () => {
+    await loaded();
+    const trigger = screen.getByRole("button", { name: /send to account/i });
+    trigger.focus();
+    await openPrompt();
+
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(api.sendRenderToAccount).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /send to account/i })).toHaveFocus();
+  });
+
+  it("Escape closes the prompt without sending", async () => {
+    await loaded();
+    const dialog = await openPrompt();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(api.sendRenderToAccount).not.toHaveBeenCalled();
+  });
+
+  it("Enter in the field sends rather than doing nothing", async () => {
+    await loaded();
+    await openPrompt();
+    fireEvent.change(nameField(), { target: { value: "Sangeet look" } });
+
+    fireEvent.keyDown(nameField(), { key: "Enter" });
+
+    await waitFor(() =>
+      expect(api.sendRenderToAccount).toHaveBeenCalledWith(
+        "design-1",
+        "version-1",
+        "annotated",
+        "Sangeet look",
+      ),
+    );
+  });
+
+  it("opens the prompt even when the send state cannot be read", async () => {
+    // The suggestion and the count are conveniences. A concept the user can see
+    // must not become unsendable because a convenience read failed.
+    api.fetchRenderSendState.mockResolvedValue(null);
+    await loaded();
+    await sendWithName("Named anyway");
+
+    await waitFor(() =>
+      expect(api.sendRenderToAccount).toHaveBeenCalledWith(
+        "design-1",
+        "version-1",
+        "annotated",
+        "Named anyway",
+      ),
+    );
+  });
+
+  it("takes the suggestion only from the server, with a note in scope on the same screen", async () => {
+    // What this DOES prove: the client never derives a name itself. `fetchAnnotations`
+    // is mocked with a note, `fetchRenderSendState` with a title, and the field takes
+    // the second — so a future client-side fallback that reached for the document
+    // would fail here. That is worth guarding on this surface specifically, because
+    // this is the one where the note is already loaded and one property access away.
+    //
+    // What it does NOT prove: that the server never derives a suggestion from a
+    // note. It cannot — the server is mocked. That guarantee (CLAUDE.md §7: a note
+    // is the most personal free text in the product, and a file name travels in the
+    // message headers) is held and tested where it lives, in
+    // designs/tests/test_render_send_api.py::test_the_send_state_never_suggests_a_note.
+    // Stated plainly rather than left implied, because a test that looks like it
+    // covers a privacy rule and does not is worse than no test at all.
+    api.fetchAnnotations.mockResolvedValue(
+      emptyDocument({ items: [pin(1, "The neckline is far too low")], revision: 1 }),
+    );
+    await loaded();
+    // The note really is on screen, so "the client had it and did not use it" is a
+    // claim about an available value rather than an absent one.
+    expect(screen.getByText("The neckline is far too low")).toBeInTheDocument();
+    const dialog = await openPrompt();
+
+    expect(nameField()).toHaveValue("Ivory lehenga");
+    expect(dialog.textContent).not.toMatch(/neckline/i);
+  });
+
+  it("writes nothing to browser storage while naming and sending", async () => {
+    await loaded();
+    await sendWithName("Autumn mehndi look");
+    await waitFor(() => expect(api.sendRenderToAccount).toHaveBeenCalled());
+
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it("has no axe violations with the naming prompt open", async () => {
+    const { container } = await loaded();
+    await openPrompt();
+    expect(await axeViolations(container)).toHaveNoViolations();
+  });
+
+  it("has no axe violations with the prompt showing a refused name", async () => {
+    api.sendRenderToAccount.mockResolvedValue({
+      ok: false,
+      kind: "name_refused",
+      message: "This name cannot be used. Please try a simpler name.",
+    });
+    const { container } = await loaded();
+    await sendWithName("///");
+    await screen.findByRole("alert");
+
+    expect(await axeViolations(container)).toHaveNoViolations();
   });
 });
 

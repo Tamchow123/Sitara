@@ -910,6 +910,29 @@
   color: var(--color-accent-2-900);
 }
 
+/* How many emails are left for this render. Text rather than a bar or a colour,
+   because "1 of 3 left" is the entire message and a colour would need a legend. */
+.annotation-send-allowance {
+  color: var(--color-neutral-800);
+}
+
+/* --- The name-this-file prompt (Phase 21) -----------------------------
+   The prompt reuses the shared `.field` / `.input` / `.field-hint` /
+   `.field-error` primitives from base.css rather than growing a parallel set of
+   annotation-specific ones — a second set would drift from the questionnaire's
+   fields in exactly the details (invalid border, focus ring, hint colour) that
+   have to stay identical. Only the two things base.css cannot know are here: that
+   this field sits inside a dialog whose body has no bottom margin to give, and
+   that its hint is a paragraph of consequence rather than a one-line aside. */
+
+.annotation-dialog-body .field {
+  margin-bottom: 0;
+}
+
+.annotation-dialog-body .field-hint {
+  line-height: 1.5;
+}
+
 /* --- Dialogs and the leave popover ----------------------------------- */
 
 .annotation-scrim {

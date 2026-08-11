@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { STYLIST_STATE_PATH, stylistEmail } from "./helpers/account";
 import { completeQuestionnaire, waitForDesignQuiescent } from "./helpers/wizard";
 
 // Phase 19 §E2E: the private annotation workspace, end to end against real
@@ -16,6 +17,11 @@ import { completeQuestionnaire, waitForDesignQuiescent } from "./helpers/wizard"
 // coordinate is exactly what a unit test cannot cover.
 
 test.describe.configure({ mode: "serial", timeout: 240_000 });
+
+// Signed in as the run's shared account. A workspace can only exist under an
+// account since Phase 21 (ADR 0023), so there is no anonymous variant of any test
+// in this file — see the first test for what that displaced and where it went.
+test.use({ storageState: STYLIST_STATE_PATH });
 
 /** Press and release on the render, in fractions of its own rendered box. */
 async function markAt(
@@ -55,6 +61,18 @@ async function markAt(
 test.describe("the private annotation workspace", () => {
   test("annotate, persist across a reload, send, and stay private", async ({ page, browser }) => {
     // --- A real demo concept to annotate ---------------------------------
+    //
+    // Registered first, because since Phase 21 there is no such thing as an
+    // anonymously generated concept (ADR 0023). What this journey used to prove
+    // at the end — that an anonymous workspace owner is refused a send with no
+    // fallback and no prompt for an address — is now UNREACHABLE from a browser,
+    // since a workspace can only exist under an account. That rule has not been
+    // dropped: it is proved at the API level instead, by
+    // test_an_anonymous_owner_is_told_to_sign_in_and_nothing_is_sent in
+    // apps/api/sitara/designs/tests/test_render_send_api.py, which builds an
+    // anonymous-owned version directly and asserts 409
+    // email_recipient_unavailable with an empty mail outbox. That test is now the
+    // only proof of the rule, which is why it says so in its own docstring.
     const designId = await completeQuestionnaire(page);
     await waitForDesignQuiescent(page, designId);
     await page.getByRole("button", { name: /generate my concept/i }).click();
@@ -138,18 +156,32 @@ test.describe("the private annotation workspace", () => {
     await page.getByRole("button", { name: /show annotations/i }).click();
     await expect(page.locator(".annotation-overlay .mark")).toHaveCount(2);
 
-    // --- The send action, as an anonymous owner ---------------------------
+    // --- The send control is offered, and names no address ----------------
     //
-    // This journey never registered, so the workspace owner is the anonymous
-    // session. §8.1 is explicit that there is no fallback: no prompt for an
-    // address, no silent success.
-    const sendButton = page.getByRole("button", { name: /send to account/i });
-    await expect(sendButton).toBeDisabled();
-    await expect(page.getByText(/sign in to send this to your email/i)).toBeVisible();
+    // The owner is an account, so the control is live. What must still hold here
+    // is that the page never asks for an address and never puts one in a URL —
+    // the recipient is resolved server-side and there is no field to type one
+    // into. The send itself is exercised by the two tests below.
+    await expect(page.getByRole("button", { name: /send to account/i })).toBeEnabled();
+    await expect(page.getByRole("textbox", { name: /email|address|recipient/i })).toHaveCount(0);
+    expect(page.url()).not.toContain("@");
 
     // --- Another browser cannot reach this workspace ----------------------
-    const stranger = await browser.newContext();
+    //
+    // The empty storage state is REQUIRED, not tidiness. `browser.newContext()`
+    // inherits this file's `test.use` options, including the shared signed-in
+    // session — so without this the "stranger" was the owner, reached the
+    // workspace, and the test failed on the missing error rather than passing for
+    // the wrong reason. It could just as easily have passed for the wrong reason
+    // if the assertion had been weaker, which is why the next two lines prove the
+    // context really is a stranger before anything is concluded from it.
+    const stranger = await browser.newContext({ storageState: { cookies: [], origins: [] } });
     const strangerPage = await stranger.newPage();
+    await strangerPage.goto("/");
+    await expect(strangerPage.getByRole("link", { name: /^sign in$/i })).toBeVisible({
+      timeout: 30_000,
+    });
+
     await strangerPage.goto(page.url());
     // Indistinguishable from "never existed" — ownership is resolved before the
     // UUID is ever looked up.
@@ -169,21 +201,13 @@ test.describe("the private annotation workspace", () => {
     expect(objectKey(currentSrc)).toBe(objectKey(originalSrc));
   });
 
-  test("an authenticated owner can queue a send, and it is only ever queued", async ({ page }) => {
-    // Registered FIRST, so the design belongs to an account with an address the
-    // server can resolve. The recipient is never supplied by the client.
-    await page.goto("/register");
-    const email = `annotate-${Date.now()}@example.test`;
-    await page.getByLabel(/email/i).fill(email);
-    // Anchored rather than exact: the real label is "Password (at least 12
-    // characters)", so `{ exact: true }` on "Password" matched nothing. Anchoring
-    // at the start is what keeps it off "Confirm password" below. This line has
-    // never run — the suite is serial and the test above failed first — so it was
-    // latent until the first green run reached it.
-    await page.getByLabel(/^password \(/i).fill("a-strong-test-password-123");
-    await page.getByLabel(/confirm password/i).fill("a-strong-test-password-123");
-    await page.getByRole("button", { name: /create account|register|sign up/i }).click();
-    await expect(page.getByText(email)).toBeVisible({ timeout: 30_000 });
+  test("an authenticated owner names the file, and the send is only ever queued", async ({
+    page,
+  }) => {
+    // The design belongs to an account with an address the server can resolve.
+    // The recipient is never supplied by the client — the address is read here
+    // only to prove it never appears anywhere it should not.
+    const email = stylistEmail();
 
     const designId = await completeQuestionnaire(page);
     await waitForDesignQuiescent(page, designId);
@@ -199,18 +223,95 @@ test.describe("the private annotation workspace", () => {
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.locator(".annotation-save-pill")).toHaveText(/saved/i, { timeout: 20_000 });
 
+    // The allowance is stated BEFORE anything is spent, which is the whole point
+    // of reading it on mount rather than only in the refusal that follows the
+    // last send. Read from the server, not from a client-side guess.
+    await expect(page.getByText(/of 3 emails left for this image/i)).toBeVisible({
+      timeout: 20_000,
+    });
+
     const send = page.getByRole("button", { name: /send to account/i });
     await expect(send).toBeEnabled();
     await send.click();
 
+    // --- The naming prompt (Phase 21) -------------------------------------
+    const dialog = page.getByRole("dialog", { name: /name this file/i });
+    await expect(dialog).toBeVisible();
+    const nameField = dialog.getByLabel(/file name/i);
+    // Focus lands in the field, not on the dialog container: the first thing the
+    // stylist does here is type.
+    await expect(nameField).toBeFocused();
+
+    // The accepted exposure is stated before they type, and worded as accepted —
+    // ADR 0021 gave this up rather than mitigating it, and the copy must not
+    // suggest otherwise.
+    await expect(dialog.getByText(/email.*own headers/i)).toBeVisible();
+    await expect(dialog.getByText(/outside sitara/i)).toBeVisible();
+
+    // There is no address field here, and never has been: the recipient comes
+    // from the session server-side.
+    await expect(dialog.getByRole("textbox")).toHaveCount(1);
+
+    await nameField.fill("Autumn lehenga v1");
+    await dialog.getByRole("button", { name: /send to my email/i }).click();
+
     // Queued, and announced. With ACCOUNT_EMAIL_DELIVERY_ENABLED at its shipped
     // default of false the API answers 503 and the UI says so honestly — either
     // outcome is correct here, and BOTH are silent on SMTP, which is the point.
+    //
+    // This is also why the browser cannot drive the lifetime ceiling: nothing is
+    // reserved while the gate is closed, so the counter never moves and a
+    // "fourth send" is unreachable from here. The ceiling, the refusal wording
+    // and the remembered name are proved instead against the real reservation in
+    // apps/api/sitara/designs/tests/test_render_send_api.py —
+    // test_the_fourth_send_is_refused_with_the_numbers_that_explain_it,
+    // test_the_refusal_names_the_used_count_and_the_ceiling_separately and
+    // test_the_name_is_remembered_for_the_next_send. Turning delivery on here to
+    // reach it would mean configuring outbound mail on the e2e stack, which
+    // CLAUDE.md §7 forbids.
     const flash = page.getByText(/sent to your email|not available at the moment/i);
     await expect(flash).toBeVisible({ timeout: 20_000 });
 
-    // Whatever happened, no address was ever typed into this page and none
-    // appears in a URL.
+    // Whatever happened, no address was ever typed into this page, none appears
+    // in a URL, and the name the stylist chose is not echoed into one either.
     expect(page.url()).not.toContain("@");
+    expect(page.url()).not.toContain("Autumn");
+    expect(page.url()).not.toContain(email);
+  });
+
+  test("a refused name is answered in the dialog, keeping what was typed", async ({ page }) => {
+    // The one refusal the stylist can act on, and the reason the dialog stays
+    // open for it: closing would throw away what they wrote and leave them to
+    // guess what was wrong. Reachable with the delivery gate shut, because the
+    // name is validated before the gate is consulted.
+    const designId = await completeQuestionnaire(page);
+    await waitForDesignQuiescent(page, designId);
+    await page.getByRole("button", { name: /generate my concept/i }).click();
+    await page.waitForURL(/\/result\/[0-9a-f-]{36}/, { timeout: 180_000 });
+
+    await page.getByRole("link", { name: /^annotate$/i }).click();
+    await expect(page.getByRole("heading", { name: "Annotate this concept" })).toBeVisible();
+
+    await page.getByRole("button", { name: /send to account/i }).click();
+    const dialog = page.getByRole("dialog", { name: /name this file/i });
+    const nameField = dialog.getByLabel(/file name/i);
+
+    // A name that sanitises to nothing. Deliberately not a control character: a
+    // single-line input discards CR and LF, typed or pasted, so a header-injection
+    // name is not expressible here at all — the server refuses it as defence in
+    // depth, and test_a_control_bearing_name_is_refused_and_nothing_is_sent
+    // covers that path where it is reachable.
+    await nameField.fill("///");
+    await dialog.getByRole("button", { name: /send to my email/i }).click();
+
+    // Answered where it was typed, and what they wrote is still there.
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("alert")).toBeVisible({ timeout: 20_000 });
+    await expect(nameField).toHaveValue("///");
+
+    // Correcting it and cancelling leaves the workspace exactly as it was.
+    await dialog.getByRole("button", { name: /^cancel$/i }).click();
+    await expect(page.getByRole("dialog", { name: /name this file/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /send to account/i })).toBeEnabled();
   });
 });

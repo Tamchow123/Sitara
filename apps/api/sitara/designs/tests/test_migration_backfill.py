@@ -1,4 +1,11 @@
-"""Migration 0005 data-migration tests (Phase 10).
+"""Data-migration tests driven through the real migration graph.
+
+Every test here uses ``MigrationExecutor`` against historical model state rather
+than the current ORM, because a data step is exactly the code an ordinary test
+cannot reach: a test database is built forward from empty, so a ``RunPython``
+that repairs pre-existing rows never sees one.
+
+Migration 0005 (Phase 10) is below; migration 0018 (Phase 21) is at the end.
 
 Proves, via the real migration graph (MigrationExecutor against historical
 model state, not the current ORM), that migration 0005:
@@ -13,6 +20,8 @@ model state, not the current ORM), that migration 0005:
 - sanitises every legacy ``error_code`` against the frozen stable allowlist
   so no unvetted legacy text can surface through the public job API.
 """
+
+import uuid
 
 import pytest
 from django.db import connection
@@ -155,6 +164,112 @@ class TestBackfill:
             superseded = NewAttempt.objects.get(pk=older.pk)
             assert superseded.status == "failed"
             assert superseded.error_code == "internal_generation_error"
+        finally:
+            final_executor = MigrationExecutor(connection)
+            final_executor.loader.build_graph()
+            final_executor.migrate(_latest())
+
+
+_RENDER_DELIVERY_FROM = [(_APP, "0017_designrenderdelivery")]
+_RENDER_DELIVERY_TO = [(_APP, "0018_render_delivery_send_cap")]
+
+
+class TestRenderDeliverySendCount:
+    """Migration 0018 (Phase 21): counting the send a legacy marker already made.
+
+    Until Phase 21 a ``sent`` delivery marker meant exactly one delivered
+    message, because one was the only number possible. Phase 21 adds
+    ``send_count`` and the constraint ``sent_at IS NOT NULL <=> send_count > 0``,
+    so every historical ``sent`` row needs its count backfilled BEFORE that
+    constraint is added — otherwise applying it aborts the migration on a
+    database carrying Phase 19 rows.
+
+    The legacy row is inserted through raw SQL rather than the historical model
+    because the shape being reproduced is one the CURRENT constraints forbid,
+    which is precisely why no ordinary test can reach this step."""
+
+    def test_a_legacy_sent_marker_is_counted_before_the_constraint_lands(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(_RENDER_DELIVERY_FROM)
+        old_apps = executor.loader.project_state(_RENDER_DELIVERY_FROM).apps
+        DesignSession = old_apps.get_model(_APP, "DesignSession")
+        Design = old_apps.get_model(_APP, "Design")
+        DesignVersion = old_apps.get_model(_APP, "DesignVersion")
+
+        session = DesignSession.objects.create()
+        design = Design.objects.create(design_session=session)
+        version = DesignVersion.objects.create(design=design, version_number=1)
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO designs_designrenderdelivery "
+                    "(id, design_version_id, kind, state, attempt_count, "
+                    " claimed_at, sent_at, created_at, updated_at) "
+                    "VALUES (%s, %s, 'plain', 'sent', 1, NOW(), NOW(), NOW(), NOW())",
+                    [str(uuid.uuid4()), str(version.pk)],
+                )
+
+            executor = MigrationExecutor(connection)
+            executor.loader.build_graph()
+            # Must NOT abort: the data step runs before the new constraint.
+            executor.migrate(_RENDER_DELIVERY_TO)
+
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT send_count, attempt_epoch, sent_at IS NOT NULL, "
+                    "       requested_filename "
+                    "FROM designs_designrenderdelivery"
+                )
+                rows = cursor.fetchall()
+            # One counted send, the first epoch, its timestamp preserved, and no
+            # name remembered — a legacy row chose none.
+            assert rows == [(1, 1, True, "")]
+        finally:
+            final_executor = MigrationExecutor(connection)
+            final_executor.loader.build_graph()
+            final_executor.migrate(_latest())
+
+    def test_the_reverse_does_not_abort_on_a_row_that_has_sent(self):
+        """Reversibility, which is the property that actually matters here.
+
+        Rolling back re-adds the OLD state-coupled ``sent_at`` constraint, and a
+        row that has delivered must still satisfy it. The reverse deliberately
+        does no data work — the column is dropped immediately afterwards, so no
+        count can survive to be re-migrated — and this test is what says the
+        rollback nonetheless completes rather than aborting on the old
+        constraint."""
+        executor = MigrationExecutor(connection)
+        executor.migrate(_RENDER_DELIVERY_FROM)
+        old_apps = executor.loader.project_state(_RENDER_DELIVERY_FROM).apps
+        session = old_apps.get_model(_APP, "DesignSession").objects.create()
+        design = old_apps.get_model(_APP, "Design").objects.create(design_session=session)
+        version = old_apps.get_model(_APP, "DesignVersion").objects.create(
+            design=design, version_number=1
+        )
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO designs_designrenderdelivery "
+                    "(id, design_version_id, kind, state, attempt_count, "
+                    " claimed_at, sent_at, created_at, updated_at) "
+                    "VALUES (%s, %s, 'plain', 'sent', 1, NOW(), NOW(), NOW(), NOW())",
+                    [str(uuid.uuid4()), str(version.pk)],
+                )
+            forward = MigrationExecutor(connection)
+            forward.loader.build_graph()
+            forward.migrate(_RENDER_DELIVERY_TO)
+
+            backward = MigrationExecutor(connection)
+            backward.loader.build_graph()
+            backward.migrate(_RENDER_DELIVERY_FROM)  # must not abort either
+
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT state, sent_at IS NOT NULL FROM designs_designrenderdelivery"
+                )
+                assert cursor.fetchall() == [("sent", True)]
         finally:
             final_executor = MigrationExecutor(connection)
             final_executor.loader.build_graph()

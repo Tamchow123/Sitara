@@ -8,7 +8,9 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { ConceptGallery } from "@/features/gallery/ConceptGallery";
 import { useAuth } from "@/lib/auth";
+import { DEFAULT_AUTHENTICATED_PATH, signInHref } from "@/lib/navigation";
 
 const SIGN_OUT_FAILED_MESSAGE =
   "Sign-out could not be completed. Your session may still be active. " +
@@ -23,7 +25,9 @@ export default function AccountPage() {
   useEffect(() => {
     // Covers stale/expired session cookies that slipped past middleware.
     if (status === "anonymous") {
-      router.replace("/login?next=/account");
+      // Through the shared builder rather than a hand-written string, so this
+      // route cannot drift from the one the review screen now prints.
+      router.replace(signInHref(DEFAULT_AUTHENTICATED_PATH));
     }
   }, [status, router]);
 
@@ -82,13 +86,11 @@ export default function AccountPage() {
           )}
         </div>
       </section>
-      <section className="panel" aria-labelledby="coming-heading">
-        <h2 id="coming-heading">What&apos;s next</h2>
-        <p>
-          Bridal design features — the guided questionnaire, private concept
-          generation and your design gallery — arrive in later phases.
-        </p>
-      </section>
+      {/* Only once the session is confirmed. Rendering the gallery while the
+          status is still loading would fire a designs request that an expired
+          cookie turns into an empty list — which reads as "you have made
+          nothing" rather than "you are not signed in". */}
+      {status === "authenticated" && <ConceptGallery />}
     </AppShell>
   );
 }

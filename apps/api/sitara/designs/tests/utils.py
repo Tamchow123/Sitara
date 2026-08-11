@@ -111,6 +111,20 @@ def register(client: Client, email: str, password: str = STRONG_PASSWORD):
     return response
 
 
+def signed_in_client(email: str | None = None) -> tuple[Client, str]:
+    """A registered, signed-in browser and a live CSRF token.
+
+    Shared because Phase 21 (ADR 0023) made an account a precondition for
+    generation, so three test modules needed the same three lines. The token is
+    captured AFTER registering, never before: registration rotates the session
+    key, which rotates the CSRF token with it, so a token taken earlier is
+    already dead.
+    """
+    client = csrf_client()
+    register(client, email or unique_email())
+    return client, bootstrap_csrf(client)
+
+
 def login(client: Client, email: str, password: str = STRONG_PASSWORD):
     token = bootstrap_csrf(client)
     response = send_json(
@@ -174,16 +188,25 @@ def run_simultaneously(workers):
     return results
 
 
-def create_pending_design_version(design_id, *, version_number: int = 1) -> DesignVersion:
+def create_pending_design_version(
+    design_id,
+    *,
+    version_number: int = 1,
+    parent_version: DesignVersion | None = None,
+) -> DesignVersion:
     """A DesignVersion with its DesignSpec but NO permanent image yet.
 
     The state between enqueue and ingest. Its own helper rather than a flag on
     ``create_ready_design_version`` because the permanent-image fields are
     all-or-none at the database level, so "ready" and "pending" are two distinct
-    valid rows rather than one row with a field switched off."""
+    valid rows rather than one row with a field switched off.
+
+    Pass ``parent_version`` for a refinement that is still running — the model
+    requires the link at INSERT time, so it cannot be attached afterwards."""
     return DesignVersion.objects.create(
         design_id=design_id,
         version_number=version_number,
+        **(refinement_provenance(parent_version) if parent_version is not None else {}),
         design_spec={"schema_version": 1},
         design_spec_schema_version=1,
         design_spec_template_version="v1",
@@ -207,6 +230,35 @@ def synthetic_original(width: int = 384, height: int = 512) -> bytes:
     return buffer.getvalue()
 
 
+def refinement_provenance(parent: DesignVersion) -> dict:
+    """The fields a version 2 must carry, as the refinement service writes them.
+
+    ``designs_designversion_v2_requires_parent`` fires on INSERT, so a version 2
+    cannot be created and then adopted — the parent has to be there from the
+    start. Shared because three suites had already written this block out by hand
+    and a fourth copy would have been the one to drift."""
+    return {
+        "parent_version": parent,
+        "refinement_request": {"schema_version": 1, "change_type": "colour_story", "note": ""},
+        "refinement_request_schema_version": 1,
+        "refinement_request_sha256": "c" * 64,
+    }
+
+
+def staged_image_provenance() -> dict:
+    """The staging fields a succeeded attempt must carry, all together.
+
+    ``designs_attempt_staged_all_or_none`` means the key alone is not enough: the
+    hash, byte size and dimensions travel with it or none of them may be set."""
+    return {
+        "staged_image_storage_key": "generation-staging/test/raw.webp",
+        "staged_image_sha256": "c" * 64,
+        "staged_image_size_bytes": 1000,
+        "staged_image_width": 800,
+        "staged_image_height": 1000,
+    }
+
+
 def create_ready_design_version(
     design_id,
     *,
@@ -218,6 +270,7 @@ def create_ready_design_version(
     inspiration_context: dict | None = None,
     inspiration_context_schema_version: int | None = None,
     inspiration_context_sha256: str = "",
+    parent_version: DesignVersion | None = None,
 ) -> DesignVersion:
     """A DesignVersion with every DesignSpec and permanent-image provenance
     field populated — the shared "fully ready" fixture for both the Phase 11
@@ -225,10 +278,13 @@ def create_ready_design_version(
     `with_storage_objects=False` when a test only needs the database row
     (e.g. the result endpoint, which never checks object-store existence).
     The `inspiration_context*` fields default to absent (a legacy,
-    pre-Phase-13 row); pass all three together for a Phase 13 snapshot."""
+    pre-Phase-13 row); pass all three together for a Phase 13 snapshot.
+    Pass `parent_version` for a version 2 — the model requires the link at INSERT
+    time, so it cannot be attached afterwards."""
     version = DesignVersion.objects.create(
         design_id=design_id,
         version_number=version_number,
+        **(refinement_provenance(parent_version) if parent_version is not None else {}),
         design_spec=design_spec if design_spec is not None else {"schema_version": 1},
         design_spec_schema_version=schema_version,
         design_spec_template_version="v1",

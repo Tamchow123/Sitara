@@ -1,6 +1,8 @@
 # 0021 — Account render delivery by email
 
-- **Status:** accepted
+- **Status:** accepted; **amended by ADR 0022** (Phase 21) where it states that the
+  send endpoints accept no request body — they now accept exactly one field, a
+  filename. The server-side-only recipient rule is unchanged and absolute.
 - **Date:** 2026-08-08
 - **Deciders:** Sitara maintainers
 - **Phase:** Phase 19 (see ../phases/PHASES.md). Phase 18 (E2E tests and
@@ -44,6 +46,17 @@ request body at all** — not an ignored address field, no address field to igno
 The client wrapper `sendRenderToAccount(designId, versionId, kind)` has no address
 parameter to pass one through, mirroring the same guarantee in the shape of the
 code rather than in a validator that a later change could relax.
+
+> **Amended by ADR 0022 (Phase 21).** The endpoints now accept a request body
+> carrying exactly one field, the attachment filename, and the client wrapper takes
+> a name. **What that amendment does not touch is the rule this paragraph exists to
+> state:** the recipient is still read server-side from the authenticated account on
+> every request, a client-supplied address is still refused in every field, and an
+> anonymous owner still gets `409 email_recipient_unavailable` with no fallback. The
+> structural guarantee described below — that there is no body to smuggle an address
+> in — is genuinely weaker than it was, and is replaced by a serializer that rejects
+> every key except `filename`, naming `email`/`to`/`cc`/`bcc`/`from_email`/`reply_to`
+> explicitly. Read ADR 0022 before changing anything in this area.
 
 An anonymous owner gets `409 email_recipient_unavailable`. There is **no
 fallback**: no prompt for an address, no silent success, no "we'll email it when
@@ -176,7 +189,10 @@ not that.
 **Accept a recipient in the request body, validated against the account's own
 address.** Rejected. It is the open-relay shape with a check in front of it, and
 the check is one refactor away from being dropped. Accepting no body at all
-cannot be weakened by accident.
+cannot be weakened by accident. (Still rejected after ADR 0022 admitted a
+filename: a body now exists, but a *recipient* field in it remains prohibited, and
+the serializer refuses the address-shaped keys by name rather than merely omitting
+them.)
 
 **Send the signed URL instead of the bytes.** Rejected. The URL expires, so the
 mail becomes useless; and it is a bearer token in an inbox, which is worse than

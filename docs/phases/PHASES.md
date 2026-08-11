@@ -400,8 +400,9 @@ Standing rules across all phases:
   checkpoint remains pending. Demo mode is untouched and stays zero-cost. Marked
   Phases 1–16 delivered; Phase 17 delivered to a draft PR with two manual
   checkpoints outstanding; **Phase 18 skipped** (deployment deferred to its own
-  future phase); Phase 19 delivered to a draft PR (ADRs 0020 and 0021) with email
-  delivery shipped disabled and no SMTP send performed.
+  future phase); Phase 19 **merged** (ADRs 0020 and 0021) with email delivery shipped
+  disabled and no SMTP send performed; Phase 21 delivered to a draft PR (ADRs 0022,
+  0023 and 0024), email delivery still disabled and still no SMTP send performed.
 
 ## Phase 16-composition — Generated-image composition and framing *(inserted; delivered)*
 - **Scope:** restructure the deterministic `build_image_prompt` so the composition/framing directive (full-length, entire garment head-to-hem, one model standing, plain neutral studio background, even lighting) LEADS the prompt instead of being buried at the end, so FLUX reliably produces the intended catalogue framing rather than a cropped editorial shot. Bump `PROMPT_BUILDER_VERSION`, regenerate + review the golden snapshot/manifest, validate with a few budgeted live generations against the Phase 2 eval references, and amend ADR 0010.
@@ -454,7 +455,7 @@ Standing rules across all phases:
 - **Manual checkpoint:** public deployment reachable; full journey works for an anonymous visitor at zero provider cost; flipping `LIVE_GENERATION_ENABLED=true` with real keys on a private instance performs one successful budgeted live generation; runbook followed verbatim by a cold read.
 - **Commit:** `feat: Playwright E2E suite, deployment configuration, and runbook`
 
-## Phase 19 — Private stylist annotation workspace *(delivered to a draft PR)*
+## Phase 19 — Private stylist annotation workspace *(merged)*
 > **Delivered**, with two deliberate divergences from the scope below and one
 > outstanding checkpoint.
 >
@@ -483,6 +484,71 @@ Standing rules across all phases:
 - **Manual checkpoint:** in `DEMO_MODE=true` with no provider credentials, annotate a synthetic demo design with each supported type, edit notes via the list, verify alignment under resize/zoom/pan, trigger the unsaved-navigation warning, create a two-tab conflict with no silent overwrite, export a numbered/legended PNG, confirm the original stored image is unchanged, repeat the core flow keyboard-only, confirm another browser/account receives 404, confirm logs and Sentry contain no note text or private image data, and confirm retention purge removes annotations with their design.
 - **Spec:** see [phases-19.md](phases-19.md). A new ADR is recorded on delivery. Requires Phases 1–18 delivered (and Phase 16B if it was accepted into the roadmap).
 - **Commits:** `feat(annotations): add version-bound annotation model and validation`; `feat(api): add private annotation persistence and export endpoints`; `feat(frontend): add accessible stylist annotation workspace`; `docs(phase-19): record private annotation architecture and limits`.
+
+## Phase 21 — Account render delivery and concept gallery *(delivered to a draft PR)*
+> **Delivered.** Four changes, three ADRs. Email delivery is still gated by
+> `ACCOUNT_EMAIL_DELIVERY_ENABLED=false` and **no SMTP send has ever been
+> performed** — tests and CI open zero SMTP connections and assert the locmem
+> backend. Do not describe email delivery as exercised.
+>
+> **Numbered after Phase 20 in this file but delivered before it.** Phase 20 stays
+> optional and unstarted; Phase 21 was taken up first because it completes the
+> delivery path Phase 19 opened.
+- **Scope:** (1) the stylist names the attachment before *Send to account* — a
+  validated, header-safe filename applied to the outbound attachment, remembered on
+  the delivery marker row for the next send, with each artefact capped at
+  `ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER` (3) sends for its whole life against a
+  durable column, and the remaining allowance stated before it is spent; (2) an
+  account concept gallery on the account page — one card per design newest-first
+  with its thumbnail, name, date, demo/live label and links into the concept and its
+  annotation workspace, versions grouped inside the card, and — **revised after
+  delivery on the project owner's instruction** — only designs that actually produced
+  a concept, so a questionnaire still being answered, a generation still running and a
+  failed one are excluded server-side via `?generated=true`; a design whose refinement
+  is in flight keeps its card, with that version labelled by state; (3) the send endpoints
+  defend themselves against an account-less caller server-side, kept as defence in
+  depth even though the UI can no longer produce one; (4) generating requires an
+  account — anonymous questionnaire completion is unchanged and deliberately
+  preserved, but `generate` and `refine` require sign-in.
+- **Non-goals:** no client-supplied email recipient in any field, ever; no raising
+  or bypassing the send cap from the client; no signed image URL in the design list
+  payload; no DesignSpec *description* in the gallery (only the concept's name, ADR
+  0024); no note text as a default filename; no account required before the
+  questionnaire; no sharing, public gallery or "load more" control; no change to the
+  image model, prompt builder or ADR 0017 cost controls beyond the authentication
+  gate; no real SMTP send.
+- **Commands:** standard §20 backend + frontend checks; OpenAPI schema and
+  TypeScript client regenerated and proven drift-free; `npm --prefix apps/web run
+  e2e` including the new `gallery.spec.ts`.
+- **Automated tests:** filename validation total over arbitrary JSON with control
+  characters and lone surrogates refused rather than stripped, bidi controls
+  stripped while ZWNJ/ZWJ survive, NFC normalisation, path separators removed,
+  server-owned extension, and RFC 2231 encoding of a non-Latin name; the send cap
+  enforced against its durable column with a failed send consuming no allowance and
+  `attempt_epoch` distinguishing a deliberate second press from a redelivery; an
+  anonymous send refused with `409 email_recipient_unavailable`; `authentication_required`
+  on anonymous generate/refine with the account check ordered before ownership
+  resolution; the gallery payload's exact key set, version grouping, paging bounds
+  (including an `offset` ceiling that keeps an out-of-range SQL literal away from
+  PostgreSQL), a flat query count measured at two data sizes, and privacy negatives
+  naming every excluded DesignSpec field; `_display_title` total over malformed
+  stored JSON; frontend gallery states, thumbnail failure isolation, runtime payload
+  validation and axe passes; and a real round-trip e2e proving a generated concept is
+  findable afterwards under the same name.
+- **Manual checkpoint:** unrun and still outstanding — the live SMTP checkpoint
+  inherited from ADR 0021. Everything in Phase 21 was exercised with the locmem
+  backend only.
+- **Spec:** see [phases-21.md](phases-21.md). ADRs: 0022 (caller-named render
+  attachments), 0023 (an account is required to generate), 0024 (the account concept
+  gallery). Requires Phases 1–17 and 19 delivered.
+- **Commits:** `feat(email): accept a validated caller-named attachment`;
+  `feat(designs): cap sends per version and remember the chosen name`;
+  `feat(api): take a filename on the send endpoints`; `feat(frontend): name the file
+  before sending`; `feat(api): require an account to start a generation`;
+  `feat(frontend): ask for sign-in before producing a concept`; `test(e2e): register
+  before generating in every journey`; `feat(api): list every concept a gallery card
+  needs`; `feat(frontend): add the account concept gallery`; `docs(phase-21): record
+  the delivery and sign-in decisions`.
 
 ## Phase 20 — Optional height and body representation
 - **Scope:** two optional, feature-flagged questionnaire choices for the adult concept model — approximate height/proportion (`model_height_band`) and broad body-frame (`body_representation`) — carried through questionnaire versioning/answer validation, a new DesignSpec schema version (normally v3; adds both fields with strict integer-`schema_version` dispatch and full historical support), safe fixed-mapping structured generation and deterministic prompting (representation rendered after coverage/neckline and before decorative detail, from allowlisted neutral non-medical wording only), exact-match fail-closed demo support, respectful rights-controlled explanatory visuals reusing the Phase 16B visual manifest, and neutral private result/review copy. Behind `MODEL_REPRESENTATION_ENABLED=false` (default false, fails closed, independent of provider credentials). Neutral, non-judgmental, visually descriptive rather than medical; no measurements, sizing, fit, health or constructibility claims; disabled by default until operator review.

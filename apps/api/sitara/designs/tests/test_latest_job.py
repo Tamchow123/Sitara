@@ -129,5 +129,34 @@ class TestLatestJob:
         response = client.get(DESIGNS_URL)
         assert response.status_code == 200
         row = response.json()["designs"][0]
+        # The rule this test exists for, unchanged: the sanitised job SNAPSHOT
+        # belongs to design detail and never appears on a list row.
         assert "latest_job" not in row
-        assert set(row) == {"id", "title", "status", "created_at", "updated_at"}
+        # Stated as the specific things that must not appear, rather than only as
+        # an exact key set. Phase 21 added the gallery's own fields to this row,
+        # and an exact-set assertion alone would have had to be relaxed to let
+        # them in — which is precisely when a job field could have slipped in
+        # beside them unnoticed.
+        raw = response.content.decode()
+        attempt = GenerationAttempt.objects.get(design_id=design_id)
+        assert str(attempt.id) not in raw
+        assert "internal_generation_error" not in raw
+        assert "error_code" not in raw
+        assert "generation_kind" not in raw
+        assert "started_at" not in raw
+        assert "completed_at" not in raw
+        # A version's own `job_status` is a different thing from the snapshot and
+        # is allowed (ADR 0024) — but there are no versions here, so nothing about
+        # this attempt reaches the payload at all.
+        assert row["versions"] == []
+        assert set(row) == {
+            "id",
+            "title",
+            "display_title",
+            "status",
+            "created_at",
+            "updated_at",
+            "is_demo",
+            "version_count",
+            "versions",
+        }

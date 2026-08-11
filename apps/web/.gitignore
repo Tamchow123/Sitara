@@ -6,3 +6,8 @@
 /playwright-report/
 /blob-report/
 /.playwright/
+
+# The one account the run shares (Phase 21). Holds a live Django session cookie
+# and the address it belongs to — a credential in everything but name, written
+# fresh by e2e/auth.setup.ts on every run and never useful to anyone else.
+/e2e/.auth/

@@ -100,15 +100,26 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } },
     },
     {
-      name: "desktop",
-      testIgnore: /safety\.spec\.ts/,
+      // Phase 21: one account for the whole run, registered once here and reused
+      // by every spec that generates. It depends on `safety` for the same reason
+      // the journeys do — nothing should touch the stack before the gates are
+      // proved closed. Registration is rate-limited per IP per hour and the suite
+      // is one IP, so registering per spec is not an option; see e2e/auth.setup.ts.
+      name: "setup",
+      testMatch: /auth\.setup\.ts/,
       dependencies: ["safety"],
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } },
     },
     {
+      name: "desktop",
+      testIgnore: /safety\.spec\.ts|auth\.setup\.ts/,
+      dependencies: ["setup"],
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } },
+    },
+    {
       name: "mobile",
-      testIgnore: /safety\.spec\.ts/,
-      dependencies: ["safety"],
+      testIgnore: /safety\.spec\.ts|auth\.setup\.ts/,
+      dependencies: ["setup"],
       // The 390x844 viewport §28 names, driven as a real touch device so the
       // mobile-only progress bar and single-column layouts are the ones under
       // test rather than a narrow desktop window.

@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState, type FormEvent } from "react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { DEFAULT_AUTHENTICATED_PATH } from "@/lib/navigation";
+import { safeNextPath, signInHref } from "@/lib/navigation";
 
 type FieldErrors = Record<string, string[]>;
 
@@ -20,9 +20,14 @@ function FieldError({ id, errors }: { id: string; errors?: string[] }) {
   );
 }
 
-export default function RegisterPage() {
+function RegisterForm() {
   const { register } = useAuth();
   const router = useRouter();
+  // Phase 21: registration is now a step INSIDE the design journey, not only a
+  // destination of its own, so it has to return the new account holder to the
+  // review screen they were sent from — with their answers still there.
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
@@ -38,7 +43,7 @@ export default function RegisterPage() {
     try {
       const result = await register(email, password, passwordConfirm);
       if (result.ok) {
-        router.push(DEFAULT_AUTHENTICATED_PATH);
+        router.push(safeNextPath(next));
         return;
       }
       setFieldErrors(result.fields ?? {});
@@ -121,9 +126,17 @@ export default function RegisterPage() {
           </button>
         </form>
         <p>
-          Already have an account? <Link href="/login">Sign in</Link>
+          Already have an account? <Link href={signInHref(next)}>Sign in</Link>
         </p>
       </section>
     </AppShell>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense>
+      <RegisterForm />
+    </Suspense>
   );
 }

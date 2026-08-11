@@ -330,8 +330,34 @@
         "/api/v1/designs/": {
             "get": {
                 "operationId": "designs_list",
-                "description": "Returns the private designs owned by the current session or account as compact rows (no questionnaire schema, no inspiration records). A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Returns the private designs owned by the current session or account as compact rows (no questionnaire schema, no inspiration records, no job snapshot), newest first, each with its versions in creation order. Carries no signed image URL — a gallery mints one per card through the ownership-checked images endpoint. Bounded page size. A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "List your designs",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "generated",
+                        "schema": {
+                            "type": "boolean"
+                        },
+                        "description": "Pass \"true\" to return only designs that actually produced a concept — at least one version whose image has landed. Excludes a questionnaire still being answered, a generation still running, and one that failed. Defaults to false, which returns every design the caller owns. Anything other than \"true\" or \"false\" is refused rather than read as false."
+                    },
+                    {
+                        "in": "query",
+                        "name": "limit",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "description": "How many designs to return, newest first. Defaults to 20 and is capped at 50."
+                    },
+                    {
+                        "in": "query",
+                        "name": "offset",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "description": "How many designs to skip, for paging through the gallery. Must be between 0 and 1000000."
+                    }
+                ],
                 "tags": [
                     "Designs"
                 ],
@@ -347,6 +373,16 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/DesignListResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ValidationErrorEnvelope"
                                 }
                             }
                         },
@@ -638,6 +674,16 @@
                             }
                         },
                         "description": ""
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "authentication_required — producing a concept needs an account (ADR 0023). Answering the questionnaire, saving a draft and uploading references do NOT; only this last step does. Never a redirect: route to your own sign-in screen on seeing this code, then repeat the request. The draft and its answers are untouched and still there afterwards."
                     },
                     "403": {
                         "content": {
@@ -1035,6 +1081,16 @@
                         },
                         "description": ""
                     },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "authentication_required — producing a concept needs an account (ADR 0023). Answering the questionnaire, saving a draft and uploading references do NOT; only this last step does. Never a redirect: route to your own sign-in screen on seeing this code, then repeat the request. The draft and its answers are untouched and still there afterwards."
+                    },
                     "403": {
                         "content": {
                             "application/json": {
@@ -1418,9 +1474,65 @@
             }
         },
         "/api/v1/designs/{design_id}/versions/{version_id}/annotations/send/": {
+            "get": {
+                "operationId": "designs_versions_annotations_send_state",
+                "description": "Read this before offering a send: it reports how many of this render's lifetime allowance of sends are used, and the name to pre-fill — the name you last chose for this render, or your design's title. Never a note. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "How many annotated-concept sends are left, and the name to pre-fill",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RenderSendStateResponse"
+                                }
+                            }
+                        },
+                        "description": "How many sends this render has used, and what to pre-fill the name with."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    }
+                }
+            },
             "post": {
                 "operationId": "designs_versions_annotations_send_create",
-                "description": "Queues the annotated composite — the image with your marks drawn on it and a numbered note legend beneath — as a PNG attachment. Your note text is in the attachment only; the message body never carries it. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Queues the annotated composite — the image with your marks drawn on it and a numbered note legend beneath — as a PNG attachment. Your note text is in the attachment only; the message body never carries it. The recipient is always your own account address, read server-side. The ONLY accepted body field is an optional 'filename' — no address may be supplied in any field, and a request carrying one fails whole rather than partially succeeding. Whatever you type as the file name travels in the message headers and is retained by the mail relay and the receiving host. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "Email yourself this design version's annotated concept",
                 "parameters": [
                     {
@@ -1454,6 +1566,15 @@
                 "tags": [
                     "Designs"
                 ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RenderSendRequest"
+                            }
+                        }
+                    }
+                },
                 "security": [
                     {
                         "cookieAuth": []
@@ -1499,7 +1620,7 @@
                                 }
                             }
                         },
-                        "description": "design_image_not_ready, or email_recipient_unavailable when the workspace is anonymous and so has no account address."
+                        "description": "design_image_not_ready; email_recipient_unavailable when the workspace is anonymous and so has no account address; or send_limit_reached when this render's lifetime allowance of sends is spent. The last carries no Retry-After — no waiting returns an allowance that is spent for good."
                     },
                     "429": {
                         "content": {
@@ -1681,9 +1802,65 @@
             }
         },
         "/api/v1/designs/{design_id}/versions/{version_id}/send/": {
+            "get": {
+                "operationId": "designs_versions_send_state",
+                "description": "Read this before offering a send: it reports how many of this render's lifetime allowance of sends are used, and the name to pre-fill — the name you last chose for this render, or your design's title. Never a note. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "How many concept-image sends are left, and the name to pre-fill",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "version_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RenderSendStateResponse"
+                                }
+                            }
+                        },
+                        "description": "How many sends this render has used, and what to pre-fill the name with."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    }
+                }
+            },
             "post": {
                 "operationId": "designs_versions_send_create",
-                "description": "Queues the plain canonical render as a PNG attachment. The recipient is always your own account address, read server-side. No request body is accepted and no address may be supplied. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Queues the plain canonical render as a PNG attachment. The recipient is always your own account address, read server-side. The ONLY accepted body field is an optional 'filename' — no address may be supplied in any field, and a request carrying one fails whole rather than partially succeeding. Whatever you type as the file name travels in the message headers and is retained by the mail relay and the receiving host. The response never contains an address. Delivery is asynchronous: a 202 means queued, not sent. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "Email yourself this design version's concept image",
                 "parameters": [
                     {
@@ -1717,6 +1894,15 @@
                 "tags": [
                     "Designs"
                 ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RenderSendRequest"
+                            }
+                        }
+                    }
+                },
                 "security": [
                     {
                         "cookieAuth": []
@@ -1762,7 +1948,7 @@
                                 }
                             }
                         },
-                        "description": "design_image_not_ready, or email_recipient_unavailable when the workspace is anonymous and so has no account address."
+                        "description": "design_image_not_ready; email_recipient_unavailable when the workspace is anonymous and so has no account address; or send_limit_reached when this render's lifetime allowance of sends is spent. The last carries no Retry-After — no waiting returns an allowance that is spent for good."
                     },
                     "429": {
                         "content": {
@@ -2833,7 +3019,7 @@
             },
             "DesignListItem": {
                 "type": "object",
-                "description": "A compact list row — no questionnaire schema, no inspiration records.",
+                "description": "A gallery row — no questionnaire schema, no inspiration records, no job.",
                 "properties": {
                     "id": {
                         "type": "string",
@@ -2841,6 +3027,10 @@
                     },
                     "title": {
                         "type": "string"
+                    },
+                    "display_title": {
+                        "type": "string",
+                        "description": "The name to show on a card. The design's own title when it has one, otherwise the concept's name taken from its newest generated version, otherwise a plain placeholder. The ONLY spec-derived text in this payload — see serializers._display_title for the name/description boundary that admits it."
                     },
                     "status": {
                         "type": "string"
@@ -2852,14 +3042,32 @@
                     "updated_at": {
                         "type": "string",
                         "format": "date-time"
+                    },
+                    "is_demo": {
+                        "type": "boolean",
+                        "nullable": true
+                    },
+                    "version_count": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "versions": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DesignListVersion"
+                        }
                     }
                 },
                 "required": [
                     "created_at",
+                    "display_title",
                     "id",
+                    "is_demo",
                     "status",
                     "title",
-                    "updated_at"
+                    "updated_at",
+                    "version_count",
+                    "versions"
                 ]
             },
             "DesignListResponse": {
@@ -2870,10 +3078,68 @@
                         "items": {
                             "$ref": "#/components/schemas/DesignListItem"
                         }
+                    },
+                    "total": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0
                     }
                 },
                 "required": [
-                    "designs"
+                    "designs",
+                    "limit",
+                    "offset",
+                    "total"
+                ]
+            },
+            "DesignListVersion": {
+                "type": "object",
+                "description": "One version inside a gallery row (Phase 21).\n\nNo signed URL, storage key, hash, prompt or note text — see\n``serializers._version_row_payload`` for why a list is the wrong place for a\nbearer token. ``job_status`` is this version's own progress and may be null on\na legacy row whose attempt was deleted.",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "version_number": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "is_demo": {
+                        "type": "boolean"
+                    },
+                    "has_image": {
+                        "type": "boolean"
+                    },
+                    "job_status": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/JobStatusEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": [
+                    "created_at",
+                    "has_image",
+                    "id",
+                    "is_demo",
+                    "job_status",
+                    "version_number"
                 ]
             },
             "DesignOriginalImage": {
@@ -3484,6 +3750,17 @@
                     "rights_acknowledged"
                 ]
             },
+            "JobStatusEnum": {
+                "enum": [
+                    "queued",
+                    "running_text",
+                    "running_image",
+                    "succeeded",
+                    "failed"
+                ],
+                "type": "string",
+                "description": "* `queued` - Queued\n* `running_text` - Running text\n* `running_image` - Running image\n* `succeeded` - Succeeded\n* `failed` - Failed"
+            },
             "LiveResponse": {
                 "type": "object",
                 "properties": {
@@ -3917,11 +4194,57 @@
                     "password_confirm"
                 ]
             },
+            "RenderSendRequest": {
+                "type": "object",
+                "description": "The send endpoints' request body: exactly one optional ``filename``.\n\nThe only caller-influenced value in the whole delivery path (Phase 21,\nADR 0022). Every other field is rejected rather than ignored, which matters\nmore here than anywhere else in this API: these endpoints mail an attachment,\nand the guarantee that no request can express a destination used to be\nstructural — there was no body to put one in. Now that a body exists the\nguarantee is an explicit, tested one, so ``email``, ``to``, ``cc``, ``bcc``,\n``from_email``, ``reply_to`` and anything else fail the whole request rather\nthan being silently dropped beside a valid ``filename``.\n\nValidation is total over arbitrary JSON. A number, ``null``, a list or a\nnested object becomes a controlled 400, never a ``TypeError``.\n\nThe edge REFUSES what the choke point refuses and accepts what it repairs,\nby asking the sanitiser itself rather than reimplementing its rules. So a\nname carrying a control character is a 400 the stylist can see and correct,\nwhile one merely containing a path separator is quietly cleaned — the\ndifference being that a refusal would otherwise deliver a name nobody chose.",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "maxLength": 200
+                    }
+                }
+            },
             "RenderSendResponse": {
                 "type": "object",
                 "properties": {
                     "send": {
                         "$ref": "#/components/schemas/RenderSendStatus"
+                    }
+                },
+                "required": [
+                    "send"
+                ]
+            },
+            "RenderSendState": {
+                "type": "object",
+                "description": "What the owner needs before pressing Send (Phase 21, ADR 0022).\n\nStill no recipient address, for the same reason as above. What is new is\n``suggested_filename``, which is the owner's OWN free text read back to them:\nthe name they last chose for this exact render, or their design's title if\nthey have not chosen one. It is never derived from an annotation note.",
+                "properties": {
+                    "used": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "How many times this render has already been emailed. A lifetime total per render, not a rate that refills."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "The most times this render may EVER be emailed. Reaching it is a 409 send_limit_reached, not a 429 — no waiting returns an allowance that is spent for good."
+                    },
+                    "suggested_filename": {
+                        "type": "string",
+                        "description": "Pre-fill the name field with this: the name last chosen for this render, else the design's title, else blank. Your annotation notes are never used here."
+                    }
+                },
+                "required": [
+                    "limit",
+                    "suggested_filename",
+                    "used"
+                ]
+            },
+            "RenderSendStateResponse": {
+                "type": "object",
+                "properties": {
+                    "send": {
+                        "$ref": "#/components/schemas/RenderSendState"
                     }
                 },
                 "required": [

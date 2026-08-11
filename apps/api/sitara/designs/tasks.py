@@ -36,15 +36,20 @@ HARD_TIME_LIMIT_SECONDS = settings.ACCOUNT_EMAIL_SEND_HARD_TIME_LIMIT_SECONDS
     soft_time_limit=SOFT_TIME_LIMIT_SECONDS,
     time_limit=HARD_TIME_LIMIT_SECONDS,
 )
-def send_design_render(design_version_id, kind):
+def send_design_render(design_version_id, kind, attempt_epoch):
     """Mail one render of one version to the version's own owner.
 
-    Deliberately takes two identifiers and nothing else. No recipient address,
-    no rendered bytes and no signed URL crosses the queue, where they would rest
-    in Redis in the clear and survive any broker inspection; everything is
-    re-derived from database state inside the task.
+    Deliberately takes two identifiers and one integer, and nothing else. No
+    recipient address, no rendered bytes, no signed URL and no chosen filename
+    crosses the queue, where they would rest in Redis in the clear and survive
+    any broker inspection; everything is re-derived from database state inside
+    the task.
+
+    ``attempt_epoch`` says which deliberate press this task belongs to (Phase
+    21). It is the whole reason a render can be emailed more than once without a
+    redelivered task becoming a duplicate copy.
 
     No ``autoretry_for``: a failure leaves the durable claim standing and the
     bounded stale-claim path retries at most once. An automatic retry here would
     multiply real emails."""
-    return deliver_render(design_version_id, kind)
+    return deliver_render(design_version_id, kind, attempt_epoch)

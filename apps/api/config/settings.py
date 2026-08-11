@@ -767,10 +767,39 @@ ACCOUNT_EMAIL_RECIPIENT_LIMIT_PER_DAY = env_positive_int(
     "ACCOUNT_EMAIL_RECIPIENT_LIMIT_PER_DAY", 50
 )
 
+# How many times ONE render of ONE version may ever be emailed (Phase 21,
+# ADR 0022). Categorically different from the four limits above, which are RATES
+# that refill: this is a durable lifetime total per (version, kind), held on the
+# delivery marker row and never in a cache, because a cache eviction must not
+# hand back three more sends. Counted per accepted message, so a failed send
+# does not consume one — the rates above still bound every attempt, so repeated
+# failure cannot be used to grind.
+#
+# A setting rather than a literal so an operator can lower it without a code
+# change. Raising it is also legitimate, which is why no database constraint
+# pins it; see DesignRenderDelivery for that reasoning.
+ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = env_positive_int("ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER", 3)
+
 # How long a worker's claim on a send stays authoritative. Beyond this the claim
 # is treated as a dead worker's and retried once — see designs.render_delivery
 # for why that direction was chosen over silent loss.
 ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS = env_positive_int("ACCOUNT_EMAIL_SEND_CLAIM_TTL_SECONDS", 900)
+
+# How long a RESERVATION that no worker has picked up yet blocks a further press
+# (Phase 21). A different question from the claim TTL above and therefore a
+# different number: that one asks "how long may a worker hold a send before we
+# presume it dead", which must exceed the task's own hard time limit; this one
+# asks "how long may a queued task go unclaimed before a second press should
+# supersede it", which is a queue-latency question measured in seconds.
+#
+# It exists because a reservation with no window at all lets a second press bump
+# the epoch out from under a task that is still validly sitting in the broker —
+# orphaning it, so that if the second press's own enqueue then fails the owner
+# gets a 202 for a message that will never be sent. Sized so an impatient double
+# click is absorbed while a genuinely failed enqueue can be retried soon.
+ACCOUNT_EMAIL_SEND_RESERVATION_GRACE_SECONDS = env_positive_int(
+    "ACCOUNT_EMAIL_SEND_RESERVATION_GRACE_SECONDS", 60
+)
 
 # The delivery task's bounded execution, derived from its stages rather than
 # picked round. Computed HERE, beside the TTL it must stay below, rather than in

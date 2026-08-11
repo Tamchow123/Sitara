@@ -23,6 +23,7 @@ from functools import wraps
 
 from django.core.files.storage import default_storage
 from django.db import transaction
+from django.db.models import Exists, OuterRef
 from django.http import HttpResponse, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
@@ -67,6 +68,7 @@ from sitara.media.account_delivery import (
     AccountEmailRecipientUnavailable,
     recipient_for,
     require_account_email_enabled,
+    safe_stored_filename,
 )
 from sitara.media.delivery import issue_design_image_urls
 from sitara.media.exceptions import (
@@ -111,16 +113,20 @@ from .openapi import (
     InspirationUploadResponseSerializer,
     InspirationUploadWriteSerializer,
     RenderSendResponseSerializer,
+    RenderSendStateResponseSerializer,
 )
 from .ownership import accessible_designs, accessible_generation_attempts
 from .render_delivery import (
     RenderDeliveryThrottled,
     RenderDeliveryThrottleUnavailable,
     RenderNotReady,
-    delivery_is_terminal,
+    SendLimitReached,
     enforce_send_throttles,
     owner_of,
+    remembered_filename,
     require_render_ready,
+    reserve_send,
+    send_allowance,
 )
 from .result import (
     DesignResultNotReady,
@@ -131,8 +137,12 @@ from .result import (
     load_validated_design_spec,
 )
 from .serializers import (
+    GALLERY_OFFSET_MAX,
+    GALLERY_PAGE_SIZE_DEFAULT,
+    GALLERY_PAGE_SIZE_MAX,
     DesignWriteSerializer,
     RefinementWriteSerializer,
+    RenderSendSerializer,
     design_detail_payload,
     design_list_item_payload,
     inspiration_upload_payload,
@@ -325,6 +335,100 @@ def _detail(design_id) -> dict:
     return design_detail_payload(design)
 
 
+def _designs_with_a_concept(owned):
+    """``owned`` narrowed to designs that actually produced a concept.
+
+    "Produced a concept" means the same thing the gallery card means by it: at
+    least one version whose permanent image has landed. That deliberately excludes
+    three kinds of row a person would not call a concept — a questionnaire still
+    being answered, a generation still running, and one that failed — so the
+    account gallery shows work, not work-in-progress.
+
+    ``Exists`` rather than a join with ``.distinct()``: a design with an original
+    and a refinement matches the join twice, and de-duplicating afterwards would
+    make ``count()`` and the slice disagree about how many rows there are. A
+    subquery asks the only question that matters — is there one? — and cannot
+    multiply rows.
+
+    Both keys are checked because the ingest service writes them together, so
+    either one missing means there is nothing to show; this is the same condition
+    ``_version_row_payload`` reports as ``has_image``, kept identical on purpose
+    so a listed design always has a picture for its card."""
+    return owned.filter(
+        Exists(
+            DesignVersion.objects.filter(design=OuterRef("pk"))
+            .exclude(image_storage_key="")
+            .exclude(thumbnail_storage_key="")
+        )
+    )
+
+
+def _read_gallery_page(request) -> tuple[tuple[int, int, bool], Response | None]:
+    """``(limit, offset, generated_only)`` for the design list, or a controlled 400.
+
+    Refused rather than clamped when the value is not a non-negative integer, so a
+    client with a bug is told about it instead of silently getting page one — the
+    same reason every write endpoint here rejects an unknown field. An oversized
+    ``limit`` IS clamped, because asking for more than the ceiling is a reasonable
+    request that has a correct answer; asking with ``limit=banana`` is not. An
+    ``offset`` past ``GALLERY_OFFSET_MAX`` is refused for the same reason as
+    ``banana`` rather than clamped like an oversized ``limit``: no row lives there,
+    so there is nothing correct to return — and an unbounded one would reach
+    PostgreSQL as an out-of-range SQL literal.
+
+    ``generated`` is a separate question from paging and is parsed the same strict
+    way: exactly ``true`` or ``false``, with anything else refused rather than
+    treated as false. Defaulting to false keeps this endpoint's existing contract —
+    it lists designs, and a draft is a design — while letting the account gallery
+    ask for the narrower thing it actually shows.
+
+    Reads ``request.query_params``, never a body: this is a safe method."""
+    raw_limit = request.query_params.get("limit")
+    raw_offset = request.query_params.get("offset")
+    raw_generated = request.query_params.get("generated")
+    values: dict[str, int] = {}
+    errors: dict[str, list[str]] = {}
+    for name, raw, default in (
+        ("limit", raw_limit, GALLERY_PAGE_SIZE_DEFAULT),
+        ("offset", raw_offset, 0),
+    ):
+        if raw is None:
+            values[name] = default
+            continue
+        try:
+            parsed = int(raw)
+        except (TypeError, ValueError):
+            errors[name] = ["This must be a whole number."]
+            continue
+        if parsed < 0:
+            errors[name] = ["This cannot be negative."]
+            continue
+        # Refused, not clamped: unlike an oversized ``limit``, an offset this far
+        # out cannot name a row that exists, so there is no correct answer to
+        # give it. It has to be caught here rather than left to the slice, because
+        # the offset reaches PostgreSQL as a SQL literal and one past bigint raises
+        # a DataError that DRF does not wrap — an HTML 500 instead of JSON.
+        if name == "offset" and parsed > GALLERY_OFFSET_MAX:
+            errors[name] = ["This is beyond the largest page that can be requested."]
+            continue
+        values[name] = parsed
+    # Not `raw_generated == "true"`: that would silently read "1", "yes" and
+    # "banana" all as false, so a client asking the wrong way would be told its
+    # drafts are concepts rather than told it asked wrongly.
+    generated_only = False
+    if raw_generated is not None:
+        if raw_generated not in ("true", "false"):
+            errors["generated"] = ['This must be "true" or "false".']
+        else:
+            generated_only = raw_generated == "true"
+    if errors:
+        return (GALLERY_PAGE_SIZE_DEFAULT, 0, False), _validation_failed(errors)
+    # A limit of 0 would mean "give me nothing", which no caller wants and which
+    # makes an empty page indistinguishable from the end of the list.
+    limit = min(values["limit"], GALLERY_PAGE_SIZE_MAX) or GALLERY_PAGE_SIZE_DEFAULT
+    return (limit, values["offset"], generated_only), None
+
+
 @method_decorator(csrf_protect, name="dispatch")
 class DesignListCreateView(APIView):
     authentication_classes = [SessionAuthentication]
@@ -333,21 +437,88 @@ class DesignListCreateView(APIView):
     @extend_schema(
         operation_id="designs_list",
         tags=_DESIGN_TAGS,
-        responses={200: DesignListResponseSerializer},
+        parameters=[
+            OpenApiParameter(
+                name="limit",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    f"How many designs to return, newest first. Defaults to "
+                    f"{GALLERY_PAGE_SIZE_DEFAULT} and is capped at {GALLERY_PAGE_SIZE_MAX}."
+                ),
+            ),
+            OpenApiParameter(
+                name="offset",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    f"How many designs to skip, for paging through the gallery. "
+                    f"Must be between 0 and {GALLERY_OFFSET_MAX}."
+                ),
+            ),
+            OpenApiParameter(
+                name="generated",
+                type=bool,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    'Pass "true" to return only designs that actually produced a '
+                    "concept — at least one version whose image has landed. Excludes "
+                    "a questionnaire still being answered, a generation still "
+                    "running, and one that failed. Defaults to false, which returns "
+                    'every design the caller owns. Anything other than "true" or '
+                    '"false" is refused rather than read as false.'
+                ),
+            ),
+        ],
+        responses={
+            200: DesignListResponseSerializer,
+            400: ValidationErrorEnvelopeSerializer,
+        },
         summary="List your designs",
         description=(
             "Returns the private designs owned by the current session or "
             "account as compact rows (no questionnaire schema, no inspiration "
-            "records). A list request never creates a workspace. " + _OWNERSHIP_NOTE
+            "records, no job snapshot), newest first, each with its versions in "
+            "creation order. Carries no signed image URL — a gallery mints one "
+            "per card through the ownership-checked images endpoint. Bounded page "
+            "size. A list request never creates a workspace. " + _OWNERSHIP_NOTE
         ),
     )
     def get(self, request):
+        page, page_failure = _read_gallery_page(request)
+        if page_failure is not None:
+            return page_failure
+        limit, offset, generated_only = page
+
         # Listing never creates a workspace (accessible_designs resolves
         # with create=False); an anonymous browser that has not designed
         # anything gets an empty list and no database row.
-        designs = accessible_designs(request)
+        owned = accessible_designs(request)
+        # Narrowed BEFORE the count, so `total` reports the number of rows this
+        # caller can actually page through. Filtering after the slice would make
+        # the count describe a different set from the one returned, and the
+        # gallery's "showing your N most recent of M" would be a lie.
+        if generated_only:
+            owned = _designs_with_a_concept(owned)
+        # Counted before slicing, so a caller can tell "that is all of them" from
+        # "there is another page" without asking for one.
+        total = owned.count()
+        # Both levels prefetched together: without the second, every version in
+        # every card would ask for its own attempt, and the query count would grow
+        # with the number of concepts someone owns rather than staying flat.
+        designs = owned.prefetch_related("versions", "versions__generation_attempts")[
+            offset : offset + limit
+        ]
         return Response(
-            {"designs": [design_list_item_payload(design) for design in designs]},
+            {
+                "designs": [design_list_item_payload(design) for design in designs],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            },
             headers=NO_STORE,
         )
 
@@ -549,6 +720,46 @@ _IDEMPOTENCY_KEY_PARAMETER = OpenApiParameter(
 
 _GENERATION_TAGS = ["Generation"]
 
+_ACCOUNT_REQUIRED_RESPONSE = OpenApiResponse(
+    ErrorEnvelopeSerializer,
+    description=(
+        "authentication_required — producing a concept needs an account (ADR "
+        "0023). Answering the questionnaire, saving a draft and uploading "
+        "references do NOT; only this last step does. Never a redirect: route to "
+        "your own sign-in screen on seeing this code, then repeat the request. "
+        "The draft and its answers are untouched and still there afterwards."
+    ),
+)
+
+
+def _require_account(request) -> Response | None:
+    """Refuse an anonymous caller, or None to continue (Phase 21, ADR 0023).
+
+    Producing a concept is the one action in this API that requires an account.
+    Everything before it does not: a visitor answers the whole questionnaire,
+    picks colours, uploads references and saves a draft without signing in, and
+    ADR 0004's anonymous ownership continues to govern all of that. Only the last
+    step — the one that costs a provider call and produces something worth keeping
+    — needs somewhere durable to keep it.
+
+    Checked BEFORE ownership deliberately, which is the opposite of the usual
+    order in this module. Everywhere else the ownership filter runs first so that
+    a foreign UUID is indistinguishable from a nonexistent one; here the refusal
+    is about the CALLER's capability and says nothing whatever about the
+    resource, so answering it first leaks strictly less than a 404 would — and
+    spares an anonymous visitor a "not found" for a design they are looking at.
+
+    A 401 with a stable code, never a redirect: an API that redirects a JSON
+    request to a login page produces an HTML body a client cannot read. The
+    frontend routes to /login itself on seeing this code."""
+    if request.user.is_authenticated:
+        return None
+    return _error(
+        "authentication_required",
+        "Sign in or create an account to generate your concept. Your answers are saved.",
+        status.HTTP_401_UNAUTHORIZED,
+    )
+
 
 def _read_idempotency_key(request) -> tuple[uuid.UUID | None, Response | None]:
     raw = request.headers.get("Idempotency-Key")
@@ -584,6 +795,7 @@ class DesignGenerateView(APIView):
         responses={
             202: GenerationJobResponseSerializer,
             400: ValidationErrorEnvelopeSerializer,
+            401: _ACCOUNT_REQUIRED_RESPONSE,
             403: OpenApiResponse(
                 ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
             ),
@@ -618,7 +830,20 @@ class DesignGenerateView(APIView):
         ),
     )
     def post(self, request, design_id: str):
+        # An account first (ADR 0023) — before ownership, and see _require_account
+        # for why that order is the safer one here rather than the usual reverse.
+        account_failure = _require_account(request)
+        if account_failure is not None:
+            return account_failure
+
         # Ownership filter FIRST, UUID lookup second — indistinguishable 404.
+        # This is also where a just-signed-in visitor's anonymous workspace is
+        # claimed, so someone who answered everything anonymously and then signed
+        # in finds their own design here. If the claim could not happen — their
+        # browser session pointed at a workspace another user already owns, which
+        # ADR 0004 deliberately never transfers — this is a plain not_found. The
+        # honest answer is that we cannot see that design, NEVER that generation
+        # failed.
         design = accessible_designs(request).filter(pk=design_id).first()
         if design is None:
             return _not_found()
@@ -627,21 +852,49 @@ class DesignGenerateView(APIView):
         if key_failure is not None:
             return key_failure
 
+        # The content type is checked here rather than left entirely to DRF's
+        # parser negotiation, because a multipart body never reaches DRF intact:
+        # Django's CSRF check reads request.POST looking for csrfmiddlewaretoken,
+        # and the upload parser consumes the stream WITHOUT caching it. DRF then
+        # sees an empty request — its Request._parse catches the resulting
+        # RawPostDataException and, since this view lists no form parser, hands
+        # back empty data rather than raising — so a form submission would be
+        # read as the empty body this endpoint accepts, and would enqueue paid
+        # work. That is the reason for the check. (This view ALSO used to read
+        # request.body directly, which is not protected by DRF's rescue and
+        # escaped as an unhandled 500; that read is gone.)
+        #
+        # Exact match on the normalised main type, not a prefix: media types are
+        # case-insensitive per RFC 7231, and a startswith test would also admit
+        # application/json-patch+json, leaving the unrelated exact-{} body check
+        # as the only thing refusing it. The parameters are split off here rather
+        # than trusted to Django — `request.content_type` keeps them, so
+        # "application/json; charset=utf-8" arrives with the charset attached
+        # (measured; an earlier version of this comment claimed otherwise and the
+        # test below is what corrected it).
+        media_type = (request.content_type or "").split(";")[0].strip().lower()
+        if media_type not in {"", "application/json"}:
+            return _error(
+                "unsupported_media_type",
+                "This endpoint accepts application/json only.",
+                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            )
+
         # Accept EITHER a genuinely empty request body OR exactly the JSON
         # object {}. Anything else — including JSON null (which parses to
         # None), arrays and scalars — is rejected, so no out-of-contract shape
-        # can enqueue paid work. The raw-body check runs BEFORE parsing so an
-        # empty body never reaches the JSON parser.
-        if request.body:
-            body, parse_failure = _parse_body(request)
-            if parse_failure is not None:
-                return parse_failure
-            if not isinstance(body, dict) or body != {}:
-                return _error(
-                    "validation_failed",
-                    "This endpoint accepts no body or exactly {}.",
-                    status.HTTP_400_BAD_REQUEST,
-                )
+        # can enqueue paid work. DRF represents an empty body as an empty
+        # QueryDict, which is dict-like and compares equal to {}, so both
+        # accepted shapes fall out of the one check below.
+        body, parse_failure = _parse_body(request)
+        if parse_failure is not None:
+            return parse_failure
+        if not isinstance(body, dict) or body != {}:
+            return _error(
+                "validation_failed",
+                "This endpoint accepts no body or exactly {}.",
+                status.HTTP_400_BAD_REQUEST,
+            )
 
         # Live admission AFTER ownership (an inaccessible design already 404'd
         # above): session/IP throttles, mode errors, budget preflight. Demo
@@ -1103,15 +1356,27 @@ class _DesignVersionSendView(APIView):
 
     **The recipient is never accepted from the caller, in any field, ever.** It
     is ``request.user.email``, read server-side, and the task re-derives it
-    independently from the design's own session. This view has no request body
-    at all, which is the cheapest way to guarantee it: there is nothing to
-    parse, so there is nothing an address could arrive in. An endpoint that
-    mails an attachment to a caller-chosen address is an open relay.
+    independently from the design's own session. An endpoint that mails an
+    attachment to a caller-chosen address is an open relay.
 
-    Order matters and is fixed: CSRF, then ownership, then the gate, then
-    readiness, then the throttles. Throttling last means a cross-origin page
-    cannot burn a victim's quota, and a throttled caller still cannot
-    distinguish an owned design from one that never existed.
+    Until Phase 21 that guarantee was structural — the view had no request body
+    at all, so there was nothing an address could arrive in. It now takes exactly
+    one optional field, ``filename``, so the guarantee is an explicit and tested
+    one instead: ``RenderSendSerializer`` rejects every other key, and a request
+    naming ``email``/``to``/``cc``/``bcc`` fails whole rather than succeeding
+    partially with the forbidden field quietly dropped. Silently ignoring such a
+    field would teach a client it worked.
+
+    Order matters and is fixed: CSRF, then ownership, then the body, then the
+    gate, then readiness, then the allowance, then the throttles. The body is
+    read early because a malformed request should be answered as one rather than
+    being masked by a capability refusal — it reserves nothing and sends nothing.
+    Throttling last means a cross-origin page cannot burn a victim's quota, and a
+    throttled caller still cannot distinguish an owned design from one that never
+    existed.
+
+    ``GET`` reports the same view's send state (allowance used and the name to
+    pre-fill) so the client can show what is left before the last send is spent.
 
     The response carries no address. The client already knows the account's own
     address from ``/auth/me`` and uses that for its confirmation copy — echoing
@@ -1119,6 +1384,10 @@ class _DesignVersionSendView(APIView):
 
     authentication_classes = [SessionAuthentication]
     permission_classes = [AllowAny]
+    # JSON only. The documented contract is a JSON object, and leaving the form
+    # parsers enabled would give the one caller-influenced value in the delivery
+    # path a second, undocumented way in.
+    parser_classes = [JSONParser]
 
     #: Set by each concrete subclass.
     kind: str = ""
@@ -1130,10 +1399,109 @@ class _DesignVersionSendView(APIView):
             return None
         return DesignVersion.objects.filter(design=design, pk=version_id).first()
 
+    @staticmethod
+    def _limit_reached(used: int, limit: int) -> Response:
+        """The lifetime allowance for this render is spent.
+
+        409, not 429. A rate limit says "not now" and carries a ``Retry-After``;
+        this says "not again", and a recovery window would be a lie. The message
+        names the numbers rather than being generic, because a ceiling the user
+        cannot see coming is one they experience as a bug."""
+        return _error(
+            "send_limit_reached",
+            f"You have already emailed this concept {used} times, "
+            f"which is the maximum of {limit}.",
+            status.HTTP_409_CONFLICT,
+        )
+
+    def get(self, request, design_id: str, version_id: str):
+        """What the owner needs before they press Send: how many of this render's
+        sends are left, and what to pre-fill the name field with.
+
+        The only endpoint that returns the remembered filename, and only to the
+        owner of that design — ownership filtering runs before the lookup, so a
+        foreign or nonexistent design is the same 404 as everywhere else.
+        ``no-store`` because the payload carries the owner's own free text.
+
+        Identity-free it is not, so it does not opt out of authentication; but it
+        is a safe method and creates nothing."""
+        version = self._get_owned_version(request, design_id, version_id)
+        if version is None:
+            return _not_found()
+
+        used, limit = send_allowance(version, self.kind)
+        return Response(
+            {
+                "send": {
+                    "used": used,
+                    "limit": limit,
+                    "suggested_filename": self._suggested_filename(version),
+                }
+            },
+            headers=NO_STORE,
+        )
+
+    def _suggested_filename(self, version) -> str:
+        """The name to pre-fill, in order of preference.
+
+        The owner's own last choice for this exact render; failing that, the
+        design's title, sanitised and truncated by the same rules the attachment
+        will use. **Never a note.** A note is the most personal free text in the
+        product — it says what someone dislikes about a garment they intend to
+        wear — and turning it into a default filename would put it in a message
+        header (CLAUDE.md §7)."""
+        remembered = remembered_filename(version, self.kind)
+        if remembered:
+            return remembered
+        return safe_stored_filename(version.design.title)
+
+    def _read_requested_name(self, request) -> tuple[str, Response | None]:
+        """The caller's chosen name, or the 400 that refuses it.
+
+        Accepts a genuinely empty body as well as ``{}``, because the client sent
+        no body at all before this field existed and a stored client should not
+        break on an upgrade. DRF gives an empty body an empty ``QueryDict``, which
+        is dict-like and carries no fields, so no special case is needed — and
+        deliberately none is written: probing ``request.body`` first would raise
+        ``RawPostDataException`` on any request whose stream the CSRF middleware
+        has already read.
+
+        Note WHY ``request.data`` is safe here where ``request.body`` was not,
+        because it is not obvious and has been misread: DRF's ``Request._parse``
+        catches ``RawPostDataException`` itself, and for a view that lists no form
+        parser it returns empty data instead of raising. So a multipart body
+        reaches this method as an empty mapping — measured, not assumed — and the
+        chosen name is simply absent rather than crashing the request. A
+        ``request.body`` read has no such rescue, which is why the generate
+        endpoint's own probe of it produced an unhandled 500 until Phase 21."""
+        body, parse_failure = _parse_body(request)
+        if parse_failure is not None:
+            return "", parse_failure
+        serializer = RenderSendSerializer(data=body)
+        if not serializer.is_valid():
+            if set(serializer.errors) == {"filename"}:
+                # The name itself was refused, which is the stylist's to correct.
+                # Distinct from a client sending a field it has no business
+                # sending, which is a defect in the client.
+                return "", _error(
+                    "filename_invalid",
+                    " ".join(str(message) for message in serializer.errors["filename"]),
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            return "", _validation_failed(serializer.errors)
+        return serializer.validated_data.get("filename", ""), None
+
     def post(self, request, design_id: str, version_id: str):
         version = self._get_owned_version(request, design_id, version_id)
         if version is None:
             return _not_found()
+
+        # Read BEFORE the gate and the throttles, so a malformed body is answered
+        # as a malformed body rather than costing quota or being masked by a
+        # capability refusal. It reserves nothing and sends nothing.
+        requested_name, name_failure = self._read_requested_name(request)
+        if name_failure is not None:
+            return name_failure
 
         try:
             require_account_email_enabled()
@@ -1165,23 +1533,15 @@ class _DesignVersionSendView(APIView):
                 status.HTTP_409_CONFLICT,
             )
 
-        if delivery_is_terminal(version, self.kind):
-            # This render's delivery row is past the point where a send can
-            # happen, so the task would claim nothing and no-op. Charging four
-            # counters for that would let repeated sends of a finished render
-            # exhaust the quota a genuinely new one needs — the two kinds share
-            # a per-account ceiling. Still 202, and unchanged from the enqueuing
-            # path: the task no-ops either way, so there is nothing here for the
-            # response to distinguish.
-            logger.info(
-                "render_send.already_terminal",
-                extra={"design_version_id": str(version.pk), "kind": self.kind},
-            )
-            return Response(
-                {"send": {"status": "queued"}},
-                status=status.HTTP_202_ACCEPTED,
-                headers=NO_STORE,
-            )
+        used, limit = send_allowance(version, self.kind)
+        if used >= limit:
+            # The lifetime allowance for this exact render is spent. Refused
+            # BEFORE the throttles so pressing Send on a finished render cannot
+            # exhaust the quota a genuinely new one needs — the same reasoning
+            # the old already-sent short-circuit carried. An unlocked read is
+            # enough here because reserve_send re-checks under the row lock; this
+            # only decides whether to charge quota for work that will not happen.
+            return self._limit_reached(used, limit)
 
         try:
             enforce_send_throttles(request, recipient)
@@ -1203,8 +1563,33 @@ class _DesignVersionSendView(APIView):
             )
 
         try:
-            # Row UUIDs only. No address, no bytes and no URL crosses the queue.
-            send_design_render.delay(str(version.pk), self.kind)
+            # Authoritative, under the row lock: two concurrent last-allowance
+            # requests cannot both pass here. Committed before the enqueue below,
+            # so the task can never run ahead of its own reservation.
+            epoch = reserve_send(version, self.kind, requested_name=requested_name)
+        except SendLimitReached as exc:
+            return self._limit_reached(exc.used, exc.limit)
+
+        if epoch is None:
+            # A send for this render is already in flight, or the version was
+            # purged under us. Nothing new to queue. Answered exactly as a fresh
+            # reservation is, because the previous behaviour was to enqueue a
+            # second task the claim then refused — indistinguishable from here,
+            # and queueing work known to no-op is strictly worse.
+            logger.info(
+                "render_send.already_in_flight",
+                extra={"design_version_id": str(version.pk), "kind": self.kind},
+            )
+            return Response(
+                {"send": {"status": "queued"}},
+                status=status.HTTP_202_ACCEPTED,
+                headers=NO_STORE,
+            )
+
+        try:
+            # Row UUIDs and an epoch only. No address, no bytes, no URL and no
+            # filename crosses the queue.
+            send_design_render.delay(str(version.pk), self.kind, epoch)
         except Exception as exc:
             # The broker is a SECOND Redis, configured independently of the
             # throttle cache (CELERY_BROKER_URL vs REDIS_CACHE_URL, different
@@ -1243,8 +1628,11 @@ _SEND_RESPONSES = {
     409: OpenApiResponse(
         ErrorEnvelopeSerializer,
         description=(
-            "design_image_not_ready, or email_recipient_unavailable when the "
-            "workspace is anonymous and so has no account address."
+            "design_image_not_ready; email_recipient_unavailable when the "
+            "workspace is anonymous and so has no account address; or "
+            "send_limit_reached when this render's lifetime allowance of sends "
+            "is spent. The last carries no Retry-After — no waiting returns an "
+            "allowance that is spent for good."
         ),
     ),
     429: OpenApiResponse(
@@ -1261,11 +1649,30 @@ _SEND_RESPONSES = {
     ),
 }
 
+_SEND_STATE_RESPONSES = {
+    200: OpenApiResponse(
+        RenderSendStateResponseSerializer,
+        description="How many sends this render has used, and what to pre-fill the name with.",
+    ),
+    404: OpenApiResponse(
+        ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+    ),
+}
+
 _SEND_NOTE = (
-    "The recipient is always your own account address, read server-side. No "
-    "request body is accepted and no address may be supplied. The response "
-    "never contains an address. Delivery is asynchronous: a 202 means queued, "
-    "not sent."
+    "The recipient is always your own account address, read server-side. The "
+    "ONLY accepted body field is an optional 'filename' — no address may be "
+    "supplied in any field, and a request carrying one fails whole rather than "
+    "partially succeeding. Whatever you type as the file name travels in the "
+    "message headers and is retained by the mail relay and the receiving host. "
+    "The response never contains an address. Delivery is asynchronous: a 202 "
+    "means queued, not sent."
+)
+
+_SEND_STATE_NOTE = (
+    "Read this before offering a send: it reports how many of this render's "
+    "lifetime allowance of sends are used, and the name to pre-fill — the name "
+    "you last chose for this render, or your design's title. Never a note."
 )
 
 
@@ -1273,10 +1680,20 @@ class DesignVersionSendView(_DesignVersionSendView):
     kind = DesignRenderDelivery.PLAIN
 
     @extend_schema(
+        operation_id="designs_versions_send_state",
+        tags=_DESIGN_TAGS,
+        responses=_SEND_STATE_RESPONSES,
+        summary="How many concept-image sends are left, and the name to pre-fill",
+        description=_SEND_STATE_NOTE + " " + _OWNERSHIP_NOTE,
+    )
+    def get(self, request, design_id: str, version_id: str):
+        return super().get(request, design_id, version_id)
+
+    @extend_schema(
         operation_id="designs_versions_send_create",
         tags=_DESIGN_TAGS,
         parameters=[CSRF_HEADER_PARAMETER],
-        request=None,
+        request={"application/json": RenderSendSerializer},
         responses=_SEND_RESPONSES,
         summary="Email yourself this design version's concept image",
         description=(
@@ -1294,10 +1711,20 @@ class DesignVersionAnnotationsSendView(_DesignVersionSendView):
     kind = DesignRenderDelivery.ANNOTATED
 
     @extend_schema(
+        operation_id="designs_versions_annotations_send_state",
+        tags=_DESIGN_TAGS,
+        responses=_SEND_STATE_RESPONSES,
+        summary="How many annotated-concept sends are left, and the name to pre-fill",
+        description=_SEND_STATE_NOTE + " " + _OWNERSHIP_NOTE,
+    )
+    def get(self, request, design_id: str, version_id: str):
+        return super().get(request, design_id, version_id)
+
+    @extend_schema(
         operation_id="designs_versions_annotations_send_create",
         tags=_DESIGN_TAGS,
         parameters=[CSRF_HEADER_PARAMETER],
-        request=None,
+        request={"application/json": RenderSendSerializer},
         responses=_SEND_RESPONSES,
         summary="Email yourself this design version's annotated concept",
         description=(
@@ -1331,6 +1758,7 @@ class DesignRefineView(APIView):
         responses={
             202: GenerationJobResponseSerializer,
             400: ValidationErrorEnvelopeSerializer,
+            401: _ACCOUNT_REQUIRED_RESPONSE,
             403: OpenApiResponse(
                 ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
             ),
@@ -1369,6 +1797,15 @@ class DesignRefineView(APIView):
         ),
     )
     def post(self, request, design_id: str):
+        # An account first (ADR 0023). In practice a refiner already has one —
+        # they cannot have reached a version-1 concept without it — so this is
+        # defence in depth against a session that expired between generating and
+        # refining, which would otherwise spend a provider call for a caller with
+        # nowhere to keep the result.
+        account_failure = _require_account(request)
+        if account_failure is not None:
+            return account_failure
+
         # Ownership filter FIRST, UUID lookup second — indistinguishable 404.
         design = accessible_designs(request).filter(pk=design_id).first()
         if design is None:

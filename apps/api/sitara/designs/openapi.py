@@ -26,18 +26,52 @@ from .annotation_schema import (
 from .models import GenerationAttempt
 
 
-class DesignListItemSerializer(serializers.Serializer):
-    """A compact list row — no questionnaire schema, no inspiration records."""
+class DesignListVersionSerializer(serializers.Serializer):
+    """One version inside a gallery row (Phase 21).
+
+    No signed URL, storage key, hash, prompt or note text — see
+    ``serializers._version_row_payload`` for why a list is the wrong place for a
+    bearer token. ``job_status`` is this version's own progress and may be null on
+    a legacy row whose attempt was deleted."""
 
     id = serializers.UUIDField()
-    title = serializers.CharField()
+    version_number = serializers.IntegerField(min_value=1)
+    is_demo = serializers.BooleanField()
+    has_image = serializers.BooleanField()
+    job_status = serializers.ChoiceField(choices=GenerationAttempt.Status.choices, allow_null=True)
+    created_at = serializers.DateTimeField()
+
+
+class DesignListItemSerializer(serializers.Serializer):
+    """A gallery row — no questionnaire schema, no inspiration records, no job."""
+
+    id = serializers.UUIDField()
+    title = serializers.CharField(allow_blank=True)
+    display_title = serializers.CharField(
+        help_text=(
+            "The name to show on a card. The design's own title when it has one, "
+            "otherwise the concept's name taken from its newest generated version, "
+            "otherwise a plain placeholder. The ONLY spec-derived text in this "
+            "payload — see serializers._display_title for the name/description "
+            "boundary that admits it."
+        ),
+    )
     status = serializers.CharField()
     created_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()
+    # Null until there is a version to report a mode for.
+    is_demo = serializers.BooleanField(allow_null=True)
+    version_count = serializers.IntegerField(min_value=0)
+    versions = DesignListVersionSerializer(many=True)
 
 
 class DesignListResponseSerializer(serializers.Serializer):
     designs = DesignListItemSerializer(many=True)
+    # How many the caller owns in total, so "that is all of them" is
+    # distinguishable from "there is another page" without asking for one.
+    total = serializers.IntegerField(min_value=0)
+    limit = serializers.IntegerField(min_value=1)
+    offset = serializers.IntegerField(min_value=0)
 
 
 class DesignQuestionnaireSerializer(serializers.Serializer):
@@ -544,3 +578,40 @@ class RenderSendStatusSerializer(serializers.Serializer):
 
 class RenderSendResponseSerializer(serializers.Serializer):
     send = RenderSendStatusSerializer()
+
+
+class RenderSendStateSerializer(serializers.Serializer):
+    """What the owner needs before pressing Send (Phase 21, ADR 0022).
+
+    Still no recipient address, for the same reason as above. What is new is
+    ``suggested_filename``, which is the owner's OWN free text read back to them:
+    the name they last chose for this exact render, or their design's title if
+    they have not chosen one. It is never derived from an annotation note."""
+
+    used = serializers.IntegerField(
+        min_value=0,
+        help_text=(
+            "How many times this render has already been emailed. A lifetime "
+            "total per render, not a rate that refills."
+        ),
+    )
+    limit = serializers.IntegerField(
+        min_value=1,
+        help_text=(
+            "The most times this render may EVER be emailed. Reaching it is a "
+            "409 send_limit_reached, not a 429 — no waiting returns an allowance "
+            "that is spent for good."
+        ),
+    )
+    suggested_filename = serializers.CharField(
+        allow_blank=True,
+        help_text=(
+            "Pre-fill the name field with this: the name last chosen for this "
+            "render, else the design's title, else blank. Your annotation notes "
+            "are never used here."
+        ),
+    )
+
+
+class RenderSendStateResponseSerializer(serializers.Serializer):
+    send = RenderSendStateSerializer()

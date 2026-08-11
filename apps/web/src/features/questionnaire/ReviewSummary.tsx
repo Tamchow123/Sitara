@@ -10,9 +10,20 @@
 // browser storage) for the life of the in-flight attempt, reused verbatim on
 // a retry after a transport failure, and reset only once a definitive server
 // outcome proves no replay is required.
+//
+// Since Phase 21 that one button is also the point where an account becomes
+// necessary (ADR 0023). Everything before it — reading the schema, creating the
+// design, answering, uploading references, and this very screen's validation —
+// stays open to an anonymous visitor, so nobody is asked to register before they
+// can see what they would be registering for. Two things this screen must NOT
+// do: lose the answers (they live on the server and this page is unmounted only
+// by the user's own navigation), and fire the generation by itself on the way
+// back from signing in. The return trip lands here and waits for a second
+// deliberate press — an auto-fire would spend a paid generation on a click the
+// user made minutes earlier for a different purpose.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 
 import { fetchDesign, fetchPublicConfig, startDesignGeneration, validateDesignDraft } from "./api";
@@ -21,10 +32,13 @@ import { visibleQuestions } from "./rules";
 import { resolveDesignLifecycleTarget } from "@/lib/design-lifecycle";
 import { generationIsOffered } from "@/features/generation/generation-availability";
 import {
+  GENERATION_SIGN_IN_REQUIRED_CODE,
   GENERATION_SUBMIT_TERMINAL_CODES,
   generationSubmitErrorMessage,
 } from "@/features/generation/submit-errors";
 import { inspirationUploadImageUrl, type PublicConfig } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { registerHref, signInHref } from "@/lib/navigation";
 import type { Answers, DesignDraft, Question, QuestionnaireSchema } from "./types";
 
 type Props = { designId: string };
@@ -60,10 +74,18 @@ type SubmitState =
   // on an immediate second attempt (generation turned off, per-user limit
   // reached, daily budget exhausted). Offering a button there would invite the
   // user to keep asking a question already answered, so we do not render one.
-  | { status: "error"; message: string; retryable: boolean };
+  | { status: "error"; message: string; retryable: boolean }
+  // The server refused for want of an account. Distinct from "error" because it
+  // is not a failure the user should be apologised to for — it is a step, and
+  // the answer to it is a link, not a retry button. Reachable even when this
+  // client believed it was signed in (a session that expired while the review
+  // was open), which is exactly why it is handled here and not only up front.
+  | { status: "signin"; message: string };
 
 export function ReviewSummary({ designId }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
+  const { status: authStatus, refreshUser } = useAuth();
   const [state, setState] = useState<State>({ phase: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [submit, setSubmit] = useState<SubmitState>({ status: "idle" });
@@ -185,6 +207,19 @@ export function ReviewSummary({ designId }: Props) {
     // deliberate click (if any) mints a fresh key.
     idempotencyKeyRef.current = null;
 
+    if (result.code === GENERATION_SIGN_IN_REQUIRED_CODE) {
+      // Bring the client's own idea of the session back in line with the
+      // server's, so the header stops showing an account that is no longer
+      // there. The design and every answer stay exactly where they are.
+      void refreshUser();
+      submittingRef.current = false;
+      setSubmit({
+        status: "signin",
+        message: generationSubmitErrorMessage(result.code, result.message),
+      });
+      return;
+    }
+
     if (result.code === "generation_in_progress" || result.code === "design_already_generated") {
       try {
         const refreshed = await fetchDesign(designId);
@@ -213,7 +248,7 @@ export function ReviewSummary({ designId }: Props) {
       message: generationSubmitErrorMessage(result.code, result.message),
       retryable: !GENERATION_SUBMIT_TERMINAL_CODES.has(result.code),
     });
-  }, [designId, router]);
+  }, [designId, router, refreshUser]);
 
   if (state.phase === "loading" || state.phase === "redirecting") {
     return (
@@ -278,7 +313,18 @@ export function ReviewSummary({ designId }: Props) {
   const visibility = visibleQuestions(schema, answers);
   const editHref = `/design/${design.id}`;
   const submitting = submit.status === "submitting";
-  const canGenerate = valid && generationOffered && !submitting;
+  // Where sign-in must return to. `pathname` is the route actually being viewed;
+  // the explicit fallback covers a renderer that does not provide one, so the
+  // return trip never silently becomes the account page.
+  const returnTo = pathname ?? `/design/${design.id}/review`;
+  // Two ways in: we already know there is no account, or the server just told
+  // us. `authStatus === "unavailable"` is deliberately NOT one of them — a failed
+  // /auth/me read must not stand between a signed-in user and their concept, and
+  // the endpoint itself is the authority that will refuse if they really are
+  // anonymous.
+  const needsAccount = authStatus === "anonymous" || submit.status === "signin";
+  const authPending = authStatus === "loading";
+  const canGenerate = valid && generationOffered && !submitting && !authPending;
   const demoAssetsUnavailable = demoMode && generationMode === "unavailable";
   const describedBy = demoMode ? "generate-note demo-disclosure" : "generate-note";
 
@@ -449,26 +495,62 @@ export function ReviewSummary({ designId }: Props) {
 
       <div className="wizard-nav">
         <Link href={editHref}>Back to questionnaire</Link>
-        <button
-          type="button"
-          onClick={() => void handleGenerate()}
-          disabled={!canGenerate}
-          aria-describedby={describedBy}
-        >
-          {submitting ? "Starting…" : "Generate my concept"}
-        </button>
+        {needsAccount ? (
+          // The final control becomes a link rather than a disabled button: the
+          // step is not blocked, it is somewhere else. Styled as the primary
+          // action because it IS the primary action on this screen now.
+          <Link className="btn btn-primary" href={signInHref(returnTo)} aria-describedby={describedBy}>
+            Sign in to generate
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void handleGenerate()}
+            disabled={!canGenerate}
+            aria-describedby={describedBy}
+          >
+            {submitting ? "Starting…" : "Generate my concept"}
+          </button>
+        )}
       </div>
+      {/* One line of help, describing the single most useful next thing. The
+          order is deliberate and not interchangeable: what the USER can act on
+          comes before what only the operator can (no account, then an
+          incomplete draft), which comes before what nobody can right now
+          (generation switched off), which comes before mere progress reports
+          (checking the account, starting). Reordering it would answer a
+          question the visitor has not reached yet. */}
       <p id="generate-note" className="field-help">
-        {!valid
-          ? "Complete the highlighted items above before generating."
-          : !generationOffered
-            ? demoAssetsUnavailable
-              ? "Demo generation is temporarily unavailable because its visual library is not ready."
-              : "Concept generation is not currently available."
-            : submitting
-              ? "Starting your generation…"
-              : "Ready to generate your concept."}
+        {needsAccount ? (
+          <>
+            Nothing you have entered is lost. Sitara needs an account before it makes
+            your concept, so the result stays private to you and you can find it again.{" "}
+            <Link href={registerHref(returnTo)}>Create an account</Link> if you do not have
+            one — either way you will come straight back here.
+          </>
+        ) : !valid ? (
+          "Complete the highlighted items above before generating."
+        ) : !generationOffered ? (
+          demoAssetsUnavailable ? (
+            "Demo generation is temporarily unavailable because its visual library is not ready."
+          ) : (
+            "Concept generation is not currently available."
+          )
+        ) : authPending ? (
+          "Checking your account…"
+        ) : submitting ? (
+          "Starting your generation…"
+        ) : (
+          "Ready to generate your concept."
+        )}
       </p>
+      {submit.status === "signin" && (
+        // A status, not an alert: nothing went wrong and nothing was lost. The
+        // route out is the link above, which is already the primary control.
+        <p className="notice" role="status">
+          {submit.message}
+        </p>
+      )}
       {submit.status === "error" && (
         // An in-page alert: the review itself is intact and every answer is
         // still on screen. `submit.message` is the safe, server-derived reason

@@ -4,3 +4,19 @@
 node_modules
 .next
 npm-debug.log*
+
+# Playwright run artefacts, and the shared e2e session in particular. The
+# Dockerfile does `COPY . .`, so anything left on a developer's disk after an e2e
+# run would otherwise be baked into an image layer — and `e2e/.auth/stylist.json`
+# holds a LIVE Django session cookie. An image is a more durable and more
+# portable artefact than the file itself: it survives `docker save`, layer
+# inspection and any future registry push, all of which outlive the cookie's own
+# intended lifecycle. The .gitignore entries close the git path and CI only
+# uploads playwright-report/, so this is the third path and the one that is easy
+# to forget. Baselines under e2e/*-snapshots/ are deliberately NOT excluded —
+# they are committed reference images, not run output.
+e2e/.auth
+test-results
+playwright-report
+blob-report
+.playwright

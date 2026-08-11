@@ -5,9 +5,10 @@
 // implemented in jsdom, so the native element would leave the trapped-focus
 // behaviour the accessibility tests exist to prove unverified.
 //
-// Only the two dialogs §12/§14 call modals use this: clear-all and conflict. The
-// unsaved-leave warning is an anchored popover instead, because it belongs beside
-// the control that triggered it rather than over the work.
+// Three dialogs use this: clear-all and conflict (§12/§14), and Phase 21's
+// name-this-file prompt. The unsaved-leave warning is an anchored popover instead,
+// because it belongs beside the control that triggered it rather than over the
+// work.
 
 import { useEffect, useId, useRef } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
@@ -20,11 +21,28 @@ type Props = {
   body: ReactNode;
   children: ReactNode;
   onClose: () => void;
-  /** Where focus lands on open — the least destructive action. */
-  initialFocusRef: React.RefObject<HTMLButtonElement | null>;
+  /**
+   * Where focus lands on open — the least destructive action, or the field the
+   * user came here to fill in. Typed to HTMLElement rather than HTMLButtonElement
+   * so a prompt can focus its input; every caller still passes something focusable.
+   */
+  initialFocusRef: React.RefObject<HTMLElement | null>;
+  /**
+   * `alertdialog` for the two confirmations, which interrupt to ask about work at
+   * risk. A prompt that merely collects a value is a plain `dialog` — announcing a
+   * name field as an alert would overstate it every time.
+   */
+  role?: "alertdialog" | "dialog";
 };
 
-export function ModalDialog({ title, body, children, onClose, initialFocusRef }: Props) {
+export function ModalDialog({
+  title,
+  body,
+  children,
+  onClose,
+  initialFocusRef,
+  role = "alertdialog",
+}: Props) {
   const titleId = useId();
   const bodyId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -72,7 +90,7 @@ export function ModalDialog({ title, body, children, onClose, initialFocusRef }:
     <div className="annotation-scrim" onKeyDown={onKeyDown}>
       <div
         className="annotation-dialog"
-        role="alertdialog"
+        role={role}
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={bodyId}

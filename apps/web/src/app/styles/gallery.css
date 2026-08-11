@@ -1,0 +1,120 @@
+/* ==================================================================== */
+/* The account gallery (Phase 21)                                       */
+/*                                                                      */
+/* A grid of concept cards on the account page. Everything here is       */
+/* layout: the card, tag, button and skeleton primitives it uses all     */
+/* come from base.css, so a card in the gallery looks like a card        */
+/* anywhere else in the product.                                        */
+/* ==================================================================== */
+
+.gallery-grid {
+  display: grid;
+  /* auto-fill rather than a fixed column count, so the grid reflows from one
+     column on a phone to as many as the container allows without a media
+     query per breakpoint. */
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gallery-card {
+  height: 100%;
+}
+
+.gallery-card-title {
+  margin: 0;
+  font-size: 18px;
+  /* A stylist's own title, so it can be any length. Wrap rather than
+     truncate: a clipped title is a title you cannot use to find anything. */
+  overflow-wrap: anywhere;
+}
+
+.gallery-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-neutral-800);
+}
+
+/* ------------------------------------------------------------------ */
+/* The picture                                                         */
+/*                                                                     */
+/* A fixed aspect box so a card's height does not jump when its image   */
+/* arrives, and so a row of cards lines up before any of them have      */
+/* loaded. object-fit: cover is correct HERE and only here — this is a  */
+/* decorative preview, not the annotation overlay, whose stored         */
+/* coordinates a crop would silently invalidate.                        */
+/* ------------------------------------------------------------------ */
+.gallery-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  background: var(--color-neutral-200);
+}
+
+.gallery-thumb-loading {
+  /* The shimmer comes from .skeleton; this only reserves the box. */
+  border-radius: var(--radius-md);
+}
+
+.gallery-thumb-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2);
+  font-size: 13px;
+  text-align: center;
+  color: var(--color-neutral-800);
+}
+
+/* ------------------------------------------------------------------ */
+/* Versions inside a card                                              */
+/*                                                                     */
+/* Grouped visually so it reads as "these were made together" — the     */
+/* original and the one refinement made from it. The version number is  */
+/* also repeated into each link's accessible name at the call site, so   */
+/* the grouping survives for a reader who never sees the indent.         */
+/* ------------------------------------------------------------------ */
+.gallery-versions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) 0 0;
+  border-top: 1px solid var(--color-neutral-200);
+  list-style: none;
+}
+
+.gallery-version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.gallery-version-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.gallery-version-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  /* Pushes the actions to the end of the row on a wide card, and simply
+     wraps under the label on a narrow one. */
+  margin-inline-start: auto;
+}
+
+.gallery-count {
+  margin: var(--space-2) 0 0;
+  font-size: 14px;
+  color: var(--color-neutral-800);
+}

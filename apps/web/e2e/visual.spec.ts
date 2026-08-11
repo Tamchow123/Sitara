@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { STYLIST_STATE_PATH } from "./helpers/account";
 import { advanceUntilQuestion, completeQuestionnaire, waitForDesignQuiescent } from "./helpers/wizard";
 
 // Phase 17 §26: deterministic mobile and desktop screenshots.
@@ -159,6 +160,17 @@ test.describe("visual regression: questionnaire screens", () => {
 });
 
 test.describe("visual regression: generation, result, refinement and history", () => {
+  // Signed in as the run's shared account (Phase 21, ADR 0023). Note what this
+  // preserves about the "review" baseline: a signed-in review screen shows the
+  // generate button, which is what this shot has always captured — an anonymous
+  // one now shows a sign-in link instead. Reusing the session keeps the baseline
+  // meaning the same thing rather than silently re-pointing it at a different
+  // screen. The anonymous variant is covered by axe in accessibility.spec.ts and
+  // by unit snapshots, not by a new baseline, because a second full-page shot of
+  // the same screen would cost two more platform-suffixed files for one changed
+  // control.
+  test.use({ storageState: STYLIST_STATE_PATH });
+
   test("review, generation, result, refinement and comparison", async ({ page }) => {
     test.setTimeout(240_000);
 

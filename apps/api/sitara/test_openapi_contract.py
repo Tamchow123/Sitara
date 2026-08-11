@@ -52,6 +52,11 @@ EXPECTED_OPERATIONS = frozenset(
         # annotation workspace sends the annotated composite.
         ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/send/", "post"),
         ("/api/v1/designs/{design_id}/versions/{version_id}/send/", "post"),
+        # Phase 21: the same two routes answer GET with send state — how much of
+        # this render's lifetime allowance is spent, and the name to pre-fill —
+        # so a client can show the ceiling coming rather than only announcing it.
+        ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/send/", "get"),
+        ("/api/v1/designs/{design_id}/versions/{version_id}/send/", "get"),
         ("/api/v1/jobs/{job_id}/", "get"),
         ("/api/v1/questionnaire/active/", "get"),
         ("/api/v1/inspiration-assets/", "get"),
