@@ -188,16 +188,25 @@ def run_simultaneously(workers):
     return results
 
 
-def create_pending_design_version(design_id, *, version_number: int = 1) -> DesignVersion:
+def create_pending_design_version(
+    design_id,
+    *,
+    version_number: int = 1,
+    parent_version: DesignVersion | None = None,
+) -> DesignVersion:
     """A DesignVersion with its DesignSpec but NO permanent image yet.
 
     The state between enqueue and ingest. Its own helper rather than a flag on
     ``create_ready_design_version`` because the permanent-image fields are
     all-or-none at the database level, so "ready" and "pending" are two distinct
-    valid rows rather than one row with a field switched off."""
+    valid rows rather than one row with a field switched off.
+
+    Pass ``parent_version`` for a refinement that is still running — the model
+    requires the link at INSERT time, so it cannot be attached afterwards."""
     return DesignVersion.objects.create(
         design_id=design_id,
         version_number=version_number,
+        **(refinement_provenance(parent_version) if parent_version is not None else {}),
         design_spec={"schema_version": 1},
         design_spec_schema_version=1,
         design_spec_template_version="v1",

@@ -1,6 +1,7 @@
 # 0024 — The account concept gallery
 
-- **Status:** accepted
+- **Status:** accepted; **amended 2026-08-11** — the gallery shows only designs that
+  actually produced a concept. See "Amendment: concepts, not works-in-progress" below.
 - **Date:** 2026-08-11
 - **Deciders:** Sitara project owner
 - **Phase:** Phase 21 (see ../phases/PHASES.md)
@@ -110,6 +111,48 @@ so DRF would not wrap it and the caller would receive an HTML 500 instead of thi
 project's JSON envelope. The UI asks for one page and states plainly how many of
 the total it is showing when there are more, rather than implying the list is
 complete.
+
+## Amendment: concepts, not works-in-progress
+
+Recorded the same day, on the project owner's instruction after seeing the delivered
+screen: the gallery was showing in-progress questionnaires, and it should show only
+concepts that were actually generated.
+
+**What changed.** `GET /api/v1/designs/` gained a `generated` query parameter and the
+gallery passes `generated=true`. When set, the queryset is narrowed to designs with at
+least one version whose permanent image has landed — the same condition a card reports
+as `has_image`, so the rule is simply "if a card would have a picture, it is in the
+gallery". Three kinds of row are excluded: a questionnaire still being answered, a
+generation still running, and one that failed.
+
+**One thing deliberately kept.** A design whose *refinement* is in flight keeps its
+card. The concept it refines already exists, and hiding the card would take away
+something the person already has; the in-flight version is labelled by state inside the
+card instead.
+
+**Why a parameter rather than changing the default.** The endpoint lists *designs*, and
+a draft is a design. Narrowing it by default would silently change a contract for a
+future caller; the gallery asks for the narrower thing it actually shows. An
+unparseable value is refused rather than read as false, because answering a client that
+asked the wrong way by presenting its drafts as concepts is a wrong answer rather than
+an error.
+
+**Why server-side rather than filtering in the component.** `total` and the page window
+have to describe the same set. Filtering a returned page in the browser would leave
+"showing your N most recent of M" counting drafts it had just hidden, and would produce
+ragged pages.
+
+**What this supersedes.** The original scope, and `phases-21.md`, required every
+concept to appear "including generating and failed ones labelled by state". That is no
+longer true at the *card* level. The state labels themselves remain, and are still
+needed, for versions inside a card.
+
+**The accepted cost.** A draft is now unreachable from the account page: the card that
+offered *Continue* is gone with nothing in its place. That is a real loss of a resume
+route, accepted because the instruction was explicit and because a concepts gallery is
+the wrong place to resume a questionnaire. If drafts need a way back, it belongs in its
+own decision — a separate section or a resume prompt — rather than by readmitting them
+here.
 
 ## Consequences
 

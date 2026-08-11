@@ -604,11 +604,15 @@ function isDesignListResponse(value: unknown): value is DesignListResponse {
 }
 
 export async function fetchOwnedDesigns(
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number; offset?: number; generated?: boolean } = {},
 ): Promise<OwnedDesignsResult> {
   const query = new URLSearchParams();
   if (options.limit !== undefined) query.set("limit", String(options.limit));
   if (options.offset !== undefined) query.set("offset", String(options.offset));
+  // Sent only when asked for. The endpoint lists every design by default — a
+  // draft is a design — and narrowing is the caller's decision, not this
+  // wrapper's.
+  if (options.generated !== undefined) query.set("generated", String(options.generated));
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
   let response: Response;
   try {

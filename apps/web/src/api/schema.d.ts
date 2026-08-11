@@ -1718,6 +1718,8 @@ export interface operations {
     designs_list: {
         parameters: {
             query?: {
+                /** @description Pass "true" to return only designs that actually produced a concept — at least one version whose image has landed. Excludes a questionnaire still being answered, a generation still running, and one that failed. Defaults to false, which returns every design the caller owns. Anything other than "true" or "false" is refused rather than read as false. */
+                generated?: boolean;
                 /** @description How many designs to return, newest first. Defaults to 20 and is capped at 50. */
                 limit?: number;
                 /** @description How many designs to skip, for paging through the gallery. Must be between 0 and 1000000. */

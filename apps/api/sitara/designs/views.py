@@ -23,6 +23,7 @@ from functools import wraps
 
 from django.core.files.storage import default_storage
 from django.db import transaction
+from django.db.models import Exists, OuterRef
 from django.http import HttpResponse, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
@@ -334,8 +335,36 @@ def _detail(design_id) -> dict:
     return design_detail_payload(design)
 
 
-def _read_gallery_page(request) -> tuple[tuple[int, int], Response | None]:
-    """``(limit, offset)`` for the design list, or a controlled 400.
+def _designs_with_a_concept(owned):
+    """``owned`` narrowed to designs that actually produced a concept.
+
+    "Produced a concept" means the same thing the gallery card means by it: at
+    least one version whose permanent image has landed. That deliberately excludes
+    three kinds of row a person would not call a concept — a questionnaire still
+    being answered, a generation still running, and one that failed — so the
+    account gallery shows work, not work-in-progress.
+
+    ``Exists`` rather than a join with ``.distinct()``: a design with an original
+    and a refinement matches the join twice, and de-duplicating afterwards would
+    make ``count()`` and the slice disagree about how many rows there are. A
+    subquery asks the only question that matters — is there one? — and cannot
+    multiply rows.
+
+    Both keys are checked because the ingest service writes them together, so
+    either one missing means there is nothing to show; this is the same condition
+    ``_version_row_payload`` reports as ``has_image``, kept identical on purpose
+    so a listed design always has a picture for its card."""
+    return owned.filter(
+        Exists(
+            DesignVersion.objects.filter(design=OuterRef("pk"))
+            .exclude(image_storage_key="")
+            .exclude(thumbnail_storage_key="")
+        )
+    )
+
+
+def _read_gallery_page(request) -> tuple[tuple[int, int, bool], Response | None]:
+    """``(limit, offset, generated_only)`` for the design list, or a controlled 400.
 
     Refused rather than clamped when the value is not a non-negative integer, so a
     client with a bug is told about it instead of silently getting page one — the
@@ -347,9 +376,16 @@ def _read_gallery_page(request) -> tuple[tuple[int, int], Response | None]:
     so there is nothing correct to return — and an unbounded one would reach
     PostgreSQL as an out-of-range SQL literal.
 
+    ``generated`` is a separate question from paging and is parsed the same strict
+    way: exactly ``true`` or ``false``, with anything else refused rather than
+    treated as false. Defaulting to false keeps this endpoint's existing contract —
+    it lists designs, and a draft is a design — while letting the account gallery
+    ask for the narrower thing it actually shows.
+
     Reads ``request.query_params``, never a body: this is a safe method."""
     raw_limit = request.query_params.get("limit")
     raw_offset = request.query_params.get("offset")
+    raw_generated = request.query_params.get("generated")
     values: dict[str, int] = {}
     errors: dict[str, list[str]] = {}
     for name, raw, default in (
@@ -376,12 +412,21 @@ def _read_gallery_page(request) -> tuple[tuple[int, int], Response | None]:
             errors[name] = ["This is beyond the largest page that can be requested."]
             continue
         values[name] = parsed
+    # Not `raw_generated == "true"`: that would silently read "1", "yes" and
+    # "banana" all as false, so a client asking the wrong way would be told its
+    # drafts are concepts rather than told it asked wrongly.
+    generated_only = False
+    if raw_generated is not None:
+        if raw_generated not in ("true", "false"):
+            errors["generated"] = ['This must be "true" or "false".']
+        else:
+            generated_only = raw_generated == "true"
     if errors:
-        return (GALLERY_PAGE_SIZE_DEFAULT, 0), _validation_failed(errors)
+        return (GALLERY_PAGE_SIZE_DEFAULT, 0, False), _validation_failed(errors)
     # A limit of 0 would mean "give me nothing", which no caller wants and which
     # makes an empty page indistinguishable from the end of the list.
     limit = min(values["limit"], GALLERY_PAGE_SIZE_MAX) or GALLERY_PAGE_SIZE_DEFAULT
-    return (limit, values["offset"]), None
+    return (limit, values["offset"], generated_only), None
 
 
 @method_decorator(csrf_protect, name="dispatch")
@@ -413,6 +458,20 @@ class DesignListCreateView(APIView):
                     f"Must be between 0 and {GALLERY_OFFSET_MAX}."
                 ),
             ),
+            OpenApiParameter(
+                name="generated",
+                type=bool,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    'Pass "true" to return only designs that actually produced a '
+                    "concept — at least one version whose image has landed. Excludes "
+                    "a questionnaire still being answered, a generation still "
+                    "running, and one that failed. Defaults to false, which returns "
+                    'every design the caller owns. Anything other than "true" or '
+                    '"false" is refused rather than read as false.'
+                ),
+            ),
         ],
         responses={
             200: DesignListResponseSerializer,
@@ -432,12 +491,18 @@ class DesignListCreateView(APIView):
         page, page_failure = _read_gallery_page(request)
         if page_failure is not None:
             return page_failure
-        limit, offset = page
+        limit, offset, generated_only = page
 
         # Listing never creates a workspace (accessible_designs resolves
         # with create=False); an anonymous browser that has not designed
         # anything gets an empty list and no database row.
         owned = accessible_designs(request)
+        # Narrowed BEFORE the count, so `total` reports the number of rows this
+        # caller can actually page through. Filtering after the slice would make
+        # the count describe a different set from the one returned, and the
+        # gallery's "showing your N most recent of M" would be a lie.
+        if generated_only:
+            owned = _designs_with_a_concept(owned)
         # Counted before slicing, so a caller can tell "that is all of them" from
         # "there is another page" without asking for one.
         total = owned.count()

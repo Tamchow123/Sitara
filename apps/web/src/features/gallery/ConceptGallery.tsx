@@ -113,17 +113,19 @@ function DesignCard({ design }: { design: DesignListItem }) {
             alt={thumbnailAlt(design, cover)}
           />
         ) : (
-          // Three different sentences can land in a card, and they are NOT
-          // interchangeable — keeping them distinct is the point, so they are
-          // listed together here to stop a future edit collapsing them:
-          //   "No picture yet"      (here) nothing has been rendered for this
-          //                         design at all — a structural absence.
+          // Defence in depth, not an expected state: the list is fetched with
+          // `generated: true`, so every design here has at least one version with
+          // an image and `cover` should never be null. Kept because the server is
+          // the only thing guaranteeing that, and a card with no picture is a
+          // better failure than a crash if that guarantee ever changes.
+          //
+          // The two remaining placeholder sentences are NOT interchangeable:
+          //   "No picture yet"      (here) the design has no rendered version —
+          //                         now unreachable through the gallery's own query.
           //   "Preview unavailable" (GalleryThumbnail) a picture exists, but
           //                         fetching or decoding it failed — transient.
-          //   "No picture available" (versionState) one VERSION has no image and
-          //                         no job status to explain why — a row label,
-          //                         not a placeholder, and it sits beside the
-          //                         version number rather than in this box.
+          // A third, "No picture available", is a per-version row label from
+          // `versionState`, beside the version number rather than in this box.
           <div className="gallery-thumb gallery-thumb-failed">
             <span>No picture yet</span>
           </div>
@@ -138,8 +140,11 @@ function DesignCard({ design }: { design: DesignListItem }) {
 
         <p className="gallery-card-meta">
           <time dateTime={design.created_at}>{madeOn(design.created_at)}</time>
-          {/* Null means the design has no versions, so it was never generated
-              either way — labelling it would be inventing a fact. */}
+          {/* Null means the design has no versions at all, which the gallery's
+              `generated: true` query already excludes — so this guard is defence
+              in depth. It stays because labelling an ungenerated design as demo
+              or live would be inventing a fact, and the wire type still permits
+              null. */}
           {design.is_demo !== null && (
             <span className={design.is_demo ? "tag tag-accent-2" : "tag tag-accent"}>
               {design.is_demo ? "Demo concept" : "AI-generated concept"}
@@ -187,20 +192,7 @@ function DesignCard({ design }: { design: DesignListItem }) {
               );
             })}
           </ul>
-        ) : (
-          <p className="gallery-card-note">
-            This design has no concept yet — its answers are saved.
-          </p>
-        )}
-
-        {/* Only when there is nothing to open, so a card never carries two
-            competing primary actions. */}
-        {!cover && (
-          <a className="btn btn-secondary btn-small" href={`/design/${design.id}`}>
-            Continue
-            <span className="visually-hidden">{` ${design.display_title}`}</span>
-          </a>
-        )}
+        ) : null}
       </article>
     </li>
   );
@@ -211,7 +203,11 @@ export function ConceptGallery() {
 
   const run = useCallback(async () => {
     setLoad({ status: "loading" });
-    const result = await fetchOwnedDesigns({ limit: PAGE_SIZE });
+    // `generated: true` — this screen is called "Your concepts", so it shows
+    // concepts. A questionnaire still being answered, a generation still running
+    // and one that failed are all excluded, server-side, so `total` and the page
+    // window agree about what is being counted.
+    const result = await fetchOwnedDesigns({ limit: PAGE_SIZE, generated: true });
     if (result.ok) {
       setLoad({ status: "ready", designs: result.data.designs, total: result.data.total });
       return;

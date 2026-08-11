@@ -37,8 +37,12 @@ consequence, not the justification, and ADR 0017's ceilings are unchanged. ADR 0
 lazy claim-at-next-request window is **accepted, not removed**. **The account page
 becomes a gallery**: a card per design newest-first with its thumbnail, name, date,
 demo/live label and links into the concept and its annotation workspace, versions
-grouped inside the card, and every concept shown including generating and failed ones
-labelled by state. The list payload carries **no signed URL** — each card mints its
+grouped inside the card. The gallery shows **concepts, not works-in-progress**: a
+questionnaire still being answered, a generation still running and one that failed are
+all excluded server-side, on the owner's instruction, so the screen contains exactly
+the designs that have something to look at. A refinement still in flight is the one
+exception — its card stays, because the concept it refines already exists, and the
+in-flight version is labelled by state inside the card. The list payload carries **no signed URL** — each card mints its
 own through the ownership-checked images endpoint and holds it in memory only — and
 exactly one piece of DesignSpec-derived text: the concept's **name**. Its description
 stays out, asserted field by field. That narrowing exists because `Design.title` is

@@ -194,7 +194,24 @@ describe("ConceptGallery", () => {
     expect(screen.getByText("AI-generated concept")).toHaveClass("tag", "tag-accent");
   });
 
-  it("says nothing about demo or live for a design that was never generated", async () => {
+  it("asks the server for concepts only, not for every design", async () => {
+    // The screen is "Your concepts". Drafts and failed generations are excluded
+    // server-side rather than filtered here, so `total` counts the same set the
+    // page shows.
+    const fetchMock = mockList({ designs: [design()], total: 1, limit: 20, offset: 0 });
+    render(<ConceptGallery />);
+    await screen.findByRole("heading", { name: "Ivory lehenga" });
+    const listUrl = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .find((url) => !url.includes("/images/"));
+    expect(listUrl).toContain("generated=true");
+  });
+
+  it("renders a version-less row defensively without inventing a demo or live label", async () => {
+    // The gallery's own query cannot return this — a design with no rendered
+    // version is excluded server-side. Kept as a guard because the server is the
+    // only thing enforcing that, and the wire type still permits is_demo: null.
+    // A card with no picture is a better failure than a crash.
     mockList({
       designs: [design({ is_demo: null, version_count: 0, versions: [] })],
       total: 1,
@@ -205,12 +222,10 @@ describe("ConceptGallery", () => {
     await screen.findByRole("heading", { name: "Ivory lehenga" });
     expect(screen.queryByText("Demo concept")).not.toBeInTheDocument();
     expect(screen.queryByText("AI-generated concept")).not.toBeInTheDocument();
-    expect(screen.getByText(/no concept yet/i)).toBeInTheDocument();
-    // Nothing to open, so the card offers the way back into the design.
-    expect(screen.getByRole("link", { name: /continue ivory lehenga/i })).toHaveAttribute(
-      "href",
-      "/design/d-1",
-    );
+    // No draft affordances: resuming an unfinished questionnaire is not what a
+    // concepts gallery is for, so the card carries no "Continue" route.
+    expect(screen.queryByRole("link", { name: /continue/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/no concept yet/i)).not.toBeInTheDocument();
   });
 
   it("links a ready version to its concept and its annotation workspace", async () => {
@@ -301,7 +316,7 @@ describe("ConceptGallery", () => {
     const urls = fetchMock.mock.calls.map((call) => String(call[0]));
     expect(urls).toContain("/api/v1/designs/d-1/versions/v-1/images/");
     // The list itself must never be asked to carry a signed URL.
-    expect(urls.some((url) => url === "/api/v1/designs/?limit=20")).toBe(true);
+    expect(urls).toContain("/api/v1/designs/?limit=20&generated=true");
   });
 
   it("keeps a card usable when its thumbnail cannot be loaded", async () => {

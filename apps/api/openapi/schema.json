@@ -335,6 +335,14 @@
                 "parameters": [
                     {
                         "in": "query",
+                        "name": "generated",
+                        "schema": {
+                            "type": "boolean"
+                        },
+                        "description": "Pass \"true\" to return only designs that actually produced a concept — at least one version whose image has landed. Excludes a questionnaire still being answered, a generation still running, and one that failed. Defaults to false, which returns every design the caller owns. Anything other than \"true\" or \"false\" is refused rather than read as false."
+                    },
+                    {
+                        "in": "query",
                         "name": "limit",
                         "schema": {
                             "type": "integer"

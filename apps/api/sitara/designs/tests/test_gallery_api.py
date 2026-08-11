@@ -425,6 +425,116 @@ class TestPrivacy:
         assert len(gallery(anonymous).json()["designs"]) == 1
 
 
+class TestGeneratedOnly:
+    """``?generated=true`` — the account gallery's own filter.
+
+    The screen is called "Your concepts", so it shows concepts. Three kinds of row
+    are excluded, and each is tested separately because they fail for different
+    reasons: a questionnaire still being answered has no version at all, a
+    generation still running has a version with no image yet, and a failed one has
+    a version that will never get an image."""
+
+    def test_a_questionnaire_still_being_answered_is_not_a_concept(self):
+        browser, token = signed_in_client()
+        create_design(browser, title="still answering", token=token)
+        done = create_owned_design_id(browser, title="finished")
+        create_ready_design_version(done, with_storage_objects=False)
+
+        body = gallery(browser, "?generated=true").json()
+        assert [row["id"] for row in body["designs"]] == [done]
+        # The count describes the same set as the page, not the wider one.
+        assert body["total"] == 1
+
+    def test_a_generation_still_running_is_not_yet_a_concept(self):
+        browser, _ = signed_in_client()
+        design_id = create_owned_design_id(browser)
+        version = create_pending_design_version(design_id)
+        attempt_for(version, status="running_image")
+
+        body = gallery(browser, "?generated=true").json()
+        assert body["designs"] == []
+        assert body["total"] == 0
+
+    def test_a_failed_generation_is_not_a_concept(self):
+        browser, _ = signed_in_client()
+        design_id = create_owned_design_id(browser)
+        version = create_pending_design_version(design_id)
+        attempt_for(version, status="failed")
+
+        body = gallery(browser, "?generated=true").json()
+        assert body["designs"] == []
+
+    def test_a_design_whose_refinement_is_still_running_still_appears(self):
+        """The concept exists; only the change to it is in flight. Hiding the card
+        would take away the concept someone already has."""
+        browser, _ = signed_in_client()
+        design_id = create_owned_design_id(browser)
+        first = create_ready_design_version(design_id, with_storage_objects=False)
+        create_pending_design_version(design_id, version_number=2, parent_version=first)
+
+        (row,) = gallery(browser, "?generated=true").json()["designs"]
+        assert row["version_count"] == 2
+        assert [v["has_image"] for v in row["versions"]] == [True, False]
+
+    def test_a_design_with_two_rendered_versions_appears_exactly_once(self):
+        """The filter is an EXISTS subquery rather than a join: a join would match
+        this design twice and the row would be duplicated, or a `.distinct()` would
+        make `count()` and the slice disagree."""
+        browser, _ = signed_in_client()
+        design_id = create_owned_design_id(browser)
+        first = create_ready_design_version(design_id, with_storage_objects=False)
+        create_ready_design_version(
+            design_id, version_number=2, parent_version=first, with_storage_objects=False
+        )
+
+        body = gallery(browser, "?generated=true").json()
+        assert [row["id"] for row in body["designs"]] == [design_id]
+        assert body["total"] == 1
+
+    def test_the_default_still_lists_every_design(self):
+        """The endpoint lists designs, and a draft is a design. Narrowing is the
+        caller's decision, so omitting the parameter must not change the contract
+        other callers rely on."""
+        browser, token = signed_in_client()
+        create_design(browser, title="a draft", token=token)
+
+        assert gallery(browser).json()["total"] == 1
+        assert gallery(browser, "?generated=false").json()["total"] == 1
+        assert gallery(browser, "?generated=true").json()["total"] == 0
+
+    @pytest.mark.parametrize("raw", ["1", "0", "yes", "True", "TRUE", "", "banana"])
+    def test_a_nonsense_generated_value_is_refused_rather_than_read_as_false(self, raw):
+        """Reading "1" or "yes" as false would answer a client that asked the wrong
+        way with its drafts presented as concepts — a wrong answer rather than an
+        error. Same principle as the paging parameters."""
+        browser, _ = signed_in_client()
+        response = gallery(browser, f"?generated={raw}")
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "validation_failed"
+        assert "generated" in response.json()["error"]["fields"]
+
+    def test_a_refused_value_is_not_echoed_back(self):
+        browser, _ = signed_in_client()
+        response = gallery(browser, "?generated=<script>alert(1)</script>")
+        assert response.status_code == 400
+        assert "script" not in response.content.decode()
+
+    def test_the_filter_does_not_widen_to_another_account(self):
+        """The narrowing composes with ownership rather than replacing it."""
+        mine, _ = signed_in_client()
+        stranger, _ = signed_in_client()
+        theirs = create_owned_design_id(stranger)
+        create_ready_design_version(theirs, with_storage_objects=False)
+
+        body = gallery(mine, "?generated=true").json()
+        assert body["designs"] == []
+        assert theirs not in body_ids(body)
+
+
+def body_ids(body) -> list[str]:
+    return [row["id"] for row in body["designs"]]
+
+
 class TestPaging:
     def test_newest_first_and_bounded_by_default(self):
         browser, token = signed_in_client()

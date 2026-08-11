@@ -501,8 +501,11 @@ Standing rules across all phases:
   durable column, and the remaining allowance stated before it is spent; (2) an
   account concept gallery on the account page — one card per design newest-first
   with its thumbnail, name, date, demo/live label and links into the concept and its
-  annotation workspace, versions grouped inside the card, every concept shown
-  including generating and failed ones labelled by state; (3) the send endpoints
+  annotation workspace, versions grouped inside the card, and — **revised after
+  delivery on the project owner's instruction** — only designs that actually produced
+  a concept, so a questionnaire still being answered, a generation still running and a
+  failed one are excluded server-side via `?generated=true`; a design whose refinement
+  is in flight keeps its card, with that version labelled by state; (3) the send endpoints
   defend themselves against an account-less caller server-side, kept as defence in
   depth even though the UI can no longer produce one; (4) generating requires an
   account — anonymous questionnaire completion is unchanged and deliberately
