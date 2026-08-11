@@ -146,7 +146,19 @@ describe("ConceptGallery", () => {
     // by region knows which concept they are in.
     const card = heading.closest("article");
     expect(card).toHaveAccessibleName("Ivory lehenga");
-    expect(within(card as HTMLElement).getByText(/4 March 2026/)).toBeInTheDocument();
+
+    // Asserted on the machine-readable attribute, NOT on the rendered string.
+    // `madeOn` formats in the visitor's own locale on purpose — a stylist in
+    // Dhaka should not be shown a US date order — so the rendered text differs
+    // between machines. An earlier version of this test pinned "4 March 2026",
+    // which passed under en-GB locally and failed on CI under en-US: a test that
+    // asserts a locale is testing the runner, not the component.
+    const time = within(card as HTMLElement).getByText(
+      (_content, element) => element?.tagName === "TIME",
+    );
+    expect(time).toHaveAttribute("dateTime", "2026-03-04T10:00:00Z");
+    // Something human-readable was rendered, whatever this machine calls it.
+    expect(time.textContent?.trim()).not.toBe("");
   });
 
   it("names a card from display_title, never from the raw title field", async () => {
