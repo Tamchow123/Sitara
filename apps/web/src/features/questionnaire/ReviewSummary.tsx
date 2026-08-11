@@ -407,7 +407,7 @@ export function ReviewSummary({ designId }: Props) {
           <Link href={editHref}>Edit</Link>
         </div>
         {design.selected_inspirations.length === 0 && uploads.length === 0 ? (
-          <p>No inspiration images selected.</p>
+          <p>No photographs added.</p>
         ) : (
           <>
             <p className="field-help">

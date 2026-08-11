@@ -556,14 +556,12 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
       {onInspirationScreen ? (
         <section aria-labelledby="inspiration-heading">
           <h1 id="inspiration-heading">Inspiration images</h1>
-          {saver.designId ? (
-            <InspirationUploadPanel
-              designId={saver.designId}
-              uploads={uploads}
-              slotsRemaining={Math.max(MAX_INSPIRATIONS - uploads.length, 0)}
-              onChange={setUploads}
-            />
-          ) : null}
+          <InspirationUploadPanel
+            designId={saver.designId ?? undefined}
+            uploads={uploads}
+            max={MAX_INSPIRATIONS}
+            onChange={setUploads}
+          />
         </section>
       ) : (
         screen && (

@@ -679,7 +679,7 @@ describe("QuestionnaireWizard", () => {
       );
       // Uploads are now the only thing drawing on the three-reference budget,
       // so restoring one has to leave exactly two slots free.
-      expect(screen.getByText(/2 of your inspiration slots are free/i)).toBeInTheDocument();
+      expect(screen.getByText(/2 of your 3 reference slots are free/i)).toBeInTheDocument();
     });
 
     it("wires the upload control to the design created during the questionnaire", async () => {
@@ -690,8 +690,8 @@ describe("QuestionnaireWizard", () => {
       expect(
         await screen.findByRole("heading", { name: /Your own photographs/i }),
       ).toBeInTheDocument();
-      expect(screen.getByLabelText(/Choose an image/i)).toBeDisabled();
-      expect(screen.getByText(/3 of your inspiration slots are free/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Choose a file/i)).toBeDisabled();
+      expect(screen.getByText(/3 of your 3 reference slots are free/i)).toBeInTheDocument();
     });
 
     it("will not carry the user to review once a later change clears an answer", async () => {

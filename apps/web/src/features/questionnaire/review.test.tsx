@@ -226,7 +226,7 @@ describe("ReviewSummary", () => {
 
   it("omits the priority note when no inspiration is selected", async () => {
     render(<ReviewSummary designId="d1" />);
-    expect(await screen.findByText("No inspiration images selected.")).toBeInTheDocument();
+    expect(await screen.findByText("No photographs added.")).toBeInTheDocument();
     expect(screen.queryByText(/answers always take priority/i)).not.toBeInTheDocument();
   });
 
@@ -252,7 +252,7 @@ describe("ReviewSummary", () => {
       render(<ReviewSummary designId="d1" />);
 
       expect(await screen.findByText("Your own photographs")).toBeInTheDocument();
-      expect(screen.queryByText("No inspiration images selected.")).not.toBeInTheDocument();
+      expect(screen.queryByText("No photographs added.")).not.toBeInTheDocument();
       expect(screen.getByText(/answers always take priority/i)).toHaveTextContent(
         /sent to the external ai image provider/i,
       );
@@ -280,7 +280,7 @@ describe("ReviewSummary", () => {
     it("keeps the section honest for a design with no images at all", async () => {
       mocks.fetchDesign.mockResolvedValue(design({ inspiration_uploads: [] }));
       render(<ReviewSummary designId="d1" />);
-      expect(await screen.findByText("No inspiration images selected.")).toBeInTheDocument();
+      expect(await screen.findByText("No photographs added.")).toBeInTheDocument();
       expect(screen.queryByText("Your own photographs")).not.toBeInTheDocument();
     });
   });

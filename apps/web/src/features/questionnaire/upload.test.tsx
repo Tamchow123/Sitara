@@ -1,9 +1,9 @@
-// User inspiration uploads (Phase 16B, ADR 0018/0019).
+// The reference step (Phase 16B ADR 0018/0019; the whole step since ADR 0025).
 //
 // The load-bearing behaviours here are consent and honesty, not mechanics: the
-// ADR 0019 provider exposure must be readable BEFORE the picker is usable, the
-// affirmation must gate the upload, and every outcome must be announced rather
-// than only drawn.
+// ADR 0019 provider exposure must be readable BEFORE any way of adding a
+// photograph is usable, the affirmation must gate the upload, and every outcome
+// must be announced rather than only drawn.
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,7 +45,7 @@ function renderUpload(overrides: Partial<React.ComponentProps<typeof Inspiration
     <InspirationUpload
       designId="design-1"
       uploads={[]}
-      slotsRemaining={3}
+      max={3}
       onChange={onChange}
       {...overrides}
     />,
@@ -54,7 +54,7 @@ function renderUpload(overrides: Partial<React.ComponentProps<typeof Inspiration
 }
 
 function chooser(): HTMLInputElement {
-  return screen.getByLabelText(/Choose an image/i) as HTMLInputElement;
+  return screen.getByLabelText(/Choose a file/i) as HTMLInputElement;
 }
 
 function acknowledge(): void {
@@ -69,7 +69,8 @@ beforeEach(() => {
 describe("InspirationUpload — consent", () => {
   it("discloses the provider exposure before anything can be uploaded", () => {
     renderUpload();
-    const disclosure = screen.getByText(/Before you upload, please read this/i).parentElement;
+    const disclosure = screen.getByText(/Before you add a photograph, please read this/i)
+      .parentElement;
     expect(disclosure).toHaveTextContent(/perpetual, irrevocable licence/i);
     expect(disclosure).toHaveTextContent(/train and improve/i);
     expect(disclosure).toHaveTextContent(/no time limit/i);
@@ -99,7 +100,7 @@ describe("InspirationUpload — consent", () => {
     // It stays ticked between uploads, so a second photo is covered by a box
     // the user ticked while thinking about the first one.
     renderUpload();
-    expect(screen.getByText(/applies to every image you choose/i)).toBeInTheDocument();
+    expect(screen.getByText(/applies to every image you add/i)).toBeInTheDocument();
   });
 
   it("keeps the file picker disabled until the affirmation is given", () => {
@@ -149,7 +150,13 @@ describe("InspirationUpload — states", () => {
 
     fireEvent.change(chooser(), { target: { files: [file("lehenga.jpg")] } });
 
-    expect(await screen.findByText(/Uploading lehenga.jpg/i)).toBeInTheDocument();
+    // Progress is announced without echoing the chosen filename. It never
+    // reached the server (the storage key is server-generated and the model
+    // carries no filename), and the two ways in that arrive later — a camera
+    // capture and a photograph handed over from a phone — have no name worth
+    // reading back on a screen a shop and a customer are both looking at.
+    expect(await screen.findByText(/Adding your photograph/i)).toBeInTheDocument();
+    expect(screen.queryByText(/lehenga\.jpg/i)).not.toBeInTheDocument();
     await waitFor(() => expect(onChange).toHaveBeenCalledWith([made("u1")]));
     expect(await screen.findByText(/Image added to your design/i)).toBeInTheDocument();
   });
@@ -210,22 +217,44 @@ describe("InspirationUpload — states", () => {
   });
 });
 
-describe("InspirationUpload — the shared budget", () => {
+describe("InspirationUpload — the reference budget", () => {
+  // The budget used to be SHARED with curated catalogue presets, so the count
+  // was passed in already spent. ADR 0025 left uploads as the only thing
+  // drawing on it, so this component owns the arithmetic — which is why these
+  // now vary `uploads` rather than a remaining count.
   it("says how many slots are free", () => {
-    renderUpload({ slotsRemaining: 2 });
-    expect(screen.getByText(/2 of your inspiration slots are free/i)).toBeInTheDocument();
+    renderUpload({ uploads: [made("u1")] });
+    expect(screen.getByText(/2 of your 3 reference slots are free/i)).toBeInTheDocument();
   });
 
   it("uses the singular for one remaining slot", () => {
-    renderUpload({ slotsRemaining: 1 });
-    expect(screen.getByText(/1 of your inspiration slots is free/i)).toBeInTheDocument();
+    renderUpload({ uploads: [made("u1"), made("u2", 2)] });
+    expect(screen.getByText(/1 of your 3 reference slots is free/i)).toBeInTheDocument();
   });
 
-  it("closes the picker when the shared budget is spent, even with the affirmation given", () => {
-    renderUpload({ slotsRemaining: 0 });
+  it("closes the ways in when the budget is spent, even with the affirmation given", () => {
+    renderUpload({ uploads: [made("u1"), made("u2", 2), made("u3", 3)] });
     acknowledge();
     expect(chooser()).toBeDisabled();
-    expect(screen.getByText(/used all of your inspiration slots/i)).toBeInTheDocument();
+    expect(screen.getByText(/used all of your reference slots/i)).toBeInTheDocument();
+  });
+
+  it("never reports a negative budget if the cap is lowered below what exists", () => {
+    renderUpload({ max: 1, uploads: [made("u1"), made("u2", 2)] });
+    expect(screen.getByText(/used all of your reference slots/i)).toBeInTheDocument();
+    expect(chooser()).toBeDisabled();
+  });
+});
+
+describe("InspirationUpload — before the draft exists", () => {
+  it("explains itself and refuses to add rather than rendering nothing", () => {
+    renderUpload({ designId: undefined });
+    // The disclosure is still readable: someone should be able to understand
+    // what this step will do before they have answered anything.
+    expect(screen.getByText(/perpetual, irrevocable licence/i)).toBeInTheDocument();
+    acknowledge();
+    expect(chooser()).toBeDisabled();
+    expect(screen.getByText(/your design has to exist/i)).toBeInTheDocument();
   });
 });
 

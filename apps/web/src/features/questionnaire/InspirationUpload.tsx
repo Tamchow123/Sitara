@@ -1,23 +1,26 @@
 "use client";
 
-// The user's own inspiration photographs (Phase 16B, ADR 0018/0019).
+// The reference step (Phase 16B ADR 0018/0019; rebuilt in Phase 22, ADR 0025).
 //
-// An upload is private user content, not catalogue content: it is never listed,
-// never shown to another session, and can never be promoted into the catalogue.
-// Its rights position is ONE per-upload affirmation by the person uploading —
-// deliberately weaker than the staff-verified catalogue model, and never
-// presented as verified rights.
+// Since the curated catalogue was retired this screen holds one thing: the
+// customer's own photographs. There is no grid to browse, no shared budget to
+// arithmetic against, and no catalogue request to fail — the three reference
+// slots are the uploads' alone.
+//
+// A reference is private user content, not catalogue content: it is never
+// listed, never shown to another session, and can never be promoted into the
+// catalogue. Its rights position is ONE per-upload affirmation by the person
+// choosing the image — deliberately weaker than the staff-verified catalogue
+// model that just left the product, and never to be presented as verified
+// rights. Removing the stronger model does not upgrade this one.
 //
 // The affirmation is gated behind the ADR 0019 disclosure, which must be
-// readable BEFORE the file picker is usable, because that decision sends the
-// bytes of a chosen reference to an image provider whose terms take a
-// perpetual, irrevocable licence over inputs. A user cannot consent to
-// something the interface has not told them.
-//
-// Uploads share the single three-reference budget with curated presets, so this
-// component is told how many slots remain rather than counting its own.
+// readable BEFORE any way of adding a photograph is usable, because that
+// decision sends the bytes of a chosen reference to an image provider whose
+// terms take a perpetual, irrevocable licence over inputs. A user cannot
+// consent to something the interface has not told them.
 
-import { useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 
 import {
   inspirationUploadImageUrl,
@@ -29,39 +32,40 @@ import {
 const ACCEPTED = "image/jpeg,image/png,image/webp";
 
 type Props = {
-  designId: string;
+  // Absent until the first autosave has created the draft. The ways in are
+  // disabled rather than hidden in that window, so the screen still explains
+  // itself instead of appearing to offer nothing.
+  designId?: string;
   uploads: Upload[];
-  slotsRemaining: number;
+  /** The whole reference budget — this screen is the only thing drawing on it. */
+  max: number;
   onChange: (uploads: Upload[]) => void;
 };
 
 type Status =
   | { kind: "idle" }
-  | { kind: "uploading"; name: string }
+  | { kind: "uploading" }
   | { kind: "added" }
   | { kind: "removed" }
   | { kind: "error"; message: string };
 
-export function InspirationUpload({
-  designId,
-  uploads,
-  slotsRemaining,
-  onChange,
-}: Props) {
+export function InspirationUpload({ designId, uploads, max, onChange }: Props) {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [acknowledged, setAcknowledged] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const disclosureId = useId();
   const acknowledgeId = useId();
   const helpId = useId();
+  const fileInputId = `${acknowledgeId}-file`;
 
+  const slotsRemaining = Math.max(max - uploads.length, 0);
   const full = slotsRemaining <= 0;
   const uploading = status.kind === "uploading";
-  const canChoose = acknowledged && !full && !uploading;
+  const canAdd = Boolean(designId) && acknowledged && !full && !uploading;
 
   const handleFile = async (file: File): Promise<void> => {
-    setStatus({ kind: "uploading", name: file.name });
+    if (!designId) return;
+    setStatus({ kind: "uploading" });
     let result;
     try {
       result = await uploadInspirationImage(designId, file, acknowledged);
@@ -94,11 +98,12 @@ export function InspirationUpload({
     // consent gate for sending someone's photograph to an external provider; it
     // should not depend on a DOM property a stray programmatic change can
     // bypass. The server refuses an unacknowledged upload too.
-    if (!canChoose) return;
+    if (!canAdd) return;
     void handleFile(file);
   };
 
   const onRemove = async (uploadId: string): Promise<void> => {
+    if (!designId) return;
     setBusyId(uploadId);
     let result;
     try {
@@ -122,7 +127,15 @@ export function InspirationUpload({
 
   return (
     <div className="upload">
-      <h3 className="upload-heading">Your own photographs</h3>
+      <h2 className="upload-heading">Your own photographs</h2>
+
+      <p className="field-help">
+        Add up to {max} of your own photographs, if you have any — a saree you
+        love, a colour you keep coming back to, a photograph of your sister at
+        her wedding. This step is optional. Your questionnaire answers stay
+        authoritative, and the concept will not be an exact copy of anything you
+        add.
+      </p>
 
       <div className="upload-disclosure" id={disclosureId}>
         <p>
@@ -130,15 +143,15 @@ export function InspirationUpload({
           catalogue, never shown to anyone else, and are deleted with your design.
         </p>
         <p>
-          <strong>Before you upload, please read this.</strong> If you use an image
-          you upload as a reference, its file is sent to the external AI image
+          <strong>Before you add a photograph, please read this.</strong> If you
+          use an image as a reference, its file is sent to the external AI image
           provider that draws your concept. That provider&apos;s terms take a
           perpetual, irrevocable licence over what it receives, to train and
           improve their technology. They publish no time limit on how long they
           keep it, and it is unresolved whether those terms differ when Sitara
           reaches them through Replicate. Sitara cannot undo that once an image is
-          sent. Please only upload an image you are comfortable handing over on
-          those terms — and not one that shows someone who has not agreed to it.
+          sent. Please only add an image you are comfortable handing over on those
+          terms — and not one that shows someone who has not agreed to it.
         </p>
       </div>
 
@@ -157,29 +170,42 @@ export function InspirationUpload({
       </div>
 
       <p className="field-help" id={helpId}>
-        {/* The affirmation stays ticked between uploads, so it has to be clear
-            it covers each image and not just the first one. */}
-        This applies to every image you choose. JPEG, PNG or WebP, up to 15 MB.{" "}
+        {/* The affirmation stays ticked between photographs, so it has to be
+            clear it covers each one and not just the first. */}
+        This applies to every image you add. JPEG, PNG or WebP, up to 15 MB.{" "}
         {full
-          ? "You have used all of your inspiration slots."
-          : `${slotsRemaining} of your inspiration slots ${
+          ? "You have used all of your reference slots."
+          : `${slotsRemaining} of your ${max} reference slots ${
               slotsRemaining === 1 ? "is" : "are"
             } free.`}
       </p>
 
-      <input
-        ref={inputRef}
-        type="file"
-        accept={ACCEPTED}
-        className="upload-input"
-        id={`${acknowledgeId}-file`}
-        onChange={onSelect}
-        disabled={!canChoose}
-        aria-describedby={helpId}
-      />
-      <label className="upload-label" htmlFor={`${acknowledgeId}-file`}>
-        Choose an image
-      </label>
+      <div className="upload-ways" role="group" aria-labelledby={`${helpId}-ways`}>
+        <h3 className="upload-ways-heading" id={`${helpId}-ways`}>
+          Ways to add a photograph
+        </h3>
+        <div className="upload-way">
+          <input
+            type="file"
+            accept={ACCEPTED}
+            className="upload-input"
+            id={fileInputId}
+            onChange={onSelect}
+            disabled={!canAdd}
+            aria-describedby={helpId}
+          />
+          <label className="upload-label" htmlFor={fileInputId}>
+            Choose a file
+          </label>
+        </div>
+      </div>
+
+      {!designId && (
+        <p className="field-help">
+          Answer a question first — your design has to exist before a photograph
+          can be attached to it.
+        </p>
+      )}
 
       {/* Announced, not merely displayed: a screen-reader user gets no visual
           cue that an upload finished, failed, or that a slot freed up. */}
@@ -189,13 +215,13 @@ export function InspirationUpload({
         }
         role="status"
       >
-        {status.kind === "uploading" && `Uploading ${status.name}…`}
+        {status.kind === "uploading" && "Adding your photograph…"}
         {status.kind === "added" && "Image added to your design."}
         {status.kind === "removed" && "Image removed from your design."}
         {status.kind === "error" && status.message}
       </p>
 
-      {uploads.length > 0 && (
+      {uploads.length > 0 && designId && (
         <ul className="upload-grid" aria-label="Your uploaded images">
           {uploads.map((upload, index) => (
             <li key={upload.id} className="upload-card">
