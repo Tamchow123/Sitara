@@ -392,7 +392,7 @@
             },
             "post": {
                 "operationId": "designs_create",
-                "description": "Creates a private draft. Accepts optional title, questionnaire version, answers and inspiration selections; status is server-owned (draft). Answers and inspirations are validated authoritatively and roll back together on any failure. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Creates a private draft. Accepts optional title, questionnaire version and answers; status is server-owned (draft). Answers are validated authoritatively and roll back with the insert on any failure. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "Create a design",
                 "parameters": [
                     {
@@ -470,7 +470,7 @@
         "/api/v1/designs/{design_id}/": {
             "get": {
                 "operationId": "designs_retrieve",
-                "description": "Returns the full draft: linked questionnaire (or null), answers and ordered inspiration selections with live availability. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Returns the full draft: linked questionnaire (or null), answers, the design's own uploaded references and any historical curated selection (always reported unavailable since the catalogue was retired). Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "Retrieve a design",
                 "parameters": [
                     {
@@ -517,7 +517,7 @@
             },
             "patch": {
                 "operationId": "designs_update",
-                "description": "Partial draft update: title, questionnaire version (assignable once), answers (draft-validated) and inspiration selections (replaced as one ordered set). Only a draft — or a generation_failed design with no version, which returns to draft — may be edited. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Partial draft update: title, questionnaire version (assignable once) and answers (draft-validated). Only a draft — or a generation_failed design with no version, which returns to draft — may be edited. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "Update a design",
                 "parameters": [
                     {
@@ -2039,145 +2039,6 @@
                 }
             }
         },
-        "/api/v1/inspiration-assets/": {
-            "get": {
-                "operationId": "inspiration_assets_list",
-                "description": "Public, identity-free catalogue of rights-approved inspiration images (approved + verified + unexpired + all usage permissions). No authentication required; only the public fields are returned.",
-                "summary": "List inspiration assets",
-                "tags": [
-                    "Inspiration catalogue"
-                ],
-                "security": [
-                    {}
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/InspirationCatalogueResponse"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/v1/inspiration-assets/{asset_id}/image/": {
-            "get": {
-                "operationId": "inspiration_asset_image",
-                "description": "Streams the full-size sanitised WebP for an eligible asset. No storage keys or storage URLs are exposed.",
-                "summary": "Inspiration asset image",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "asset_id",
-                        "schema": {
-                            "type": "string",
-                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": [
-                    "Inspiration catalogue"
-                ],
-                "security": [
-                    {}
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "image/webp": {
-                                "schema": {
-                                    "type": "string",
-                                    "format": "binary"
-                                }
-                            }
-                        },
-                        "description": "Sanitised WebP image bytes streamed through Django."
-                    },
-                    "404": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ErrorEnvelope"
-                                }
-                            }
-                        },
-                        "description": "Missing or ineligible asset (indistinguishable from absent)."
-                    },
-                    "503": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ErrorEnvelope"
-                                }
-                            }
-                        },
-                        "description": "Eligible asset whose private storage object is unavailable."
-                    }
-                }
-            }
-        },
-        "/api/v1/inspiration-assets/{asset_id}/thumbnail/": {
-            "get": {
-                "operationId": "inspiration_asset_thumbnail",
-                "description": "Streams the thumbnail sanitised WebP for an eligible asset. No storage keys or storage URLs are exposed.",
-                "summary": "Inspiration asset thumbnail",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "asset_id",
-                        "schema": {
-                            "type": "string",
-                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": [
-                    "Inspiration catalogue"
-                ],
-                "security": [
-                    {}
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "image/webp": {
-                                "schema": {
-                                    "type": "string",
-                                    "format": "binary"
-                                }
-                            }
-                        },
-                        "description": "Sanitised WebP image bytes streamed through Django."
-                    },
-                    "404": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ErrorEnvelope"
-                                }
-                            }
-                        },
-                        "description": "Missing or ineligible asset (indistinguishable from absent)."
-                    },
-                    "503": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ErrorEnvelope"
-                                }
-                            }
-                        },
-                        "description": "Eligible asset whose private storage object is unavailable."
-                    }
-                }
-            }
-        },
         "/api/v1/jobs/{job_id}/": {
             "get": {
                 "operationId": "jobs_retrieve",
@@ -3355,14 +3216,7 @@
                         "type": "string",
                         "format": "uuid"
                     },
-                    "answers": {},
-                    "inspiration_asset_ids": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "format": "uuid"
-                        }
-                    }
+                    "answers": {}
                 }
             },
             "EmbellishmentPlanResult": {
@@ -3670,20 +3524,6 @@
                     "title"
                 ]
             },
-            "InspirationCatalogueResponse": {
-                "type": "object",
-                "properties": {
-                    "assets": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/PublicInspirationAsset"
-                        }
-                    }
-                },
-                "required": [
-                    "assets"
-                ]
-            },
             "InspirationUpload": {
                 "type": "object",
                 "description": "One image the user uploaded as inspiration for their own design.\n\nOnly the sanitised WebP derivative exists server-side; its bytes are served\nexclusively by the ownership-checked image endpoint. No storage key, image\nhash, byte size, filename or client-declared content type is ever\nexposed.",
@@ -3879,14 +3719,7 @@
                         "type": "string",
                         "format": "uuid"
                     },
-                    "answers": {},
-                    "inspiration_asset_ids": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "format": "uuid"
-                        }
-                    }
+                    "answers": {}
                 }
             },
             "PublicConfig": {
@@ -3920,49 +3753,6 @@
                     "generation_mode",
                     "max_inspiration_images",
                     "max_refinements"
-                ]
-            },
-            "PublicInspirationAsset": {
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "format": "uuid"
-                    },
-                    "title": {
-                        "type": "string"
-                    },
-                    "alt_text": {
-                        "type": "string"
-                    },
-                    "garment_type": {
-                        "type": "string"
-                    },
-                    "cultural_context": {
-                        "type": "string"
-                    },
-                    "attribution": {
-                        "type": "string",
-                        "description": "Approved public attribution text, if any."
-                    },
-                    "image_url": {
-                        "type": "string",
-                        "description": "Relative Django endpoint streaming WebP bytes."
-                    },
-                    "thumbnail_url": {
-                        "type": "string",
-                        "description": "Relative Django endpoint streaming WebP bytes."
-                    }
-                },
-                "required": [
-                    "alt_text",
-                    "attribution",
-                    "cultural_context",
-                    "garment_type",
-                    "id",
-                    "image_url",
-                    "thumbnail_url",
-                    "title"
                 ]
             },
             "QuestionConstraintsSchema": {
@@ -4325,7 +4115,7 @@
             },
             "SelectedInspiration": {
                 "type": "object",
-                "description": "One inspiration selection with its live availability.\n\n``available: false`` with ``asset: null`` means the previously-selected\nasset is no longer publicly eligible (retired, expired or revoked). The\nreason is deliberately not disclosed.",
+                "description": "One HISTORICAL curated-catalogue selection, made before Phase 22.\n\nPhase 22 (ADR 0025) retired the catalogue from the product: no design can\ngain a selection any more, and the three endpoints that once streamed an\nasset's bytes and attribution are gone. So the asset object went with them —\ndocumenting a payload that named dead URLs would be worse than documenting\nnone — and ``available`` is permanently false, meaning \"no longer usable in\na design\".\n\nThe rows themselves are untouched, as is every ``DesignVersion``'s frozen\n``inspiration_context`` acknowledgement, which is rendered from its own\nsnapshot by the result endpoint.",
                 "properties": {
                     "id": {
                         "type": "string",
@@ -4336,63 +4126,14 @@
                         "type": "integer"
                     },
                     "available": {
-                        "type": "boolean"
-                    },
-                    "asset": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/SelectedInspirationAsset"
-                            }
-                        ],
-                        "nullable": true
+                        "type": "boolean",
+                        "description": "Always false since the catalogue was retired (ADR 0025)."
                     }
                 },
                 "required": [
-                    "asset",
                     "available",
                     "id",
                     "position"
-                ]
-            },
-            "SelectedInspirationAsset": {
-                "type": "object",
-                "description": "The public catalogue fields for an inspiration that is still eligible.",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "format": "uuid"
-                    },
-                    "title": {
-                        "type": "string"
-                    },
-                    "alt_text": {
-                        "type": "string"
-                    },
-                    "garment_type": {
-                        "type": "string"
-                    },
-                    "cultural_context": {
-                        "type": "string"
-                    },
-                    "attribution": {
-                        "type": "string"
-                    },
-                    "image_url": {
-                        "type": "string"
-                    },
-                    "thumbnail_url": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "alt_text",
-                    "attribution",
-                    "cultural_context",
-                    "garment_type",
-                    "id",
-                    "image_url",
-                    "thumbnail_url",
-                    "title"
                 ]
             },
             "StepSchema": {

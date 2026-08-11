@@ -22,7 +22,7 @@ from sitara.questionnaire.answer_validation import (
 )
 from sitara.questionnaire.models import QuestionnaireVersion
 
-from .models import Design, DesignInspiration, DesignSession, DesignVersion
+from .models import Design, DesignSession, DesignVersion
 
 logger = logging.getLogger(__name__)
 
@@ -364,92 +364,6 @@ def _assign_questionnaire_version(design: Design, questionnaire_version_id) -> N
     design.save(update_fields=["questionnaire_version", "updated_at"])
 
 
-def _replace_inspirations(design: Design, inspiration_asset_ids) -> None:
-    """Replace the design's inspiration selections with one ordered set.
-
-    Rejects duplicates and more than ``settings.MAX_INSPIRATION_IMAGES``, and
-    accepts ONLY assets currently returned by ``publicly_eligible()`` — so a
-    draft, retired, expired, unverified or incompletely-permitted asset is
-    refused with the same indistinguishable message and never linked. The
-    submitted order becomes positions 1..n. The Design row is already locked
-    by the caller, so concurrent updates serialise and can never create
-    duplicate positions or exceed the limit."""
-    if not isinstance(inspiration_asset_ids, list):
-        raise DraftUpdateError(
-            "validation_failed",
-            "Invalid inspiration selection.",
-            field_errors={"inspiration_asset_ids": ["Must be a list of asset ids."]},
-        )
-    # The limit is SHARED with the design's own uploaded inspirations (Phase
-    # 16B): a bride who has uploaded two of her own images may select only one
-    # curated preset. Counted under the Design row lock the caller holds, so a
-    # concurrent upload cannot slip past it.
-    limit = settings.MAX_INSPIRATION_IMAGES
-    uploads_used = design.inspiration_uploads.count()
-    # Clamped at zero: if the cap were ever lowered below an existing upload
-    # count, a negative budget would reject even CLEARING the curated
-    # selections — the one action that helps.
-    if len(inspiration_asset_ids) > max(limit - uploads_used, 0):
-        raise DraftUpdateError(
-            "validation_failed",
-            "Too many inspiration images selected.",
-            field_errors={
-                "inspiration_asset_ids": [
-                    f"Select at most {limit} inspiration images in total, including "
-                    "any you have uploaded."
-                    if uploads_used
-                    else f"Select at most {limit} inspiration images."
-                ]
-            },
-        )
-
-    parsed: list[uuid.UUID] = []
-    seen: set[uuid.UUID] = set()
-    for raw in inspiration_asset_ids:
-        try:
-            asset_id = uuid.UUID(str(raw))
-        except (ValueError, AttributeError, TypeError):
-            raise DraftUpdateError(
-                "validation_failed",
-                "Invalid inspiration selection.",
-                field_errors={"inspiration_asset_ids": ["That inspiration is not available."]},
-            ) from None
-        if asset_id in seen:
-            raise DraftUpdateError(
-                "validation_failed",
-                "Duplicate inspiration selected.",
-                field_errors={
-                    "inspiration_asset_ids": ["The same inspiration was selected more than once."]
-                },
-            )
-        seen.add(asset_id)
-        parsed.append(asset_id)
-
-    eligible = {
-        asset.pk: asset
-        for asset in InspirationAsset.objects.publicly_eligible().filter(pk__in=parsed)
-    }
-    for asset_id in parsed:
-        if asset_id not in eligible:
-            # Missing, retired, expired, unverified or incompletely-permitted:
-            # one indistinguishable rejection, no private reason revealed.
-            raise DraftUpdateError(
-                "validation_failed",
-                "That inspiration is not available.",
-                field_errors={"inspiration_asset_ids": ["That inspiration is not available."]},
-            )
-
-    # Replace as one ordered set. Deleting first then recreating is safe
-    # under the Design row lock the caller holds.
-    DesignInspiration.objects.filter(design=design).delete()
-    DesignInspiration.objects.bulk_create(
-        [
-            DesignInspiration(design=design, inspiration_asset=eligible[asset_id], position=index)
-            for index, asset_id in enumerate(parsed, start=1)
-        ]
-    )
-
-
 def _design_editability(locked: Design) -> tuple[bool, bool]:
     """(ordinary_editable, recovery_edit) for an already-locked Design.
 
@@ -473,17 +387,18 @@ def update_design_draft(
     title=UNSET,
     questionnaire_version_id=UNSET,
     answers=UNSET,
-    inspiration_asset_ids=UNSET,
 ) -> Design:
     """Atomically apply a partial draft update to one owned design.
 
     Ownership MUST be enforced by the caller before this runs (the view
     resolves the design through ``accessible_designs`` first). Everything
-    here — version assignment, answer validation/persistence and the ordered
-    inspiration replacement — happens inside one transaction under a Design
-    row lock, so answers and selections roll back together on any failure and
-    no partial update (answers saved but inspirations failed, or vice versa)
-    can ever occur.
+    here — version assignment and answer validation/persistence — happens
+    inside one transaction under a Design row lock, so a failure rolls the
+    whole update back rather than leaving a partial one.
+
+    There is no inspiration argument any more: ADR 0025 retired the curated
+    catalogue, so the only references a design can gain are its own uploads,
+    which have their own endpoint and their own row-locked service.
 
     Editability (Phase 10 lifecycle): ordinary edits require ``draft`` status
     AND no DesignVersion (a version — even one created while the status was
@@ -532,9 +447,6 @@ def update_design_draft(
             locked.answers = normalised
             locked.save(update_fields=["answers", "updated_at"])
 
-        if inspiration_asset_ids is not UNSET:
-            _replace_inspirations(locked, inspiration_asset_ids)
-
         if is_recovery:
             # A successful recovery edit clears the failed state so the design
             # can be completed and re-generated.
@@ -546,7 +458,14 @@ def update_design_draft(
 
 def inspiration_availability_errors(design: Design) -> list[str]:
     """Complete validation must fail while any selected inspiration is no
-    longer publicly eligible. The message never reveals which one or why."""
+    longer publicly eligible. The message never reveals which one or why.
+
+    Only HISTORICAL selections can reach this since Phase 22 (ADR 0025) retired
+    the catalogue — nothing can add one any more. It is deliberately unchanged
+    all the same: it mirrors the provider-facing gate in
+    ``generation.context``, which refuses to build an inspiration snapshot for
+    an ineligible asset, and a validate endpoint that answered "ready" while
+    generation would refuse is worse than one that says no early."""
     selections = list(design.inspiration_selections.all())
     if not selections:
         return []
@@ -567,8 +486,8 @@ def design_completion_errors(design: Design) -> dict:
 
     Returns a dict of field errors (empty means complete): a missing
     questionnaire link, any complete-mode answer-validation error, and any
-    no-longer-eligible inspiration selection. Purely read-only — no paid call,
-    no mutation."""
+    no-longer-eligible historical inspiration selection. Purely read-only — no
+    paid call, no mutation."""
     if design.questionnaire_version_id is None:
         return {"questionnaire_version_id": ["Select a questionnaire before validating."]}
     errors: dict = {}

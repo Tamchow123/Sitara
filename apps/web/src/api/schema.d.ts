@@ -139,7 +139,7 @@ export interface paths {
         put?: never;
         /**
          * Create a design
-         * @description Creates a private draft. Accepts optional title, questionnaire version, answers and inspiration selections; status is server-owned (draft). Answers and inspirations are validated authoritatively and roll back together on any failure. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Creates a private draft. Accepts optional title, questionnaire version and answers; status is server-owned (draft). Answers are validated authoritatively and roll back with the insert on any failure. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         post: operations["designs_create"];
         delete?: never;
@@ -157,7 +157,7 @@ export interface paths {
         };
         /**
          * Retrieve a design
-         * @description Returns the full draft: linked questionnaire (or null), answers and ordered inspiration selections with live availability. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Returns the full draft: linked questionnaire (or null), answers, the design's own uploaded references and any historical curated selection (always reported unavailable since the catalogue was retired). Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         get: operations["designs_retrieve"];
         put?: never;
@@ -167,7 +167,7 @@ export interface paths {
         head?: never;
         /**
          * Update a design
-         * @description Partial draft update: title, questionnaire version (assignable once), answers (draft-validated) and inspiration selections (replaced as one ordered set). Only a draft — or a generation_failed design with no version, which returns to draft — may be edited. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Partial draft update: title, questionnaire version (assignable once) and answers (draft-validated). Only a draft — or a generation_failed design with no version, which returns to draft — may be edited. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         patch: operations["designs_update"];
         trace?: never;
@@ -440,66 +440,6 @@ export interface paths {
          * @description PostgreSQL, the Redis broker, the auth-rate-limit cache and private object storage. Returns 503 with a displayable per-check body when any dependency is down. No authentication required.
          */
         get: operations["health_ready"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/inspiration-assets/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List inspiration assets
-         * @description Public, identity-free catalogue of rights-approved inspiration images (approved + verified + unexpired + all usage permissions). No authentication required; only the public fields are returned.
-         */
-        get: operations["inspiration_assets_list"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/inspiration-assets/{asset_id}/image/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Inspiration asset image
-         * @description Streams the full-size sanitised WebP for an eligible asset. No storage keys or storage URLs are exposed.
-         */
-        get: operations["inspiration_asset_image"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/inspiration-assets/{asset_id}/thumbnail/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Inspiration asset thumbnail
-         * @description Streams the thumbnail sanitised WebP for an eligible asset. No storage keys or storage URLs are exposed.
-         */
-        get: operations["inspiration_asset_thumbnail"];
         put?: never;
         post?: never;
         delete?: never;
@@ -998,7 +938,6 @@ export interface components {
             /** Format: uuid */
             questionnaire_version_id?: string;
             answers?: unknown;
-            inspiration_asset_ids?: string[];
         };
         EmbellishmentPlanResult: {
             techniques: string[];
@@ -1136,9 +1075,6 @@ export interface components {
             title: string;
             attribution: string;
         };
-        InspirationCatalogueResponse: {
-            assets: components["schemas"]["PublicInspirationAsset"][];
-        };
         /**
          * @description One image the user uploaded as inspiration for their own design.
          *
@@ -1233,7 +1169,6 @@ export interface components {
             /** Format: uuid */
             questionnaire_version_id?: string;
             answers?: unknown;
-            inspiration_asset_ids?: string[];
         };
         PublicConfig: {
             demo_mode: boolean;
@@ -1249,20 +1184,6 @@ export interface components {
             generation_mode: components["schemas"]["GenerationModeEnum"];
             max_inspiration_images: number;
             max_refinements: number;
-        };
-        PublicInspirationAsset: {
-            /** Format: uuid */
-            id: string;
-            title: string;
-            alt_text: string;
-            garment_type: string;
-            cultural_context: string;
-            /** @description Approved public attribution text, if any. */
-            attribution: string;
-            /** @description Relative Django endpoint streaming WebP bytes. */
-            image_url: string;
-            /** @description Relative Django endpoint streaming WebP bytes. */
-            thumbnail_url: string;
         };
         /**
          * @description Bounded per-question-type constraint mapping (all keys optional).
@@ -1440,11 +1361,18 @@ export interface components {
             values: string[];
         };
         /**
-         * @description One inspiration selection with its live availability.
+         * @description One HISTORICAL curated-catalogue selection, made before Phase 22.
          *
-         *     ``available: false`` with ``asset: null`` means the previously-selected
-         *     asset is no longer publicly eligible (retired, expired or revoked). The
-         *     reason is deliberately not disclosed.
+         *     Phase 22 (ADR 0025) retired the catalogue from the product: no design can
+         *     gain a selection any more, and the three endpoints that once streamed an
+         *     asset's bytes and attribution are gone. So the asset object went with them —
+         *     documenting a payload that named dead URLs would be worse than documenting
+         *     none — and ``available`` is permanently false, meaning "no longer usable in
+         *     a design".
+         *
+         *     The rows themselves are untouched, as is every ``DesignVersion``'s frozen
+         *     ``inspiration_context`` acknowledgement, which is rendered from its own
+         *     snapshot by the result endpoint.
          */
         SelectedInspiration: {
             /**
@@ -1453,20 +1381,8 @@ export interface components {
              */
             id: string;
             position: number;
+            /** @description Always false since the catalogue was retired (ADR 0025). */
             available: boolean;
-            asset: components["schemas"]["SelectedInspirationAsset"] | null;
-        };
-        /** @description The public catalogue fields for an inspiration that is still eligible. */
-        SelectedInspirationAsset: {
-            /** Format: uuid */
-            id: string;
-            title: string;
-            alt_text: string;
-            garment_type: string;
-            cultural_context: string;
-            attribution: string;
-            image_url: string;
-            thumbnail_url: string;
         };
         StepSchema: {
             id: string;
@@ -2814,105 +2730,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadyResponse"];
-                };
-            };
-        };
-    };
-    inspiration_assets_list: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InspirationCatalogueResponse"];
-                };
-            };
-        };
-    };
-    inspiration_asset_image: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                asset_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Sanitised WebP image bytes streamed through Django. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "image/webp": string;
-                };
-            };
-            /** @description Missing or ineligible asset (indistinguishable from absent). */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-            /** @description Eligible asset whose private storage object is unavailable. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-        };
-    };
-    inspiration_asset_thumbnail: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                asset_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Sanitised WebP image bytes streamed through Django. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "image/webp": string;
-                };
-            };
-            /** @description Missing or ineligible asset (indistinguishable from absent). */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-            /** @description Eligible asset whose private storage object is unavailable. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };

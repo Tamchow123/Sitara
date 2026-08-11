@@ -1,20 +1,22 @@
 """Design API serializers and response payloads.
 
-The write serializer accepts EXACTLY ``title``, ``questionnaire_version_id``,
-``answers`` and ``inspiration_asset_ids`` (all optional, for partial draft
-operations) and rejects everything else with a controlled 400 — server-owned
-fields (id, design_session, status, versions, generation attempts,
-timestamps, storage fields) must never be silently ignored, because silence
-teaches clients they worked. Answer content and inspiration eligibility are
-validated authoritatively in the service layer, not here.
+The write serializer accepts EXACTLY ``title``, ``questionnaire_version_id``
+and ``answers`` (all optional, for partial draft operations) and rejects
+everything else with a controlled 400 — server-owned fields (id,
+design_session, status, versions, generation attempts, timestamps, storage
+fields) must never be silently ignored, because silence teaches clients they
+worked. ``inspiration_asset_ids`` left that list in Phase 22 (ADR 0025) along
+with the catalogue it selected from, and is now one of the rejected names.
+Answer content is validated authoritatively in the service layer, not here.
 
 The read payloads never expose the DesignSession identifier, the user,
 version rows, storage keys, image hashes, rights evidence, verifier identity
 or internal notes. The list payload is compact (no questionnaire schema, no
 inspiration records, no job data); only the detail payload embeds the linked
-questionnaire, the selected inspirations and, since Phase 12, one sanitised
-public snapshot of the latest generation job (``latest_job``) — still no
-private provenance (provider, model, prediction id, seed, storage key).
+questionnaire, the design's own uploads, the historical catalogue selections
+and, since Phase 12, one sanitised public snapshot of the latest generation
+job (``latest_job``) — still no private provenance (provider, model,
+prediction id, seed, storage key).
 
 Since Phase 21 the list payload also carries each design's versions, so the
 account gallery can group a refinement with the concept it came from. That adds
@@ -27,8 +29,6 @@ put a fistful of them.
 
 from rest_framework import serializers
 
-from sitara.catalogue.models import InspirationAsset
-from sitara.catalogue.serializers import public_asset_payload
 from sitara.media.account_delivery import safe_stored_filename
 
 from .jobs import latest_generation_attempt, public_job_payload
@@ -50,9 +50,12 @@ class DesignWriteSerializer(serializers.Serializer):
     # Arbitrary JSON object; totality-validated against the linked
     # questionnaire schema in ``services.update_design_draft``.
     answers = serializers.JSONField(required=False)
-    inspiration_asset_ids = serializers.ListField(
-        child=serializers.UUIDField(), required=False, allow_empty=True
-    )
+
+    # No ``inspiration_asset_ids``. Phase 22 (ADR 0025) retired the curated
+    # catalogue from the product, so there is nothing left to select; the field
+    # is GONE rather than accepted-and-ignored, which means a client still
+    # sending it gets the ordinary unknown-field 400 below instead of silence
+    # that teaches it the selection was saved.
 
     def to_internal_value(self, data):
         if not isinstance(data, dict):
@@ -175,36 +178,33 @@ def _questionnaire_payload(design: Design) -> dict | None:
 
 
 def _selected_inspirations_payload(design: Design) -> list[dict]:
-    """The design's inspiration selections, ordered by position.
+    """The design's historical catalogue selections, ordered by position.
 
-    Each entry reports whether the asset is STILL publicly eligible right
-    now. An asset that has become retired, expired or otherwise ineligible is
-    rendered as ``available: false`` with ``asset: null`` — the reason is
-    never revealed, and no storage key, hash, rights evidence or internal
-    metadata is ever exposed. The linked asset and its live rights record
-    remain authoritative; nothing is snapshotted onto the selection."""
-    selections = list(design.inspiration_selections.all())
-    if not selections:
-        return []
-    selected_ids = [selection.inspiration_asset_id for selection in selections]
-    eligible = {
-        asset.pk: asset
-        for asset in InspirationAsset.objects.publicly_eligible()
-        .filter(pk__in=selected_ids)
-        .select_related("usage_rights")
-    }
-    payload = []
-    for selection in selections:
-        asset = eligible.get(selection.inspiration_asset_id)
-        payload.append(
-            {
-                "id": str(selection.inspiration_asset_id),
-                "position": selection.position,
-                "available": asset is not None,
-                "asset": public_asset_payload(asset) if asset is not None else None,
-            }
-        )
-    return payload
+    Kept, and kept READ-ONLY, for designs made before Phase 22: the rows exist,
+    the frontend's runtime shape validator reads this field, and deleting it
+    would silently drop part of what an old design records about itself.
+
+    Since ADR 0025 retired the catalogue from the product, ``available`` is
+    permanently ``false`` and the asset object is gone from the payload
+    entirely. That is the honest report rather than a downgrade: a curated
+    reference can no longer be added to a design, and the three endpoints that
+    once streamed its bytes and its attribution no longer exist, so a payload
+    naming them would hand out dead links. Nothing PERSISTED changes — the
+    ``DesignInspiration`` rows stand, and a ``DesignVersion``'s frozen
+    ``inspiration_context`` acknowledgement is rendered from its own snapshot by
+    :mod:`sitara.designs.result`, untouched by any of this (CLAUDE.md §13).
+
+    A still-eligible asset (staff can still approve one in the dormant admin) is
+    likewise reported unavailable, because availability here means "usable in a
+    design", and after the retirement nothing is."""
+    return [
+        {
+            "id": str(selection.inspiration_asset_id),
+            "position": selection.position,
+            "available": False,
+        }
+        for selection in design.inspiration_selections.all()
+    ]
 
 
 def inspiration_upload_payload(upload) -> dict:

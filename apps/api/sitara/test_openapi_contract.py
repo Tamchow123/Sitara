@@ -4,7 +4,7 @@ These prove the generated contract is complete, safe and byte-deterministic:
 generation is warning-free and validates, every canonical operation is
 present (and nothing else, including Django admin), paths are clean, the
 CSRF header is documented on unsafe browser operations, password fields are
-write-only, the catalogue image endpoints expose binary WebP, the
+write-only, the private image endpoints document their failure modes, the
 questionnaire schema is structurally typed, no JWT/bearer scheme exists, no
 private field leaks into any component, and the committed
 ``apps/api/openapi/schema.json`` matches a fresh regeneration exactly.
@@ -59,9 +59,10 @@ EXPECTED_OPERATIONS = frozenset(
         ("/api/v1/designs/{design_id}/versions/{version_id}/send/", "get"),
         ("/api/v1/jobs/{job_id}/", "get"),
         ("/api/v1/questionnaire/active/", "get"),
-        ("/api/v1/inspiration-assets/", "get"),
-        ("/api/v1/inspiration-assets/{asset_id}/image/", "get"),
-        ("/api/v1/inspiration-assets/{asset_id}/thumbnail/", "get"),
+        # No /api/v1/inspiration-assets/* — Phase 22 (ADR 0025) retired the
+        # public catalogue. The absence is asserted by this set being exact:
+        # test_no_unexpected_operations fails if one ever comes back
+        # unannounced.
     }
 )
 
@@ -219,18 +220,25 @@ def test_password_fields_are_write_only(committed_schema):
             assert name.endswith("Request"), f"password exposed in response component {name}"
 
 
-def test_image_endpoints_expose_binary_webp(committed_schema):
+def test_private_image_endpoints_document_their_failure_modes(committed_schema):
+    """The binary-WebP assertion this replaces belonged to the public catalogue
+    endpoints, retired in Phase 22 (ADR 0025). The private image endpoints that
+    remain stream bytes rather than JSON and are documented by description, so
+    what is worth asserting about them is the pair of failure modes that keep a
+    private object private: an indistinguishable 404 and a safe 503."""
     for path in (
-        "/api/v1/inspiration-assets/{asset_id}/image/",
-        "/api/v1/inspiration-assets/{asset_id}/thumbnail/",
+        "/api/v1/designs/{design_id}/versions/{version_id}/images/",
+        "/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/image/",
     ):
-        response = committed_schema["paths"][path]["get"]["responses"]["200"]
-        content = response["content"]
-        assert "image/webp" in content, path
-        assert content["image/webp"]["schema"].get("format") == "binary", path
-        # And the failure modes are documented.
-        assert "404" in committed_schema["paths"][path]["get"]["responses"]
-        assert "503" in committed_schema["paths"][path]["get"]["responses"]
+        responses = committed_schema["paths"][path]["get"]["responses"]
+        assert "404" in responses, path
+        assert "503" in responses, path
+    # The upload endpoint STREAMS its bytes (there is deliberately no bearer URL
+    # to a private user photograph), so its success has no JSON body at all.
+    upload_ok = committed_schema["paths"][
+        "/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/image/"
+    ]["get"]["responses"]["200"]
+    assert "content" not in upload_ok
 
 
 def test_questionnaire_schema_is_structurally_typed(committed_schema):
@@ -297,7 +305,6 @@ def test_public_endpoints_do_not_require_bearer_auth(committed_schema):
                 assert "jwt" not in scheme_name.lower()
     for path in (
         "/api/v1/questionnaire/active/",
-        "/api/v1/inspiration-assets/",
         "/api/v1/health/live",
     ):
         security = committed_schema["paths"][path]["get"].get("security", [])

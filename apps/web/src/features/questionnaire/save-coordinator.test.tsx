@@ -6,7 +6,6 @@ import type { QuestionnaireSchema } from "./types";
 
 const mocks = vi.hoisted(() => ({
   fetchActiveQuestionnaire: vi.fn(),
-  fetchCatalogue: vi.fn(),
   fetchDesign: vi.fn(),
   createDesignDraft: vi.fn(),
   updateDesignDraft: vi.fn(),
@@ -17,7 +16,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("./api", () => ({
   fetchActiveQuestionnaire: mocks.fetchActiveQuestionnaire,
-  fetchCatalogue: mocks.fetchCatalogue,
   fetchDesign: mocks.fetchDesign,
   createDesignDraft: mocks.createDesignDraft,
   updateDesignDraft: mocks.updateDesignDraft,
@@ -98,7 +96,6 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   mocks.fetchActiveQuestionnaire.mockResolvedValue({ id: "v1", version: 1, schema: SCHEMA });
-  mocks.fetchCatalogue.mockResolvedValue({ assets: [] });
   mocks.createDesignDraft.mockResolvedValue({ ok: true, data: detail() });
   mocks.updateDesignDraft.mockResolvedValue({ ok: true, data: detail() });
   mocks.validateDesignDraft.mockResolvedValue({ ok: true, data: { valid: true } });
@@ -257,99 +254,46 @@ describe("save coordinator — inspiration step", () => {
   function completeDesign(overrides: Record<string, unknown> = {}) {
     return detail({ answers: { garment_type: "lehenga" }, ...overrides });
   }
-  const ASSET = {
-    id: "a1",
-    title: "Look",
-    alt_text: "Alt",
-    garment_type: "lehenga",
-    cultural_context: "",
-    attribution: "Studio A",
-    image_url: "/api/v1/inspiration-assets/a1/image/",
-    thumbnail_url: "/api/v1/inspiration-assets/a1/thumbnail/",
-  };
 
-  beforeEach(() => {
-    mocks.fetchCatalogue.mockResolvedValue({ assets: [ASSET] });
-  });
+  // Cases 7, 8, 15a and 15b covered the curated catalogue: waiting on a
+  // selection save before Review, resending inspiration_asset_ids after a
+  // failed one, and telling a catalogue outage apart from an empty catalogue.
+  // ADR 0025 retired the catalogue, so none of those states can occur — there
+  // is no selection to save and no catalogue to fetch.
+  //
+  // What replaces them asserts against the rendered DOM and against the save
+  // client, never against a mock of the deleted `fetchCatalogue`: a mock of a
+  // function no code can reach cannot be called, so an expectation on it would
+  // pass no matter how wrong the component became.
 
-  it("7: selecting an inspiration then pressing Review waits for the selection save", async () => {
+  it("7: the inspiration step saves nothing of its own and reaches Review directly", async () => {
     mocks.fetchDesign.mockResolvedValue(completeDesign());
-    const patch = deferred<{ ok: true; data: ReturnType<typeof detail> }>();
-    mocks.updateDesignDraft.mockReturnValue(patch.promise);
-
     render(<QuestionnaireWizard initialDesignId="d1" />);
-    fireEvent.click((await screen.findByText("Look")).closest("button") as HTMLElement);
+    await screen.findByRole("heading", { name: "Inspiration images" });
+
+    // There is no longer any draft field this screen writes, so Review is not
+    // gated on a save — and no save is issued by arriving here at all.
+    expect(mocks.updateDesignDraft).not.toHaveBeenCalled();
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Review" }));
     });
-    // The selection save is still in flight → Review has NOT navigated yet.
-    expect(mocks.push).not.toHaveBeenCalled();
-
-    await act(async () => {
-      patch.resolve({
-        ok: true,
-        data: completeDesign({
-          selected_inspirations: [{ id: "a1", position: 1, available: true, asset: ASSET }],
-        }),
-      });
-    });
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/design/d1/review"));
+    expect(mocks.updateDesignDraft).not.toHaveBeenCalled();
   });
 
-  it("8: retry after a failed inspiration save resends inspiration_asset_ids", async () => {
+  it("8: the step renders the upload panel with no catalogue-shaped state", async () => {
     mocks.fetchDesign.mockResolvedValue(completeDesign());
-    mocks.updateDesignDraft
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 503,
-        code: "unavailable",
-        message: "Could not save.",
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        data: completeDesign({
-          selected_inspirations: [{ id: "a1", position: 1, available: true, asset: ASSET }],
-        }),
-      });
-
     render(<QuestionnaireWizard initialDesignId="d1" />);
-    fireEvent.click((await screen.findByText("Look")).closest("button") as HTMLElement);
-    await screen.findByText("Could not save.");
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    });
-    await waitFor(() => expect(mocks.updateDesignDraft).toHaveBeenCalledTimes(2));
-    expect(mocks.updateDesignDraft).toHaveBeenLastCalledWith("d1", {
-      inspiration_asset_ids: ["a1"],
-    });
-  });
+    await screen.findByRole("heading", { name: "Inspiration images" });
 
-  it("15a: a catalogue outage renders an unavailable state with Retry", async () => {
-    mocks.fetchDesign.mockResolvedValue(completeDesign());
-    // First load fails (outage), the retry succeeds.
-    mocks.fetchCatalogue
-      .mockRejectedValueOnce(new Error("catalogue_unavailable"))
-      .mockResolvedValue({ assets: [ASSET] });
-    render(<QuestionnaireWizard initialDesignId="d1" />);
-    expect(
-      await screen.findByText(/Inspiration images are temporarily unavailable/i),
-    ).toBeInTheDocument();
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    });
-    expect(await screen.findByText("Look")).toBeInTheDocument();
-  });
-
-  it("15b: a legitimately empty catalogue is a valid empty state, not an outage", async () => {
-    mocks.fetchDesign.mockResolvedValue(completeDesign());
-    mocks.fetchCatalogue.mockResolvedValue({ assets: [] });
-    render(<QuestionnaireWizard initialDesignId="d1" />);
-    expect(
-      await screen.findByText(/No inspiration images are available yet/i),
-    ).toBeInTheDocument();
     expect(
       screen.queryByText(/Inspiration images are temporarily unavailable/i),
     ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/No inspiration images are available yet/i)).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /Your own photographs/i }),
+    ).toBeInTheDocument();
   });
 });
 

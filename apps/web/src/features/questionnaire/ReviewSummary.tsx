@@ -416,39 +416,22 @@ export function ReviewSummary({ designId }: Props) {
               below are sent to the external AI image provider that draws your concept, and
               the concept will not be an exact copy of any of them.
             </p>
-            <ul className="review-inspirations">
-              {design.selected_inspirations.map((selection) => (
-                <li key={selection.id}>
-                  {selection.available && selection.asset ? (
-                    <figure>
-                      {/* Plain <img>, never next/image, so the backend's
-                          no-store eligibility checks apply to every request. */}
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        className="inspiration-thumb"
-                        src={selection.asset.thumbnail_url}
-                        alt={selection.asset.alt_text}
-                        loading="lazy"
-                        width={512}
-                        height={512}
-                      />
-                      <figcaption>
-                        {selection.asset.title}
-                        {selection.asset.attribution ? (
-                          <span className="inspiration-attribution">
-                            {selection.asset.attribution}
-                          </span>
-                        ) : null}
-                      </figcaption>
-                    </figure>
-                  ) : (
+            {/* Curated selections can only be historical since ADR 0025
+                retired the catalogue: nothing can add one, no endpoint serves
+                one's picture any more, and the payload no longer carries its
+                title or attribution. So an old design that holds one is told
+                plainly that it is gone rather than shown a broken thumbnail. */}
+            {design.selected_inspirations.length > 0 && (
+              <ul className="review-inspirations">
+                {design.selected_inspirations.map((selection) => (
+                  <li key={selection.id}>
                     <p className="inspiration-card-unavailable">
                       This inspiration is no longer available.
                     </p>
-                  )}
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+              </ul>
+            )}
             {uploads.length > 0 && (
               <>
                 <h3 className="review-uploads-heading">Your own photographs</h3>

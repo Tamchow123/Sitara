@@ -399,38 +399,19 @@ class TestSharedInspirationBudget:
         assert third.json()["error"]["code"] == "inspiration_limit_reached"
         assert DesignInspirationUpload.objects.count() == 2
 
-    def test_uploads_consume_the_preset_budget(self, settings):
-        from sitara.designs.services import DraftUpdateError, update_design_draft
-
+    def test_uploads_alone_now_fill_the_reference_budget(self, settings):
+        """Phase 22 (ADR 0025): the budget is no longer SHARED with curated
+        presets, because there are none — but it is the same cap, enforced in
+        the same place under the same row lock."""
         settings.MAX_INSPIRATION_IMAGES = 1
         client = csrf_client()
         design_id = create_owned_design_id(client)
-        post_upload(client, design_id, data=_png_bytes())
-        design = Design.objects.get(pk=design_id)
+        assert post_upload(client, design_id, data=_png_bytes()).status_code == 201
 
-        with pytest.raises(DraftUpdateError) as excinfo:
-            update_design_draft(
-                design, inspiration_asset_ids=["11111111-1111-4111-8111-111111111111"]
-            )
-
-        assert "inspiration_asset_ids" in excinfo.value.field_errors
-
-    def test_clearing_presets_is_never_blocked_by_the_upload_count(self, settings):
-        # REL-006: if the cap were ever lowered below an existing upload count,
-        # the remaining budget goes negative — and the one action that helps
-        # (selecting nothing) must not be the thing it refuses.
-        from sitara.designs.services import update_design_draft
-
-        client = csrf_client()
-        design_id = create_owned_design_id(client)
-        post_upload(client, design_id, data=_png_bytes(colour=(4, 4, 4)))
-        post_upload(client, design_id, data=_png_bytes(colour=(5, 5, 5)))
-        settings.MAX_INSPIRATION_IMAGES = 1
-        design = Design.objects.get(pk=design_id)
-
-        update_design_draft(design, inspiration_asset_ids=[])
-
-        assert design.inspiration_selections.count() == 0
+        refused = post_upload(client, design_id, data=_png_bytes(colour=(9, 9, 9)))
+        assert refused.status_code == 409
+        assert refused.json()["error"]["code"] == "inspiration_limit_reached"
+        assert DesignInspirationUpload.objects.filter(design_id=design_id).count() == 1
 
     def test_a_storage_write_failure_creates_no_row(self, monkeypatch):
         client = csrf_client()

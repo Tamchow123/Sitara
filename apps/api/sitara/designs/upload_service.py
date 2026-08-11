@@ -13,9 +13,12 @@ here, following the same shape as the catalogue's own ingest service:
   revision. No filename, client content type, user identity or session data
   ever reaches a key.
 
-The cap is the one thing curated selections and uploads share: their COMBINED
-count is bounded by ``settings.MAX_INSPIRATION_IMAGES``, checked here under a
-row lock on the owning design so two concurrent uploads cannot both pass.
+The cap is ``settings.MAX_INSPIRATION_IMAGES``, checked here under a row lock
+on the owning design so two concurrent uploads cannot both pass. It used to be
+a budget SHARED with curated catalogue selections; ADR 0025 retired those, so
+nothing else draws on it any more — but it is still counted the same way,
+because a historical design may still hold a selection and the total is what
+the provider ceiling cares about.
 """
 
 import logging
@@ -165,7 +168,13 @@ def _delete_quietly(storage_key: str) -> bool:
 
 
 def inspiration_slots_used(design: Design) -> int:
-    """How many of the design's shared inspiration slots are already taken."""
+    """How many of the design's reference slots are already taken.
+
+    Historical curated selections still count. Nothing can add one since ADR
+    0025, but an old design that holds one has genuinely used the slot — it is
+    still sent to the provider by ``generation.reference_images`` when it is
+    still eligible — so ignoring it here would let that design exceed the
+    provider ceiling."""
     return design.inspiration_selections.count() + design.inspiration_uploads.count()
 
 

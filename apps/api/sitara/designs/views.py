@@ -10,11 +10,15 @@ unchanged since Phase 4:
   CSRF for already-authenticated requests, but these endpoints accept
   anonymous unsafe requests too. Nothing here is csrf_exempt.
 
-Phase 7 extends the draft with a linked questionnaire version, validated
-answers and ordered inspiration selections. All answer/selection validation
-and persistence is authoritative in ``services.update_design_draft`` (one
-atomic, row-locked transaction); views stay thin. Inaccessible designs are
-404, never 403. Every response carries ``Cache-Control: no-store``.
+Phase 7 extends the draft with a linked questionnaire version and validated
+answers. All answer validation and persistence is authoritative in
+``services.update_design_draft`` (one atomic, row-locked transaction); views
+stay thin. Inaccessible designs are 404, never 403. Every response carries
+``Cache-Control: no-store``.
+
+Phase 22 (ADR 0025) retired the curated inspiration catalogue, so a draft no
+longer carries selectable references: the only references a design can gain
+are the user's own uploads, through their own endpoint below.
 """
 
 import logging
@@ -325,8 +329,6 @@ def _draft_kwargs(validated: dict, *, include_title: bool) -> dict:
         kwargs["questionnaire_version_id"] = str(validated["questionnaire_version_id"])
     if "answers" in validated:
         kwargs["answers"] = validated["answers"]
-    if "inspiration_asset_ids" in validated:
-        kwargs["inspiration_asset_ids"] = [str(a) for a in validated["inspiration_asset_ids"]]
     return kwargs
 
 
@@ -541,9 +543,9 @@ class DesignListCreateView(APIView):
         summary="Create a design",
         description=(
             "Creates a private draft. Accepts optional title, questionnaire "
-            "version, answers and inspiration selections; status is "
-            "server-owned (draft). Answers and inspirations are validated "
-            "authoritatively and roll back together on any failure. " + _OWNERSHIP_NOTE
+            "version and answers; status is server-owned (draft). Answers are "
+            "validated authoritatively and roll back with the insert on any "
+            "failure. " + _OWNERSHIP_NOTE
         ),
     )
     def post(self, request):
@@ -558,8 +560,8 @@ class DesignListCreateView(APIView):
         try:
             # One coherent transaction: workspace resolution (which locks the
             # browser's django_session row), the design insert AND the draft
-            # update commit together, so a failed answer/inspiration update
-            # never leaves behind an empty workspace or a half-saved draft.
+            # update commit together, so a failed answer update never leaves
+            # behind an empty workspace or a half-saved draft.
             with transaction.atomic():
                 design_session = resolve_current_design_session(request, create=True)
                 design = Design.objects.create(
@@ -599,8 +601,10 @@ class DesignDetailView(APIView):
         },
         summary="Retrieve a design",
         description=(
-            "Returns the full draft: linked questionnaire (or null), answers "
-            "and ordered inspiration selections with live availability. " + _OWNERSHIP_NOTE
+            "Returns the full draft: linked questionnaire (or null), answers, "
+            "the design's own uploaded references and any historical curated "
+            "selection (always reported unavailable since the catalogue was "
+            "retired). " + _OWNERSHIP_NOTE
         ),
     )
     def get(self, request, design_id: str):
@@ -635,8 +639,7 @@ class DesignDetailView(APIView):
         summary="Update a design",
         description=(
             "Partial draft update: title, questionnaire version (assignable "
-            "once), answers (draft-validated) and inspiration selections "
-            "(replaced as one ordered set). Only a draft — or a "
+            "once) and answers (draft-validated). Only a draft — or a "
             "generation_failed design with no version, which returns to draft "
             "— may be edited. " + _OWNERSHIP_NOTE
         ),
@@ -1979,7 +1982,8 @@ class DesignInspirationUploadView(APIView):
     unsafe design endpoint. The client's filename and declared content type are
     never read: ``designs.upload_processing`` trusts only the decoded image, and
     the storage key is server-generated. The upload shares the design's
-    ``MAX_INSPIRATION_IMAGES`` budget with its curated catalogue selections."""
+    ``MAX_INSPIRATION_IMAGES`` reference budget, which since ADR 0025 nothing
+    else draws on."""
 
     authentication_classes = [SessionAuthentication]
     permission_classes = [AllowAny]

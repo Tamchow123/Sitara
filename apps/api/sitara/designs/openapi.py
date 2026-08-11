@@ -82,30 +82,25 @@ class DesignQuestionnaireSerializer(serializers.Serializer):
     schema = QuestionnaireSchemaSerializer()
 
 
-class SelectedInspirationAssetSerializer(serializers.Serializer):
-    """The public catalogue fields for an inspiration that is still eligible."""
-
-    id = serializers.UUIDField()
-    title = serializers.CharField()
-    alt_text = serializers.CharField()
-    garment_type = serializers.CharField()
-    cultural_context = serializers.CharField()
-    attribution = serializers.CharField()
-    image_url = serializers.CharField()
-    thumbnail_url = serializers.CharField()
-
-
 class SelectedInspirationSerializer(serializers.Serializer):
-    """One inspiration selection with its live availability.
+    """One HISTORICAL curated-catalogue selection, made before Phase 22.
 
-    ``available: false`` with ``asset: null`` means the previously-selected
-    asset is no longer publicly eligible (retired, expired or revoked). The
-    reason is deliberately not disclosed."""
+    Phase 22 (ADR 0025) retired the catalogue from the product: no design can
+    gain a selection any more, and the three endpoints that once streamed an
+    asset's bytes and attribution are gone. So the asset object went with them —
+    documenting a payload that named dead URLs would be worse than documenting
+    none — and ``available`` is permanently false, meaning "no longer usable in
+    a design".
+
+    The rows themselves are untouched, as is every ``DesignVersion``'s frozen
+    ``inspiration_context`` acknowledgement, which is rendered from its own
+    snapshot by the result endpoint."""
 
     id = serializers.UUIDField(help_text="The selected inspiration asset id.")
     position = serializers.IntegerField()
-    available = serializers.BooleanField()
-    asset = SelectedInspirationAssetSerializer(allow_null=True)
+    available = serializers.BooleanField(
+        help_text="Always false since the catalogue was retired (ADR 0025)."
+    )
 
 
 class InspirationUploadSerializer(serializers.Serializer):

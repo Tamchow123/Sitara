@@ -11,8 +11,6 @@ export type QuestionOption = components["schemas"]["QuestionOptionSchema"];
 export type QuestionConstraints = components["schemas"]["QuestionConstraintsSchema"];
 export type CompatibilityRule = components["schemas"]["CompatibilityRuleSchema"];
 export type ActiveQuestionnaire = components["schemas"]["ActiveQuestionnaireResponse"];
-export type PublicAsset = components["schemas"]["PublicInspirationAsset"];
-export type InspirationCatalogue = components["schemas"]["InspirationCatalogueResponse"];
 export type DesignDraft = components["schemas"]["DesignDetailResponse"];
 export type SelectedInspiration = components["schemas"]["SelectedInspiration"];
 

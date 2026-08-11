@@ -6,7 +6,6 @@ import type { QuestionnaireSchema } from "./types";
 
 const mocks = vi.hoisted(() => ({
   fetchActiveQuestionnaire: vi.fn(),
-  fetchCatalogue: vi.fn(),
   fetchDesign: vi.fn(),
   createDesignDraft: vi.fn(),
   updateDesignDraft: vi.fn(),
@@ -17,7 +16,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("./api", () => ({
   fetchActiveQuestionnaire: mocks.fetchActiveQuestionnaire,
-  fetchCatalogue: mocks.fetchCatalogue,
   fetchDesign: mocks.fetchDesign,
   createDesignDraft: mocks.createDesignDraft,
   updateDesignDraft: mocks.updateDesignDraft,
@@ -133,7 +131,6 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   mocks.fetchActiveQuestionnaire.mockResolvedValue({ id: "v1", version: 1, schema: SCHEMA });
-  mocks.fetchCatalogue.mockResolvedValue({ assets: [] });
   mocks.createDesignDraft.mockResolvedValue({ ok: true, data: detail() });
   mocks.updateDesignDraft.mockResolvedValue({ ok: true, data: detail() });
   mocks.validateDesignDraft.mockResolvedValue({ ok: true, data: { valid: true } });
@@ -613,7 +610,7 @@ describe("QuestionnaireWizard", () => {
     });
   });
 
-  describe("inspiration catalogue", () => {
+  describe("inspiration step", () => {
     async function goToInspirationStep() {
       fireEvent.click(await screen.findByRole("radio", { name: "Lehenga" }));
       await screen.findByText("Saved");
@@ -627,45 +624,32 @@ describe("QuestionnaireWizard", () => {
       await screen.findByRole("heading", { name: "Inspiration images" });
     }
 
-    it("loads and renders the catalogue on the final step", async () => {
+    it("offers only the user's own photographs on the final step", async () => {
       render(<QuestionnaireWizard />);
       await goToInspirationStep();
-      expect(mocks.fetchCatalogue).toHaveBeenCalledTimes(1);
+      // ADR 0025: nothing catalogue-shaped survives on this screen — no grid,
+      // no empty-catalogue note, no loading state and no retry control. This
+      // asserts against the rendered DOM rather than against a mock of the
+      // deleted `fetchCatalogue`: a mock of a function that no longer exists
+      // cannot be called, so an expectation on it could never fail.
       expect(
-        await screen.findByText(/No inspiration images are available yet/i),
-      ).toBeInTheDocument();
-    });
-
-    // Regression test: the loading effect used to depend on catalogue.status,
-    // state the SAME effect sets synchronously (idle -> loading). Setting
-    // that state always schedules a re-render in which the dependency array
-    // has changed, so React tears the effect down (cancelled = true) and
-    // re-runs it BEFORE a real (non-instant) fetch has a chance to resolve.
-    // The re-run's guard then sees "loading" (not "idle") and bails out
-    // without starting a replacement fetch, so when the original fetch
-    // finally resolves, its result is discarded by the stale cancelled flag
-    // — the catalogue is stuck on "Loading inspiration images…" forever, for
-    // any fetch slower than one React render (i.e. every real network call).
-    it("does not get stuck loading when the fetch resolves after the effect's own re-render", async () => {
-      mocks.fetchCatalogue.mockReset();
-      mocks.fetchCatalogue.mockImplementation(
-        () => new Promise((resolve) => setTimeout(() => resolve({ assets: [] }), 20)),
-      );
-      render(<QuestionnaireWizard />);
-      await goToInspirationStep();
-      await waitFor(
-        () => expect(screen.queryByText(/Loading inspiration images/i)).not.toBeInTheDocument(),
-        { timeout: 2000 },
-      );
+        screen.queryByText(/No inspiration images are available yet/i),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/Loading inspiration images/i)).not.toBeInTheDocument();
       expect(
-        await screen.findByText(/No inspiration images are available yet/i),
+        screen.queryByText(/Inspiration images are temporarily unavailable/i),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Unavailable selections")).not.toBeInTheDocument();
+      expect(
+        await screen.findByRole("heading", { name: /Your own photographs/i }),
       ).toBeInTheDocument();
     });
 
     it("restores uploads made in an earlier visit, and counts them against the budget", async () => {
       // Uploads live on the server, not in the wizard's own state. If a resume
       // did not restore them, the user would see an empty upload list for
-      // images that ARE still attached — and the picker would offer three more
+      // images that ARE still attached — and the step would offer three more
       // references than the server will accept.
       mocks.fetchDesign.mockResolvedValue(
         detail({
@@ -693,7 +677,8 @@ describe("QuestionnaireWizard", () => {
         "src",
         "/api/v1/designs/d1/inspiration-uploads/u1/image/",
       );
-      expect(document.getElementById("inspiration-help")).toHaveTextContent(/1 of 3 used/i);
+      // Uploads are now the only thing drawing on the three-reference budget,
+      // so restoring one has to leave exactly two slots free.
       expect(screen.getByText(/2 of your inspiration slots are free/i)).toBeInTheDocument();
     });
 
@@ -773,18 +758,5 @@ describe("QuestionnaireWizard", () => {
       ).toBeInTheDocument();
     });
 
-    it("recovers from a catalogue fetch failure via Try again", async () => {
-      mocks.fetchCatalogue.mockReset();
-      mocks.fetchCatalogue.mockRejectedValueOnce(new Error("network"));
-      mocks.fetchCatalogue.mockResolvedValueOnce({ assets: [] });
-      render(<QuestionnaireWizard />);
-      await goToInspirationStep();
-      expect(await screen.findByText(/temporarily unavailable/i)).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-      await waitFor(() => expect(mocks.fetchCatalogue).toHaveBeenCalledTimes(2));
-      expect(
-        await screen.findByText(/No inspiration images are available yet/i),
-      ).toBeInTheDocument();
-    });
   });
 });
