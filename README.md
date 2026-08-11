@@ -8,10 +8,46 @@ AI-assisted South Asian bridalwear **concept design**. A guided questionnaire, a
 
 **Up next — deployment.** Phase 18 (E2E tests and deployment) was **skipped**. Its
 E2E half exists anyway: Phase 17 built the Playwright suite and a CI `e2e` job that
-drives the real stack in demo mode, and Phase 19 extended both. Its deployment half
-does not exist at all — no deployment configuration, no smoke script, no runbook, and
-nothing is deployed anywhere. Phase 20 (optional height and body representation)
-remains optional. See `docs/phases/PHASES.md`.
+drives the real stack in demo mode, and Phases 19 and 21 extended both. Its deployment
+half does not exist at all — no deployment configuration, no smoke script, no runbook,
+and nothing is deployed anywhere. Phase 20 (optional height and body representation)
+remains optional and unstarted; Phase 21 was delivered before it. See
+`docs/phases/PHASES.md`.
+
+**Phase 21 — account render delivery and the concept gallery.** Three things a
+stylist needs once concepts start accumulating. **The file gets a name.** Pressing
+*Send to account* now asks for one first, applies it to the attachment, and
+remembers it on the delivery marker row for the next send; each artefact is capped
+at `ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER` (3) sends for its whole life against a
+durable column — a lifetime total, not another rate limit, checked against the
+database rather than a cache so an eviction cannot hand back three more. The
+remaining allowance is stated before it is spent, and a refused name is answered in
+the dialog with what the person typed still in the field. This gives up ADR 0021's
+"headers carry nothing private" — the chosen name travels in a mail header, which is
+**accepted and stated to the user before they incur it, not mitigated or removed** —
+while closing the injection surface it opens: control characters and lone surrogates
+are refused rather than stripped, path separators removed, NFC applied, the extension
+server-owned, and only bidi controls stripped, never the whole `Cf` category, because
+ZWNJ/ZWJ are load-bearing in Devanagari, Urdu and Bengali. **Generating requires an
+account.** Answering the whole questionnaire stays anonymous — nobody is asked to
+register before they can see what they would be registering for — but `generate` and
+`refine` answer an anonymous caller with `401 authentication_required`, checked before
+ownership resolution so no design id is revealed. The cost-control benefit is a
+consequence, not the justification, and ADR 0017's ceilings are unchanged. ADR 0004's
+lazy claim-at-next-request window is **accepted, not removed**. **The account page
+becomes a gallery**: a card per design newest-first with its thumbnail, name, date,
+demo/live label and links into the concept and its annotation workspace, versions
+grouped inside the card, and every concept shown including generating and failed ones
+labelled by state. The list payload carries **no signed URL** — each card mints its
+own through the ownership-checked images endpoint and holds it in memory only — and
+exactly one piece of DesignSpec-derived text: the concept's **name**. Its description
+stays out, asserted field by field. That narrowing exists because `Design.title` is
+blank for every concept made through the questionnaire, so the first build rendered
+nameless cards; it was caught by running the gallery end to end, not by a unit test.
+Email delivery is still gated by `ACCOUNT_EMAIL_DELIVERY_ENABLED=false` and **no SMTP
+send has ever been performed** — see `docs/decisions/0022-caller-named-render-attachments.md`,
+`docs/decisions/0023-account-required-to-generate.md` and
+`docs/decisions/0024-account-concept-gallery.md`.
 
 **Phase 19 — private stylist annotation workspace, and email instead of download.**
 The owner of a generated concept can now mark up the private render — pins, arrows,
@@ -32,8 +68,8 @@ position in words, an editable note, labelled palette radios and arrow-key nudge
 with selection synchronised both ways and a `role="toolbar"` roving tabindex.
 Annotation data is memory-only in the browser — never `localStorage`,
 `sessionStorage` or IndexedDB. **The email recipient is always `request.user.email`,
-read server-side**: the endpoints accept no request body at all, the client wrapper
-has no address parameter, an anonymous owner gets `409
+read server-side**: a client-supplied address is never accepted in any field, the
+client wrapper has no address parameter, an anonymous owner gets `409
 email_recipient_unavailable` with no fallback, and only one module may reach
 `django.core.mail` — enforced by an AST test that catches proper-prefix imports and
 attribute chains alike. Delivery is gated by `ACCOUNT_EMAIL_DELIVERY_ENABLED`, which
