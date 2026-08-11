@@ -46,7 +46,16 @@ class DesignListItemSerializer(serializers.Serializer):
     """A gallery row — no questionnaire schema, no inspiration records, no job."""
 
     id = serializers.UUIDField()
-    title = serializers.CharField()
+    title = serializers.CharField(allow_blank=True)
+    display_title = serializers.CharField(
+        help_text=(
+            "The name to show on a card. The design's own title when it has one, "
+            "otherwise the concept's name taken from its newest generated version, "
+            "otherwise a plain placeholder. The ONLY spec-derived text in this "
+            "payload — see serializers._display_title for the name/description "
+            "boundary that admits it."
+        ),
+    )
     status = serializers.CharField()
     created_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()

@@ -13,11 +13,18 @@ from django.test import Client
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from sitara.designs.models import Design, DesignSession, GenerationAttempt
+from sitara.designs.models import (
+    DESIGN_TITLE_MAX_LENGTH,
+    Design,
+    DesignSession,
+    DesignVersion,
+    GenerationAttempt,
+)
 from sitara.designs.serializers import (
     GALLERY_OFFSET_MAX,
     GALLERY_PAGE_SIZE_DEFAULT,
     GALLERY_PAGE_SIZE_MAX,
+    UNTITLED_CONCEPT_DISPLAY_TITLE,
 )
 from sitara.designs.services import DESIGN_SESSION_KEY
 
@@ -39,6 +46,7 @@ pytestmark = pytest.mark.django_db
 GALLERY_ROW_KEYS = {
     "id",
     "title",
+    "display_title",
     "status",
     "created_at",
     "updated_at",
@@ -108,6 +116,115 @@ class TestShape:
         (row,) = body["designs"]
         assert set(row) == GALLERY_ROW_KEYS
         assert set(row["versions"][0]) == GALLERY_VERSION_KEYS
+
+    def test_a_named_design_shows_the_name_its_owner_gave_it(self):
+        browser, token = signed_in_client()
+        design_id = create_owned_design_id(browser, title="Autumn walima")
+        create_ready_design_version(
+            design_id,
+            design_spec={"schema_version": 1, "title": "A spec-derived name"},
+            with_storage_objects=False,
+        )
+        (row,) = gallery(browser).json()["designs"]
+        # An explicit title wins: someone who named their design is not
+        # overruled by the model's idea of what to call it.
+        assert row["display_title"] == "Autumn walima"
+
+    def test_an_unnamed_design_shows_the_concept_name_rather_than_an_empty_heading(self):
+        """The case that is NOT hypothetical: the questionnaire never sets
+        `Design.title`, so every concept made through the real product reaches the
+        gallery with it blank. Without this the card's heading renders empty."""
+        browser, token = signed_in_client()
+        design_id = create_owned_design_id(browser, title="")
+        create_ready_design_version(
+            design_id,
+            design_spec={"schema_version": 1, "title": "Ivory and rose lehenga"},
+            with_storage_objects=False,
+        )
+        (row,) = gallery(browser).json()["designs"]
+        assert row["title"] == ""
+        assert row["display_title"] == "Ivory and rose lehenga"
+
+    def test_a_renamed_refinement_is_what_the_card_shows(self):
+        browser, token = signed_in_client()
+        design_id = create_owned_design_id(browser, title="")
+        first = create_ready_design_version(
+            design_id,
+            design_spec={"schema_version": 1, "title": "Ivory lehenga"},
+            with_storage_objects=False,
+        )
+        create_ready_design_version(
+            design_id,
+            version_number=2,
+            parent_version=first,
+            design_spec={"schema_version": 1, "title": "Ivory lehenga, deeper red"},
+            with_storage_objects=False,
+        )
+        (row,) = gallery(browser).json()["designs"]
+        assert row["display_title"] == "Ivory lehenga, deeper red"
+
+    def test_a_design_with_nothing_to_go_on_says_so_plainly(self):
+        browser, _ = signed_in_client()
+        create_owned_design_id(browser, title="")
+        (row,) = gallery(browser).json()["designs"]
+        assert row["display_title"] == UNTITLED_CONCEPT_DISPLAY_TITLE
+
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            "not a mapping at all",
+            [],
+            {"schema_version": 1},
+            {"schema_version": 1, "title": ""},
+            {"schema_version": 1, "title": "   "},
+            {"schema_version": 1, "title": 12345},
+            {"schema_version": 1, "title": None},
+            {"schema_version": 1, "title": {"nested": "object"}},
+        ],
+    )
+    def test_a_spec_that_cannot_supply_a_name_falls_back_instead_of_raising(self, spec):
+        """`design_spec` is stored JSON, not a validated field, so a row written by
+        an older version of the pipeline or by a direct ORM write can hold anything.
+        Total over arbitrary JSON, exactly as the questionnaire schema is: a
+        controlled fallback, never a TypeError rendered as a 500.
+
+        The completely spec-LESS row is a separate test below, because two check
+        constraints make it unreachable in this shape: a prompt requires a spec, and
+        a permanent image requires both."""
+        browser, _ = signed_in_client()
+        design_id = create_owned_design_id(browser, title="")
+        version = create_ready_design_version(design_id, with_storage_objects=False)
+        DesignVersion.objects.filter(pk=version.pk).update(design_spec=spec)
+
+        response = gallery(browser)
+        assert response.status_code == 200
+        (row,) = response.json()["designs"]
+        assert row["display_title"] == UNTITLED_CONCEPT_DISPLAY_TITLE
+
+    def test_a_version_with_no_spec_at_all_falls_back(self):
+        """A legacy pre-DesignSpec row, built the only way the database permits one:
+        `designs_designversion_image_prompt_requires_spec` and
+        `designs_designversion_permanent_image_requires_spec_prompt` together mean a
+        spec-less version has no prompt and no stored image either."""
+        browser, _ = signed_in_client()
+        design_id = create_owned_design_id(browser, title="")
+        create_pending_design_version(design_id)
+
+        response = gallery(browser)
+        assert response.status_code == 200
+        (row,) = response.json()["designs"]
+        assert row["display_title"] == UNTITLED_CONCEPT_DISPLAY_TITLE
+
+    def test_an_over_long_concept_name_is_truncated_rather_than_returned_whole(self):
+        browser, _ = signed_in_client()
+        design_id = create_owned_design_id(browser, title="")
+        create_ready_design_version(
+            design_id,
+            design_spec={"schema_version": 1, "title": "R" * (DESIGN_TITLE_MAX_LENGTH + 500)},
+            with_storage_objects=False,
+        )
+        (row,) = gallery(browser).json()["designs"]
+        assert len(row["display_title"]) == DESIGN_TITLE_MAX_LENGTH
 
     def test_an_empty_gallery_still_reports_its_paging(self):
         browser, _ = signed_in_client()
@@ -224,6 +341,11 @@ class TestPrivacy:
             assert forbidden not in raw, forbidden
 
     def test_no_prompt_design_spec_or_inspiration_provenance_appears(self):
+        """The DesignSpec boundary, as narrowed in Phase 21: the concept's NAME is
+        admitted as ``display_title`` because a gallery cannot be navigated without
+        one, and the DESCRIPTION is not. This asserts the description half — every
+        spec field that says what the garment actually looks like stays out, so
+        admitting the name cannot be read as admitting the spec."""
         browser, token = signed_in_client()
         design_id = create_owned_design_id(browser)
         create_ready_design_version(
@@ -240,6 +362,14 @@ class TestPrivacy:
             "design_spec",
             "inspiration_context",
             "image_processor_version",
+            # The spec's descriptive fields, named individually so a future
+            # widening of this payload has to delete an assertion to happen.
+            "concept_summary",
+            "garment_breakdown",
+            "colour_story",
+            "fabrics_and_texture",
+            "image_alt_text",
+            "embroidery",
         ):
             assert forbidden not in raw, forbidden
 

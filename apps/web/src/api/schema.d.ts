@@ -883,6 +883,8 @@ export interface components {
             /** Format: uuid */
             id: string;
             title: string;
+            /** @description The name to show on a card. The design's own title when it has one, otherwise the concept's name taken from its newest generated version, otherwise a plain placeholder. The ONLY spec-derived text in this payload — see serializers._display_title for the name/description boundary that admits it. */
+            display_title: string;
             status: string;
             /** Format: date-time */
             created_at: string;

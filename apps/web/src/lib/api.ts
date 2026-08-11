@@ -540,6 +540,113 @@ export async function fetchGenerationJob(jobId: string): Promise<GenerationJob> 
 }
 
 // ---------------------------------------------------------------------------
+// Owned designs (Phase 21) — the account gallery's list
+// ---------------------------------------------------------------------------
+//
+// One narrow GET wrapper over the paged list. It carries no signed URL by
+// design: a gallery of twenty cards would otherwise mint twenty bearer URLs
+// on every render, most of which nobody looks at. Each card asks for its own
+// thumbnail separately through the ownership-checked images endpoint above.
+
+export type DesignListVersion = components["schemas"]["DesignListVersion"];
+export type DesignListItem = components["schemas"]["DesignListItem"];
+export type DesignListResponse = components["schemas"]["DesignListResponse"];
+
+export type OwnedDesignsResult = DraftResult<DesignListResponse>;
+
+function isDesignListVersion(value: unknown): value is DesignListVersion {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.version_number === "number" &&
+    typeof v.is_demo === "boolean" &&
+    typeof v.has_image === "boolean" &&
+    (v.job_status === null || typeof v.job_status === "string") &&
+    typeof v.created_at === "string"
+  );
+}
+
+function isDesignListItem(value: unknown): value is DesignListItem {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.title === "string" &&
+    // Checked as strictly as every other required field, and worth calling out
+    // because it is the one the gallery cannot do without: it is the card's
+    // heading, its image's alt text and part of every link's accessible name.
+    // Accepting a body without it would put the literal string "undefined" into
+    // all three rather than failing closed the way this module promises to.
+    typeof v.display_title === "string" &&
+    typeof v.status === "string" &&
+    typeof v.created_at === "string" &&
+    typeof v.updated_at === "string" &&
+    // Null is meaningful rather than missing: a design with no versions has no
+    // answer to "was this demo or live", and must not be shown as either.
+    (v.is_demo === null || typeof v.is_demo === "boolean") &&
+    typeof v.version_count === "number" &&
+    Array.isArray(v.versions) &&
+    v.versions.every(isDesignListVersion)
+  );
+}
+
+function isDesignListResponse(value: unknown): value is DesignListResponse {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    Array.isArray(v.designs) &&
+    v.designs.every(isDesignListItem) &&
+    typeof v.total === "number" &&
+    typeof v.limit === "number" &&
+    typeof v.offset === "number"
+  );
+}
+
+export async function fetchOwnedDesigns(
+  options: { limit?: number; offset?: number } = {},
+): Promise<OwnedDesignsResult> {
+  const query = new URLSearchParams();
+  if (options.limit !== undefined) query.set("limit", String(options.limit));
+  if (options.offset !== undefined) query.set("offset", String(options.offset));
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(`/api/v1/designs/${suffix}`);
+  } catch {
+    return {
+      ok: false,
+      status: 0,
+      code: "unavailable",
+      message: "The service could not be reached.",
+    };
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return {
+      ok: false,
+      status: response.status,
+      code: "invalid_response",
+      message: "The service returned an unexpected response.",
+    };
+  }
+  if (response.status === 200) {
+    if (isDesignListResponse(body)) {
+      return { ok: true, data: body };
+    }
+    return {
+      ok: false,
+      status: 200,
+      code: "invalid_response",
+      message: "The service returned an unexpected response.",
+    };
+  }
+  return toDraftFailure(response.status, body as ErrorBody);
+}
+
+// ---------------------------------------------------------------------------
 // Design images (Phase 11) — short-lived signed URL retrieval
 // ---------------------------------------------------------------------------
 //

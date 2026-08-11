@@ -11,15 +11,16 @@ assertions are written against the terminal state the server actually produces.
 | `journeys.spec.ts` | §25 journeys 1–5 — draft persistence, keyboard-only wizard (choose, Back, Skip), the information drawer, the custom colour picker, inspiration selection and synthetic upload/removal |
 | `generation.spec.ts` | §25 journeys 6–10 — generate, resume mid-flight, a failed image with the brief intact, the one refinement, the two-version history |
 | `annotations.spec.ts` | Phase 19, extended in 21 — the private annotation workspace: draw a pin and a rectangle with real pointer gestures, note them, prove persistence across a reload, prove hiding is not deleting, prove nothing reaches browser storage, a stranger's indistinguishable 404, the original render left untouched, and the naming prompt: its pre-fill, its stated exposure, the allowance stated before it is spent, and a refused name answered in the dialog |
+| `gallery.spec.ts` | Phase 21 — the account gallery: a concept made through the real pipeline is findable afterwards under the same name, its card's links resolve to that concept and its workspace, its thumbnail actually decodes, and the list payload itself carries no bearer URL, storage key or spec description |
 | `visual.spec.ts` | §26 visual regression, 15 baselines per viewport |
 
 ## Phase 21 — one account, shared by every journey that generates
 
 An account is required for the last press before a concept is produced (ADR 0023).
 `auth.setup.ts` registers **one** account for the whole run as its own Playwright
-project, and `generation.spec.ts`, `annotations.spec.ts`, `visual.spec.ts` and the
-signed-in half of `accessibility.spec.ts` reuse its session through
-`test.use({ storageState })`.
+project, and `generation.spec.ts`, `annotations.spec.ts`, `gallery.spec.ts`,
+`visual.spec.ts` and the signed-in half of `accessibility.spec.ts` reuse its
+session through `test.use({ storageState })`.
 
 **Why one and not one per spec.** Registration is throttled at
 `AUTH_REGISTER_IP_LIMIT` (5) per IP per hour, and the whole suite arrives from a
@@ -38,6 +39,15 @@ them; only its generation/result test is signed in.
 
 The session lands in `e2e/.auth/` (gitignored) as a storage-state file — the
 session cookie, which is what a browser holds. No password is written to disk.
+
+**One account holding many concepts is why `gallery.spec.ts` never counts cards.**
+Every generating spec adds to the same gallery, and the desktop and mobile
+projects both run, so the number of cards on the account page depends on which
+specs ran before. It locates its card by the link to the design it just made, and
+asserts nothing about totals or ordering position — an assertion like "the first
+card is mine" would pass or fail on run order rather than on behaviour. Ordering
+and paging are covered where they are deterministic, in
+`designs/tests/test_gallery_api.py`.
 
 Two consequences worth stating plainly rather than discovering later:
 

@@ -3020,6 +3020,10 @@
                     "title": {
                         "type": "string"
                     },
+                    "display_title": {
+                        "type": "string",
+                        "description": "The name to show on a card. The design's own title when it has one, otherwise the concept's name taken from its newest generated version, otherwise a plain placeholder. The ONLY spec-derived text in this payload — see serializers._display_title for the name/description boundary that admits it."
+                    },
                     "status": {
                         "type": "string"
                     },
@@ -3048,6 +3052,7 @@
                 },
                 "required": [
                     "created_at",
+                    "display_title",
                     "id",
                     "is_demo",
                     "status",

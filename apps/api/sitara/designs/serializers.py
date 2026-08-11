@@ -313,6 +313,46 @@ def _version_row_payload(version) -> dict:
     }
 
 
+UNTITLED_CONCEPT_DISPLAY_TITLE = "Untitled concept"
+
+
+def _display_title(design: Design, versions: list) -> str:
+    """The one name a gallery card can show.
+
+    ``Design.title`` is only ever set by someone explicitly naming a design, and
+    the questionnaire never does — so for every concept made through the actual
+    product it is the empty string, and a card built on it alone renders a
+    heading with nothing in it. The name a person recognises their concept by is
+    the DesignSpec's ``title``, which is what the result screen's own <h1> shows.
+
+    So this admits exactly ONE piece of spec-derived text into the list, and the
+    boundary is the difference between a NAME and a DESCRIPTION. The name is
+    admitted: it is short, it is what the same owner is already shown on the
+    result screen over the same ownership check, and without it the gallery
+    cannot do the only thing it exists for. Everything else stays out and is
+    tested for by name — concept summary, garment breakdown, colour story,
+    fabrics, alt text, the image prompt, inspiration provenance. A list of
+    twenty rows is a bad place to publish the generated description of what
+    twenty people are wearing to their weddings; it is a fine place to print
+    twenty names.
+
+    Read from the newest version that has one, so a refinement that renamed the
+    concept is what the card shows. Bounded to the same ceiling as a
+    user-supplied title, because this is stored JSON rather than a validated
+    field, and truncating is better than letting a malformed row set the size of
+    a response."""
+    if design.title:
+        return design.title
+    for version in reversed(versions):
+        spec = version.design_spec
+        if not isinstance(spec, dict):
+            continue
+        name = spec.get("title")
+        if isinstance(name, str) and name.strip():
+            return name.strip()[:DESIGN_TITLE_MAX_LENGTH]
+    return UNTITLED_CONCEPT_DISPLAY_TITLE
+
+
 def design_list_item_payload(design: Design) -> dict:
     """A gallery row: no questionnaire schema, no inspiration records, no job.
 
@@ -339,6 +379,11 @@ def design_list_item_payload(design: Design) -> dict:
     return {
         "id": str(design.id),
         "title": design.title,
+        # Kept ALONGSIDE `title` rather than replacing it: `title` is what the
+        # write endpoint accepts and echoes back, and a client that sets one is
+        # entitled to read exactly what it stored. This is the derived name for
+        # display, which is a different question.
+        "display_title": _display_title(design, versions),
         "status": design.status,
         "created_at": _DATETIME.to_representation(design.created_at),
         "updated_at": _DATETIME.to_representation(design.updated_at),

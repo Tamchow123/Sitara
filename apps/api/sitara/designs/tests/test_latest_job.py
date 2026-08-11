@@ -152,6 +152,7 @@ class TestLatestJob:
         assert set(row) == {
             "id",
             "title",
+            "display_title",
             "status",
             "created_at",
             "updated_at",
