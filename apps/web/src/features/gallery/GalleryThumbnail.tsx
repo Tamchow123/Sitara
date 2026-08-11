@@ -75,6 +75,10 @@ export function GalleryThumbnail({
   // Not an alert: one unloadable picture in a list of concepts is not worth
   // interrupting a screen-reader user for, but it must not be silent either,
   // so the placeholder carries real text rather than an empty box.
+  //
+  // "Preview unavailable" and NOT ConceptGallery's "No picture yet": a picture
+  // exists here and could not be shown, which is a different fact from a design
+  // that has never been rendered. See the note beside that string for all three.
   return (
     <div className="gallery-thumb gallery-thumb-failed">
       <span>Preview unavailable</span>

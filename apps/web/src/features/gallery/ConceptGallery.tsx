@@ -113,6 +113,17 @@ function DesignCard({ design }: { design: DesignListItem }) {
             alt={thumbnailAlt(design, cover)}
           />
         ) : (
+          // Three different sentences can land in a card, and they are NOT
+          // interchangeable — keeping them distinct is the point, so they are
+          // listed together here to stop a future edit collapsing them:
+          //   "No picture yet"      (here) nothing has been rendered for this
+          //                         design at all — a structural absence.
+          //   "Preview unavailable" (GalleryThumbnail) a picture exists, but
+          //                         fetching or decoding it failed — transient.
+          //   "No picture available" (versionState) one VERSION has no image and
+          //                         no job status to explain why — a row label,
+          //                         not a placeholder, and it sits beside the
+          //                         version number rather than in this box.
           <div className="gallery-thumb gallery-thumb-failed">
             <span>No picture yet</span>
           </div>
