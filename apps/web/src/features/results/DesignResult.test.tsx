@@ -654,7 +654,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
         lineage: {
           kind: "refinement",
           parent_version_id: "v1",
-          refinement: { change_type: "colour_story" },
+          refinement: { change_type: "colour_story", demo_asset_unchanged: false },
         },
       }),
     });

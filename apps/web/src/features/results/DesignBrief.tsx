@@ -8,7 +8,7 @@
 import { useState } from "react";
 
 import { BriefSection } from "./BriefSection";
-import { DEMO_RESULT_DISCLOSURE } from "./demo-disclosure";
+import { DEMO_REFINEMENT_SAME_ASSET_DISCLOSURE, DEMO_RESULT_DISCLOSURE } from "./demo-disclosure";
 import { formatDesignBrief } from "./result-brief";
 import type { DesignResult } from "@/lib/api";
 
@@ -96,6 +96,9 @@ export function DesignBrief({ result }: Props) {
       {result.is_demo && (
         <div className="demo-disclaimer" role="note" aria-label="Demo disclaimer">
           <p>{DEMO_RESULT_DISCLOSURE}</p>
+          {result.lineage.refinement?.demo_asset_unchanged && (
+            <p>{DEMO_REFINEMENT_SAME_ASSET_DISCLOSURE}</p>
+          )}
         </div>
       )}
 

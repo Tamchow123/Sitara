@@ -95,7 +95,7 @@ class TestDemoRefinementStructuredDesignProvider:
             source_spec=source, refinement_request=request
         )
         result = provider.generate(_a_request(source["source_selections"]))
-        assert result.model == DEMO_REFINEMENT_MODEL == "demo-refinement-1.0.0"
+        assert result.model == DEMO_REFINEMENT_MODEL == "demo-refinement-2.0.0"
         assert result.model != DEMO_SPEC_MODEL
 
     def test_never_labelled_as_a_live_provider(self):

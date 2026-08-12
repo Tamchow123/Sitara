@@ -165,8 +165,41 @@ def load_lineage(version: DesignVersion) -> dict:
     return {
         "kind": "refinement",
         "parent_version_id": str(version.parent_version_id),
-        "refinement": {"change_type": request.change_type},
+        "refinement": {
+            "change_type": request.change_type,
+            "demo_asset_unchanged": _demo_asset_unchanged(version),
+        },
     }
+
+
+def _demo_asset_unchanged(version: DesignVersion) -> bool:
+    """True when a DEMO refinement resolved to the very same fixture image.
+
+    A legitimate outcome — the reviewed fixture pack is small, and it may hold
+    nothing closer to the refined concept than what it already returned. What is
+    not legitimate is saying nothing: ADR 0016's honesty rule is that demo
+    output is never presented as something it is not, and "your refinement
+    produced this identical image" is exactly the case that needs a sentence.
+    Silently returning the same picture is what produced this phase's bug
+    report (ADR 0028 §8).
+
+    Compared by the version's own permanent image SHA-256 — durable audit data
+    already on the row, and exact: the image processor is deterministic and
+    version-pinned, so the same fixture asset always yields the same bytes and a
+    different one never does.
+
+    Always ``False`` for a LIVE version. Two independent provider calls do not
+    return byte-identical images, so the flag would only ever be noise there —
+    and a live concept that did somehow repeat itself is not a fixture-pack
+    limitation and must not be described as one. Also ``False`` while the
+    refined image is still being produced, since there is nothing to compare
+    yet; the result endpoint refuses an incomplete version before this anyway."""
+    if not version.is_demo:
+        return False
+    parent = version.parent_version
+    if parent is None:
+        return False
+    return bool(version.image_sha256) and version.image_sha256 == parent.image_sha256
 
 
 def design_result_payload(

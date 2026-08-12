@@ -1200,7 +1200,14 @@ class DesignVersionResultView(APIView):
         design = accessible_designs(request).filter(pk=design_id).first()
         if design is None:
             return _not_found()
-        version = DesignVersion.objects.filter(design=design, pk=version_id).first()
+        # ``parent_version`` is joined because a refinement's lineage compares
+        # this version's permanent image against its parent's (ADR 0028's demo
+        # disclosure); an initial version simply has none to join.
+        version = (
+            DesignVersion.objects.select_related("parent_version")
+            .filter(design=design, pk=version_id)
+            .first()
+        )
         if version is None:
             return _not_found()
         try:

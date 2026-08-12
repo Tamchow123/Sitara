@@ -76,7 +76,7 @@ function refinedResult(overrides: Partial<DesignResultType> = {}): DesignResultT
     lineage: {
       kind: "refinement",
       parent_version_id: "v1",
-      refinement: { change_type: "colour_story" },
+      refinement: { change_type: "colour_story", demo_asset_unchanged: false },
     },
     ...overrides,
   });
@@ -199,7 +199,7 @@ describe("VersionComparison", () => {
       lineage: {
         kind: "refinement",
         parent_version_id: "v1",
-        refinement: { change_type: "dupatta_or_saree_drape" },
+        refinement: { change_type: "dupatta_or_saree_drape", demo_asset_unchanged: false },
       },
     });
     await screen.findByRole("heading", { name: /original concept/i });
@@ -218,7 +218,7 @@ describe("VersionComparison", () => {
       lineage: {
         kind: "refinement",
         parent_version_id: "v1",
-        refinement: { change_type: "styling_details" },
+        refinement: { change_type: "styling_details", demo_asset_unchanged: false },
       },
     });
     await screen.findByRole("heading", { name: /original concept/i });

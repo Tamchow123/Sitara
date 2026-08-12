@@ -94,6 +94,10 @@ from .refinement import (
     references_suppressed_for_request,
     refinement_request_sha256,
 )
+from .refinement_selections import (
+    RefinementQuestionnaireUnavailable,
+    answerable_selection_alternatives,
+)
 from .refinement_service import (
     DesignChangedDuringRefinement,
     RefinementCategoryUnavailable,
@@ -1182,6 +1186,35 @@ def _run_text_stage(design, attempt, structured_provider, config) -> DesignVersi
     return version
 
 
+def _demo_selection_alternatives(source_version, refinement_request) -> dict:
+    """The canonical values a DEMO refinement of this design may choose from.
+
+    Computed here, from the design's own PINNED questionnaire, and handed to the
+    engine — the engine must never pick a canonical value itself, because its
+    phrase vocabularies are supersets of any one questionnaire (ADR 0028 §8).
+    Demo-only: the live path tells the model which fields it may move and checks
+    its answer instead.
+
+    Reached only inside the demo branch of
+    :func:`_resolve_structured_provider_impl`, so a live attempt never pays for
+    it. Both failure modes end where the live path's equivalent would: a design
+    with no usable pinned questionnaire raises
+    :class:`RefinementQuestionnaireUnavailable`, and a corrupt or
+    no-longer-supported stored spec is converted here to
+    :class:`RefinementSourceUnavailable` — the same exception
+    ``validate_source_version`` raises for it — because this runs BEFORE that
+    function does and an uncaught validation error would terminalise the demo
+    run as a generic internal error while the live run reported the real
+    reason."""
+    try:
+        spec = validate_design_spec(source_version.design_spec)
+    except (ValidationError, UnsupportedDesignSpecVersion):
+        raise RefinementSourceUnavailable("the source specification failed validation") from None
+    return answerable_selection_alternatives(
+        source_version.design, spec, refinement_request.change_type
+    )
+
+
 def _resolve_refinement_structured_provider(source_version, refinement_request, attempt):
     """The refinement structured-design provider: the local deterministic
     demo adapter (built from the persisted source spec — never a parsed
@@ -1190,7 +1223,9 @@ def _resolve_refinement_structured_provider(source_version, refinement_request, 
     return _resolve_structured_provider_impl(
         attempt,
         lambda: DemoRefinementStructuredDesignProvider(
-            source_spec=source_version.design_spec, refinement_request=refinement_request
+            source_spec=source_version.design_spec,
+            refinement_request=refinement_request,
+            selection_alternatives=_demo_selection_alternatives(source_version, refinement_request),
         ),
     )
 
@@ -1234,7 +1269,11 @@ def _run_refinement_text_stage(design, attempt, structured_provider, config) -> 
         ) from exc
     except DesignChangedDuringRefinement as exc:
         raise _TerminalGenerationError(errors.DESIGN_CHANGED, clear_text_marker=True) from exc
-    except RefinementSourceUnavailable as exc:
+    except (RefinementSourceUnavailable, RefinementQuestionnaireUnavailable) as exc:
+        # The demo path can raise the second one a step earlier than the live
+        # path raises the first — it needs the pinned questionnaire to choose a
+        # canonical value at all — so both end on the same stable code rather
+        # than the demo run failing differently from the live one.
         raise _TerminalGenerationError(
             errors.REFINEMENT_SOURCE_UNAVAILABLE, clear_text_marker=True
         ) from exc

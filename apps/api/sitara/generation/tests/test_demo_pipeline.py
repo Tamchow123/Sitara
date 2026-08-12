@@ -9,6 +9,7 @@ downloader resolution."""
 
 import hashlib
 import threading
+import uuid
 from unittest import mock
 
 import pytest
@@ -16,6 +17,7 @@ from django.core.files.base import ContentFile
 from django.core.management import call_command
 
 from sitara.designs.models import Design, DesignVersion, GenerationAttempt
+from sitara.designs.result import load_lineage
 from sitara.generation import errors
 from sitara.generation.demo.config import ACTIVE_MANIFEST_KEY
 from sitara.generation.demo.selector import DemoAssetSelection
@@ -26,15 +28,18 @@ from sitara.generation.pipeline import (
     _attempt_lock_keys,
     _demo_seed_factory,
     _select_demo_asset_for_attempt,
+    enqueue_design_refinement,
     run_generation_attempt,
 )
+from sitara.generation.refinement import normalise_refinement_request
 
-from .factory import make_complete_design
+from .factory import COMPLETE_ANSWERS_V4, make_complete_design, make_complete_v4_design
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("inmemory_storage")]
 
 _Status = GenerationAttempt.Status
 _FAST = PipelineConfig(poll_interval_seconds=0.0, poll_max_attempts=10)
+_AVAILABLE = "sitara.generation.pipeline.generation_is_available"
 
 
 def _install_synthetic_pack():
@@ -397,3 +402,141 @@ class TestFixturesRemainDistinctFromDemo:
         assert fixture_provider.name != "demo"
         assert fixture_provider.name != DEMO_SPEC_MODEL
         assert DEMO_SPEC_MODEL.startswith("demo-")
+
+
+class TestDemoRefinementChangesTheConcept:
+    """ADR 0028 §8: the demo path applies the same canonical edit as the live
+    one, so ``select_demo_asset`` reruns against genuinely different input — and
+    when it still resolves to the same asset, the result payload says so.
+
+    Every one of these runs the REAL pipeline with no injected provider, so the
+    demo adapters, the questionnaire-derived candidate list and the selector all
+    participate. The module-level ``no_network`` guard makes any accidental
+    provider construction fail loudly rather than quietly."""
+
+    @staticmethod
+    def _refined_demo_design():
+        _install_synthetic_pack()
+        design = make_complete_v4_design()
+        initial = run_generation_attempt(_queued_demo_attempt(design).id, config=_FAST)
+        assert initial.status == _Status.SUCCEEDED
+        return design, DesignVersion.objects.get(design=design, version_number=1)
+
+    @staticmethod
+    def _refine(design, source, change_type="fabric_and_texture"):
+        with mock.patch(_AVAILABLE, return_value=True):
+            attempt, _created = enqueue_design_refinement(
+                design,
+                source_version_id=source.pk,
+                refinement_request=normalise_refinement_request(
+                    {"schema_version": 1, "change_type": change_type, "note": ""}
+                ),
+                idempotency_key=uuid.uuid4(),
+                enqueue_task=lambda a: None,
+            )
+        result = run_generation_attempt(attempt.id, config=_FAST)
+        assert result.status == _Status.SUCCEEDED, result.error_code
+        return DesignVersion.objects.get(pk=result.design_version_id)
+
+    def test_the_refined_version_changed_the_canonical_selection_it_was_asked_to(self):
+        design, source = self._refined_demo_design()
+        refined = self._refine(design, source)
+
+        before = source.design_spec["source_selections"]
+        after = refined.design_spec["source_selections"]
+        assert after["fabrics"] != before["fabrics"]
+        assert {field for field in after if after[field] != before[field]} == {"fabrics"}
+        # And the prompt is genuinely different, which is the whole point of the
+        # phase — same builder, different spec.
+        assert refined.image_prompt != source.image_prompt
+        assert refined.prompt_builder_version == source.prompt_builder_version
+
+    def test_the_same_design_and_refinement_reach_the_same_asset_twice(self):
+        # Determinism across whole runs, not just within one: two independent
+        # designs answered identically, refined identically, must select the
+        # same demo asset.
+        first_design, first_source = self._refined_demo_design()
+        first = self._refine(first_design, first_source)
+        # The SAME questionnaire row, because only one version may be active —
+        # and because two designs pinned to different rows would not be the
+        # identical input this test is about.
+        second_design = make_complete_design(
+            questionnaire=first_design.questionnaire_version, answers=COMPLETE_ANSWERS_V4
+        )
+        second_initial = run_generation_attempt(
+            _queued_demo_attempt(second_design).id, config=_FAST
+        )
+        assert second_initial.status == _Status.SUCCEEDED
+        second = self._refine(
+            second_design, DesignVersion.objects.get(design=second_design, version_number=1)
+        )
+        assert first.image_sha256 == second.image_sha256
+
+    def test_an_unchanged_asset_is_disclosed_and_a_changed_one_is_not(self):
+        from sitara.designs.result import load_lineage
+
+        design, source = self._refined_demo_design()
+        refined = self._refine(design, source)
+        refined = DesignVersion.objects.select_related("parent_version").get(pk=refined.pk)
+
+        lineage = load_lineage(refined)
+        same_asset = refined.image_sha256 == source.image_sha256
+        # Whichever way the small reviewed pack resolved, the payload must AGREE
+        # with the bytes rather than assert a fixed outcome — the pack is
+        # allowed to change, the honesty rule is not.
+        assert lineage["refinement"]["demo_asset_unchanged"] is same_asset
+
+    def test_an_initial_version_never_claims_an_unchanged_asset(self):
+        _design, source = self._refined_demo_design()
+        assert load_lineage(source) == {
+            "kind": "initial",
+            "parent_version_id": None,
+            "refinement": None,
+        }
+
+    def test_a_live_refinement_never_claims_an_unchanged_asset(self):
+        # The flag describes a fixture-pack limitation. A live version that
+        # somehow repeated itself is a different thing entirely and must not be
+        # explained away as one.
+        design, source = self._refined_demo_design()
+        refined = self._refine(design, source)
+        DesignVersion.objects.filter(pk=refined.pk).update(
+            is_demo=False, image_sha256=source.image_sha256
+        )
+        refined = DesignVersion.objects.select_related("parent_version").get(pk=refined.pk)
+        assert load_lineage(refined)["refinement"]["demo_asset_unchanged"] is False
+
+    def test_a_source_spec_that_stopped_validating_fails_with_the_live_path_code(self):
+        # The demo path validates the source spec a step EARLIER than the live
+        # path does, because it needs it to work out which canonical values are
+        # legal. Without conversion that would terminalise a demo run as a
+        # generic internal error while the live run reported the real reason —
+        # the demo/live taxonomy parity this phase is otherwise careful about.
+        #
+        # The enqueue guard refuses a spec that is ALREADY invalid, so the gap
+        # only opens when a spec stops validating between enqueue and execution
+        # — an operator retiring a DesignSpec schema version while a job sits on
+        # the queue, or a corrupted row. Simulated here by corrupting it after
+        # the attempt row exists, with a bare UPDATE that deliberately bypasses
+        # the model's invariants (CLAUDE.md §16 admits exactly this use).
+        design, source = self._refined_demo_design()
+        with mock.patch(_AVAILABLE, return_value=True):
+            attempt, _created = enqueue_design_refinement(
+                design,
+                source_version_id=source.pk,
+                refinement_request=normalise_refinement_request(
+                    {"schema_version": 1, "change_type": "fabric_and_texture", "note": ""}
+                ),
+                idempotency_key=uuid.uuid4(),
+                enqueue_task=lambda a: None,
+            )
+        DesignVersion.objects.filter(pk=source.pk).update(
+            design_spec={"schema_version": 1, "title": "no longer a valid spec"}
+        )
+
+        result = run_generation_attempt(attempt.id, config=_FAST)
+
+        assert result.status == _Status.FAILED
+        # Not internal_generation_error: the reason is known and named.
+        assert result.error_code == errors.REFINEMENT_SOURCE_UNAVAILABLE
+        assert not DesignVersion.objects.filter(design=design, version_number=2).exists()

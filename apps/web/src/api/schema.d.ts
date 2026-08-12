@@ -1436,6 +1436,7 @@ export interface components {
          */
         RefinementLineage: {
             change_type: components["schemas"]["ChangeTypeEnum"];
+            demo_asset_unchanged: boolean;
         };
         /**
          * @description Coarse wire-shape validation for a refinement request (Phase 14):

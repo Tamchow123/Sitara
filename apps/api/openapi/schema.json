@@ -4457,10 +4457,14 @@
                 "properties": {
                     "change_type": {
                         "$ref": "#/components/schemas/ChangeTypeEnum"
+                    },
+                    "demo_asset_unchanged": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
-                    "change_type"
+                    "change_type",
+                    "demo_asset_unchanged"
                 ]
             },
             "RefinementWriteRequest": {

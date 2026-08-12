@@ -42,6 +42,9 @@ from sitara.questionnaire.answer_validation import (
     QuestionnaireAnswerError,
     validate_questionnaire_answers,
 )
+from sitara.questionnaire.rules import declared_option_values, questions_by_id
+
+from .refinement import canonical_refinement_fields
 
 
 class RefinedSelectionsInvalid(Exception):
@@ -102,3 +105,69 @@ def assert_refined_selections_are_answerable(design, refined_spec) -> None:
         validate_questionnaire_answers(version.schema, answers, require_complete=True)
     except QuestionnaireAnswerError as exc:
         raise RefinedSelectionsInvalid(exc.errors) from None
+
+
+_MULTI_CHOICE = "multi_choice"
+
+
+def answerable_selection_alternatives(design, spec, change_type: str) -> dict[str, tuple]:
+    """The values each canonical field of ``change_type`` could legally be
+    refined TO, for this design's own pinned questionnaire version.
+
+    Phase 23 §8 exists because of one asymmetry: a live provider is *told* which
+    fields it may move and its answer is then checked, but the deterministic
+    demo engine has to CHOOSE a value with no model in the loop. Choosing blind
+    would be wrong twice over — the demo phrase vocabularies are deliberate
+    supersets of any single questionnaire (``COLOUR_PHRASES`` alone has 57
+    entries), and a value can be a real declared option and still be illegal in
+    context, because ``restrict_options`` and the garment-dependent
+    restrictions depend on the design's other answers.
+
+    So the demo engine is HANDED its candidates rather than picking them, and
+    they are computed here, by the same validator that will judge the result —
+    one authority, not two. Each candidate is returned in the shape the field
+    takes (a one-item list for a multi-select, a bare value otherwise) and is
+    proved by substitution: the whole refined answer set is revalidated with the
+    candidate in place, so a value that would break a compatibility rule is
+    never offered. Fields with no legal alternative are omitted rather than
+    reported empty, and the whole mapping may be empty — a demo refinement then
+    changes narrative only, which is honest rather than fabricated.
+
+    Bounded and pure with respect to the database beyond reading the pinned
+    schema: at most (declared options x canonical fields) validations, over a
+    schema that is a few hundred lines of JSON."""
+    version = design.questionnaire_version
+    if version is None or not isinstance(version.schema, dict):
+        raise RefinementQuestionnaireUnavailable(
+            "this design has no questionnaire version to validate against"
+        )
+
+    schema = version.schema
+    questions = questions_by_id(schema)
+    answers = selections_as_answers(spec.source_selections.model_dump(mode="json"))
+
+    alternatives: dict[str, tuple] = {}
+    for field in canonical_refinement_fields(change_type, spec.schema_version):
+        question = questions.get(field)
+        if question is None:
+            # A canonical field this questionnaire version has no question for.
+            # Possible for a spec/questionnaire pairing older than the field;
+            # skipped rather than guessed at.
+            continue
+        multi = question.get("type") == _MULTI_CHOICE
+        current = answers.get(field)
+        legal = []
+        for value in declared_option_values(question):
+            candidate = [value] if multi else value
+            if candidate == current:
+                continue
+            try:
+                validate_questionnaire_answers(
+                    schema, {**answers, field: candidate}, require_complete=True
+                )
+            except QuestionnaireAnswerError:
+                continue
+            legal.append(candidate)
+        if legal:
+            alternatives[field] = tuple(legal)
+    return alternatives

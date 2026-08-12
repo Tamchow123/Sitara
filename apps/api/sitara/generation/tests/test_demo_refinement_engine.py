@@ -130,4 +130,7 @@ class TestOriginalUnchanged:
 
 class TestTemplateVersion:
     def test_template_version_is_pinned(self):
-        assert DEMO_REFINEMENT_TEMPLATE_VERSION == "1.0.0"
+        # 2.0.0 since ADR 0028: the engine now changes a canonical selection,
+        # not narrative alone, so a spec it produced before this phase and one
+        # it produces now are not the same kind of artefact.
+        assert DEMO_REFINEMENT_TEMPLATE_VERSION == "2.0.0"

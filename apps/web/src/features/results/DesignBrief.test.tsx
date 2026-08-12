@@ -24,7 +24,11 @@ function result(overrides: Partial<DesignResult> = {}): DesignResult {
       rationale: "Calm and bridal.",
     },
     fabrics_and_texture: [
-      { fabric: "Silk", placement: "Skirt", finish_and_movement: "Smooth drape." },
+      {
+        fabric: "Silk",
+        placement: "Skirt",
+        finish_and_movement: "Smooth drape.",
+      },
     ],
     embellishment_plan: {
       techniques: ["Zardozi"],
@@ -69,13 +73,73 @@ describe("DesignBrief — demo disclosure", () => {
 
   it("does not show the demo disclaimer for a live result", () => {
     render(<DesignBrief result={result({ is_demo: false })} />);
-    expect(screen.queryByRole("note", { name: /demo disclaimer/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("note", { name: /demo disclaimer/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the concept disclaimer alongside the demo disclaimer", () => {
     render(<DesignBrief result={result({ is_demo: true })} />);
-    expect(screen.getByRole("note", { name: /concept disclaimer/i })).toBeInTheDocument();
-    expect(screen.getByRole("note", { name: /demo disclaimer/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("note", { name: /concept disclaimer/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("note", { name: /demo disclaimer/i }),
+    ).toBeInTheDocument();
+  });
+
+  // ADR 0028 section 8: a demo refinement that resolves to the same pack image
+  // is a legitimate outcome of a small reviewed pack, and saying nothing about
+  // it is what produced the "refinement changes nothing" report.
+  const sameAssetRefinement = {
+    kind: "refinement" as const,
+    parent_version_id: "v1",
+    refinement: {
+      change_type: "colour_story" as const,
+      demo_asset_unchanged: true,
+    },
+  };
+
+  it("says so when a demo refinement resolved to the same pack image", () => {
+    render(
+      <DesignBrief
+        result={result({ is_demo: true, lineage: sameAssetRefinement })}
+      />,
+    );
+    const disclaimer = screen.getByRole("note", { name: /demo disclaimer/i });
+    expect(disclaimer).toHaveTextContent(/no closer image/i);
+    expect(disclaimer).toHaveTextContent(/did change the design brief/i);
+    // The standing demo sentence stays: this one adds to it, never replaces it.
+    expect(disclaimer).toHaveTextContent(/curated demo pack/i);
+  });
+
+  it("stays silent when the demo refinement produced a different image", () => {
+    render(
+      <DesignBrief
+        result={result({
+          is_demo: true,
+          lineage: {
+            ...sameAssetRefinement,
+            refinement: {
+              ...sameAssetRefinement.refinement,
+              demo_asset_unchanged: false,
+            },
+          },
+        })}
+      />,
+    );
+    expect(
+      screen.getByRole("note", { name: /demo disclaimer/i }),
+    ).not.toHaveTextContent(/no closer image/i);
+  });
+
+  it("never claims a same-asset outcome on an initial concept", () => {
+    // `lineage.refinement` is null for an initial version, so the optional
+    // chain must not resolve to anything renderable.
+    render(<DesignBrief result={result({ is_demo: true })} />);
+    expect(
+      screen.getByRole("note", { name: /demo disclaimer/i }),
+    ).not.toHaveTextContent(/no closer image/i);
   });
 });
 
@@ -90,7 +154,9 @@ function openCard(name: RegExp | string) {
 describe("DesignBrief — inspiration acknowledgements", () => {
   it("renders no acknowledgement section when the list is empty", () => {
     render(<DesignBrief result={result()} />);
-    expect(screen.queryByText("Inspiration acknowledgements")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Inspiration acknowledgements"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders one acknowledgement with its attribution", () => {
@@ -103,7 +169,9 @@ describe("DesignBrief — inspiration acknowledgements", () => {
         })}
       />,
     );
-    expect(screen.getByText("Inspiration acknowledgements")).toBeInTheDocument();
+    expect(
+      screen.getByText("Inspiration acknowledgements"),
+    ).toBeInTheDocument();
     openCard(/Inspiration acknowledgements/i);
     expect(screen.getByText("Emerald look")).toBeInTheDocument();
     expect(screen.getByText(/Studio A/)).toBeInTheDocument();
@@ -122,11 +190,13 @@ describe("DesignBrief — inspiration acknowledgements", () => {
       />,
     );
     openCard(/Inspiration acknowledgements/i);
-    const items = screen.getAllByRole("listitem").filter((li) =>
-      ["First look", "Second look", "Third look"].some((title) =>
-        li.textContent?.includes(title),
-      ),
-    );
+    const items = screen
+      .getAllByRole("listitem")
+      .filter((li) =>
+        ["First look", "Second look", "Third look"].some((title) =>
+          li.textContent?.includes(title),
+        ),
+      );
     expect(items.map((li) => li.textContent)).toEqual([
       expect.stringContaining("First look"),
       expect.stringContaining("Second look"),
@@ -154,13 +224,19 @@ describe("DesignBrief — inspiration acknowledgements", () => {
       <DesignBrief
         result={result({
           inspiration_acknowledgements: [
-            { position: 1, title: "A look", attribution: "<script>alert(1)</script>" },
+            {
+              position: 1,
+              title: "A look",
+              attribution: "<script>alert(1)</script>",
+            },
           ],
         })}
       />,
     );
     openCard(/Inspiration acknowledgements/i);
-    expect(screen.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/<script>alert\(1\)<\/script>/),
+    ).toBeInTheDocument();
     expect(document.querySelector("script")).not.toBeInTheDocument();
   });
 
@@ -176,7 +252,9 @@ describe("DesignBrief — inspiration acknowledgements", () => {
     );
     openCard(/Inspiration acknowledgements/i);
     const text = document.body.textContent ?? "";
-    expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    expect(text).not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+    );
     expect(text).not.toMatch(/garment_type/i);
     expect(text).not.toMatch(/visual_description/i);
   });
@@ -197,7 +275,9 @@ describe("DesignBrief — inspiration acknowledgements", () => {
       />,
     );
     openCard(/Inspiration acknowledgements/i);
-    expect(screen.getByText(/sent to the AI image provider/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/sent to the AI image provider/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/not sent to the generation models/i)).toBeNull();
   });
 
@@ -206,11 +286,15 @@ describe("DesignBrief — inspiration acknowledgements", () => {
       <DesignBrief
         result={result({
           is_demo: true,
-          inspiration_acknowledgements: [{ position: 1, title: "Emerald look", attribution: "" }],
+          inspiration_acknowledgements: [
+            { position: 1, title: "Emerald look", attribution: "" },
+          ],
         })}
       />,
     );
     openCard(/Inspiration acknowledgements/i);
-    expect(screen.getByText(/no image .* was sent to an AI provider/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/no image .* was sent to an AI provider/i),
+    ).toBeInTheDocument();
   });
 });

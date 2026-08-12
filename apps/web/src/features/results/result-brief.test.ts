@@ -22,8 +22,16 @@ const RESULT: DesignResult = {
     rationale: "Calm and bridal.",
   },
   fabrics_and_texture: [
-    { fabric: "Silk", placement: "Skirt", finish_and_movement: "Smooth drape." },
-    { fabric: "Organza", placement: "Dupatta", finish_and_movement: "Sheer float." },
+    {
+      fabric: "Silk",
+      placement: "Skirt",
+      finish_and_movement: "Smooth drape.",
+    },
+    {
+      fabric: "Organza",
+      placement: "Dupatta",
+      finish_and_movement: "Sheer float.",
+    },
   ],
   embellishment_plan: {
     techniques: ["Zardozi", "Dabka"],
@@ -98,6 +106,39 @@ describe("formatDesignBrief", () => {
     expect(text).not.toMatch(/manifest/i);
   });
 
+  it("adds the same-asset sentence when a demo refinement reused its pack image", () => {
+    // The plain-text brief and the HTML view share one constant precisely so
+    // they cannot disagree about what the user was told (ADR 0028 section 8).
+    const text = formatDesignBrief({
+      ...RESULT,
+      is_demo: true,
+      lineage: {
+        kind: "refinement",
+        parent_version_id: "v1",
+        refinement: { change_type: "colour_story", demo_asset_unchanged: true },
+      },
+    });
+    expect(text).toMatch(/no closer image/i);
+    expect(text).toMatch(/curated demo pack/i);
+    expect(text).not.toMatch(/sha|hash|manifest|asset_id/i);
+  });
+
+  it("omits the same-asset sentence when the demo refinement produced a new image", () => {
+    const text = formatDesignBrief({
+      ...RESULT,
+      is_demo: true,
+      lineage: {
+        kind: "refinement",
+        parent_version_id: "v1",
+        refinement: {
+          change_type: "colour_story",
+          demo_asset_unchanged: false,
+        },
+      },
+    });
+    expect(text).not.toMatch(/no closer image/i);
+  });
+
   it("omits the demo disclosure for a live result", () => {
     const text = formatDesignBrief(RESULT);
     expect(text).not.toMatch(/curated demo pack/i);
@@ -106,7 +147,10 @@ describe("formatDesignBrief", () => {
   it("handles a null regional direction without a Regional direction line", () => {
     const noRegional = {
       ...RESULT,
-      cultural_context: { ...RESULT.cultural_context, regional_direction: null },
+      cultural_context: {
+        ...RESULT.cultural_context,
+        regional_direction: null,
+      },
     };
     const text = formatDesignBrief(noRegional);
     expect(text).not.toContain("Regional direction:");
@@ -164,7 +208,9 @@ describe("formatDesignBrief", () => {
     const demoWithInspiration: DesignResult = {
       ...RESULT,
       is_demo: true,
-      inspiration_acknowledgements: [{ position: 1, title: "Emerald look", attribution: "" }],
+      inspiration_acknowledgements: [
+        { position: 1, title: "Emerald look", attribution: "" },
+      ],
     };
     const text = formatDesignBrief(demoWithInspiration);
     expect(text).toMatch(/no image .* was sent to an AI provider/i);

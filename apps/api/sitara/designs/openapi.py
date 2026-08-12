@@ -513,6 +513,11 @@ class RefinementLineageSerializer(serializers.Serializer):
     # seven categories a client may request today would make the published
     # contract a lie about designs that already exist.
     change_type = serializers.ChoiceField(choices=sorted(PERSISTED_REFINEMENT_CHANGE_TYPES))
+    # ADR 0028 §8. True only for a DEMO refinement that resolved to the same
+    # fixture image as its source — a legitimate outcome of a small reviewed
+    # pack, disclosed rather than passed off as a fresh render (ADR 0016).
+    # Always false for a live version.
+    demo_asset_unchanged = serializers.BooleanField()
 
 
 class DesignVersionLineageSerializer(serializers.Serializer):

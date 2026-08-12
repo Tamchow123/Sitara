@@ -62,12 +62,21 @@ class DemoRefinementStructuredDesignProvider:
 
     name = "demo"
 
-    def __init__(self, *, source_spec: dict, refinement_request):
+    def __init__(self, *, source_spec: dict, refinement_request, selection_alternatives=None):
         self._source_spec = source_spec
         self._refinement_request = refinement_request
+        # The canonical values this design's own pinned questionnaire would
+        # accept (ADR 0028). Computed by the caller, never by the engine: the
+        # demo phrase vocabularies are supersets of any one questionnaire, so a
+        # value picked from them could be one the customer was never offered.
+        self._selection_alternatives = selection_alternatives
 
     def generate(self, request: StructuredDesignRequest) -> StructuredDesignResult:
-        payload = build_demo_refined_spec(self._source_spec, self._refinement_request)
+        payload = build_demo_refined_spec(
+            self._source_spec,
+            self._refinement_request,
+            selection_alternatives=self._selection_alternatives,
+        )
         return StructuredDesignResult(
             payload=payload,
             provider=self.name,
