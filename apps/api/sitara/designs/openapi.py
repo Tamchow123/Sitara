@@ -11,7 +11,7 @@ from drf_spectacular.utils import PolymorphicProxySerializer, extend_schema_fiel
 from rest_framework import serializers
 
 from sitara.generation.errors import GENERATION_ERROR_CODES
-from sitara.generation.refinement import REFINEMENT_CHANGE_TYPES
+from sitara.generation.refinement import PERSISTED_REFINEMENT_CHANGE_TYPES
 from sitara.questionnaire.openapi import QuestionnaireSchemaSerializer
 
 from .annotation_schema import (
@@ -506,7 +506,13 @@ class RefinementLineageSerializer(serializers.Serializer):
     optional note, the refinement-request hash, its schema version, the
     refinement template version, a seed and the source attempt."""
 
-    change_type = serializers.ChoiceField(choices=sorted(REFINEMENT_CHANGE_TYPES))
+    # The PERSISTED set, not the requestable one. This describes what a result
+    # payload may CONTAIN, and a design refined before ADR 0028 retired
+    # ``styling_details`` still returns it — for ever, because a historical row
+    # is audit data that is read and never rewritten. Narrowing this to the
+    # seven categories a client may request today would make the published
+    # contract a lie about designs that already exist.
+    change_type = serializers.ChoiceField(choices=sorted(PERSISTED_REFINEMENT_CHANGE_TYPES))
 
 
 class DesignVersionLineageSerializer(serializers.Serializer):

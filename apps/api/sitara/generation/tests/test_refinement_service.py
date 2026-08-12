@@ -23,11 +23,16 @@ from sitara.generation.inspiration_context import (
     InspirationProviderCues,
     inspiration_context_sha256,
 )
-from sitara.generation.refinement import REFINEMENT_CHANGE_TYPES, normalise_refinement_request
+from sitara.generation.refinement import (
+    REFINEMENT_CHANGE_TYPES,
+    canonical_refinement_fields,
+    normalise_refinement_request,
+)
 from sitara.generation.refinement_service import (
     REFINEMENT_DESIGN_SPEC_TEMPLATE_VERSION,
     DesignChangedDuringRefinement,
     GenerationRefused,
+    RefinementCategoryUnavailable,
     RefinementGenerationFailed,
     RefinementLimitReached,
     RefinementNoChangeProduced,
@@ -36,8 +41,9 @@ from sitara.generation.refinement_service import (
     generate_refined_design_spec_for_design,
 )
 
-from .factory import make_complete_design, make_source_version
+from .factory import make_complete_design, make_complete_v4_design, make_source_version
 from .fakes import SequenceProvider
+from .test_refinement_prompt_effect import SOURCE_SPEC, canonical_refinement
 
 pytestmark = pytest.mark.django_db
 
@@ -126,9 +132,6 @@ _ALLOWED_EDITS = {
     "silhouette_detail": lambda spec: spec["garment_breakdown"].__setitem__(
         "key_proportions", "Updated proportion notes with a fuller flare."
     ),
-    "styling_details": lambda spec: spec.__setitem__(
-        "styling_notes", ["An updated styling suggestion for local review."]
-    ),
 }
 
 
@@ -138,8 +141,27 @@ def apply_allowed_edit(spec_payload: dict, change_type: str) -> dict:
     return refined
 
 
+# The categories a version-1 spec can actually be refined in. Derived from the
+# production dispatch, never hand-listed: version 1 has no ``neckline_style``
+# field at all, so ``neckline`` owns nothing on it and is refused (ADR 0028).
+V1_REFINABLE_CHANGE_TYPES = tuple(
+    change_type
+    for change_type in REFINEMENT_CHANGE_TYPES
+    if canonical_refinement_fields(change_type, DESIGN_SPEC_SCHEMA_VERSION)
+)
+
+# One legal-looking edit per permanently-immutable canonical selection. Each
+# value is a real questionnaire option, so the ONLY reason to reject it is that
+# no refinement category may ever move that field.
+_IMMUTABLE_SELECTION_EDITS = {
+    "garment_type": "saree",
+    "ceremony": "walima",
+    "regional_style": "gujarati",
+}
+
+
 class TestSuccessfulRefinementPerCategory:
-    @pytest.mark.parametrize("change_type", REFINEMENT_CHANGE_TYPES)
+    @pytest.mark.parametrize("change_type", V1_REFINABLE_CHANGE_TYPES)
     def test_one_allowed_change_succeeds(self, change_type):
         design, source, spec_payload = make_ready_design()
         refined_payload = apply_allowed_edit(spec_payload, change_type)
@@ -172,6 +194,107 @@ class TestSuccessfulRefinementPerCategory:
             version.design_spec["colour_story"]["rationale"]
             == "An updated rationale for the palette."
         )
+
+
+class TestCanonicalSelectionRefinement:
+    """ADR 0028: a category may change the one canonical selection it is named
+    after, and nothing else in ``source_selections``."""
+
+    def test_a_category_changes_its_own_canonical_selection(self):
+        design, source, spec_payload = make_ready_design()
+        refined = copy.deepcopy(spec_payload)
+        refined["source_selections"]["fabrics"] = ["velvet", "net"]
+        provider = SequenceProvider([_result(refined)])
+
+        version = generate_refined_design_spec_for_design(
+            design, source, refinement_request("fabric_and_texture"), provider=provider
+        )
+
+        assert version.design_spec["source_selections"]["fabrics"] == ["velvet", "net"]
+        # Everything else in the echo is untouched.
+        untouched = {
+            key: value
+            for key, value in version.design_spec["source_selections"].items()
+            if key != "fabrics"
+        }
+        assert untouched == {
+            key: value
+            for key, value in spec_payload["source_selections"].items()
+            if key != "fabrics"
+        }
+
+    def test_another_categorys_canonical_selection_is_rejected(self):
+        # A fabric refinement may not move the silhouette, even though the
+        # silhouette IS refinable — by a different category.
+        design, source, spec_payload = make_ready_design()
+        refined = copy.deepcopy(spec_payload)
+        refined["source_selections"]["silhouette"] = "mermaid_lehenga"
+        provider = SequenceProvider([_result(refined), _result(refined)])
+
+        with pytest.raises(RefinementGenerationFailed):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request("fabric_and_texture"), provider=provider
+            )
+        assert not DesignVersion.objects.filter(design=design, version_number=2).exists()
+
+    @pytest.mark.parametrize("field, value", sorted(_IMMUTABLE_SELECTION_EDITS.items()))
+    @pytest.mark.parametrize("change_type", V1_REFINABLE_CHANGE_TYPES)
+    def test_a_permanently_immutable_selection_is_rejected_for_every_category(
+        self, change_type, field, value
+    ):
+        design, source, spec_payload = make_ready_design()
+        refined = apply_allowed_edit(spec_payload, change_type)
+        refined["source_selections"][field] = value
+        provider = SequenceProvider([_result(refined), _result(refined)])
+
+        with pytest.raises(RefinementGenerationFailed):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request(change_type), provider=provider
+            )
+        assert not DesignVersion.objects.filter(design=design, version_number=2).exists()
+
+    @pytest.mark.parametrize("change_type", ["colour_story", "fabric_and_texture", "neckline"])
+    def test_custom_colours_is_immutable_on_a_v3_spec_too(self, change_type):
+        # The fourth permanently-immutable selection, which the version-1
+        # parametrisation above cannot reach: `custom_colours` exists only from
+        # DesignSpec v3. It is the bride's own typed-in palette, so a category
+        # that owns `colour_palette` is exactly the one that might plausibly
+        # reach for it — hence colour_story is in this list, not excluded from
+        # it. Driven end to end through the real validator rather than asserted
+        # against the mapping table, so a bypass introduced next to the
+        # immutability check itself is caught as well as one in the table.
+        design = make_complete_v4_design()
+        source = make_source_version(
+            design, copy.deepcopy(SOURCE_SPEC), design_spec_schema_version=3
+        )
+        refined = canonical_refinement(change_type)
+        refined["source_selections"]["custom_colours"] = ["#7B1E3A"]
+        provider = SequenceProvider([_result(refined), _result(copy.deepcopy(refined))])
+
+        with pytest.raises(RefinementGenerationFailed):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request(change_type), provider=provider
+            )
+        assert not DesignVersion.objects.filter(design=design, version_number=2).exists()
+        source.refresh_from_db()
+        assert source.design_spec["source_selections"]["custom_colours"] == []
+
+    def test_a_v1_spec_refuses_a_neckline_refinement_with_a_controlled_code(self):
+        # Version dispatch is mandatory, not optional: a version-1 spec has no
+        # neckline_style attribute at all. A controlled refusal, never an
+        # AttributeError and never an accepted no-op.
+        design, source, _spec_payload = make_ready_design()
+        provider = SequenceProvider([])
+
+        with pytest.raises(RefinementCategoryUnavailable) as excinfo:
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request("neckline"), provider=provider
+            )
+
+        assert excinfo.value.code == "refinement_category_unavailable"
+        # Refused BEFORE any provider request — nothing was spent.
+        assert provider.calls == 0
+        assert not DesignVersion.objects.filter(design=design, version_number=2).exists()
 
 
 class TestRejectedChanges:
@@ -217,19 +340,21 @@ class TestRejectedChanges:
 
     def test_unsafe_output_is_rejected(self):
         design, source, spec_payload = make_ready_design()
-        refined = apply_allowed_edit(spec_payload, "styling_details")
+        # styling_notes is in colour_story's allowlist, so this reaches the
+        # safety scan rather than being refused as an out-of-category change.
+        refined = apply_allowed_edit(spec_payload, "colour_story")
         refined["styling_notes"] = ["Style it the way Sabyasachi would."]
         provider = SequenceProvider([_result(refined), _result(refined)])
 
         with pytest.raises(RefinementGenerationFailed):
             generate_refined_design_spec_for_design(
-                design, source, refinement_request("styling_details"), provider=provider
+                design, source, refinement_request("colour_story"), provider=provider
             )
         assert not DesignVersion.objects.filter(design=design, version_number=2).exists()
 
     def test_refinement_process_mention_is_rejected(self):
         design, source, spec_payload = make_ready_design()
-        refined = apply_allowed_edit(spec_payload, "styling_details")
+        refined = apply_allowed_edit(spec_payload, "colour_story")
         refined["concept_summary"] = (
             spec_payload["concept_summary"] + " This is the refined version."
         )
@@ -237,7 +362,7 @@ class TestRejectedChanges:
 
         with pytest.raises(RefinementGenerationFailed):
             generate_refined_design_spec_for_design(
-                design, source, refinement_request("styling_details"), provider=provider
+                design, source, refinement_request("colour_story"), provider=provider
             )
 
 

@@ -24,7 +24,6 @@ from sitara.generation.refinement import (
     NECKLINE,
     SILHOUETTE_DETAIL,
     SLEEVES_AND_COVERAGE,
-    STYLING_DETAILS,
 )
 from sitara.generation.selection_semantics import ordered_colour_values
 
@@ -192,18 +191,11 @@ def _edit_silhouette_detail(spec: dict, note: str, fingerprint: str) -> dict:
     return spec
 
 
-def _edit_styling_details(spec: dict, note: str, fingerprint: str) -> dict:
-    variant = _pick([0, 1, 2], fingerprint, "styling")
-    options = [
-        "A more restrained accessory choice keeps the revised look grounded.",
-        "A bolder accessory choice matches the revised styling direction.",
-        "A softer, understated accessory choice complements the revised styling direction.",
-    ]
-    spec = copy.deepcopy(spec)
-    spec["styling_notes"] = [*spec["styling_notes"][:1], options[variant]][:8]
-    return spec
-
-
+# One editor per REQUESTABLE category. ``styling_details`` had one until ADR
+# 0028 retired the category; it is gone rather than kept defensively, because
+# the client boundary refuses a request naming it and a historical row is only
+# ever READ (a refined version already exists for it — it is never re-run
+# through this engine).
 _EDITORS = {
     COLOUR_STORY: _edit_colour_story,
     FABRIC_AND_TEXTURE: _edit_fabric,
@@ -212,7 +204,6 @@ _EDITORS = {
     NECKLINE: _edit_neckline,
     DUPATTA_OR_SAREE_DRAPE: _edit_drape,
     SILHOUETTE_DETAIL: _edit_silhouette_detail,
-    STYLING_DETAILS: _edit_styling_details,
 }
 
 

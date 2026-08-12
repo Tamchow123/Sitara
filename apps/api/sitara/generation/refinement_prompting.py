@@ -8,9 +8,12 @@ completely separate from :mod:`sitara.generation.prompting`, which stays
 initial-generation-only and unmodified by this phase.
 
 What the refinement request to Anthropic contains: the validated existing
-DesignSpec, the validated refinement category, the short optional note inside
-an explicitly delimited untrusted section, and these source-controlled edit
-instructions. What it NEVER contains: the original generated image, image
+DesignSpec, the validated refinement category, the server-computed list of
+canonical selection fields that category may change on this spec's schema
+version (ADR 0028 — never a client input, and never trusted back from the
+model's output either), the short optional note inside an explicitly delimited
+untrusted section, and these source-controlled edit instructions. What it
+NEVER contains: the original generated image, image
 bytes, signed image URLs, storage keys, image hashes, provider prediction
 ids, a seed, raw questionnaire answers, user/session identity, a live
 catalogue lookup or rights evidence.
@@ -25,7 +28,17 @@ import json
 # initial generation. Deliberately independent of SPEC_TEMPLATE_VERSION —
 # refinement and initial generation are two different trusted templates that
 # may evolve on separate schedules.
-REFINEMENT_TEMPLATE_VERSION = "1.0.0"
+#
+# 2.0.0 (Phase 23, ADR 0028): 1.0.0 instructed the model to preserve
+# "source_selections" byte-for-value and named every canonical field it must
+# never touch. That instruction is now wrong — a refinement may change the ONE
+# canonical selection its category is named after, and until it does, nothing
+# the model writes can reach the image prompt. The message now carries the exact
+# list of changeable selection fields, computed server-side from the source
+# spec's schema version, and the system prompt tells the model to change only
+# those and freeze the rest. Major, not minor: the same input now legitimately
+# yields a different output shape.
+REFINEMENT_TEMPLATE_VERSION = "2.0.0"
 
 # Same delimiter convention as prompting.py, reused verbatim so the same
 # neutralisation logic and untrusted-section framing apply.
@@ -37,7 +50,8 @@ You are helping Sitara apply ONE constrained edit to an existing South Asian \
 bridalwear CONCEPT specification.
 
 You will receive the complete CURRENT structured specification as trusted \
-JSON, the single allowlisted change category the user selected, and, \
+JSON, the single allowlisted change category the user selected, the exact \
+list of canonical selection fields that category may change, and, \
 optionally, a delimited section of untrusted free-text preference notes. \
 Return the COMPLETE UPDATED specification in the exact output format \
 requested by the tooling — never a partial object, a diff or a patch.
@@ -50,10 +64,16 @@ EXACTLY as given, character for character.
 - Change ONLY fields that are relevant to the selected change category. Do \
 not touch any other section.
 - Preserve "schema_version" exactly as given.
-- Preserve "source_selections" byte-for-value, in the same order — never \
-change the garment type, ceremony, regional style, silhouette, colour \
-palette, fabrics, embellishment style/density, coverage preferences, \
-dupatta style or saree drape machine values.
+- Inside "source_selections" you may change ONLY the fields named in \
+"changeable_source_selection_fields", and only to a value the user could \
+have chosen for that question. Every other entry of "source_selections" \
+must be reproduced byte-for-value, in the same order. Never change the \
+garment type, the ceremony, the regional style or the saved custom colours \
+— those are fixed for the life of the design.
+- When you change one of those canonical selections, update the descriptive \
+sections so they DESCRIBE the new selection rather than the old one. The \
+specification must read as one coherent concept, not as an edit applied to \
+a different one.
 - Preserve every cultural distinction already present (regional direction, \
 interpretation notes, safeguards) unless the selected category explicitly \
 concerns cultural interpretation.
@@ -69,6 +89,9 @@ of" or similar imitation phrasing.
 - Do not provide sewing instructions, measurements, cutting patterns or any \
 claim that the concept is guaranteed to be constructible; keep the output \
 framed as concept visualisation only.
+- Never invent a selection value. A canonical selection is a machine value \
+the user's questionnaire offers for that question; a value it does not \
+offer will be rejected and nothing will be saved.
 - Do not claim visual continuity with any previous image — you have no \
 access to any image, and none exists in this exchange.
 - Do not mention this refinement process, a previous version, an edit, a \
@@ -103,6 +126,7 @@ _UNTRUSTED_INTRO = (
 _TRUSTED_HEADER = "Trusted current specification and selected category (JSON):"
 _CHANGE_TYPE_KEY = "change_type"
 _CURRENT_SPEC_KEY = "current_design_spec"
+_CHANGEABLE_SELECTIONS_KEY = "changeable_source_selection_fields"
 
 
 def _neutralise_delimiters(text: str) -> str:
@@ -112,16 +136,29 @@ def _neutralise_delimiters(text: str) -> str:
 
 
 def build_refinement_user_message(
-    current_spec: dict, change_type: str, note: str, *, retry: bool = False
+    current_spec: dict,
+    change_type: str,
+    note: str,
+    *,
+    changeable_selection_fields: tuple[str, ...] = (),
+    retry: bool = False,
 ) -> str:
     """Assemble the refinement user message.
 
     ``current_spec`` is the ALREADY-VALIDATED existing DesignSpec as a plain
     dict (``DesignSpec.model_dump(mode="json")``) — the trusted context this
-    refinement edits. ``note`` is the already safety-scanned, canonicalised
-    refinement note (empty string when absent), placed in a delimited
-    untrusted section exactly like initial generation's free-text answers."""
-    trusted = {_CHANGE_TYPE_KEY: change_type, _CURRENT_SPEC_KEY: current_spec}
+    refinement edits. ``changeable_selection_fields`` is the server-computed,
+    version-dispatched list of ``source_selections`` fields this category may
+    change (ADR 0028); it is trusted context, never a client input, and the
+    exact-diff validation re-checks the output regardless of what the model does
+    with it. ``note`` is the already safety-scanned, canonicalised refinement
+    note (empty string when absent), placed in a delimited untrusted section
+    exactly like initial generation's free-text answers."""
+    trusted = {
+        _CHANGE_TYPE_KEY: change_type,
+        _CHANGEABLE_SELECTIONS_KEY: list(changeable_selection_fields),
+        _CURRENT_SPEC_KEY: current_spec,
+    }
     parts = [
         _TASK_LINE,
         _TRUSTED_HEADER,
@@ -150,6 +187,7 @@ def refinement_prompt_template_fingerprint() -> str:
             _UNTRUSTED_INTRO,
             _TRUSTED_HEADER,
             _CHANGE_TYPE_KEY,
+            _CHANGEABLE_SELECTIONS_KEY,
             _CURRENT_SPEC_KEY,
         ]
     )
@@ -157,4 +195,4 @@ def refinement_prompt_template_fingerprint() -> str:
 
 
 # Bump REFINEMENT_TEMPLATE_VERSION deliberately whenever this changes.
-REFINEMENT_PROMPT_TEMPLATE_HASH = "cfe4e1f0bffb7e8a1931e78118f4857a36c97efbed0e0f6001e1dfc486ae8236"
+REFINEMENT_PROMPT_TEMPLATE_HASH = "8847fbe1683d298f8348101cfcc8c3d081f0e52035954e9ebd2e77cb343a6f1b"

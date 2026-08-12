@@ -307,7 +307,7 @@ export interface paths {
         put?: never;
         /**
          * Start a single constrained refinement job
-         * @description Enqueues one asynchronous refinement job editing the design's existing version-1 concept and returns 202 with the public job payload and a same-origin Location header. Requires an Idempotency-Key UUID header; a repeated key returns the same job and queues no extra work. The body names the source version, one allowlisted change_type and an optional bounded note — the note is untrusted preference data, safety-scanned before any provider call, and never echoed back. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Enqueues one asynchronous refinement job editing the design's existing version-1 concept and returns 202 with the public job payload and a same-origin Location header. Requires an Idempotency-Key UUID header; a repeated key returns the same job and queues no extra work. The body names the source version, one allowlisted change_type and an optional bounded note — the note is untrusted preference data, safety-scanned before any provider call, and never echoed back. The requestable change_type values are colour_story, dupatta_or_saree_drape, embellishment, fabric_and_texture, neckline, silhouette_detail, sleeves_and_coverage; each changes the one canonical selection it is named after, plus the descriptive text around it. A category the design's own questionnaire version cannot express is refused with refinement_category_unavailable. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         post: operations["designs_refine"];
         delete?: never;
@@ -1066,6 +1066,7 @@ export interface components {
          *     * `live_generation_budget_exhausted` - live_generation_budget_exhausted
          *     * `prompt_build_failed` - prompt_build_failed
          *     * `queue_unavailable` - queue_unavailable
+         *     * `refinement_category_unavailable` - refinement_category_unavailable
          *     * `refinement_generation_failed` - refinement_generation_failed
          *     * `refinement_invalid` - refinement_invalid
          *     * `refinement_limit_reached` - refinement_limit_reached
@@ -1076,7 +1077,7 @@ export interface components {
          *     * `structured_submission_ambiguous` - structured_submission_ambiguous
          * @enum {string}
          */
-        ErrorCodeEnum: "demo_assets_unavailable" | "design_changed" | "design_incomplete" | "generation_stuck" | "generation_unavailable" | "image_download_failed" | "image_ingest_failed" | "image_ingest_unverified" | "image_output_invalid" | "image_poll_timeout" | "image_prediction_aborted" | "image_prediction_canceled" | "image_prediction_failed" | "image_provider_unavailable" | "image_staging_failed" | "image_staging_unverified" | "image_submission_ambiguous" | "internal_generation_error" | "live_generation_budget_exhausted" | "prompt_build_failed" | "queue_unavailable" | "refinement_generation_failed" | "refinement_invalid" | "refinement_limit_reached" | "refinement_no_change" | "refinement_source_unavailable" | "structured_generation_failed" | "structured_provider_refused" | "structured_submission_ambiguous";
+        ErrorCodeEnum: "demo_assets_unavailable" | "design_changed" | "design_incomplete" | "generation_stuck" | "generation_unavailable" | "image_download_failed" | "image_ingest_failed" | "image_ingest_unverified" | "image_output_invalid" | "image_poll_timeout" | "image_prediction_aborted" | "image_prediction_canceled" | "image_prediction_failed" | "image_provider_unavailable" | "image_staging_failed" | "image_staging_unverified" | "image_submission_ambiguous" | "internal_generation_error" | "live_generation_budget_exhausted" | "prompt_build_failed" | "queue_unavailable" | "refinement_category_unavailable" | "refinement_generation_failed" | "refinement_invalid" | "refinement_limit_reached" | "refinement_no_change" | "refinement_source_unavailable" | "structured_generation_failed" | "structured_provider_refused" | "structured_submission_ambiguous";
         ErrorDetail: {
             /** @description Stable machine-readable error code. */
             code: string;
@@ -2485,7 +2486,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description refinement_limit_reached / refinement_in_progress / refinement_source_unavailable / design_not_refinable. */
+            /** @description refinement_limit_reached / refinement_in_progress / refinement_source_unavailable / refinement_category_unavailable / design_not_refinable. */
             409: {
                 headers: {
                     [name: string]: unknown;

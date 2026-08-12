@@ -207,6 +207,26 @@ describe("VersionComparison", () => {
     expect(disclosure?.textContent).toMatch(/requested change:\s*dupatta or saree drape/i);
   });
 
+  it("still labels a concept refined through the RETIRED styling_details category", async () => {
+    // ADR 0028 retired the category, so it is no longer offered. A design
+    // refined before that still carries it in its persisted lineage for ever,
+    // and the read side must keep labelling it — a raw `styling_details` on
+    // screen would be this phase's own regression, not an old design's fault.
+    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    const { container } = renderComparison({
+      lineage: {
+        kind: "refinement",
+        parent_version_id: "v1",
+        refinement: { change_type: "styling_details" },
+      },
+    });
+    await screen.findByRole("heading", { name: /original concept/i });
+    const disclosure = container.querySelector(".comparison-disclosure");
+    expect(disclosure?.textContent).toMatch(/requested change:\s*styling details/i);
+    expect(disclosure?.textContent).not.toMatch(/styling_details/);
+  });
+
   it("never renders a raw refinement note (not part of the fetched type at all)", async () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });

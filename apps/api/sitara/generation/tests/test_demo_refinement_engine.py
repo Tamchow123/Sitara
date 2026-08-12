@@ -84,13 +84,13 @@ class TestNoteHandling:
 
     def test_empty_note_still_produces_a_change(self):
         source = _source_spec_dict()
-        refined = build_demo_refined_spec(source, _request("styling_details", note=""))
+        refined = build_demo_refined_spec(source, _request("silhouette_detail", note=""))
         assert diff_design_spec_paths(source, refined)
 
     def test_raw_note_text_is_never_copied(self):
         marker = "xyzzy-unique-marker-should-never-appear-verbatim"
         source = _source_spec_dict()
-        refined = build_demo_refined_spec(source, _request("styling_details", note=marker))
+        refined = build_demo_refined_spec(source, _request("silhouette_detail", note=marker))
         assert marker not in str(refined)
 
     def test_no_designer_or_brand_name_is_introduced(self):

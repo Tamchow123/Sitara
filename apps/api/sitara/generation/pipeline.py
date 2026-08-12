@@ -95,10 +95,12 @@ from .refinement import (
 )
 from .refinement_service import (
     DesignChangedDuringRefinement,
+    RefinementCategoryUnavailable,
     RefinementGenerationFailed,
     RefinementLimitReached,
     RefinementNoChangeProduced,
     RefinementSourceUnavailable,
+    assert_category_refinable,
     generate_refined_design_spec_for_design,
     validate_source_version,
 )
@@ -753,6 +755,15 @@ def enqueue_design_refinement(
             raise RefinementSourceUnavailable("the source version is not available")
         validate_source_version(source_version)  # raises RefinementSourceUnavailable
 
+        # 5a. The category must own a canonical selection on THIS spec's schema
+        #     version (ADR 0028). A version-1 spec has no neckline_style at all,
+        #     so a neckline refinement of one can only ever return an unchanged
+        #     concept — refused here, before an attempt row exists and before any
+        #     provider is selected, rather than spent on and then disappointed.
+        assert_category_refinable(
+            source_version.design_spec_schema_version, refinement_request.change_type
+        )
+
         # 5b. A refinement's mode is INHERITED from its source version — a
         #     demo source can never be refined through the live path and a
         #     live source can never be refined through the demo path,
@@ -1225,6 +1236,13 @@ def _run_refinement_text_stage(design, attempt, structured_provider, config) -> 
     except RefinementSourceUnavailable as exc:
         raise _TerminalGenerationError(
             errors.REFINEMENT_SOURCE_UNAVAILABLE, clear_text_marker=True
+        ) from exc
+    except RefinementCategoryUnavailable as exc:
+        # Unreachable through the API — the enqueue guard refuses this before an
+        # attempt exists. Kept so a future caller that bypasses the guard fails
+        # with the same stable code rather than an unclassified internal error.
+        raise _TerminalGenerationError(
+            errors.REFINEMENT_CATEGORY_UNAVAILABLE, clear_text_marker=True
         ) from exc
     except RefinementLimitReached as exc:
         raise _TerminalGenerationError(

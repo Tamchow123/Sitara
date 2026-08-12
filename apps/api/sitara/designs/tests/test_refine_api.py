@@ -19,6 +19,7 @@ from unittest import mock
 import pytest
 
 from sitara.designs.models import Design, DesignVersion
+from sitara.questionnaire.models import QuestionnaireVersion
 
 from .utils import (
     DESIGNS_URL,
@@ -26,6 +27,7 @@ from .utils import (
     create_owned_design_id,
     create_ready_design_version,
     csrf_client,
+    make_active_questionnaire,
     register,
     signed_in_client,
     unique_email,
@@ -61,7 +63,19 @@ def _generated_design(client, token) -> tuple[str, DesignVersion]:
     )
     design = Design.objects.get(pk=design_id)
     design.status = Design.Status.GENERATED
-    design.save(update_fields=["status"])
+    # A PINNED questionnaire version, because a refinement now revalidates any
+    # changed canonical selection against it (ADR 0028) and refuses a design
+    # that has none. This is not fixture decoration: a design cannot reach a
+    # generated version without one -- `validate` refuses to run until a
+    # questionnaire is selected -- so pinning it here makes the fixture match
+    # the only shape production can produce.
+    # Reused rather than created outright: at most one version may be active
+    # (a PostgreSQL partial unique constraint), and a throttle test creates many
+    # designs in one transaction.
+    design.questionnaire_version = (
+        QuestionnaireVersion.objects.filter(status="active").first() or make_active_questionnaire()
+    )
+    design.save(update_fields=["status", "questionnaire_version"])
     return design_id, version
 
 
@@ -154,6 +168,21 @@ class TestRefineValidation:
         assert response.status_code == 400, response.content
         assert response.json()["error"]["code"] == "refinement_invalid"
 
+    def test_the_retired_styling_details_category_is_rejected(self):
+        # ADR 0028 retired it. A NEW request naming it is a controlled 400 with
+        # the same generic code as any other out-of-contract request — never a
+        # 500, and never an accepted job that could not change the concept.
+        client, token = signed_in_client()
+        design_id, version = _generated_design(client, token)
+        body = {
+            "source_version_id": str(version.pk),
+            "change_type": "styling_details",
+            "note": "",
+        }
+        response = _post_refine(client, design_id, token=token, body=body)
+        assert response.status_code == 400, response.content
+        assert response.json()["error"]["code"] == "refinement_invalid"
+
     def test_unsafe_note_is_rejected_with_refinement_invalid(self):
         client, token = signed_in_client()
         design_id, version = _generated_design(client, token)
@@ -231,6 +260,24 @@ class TestRefineConflicts:
         response = _post_refine(client, design_id, token=token)
         assert response.status_code == 409, response.content
         assert response.json()["error"]["code"] == "design_not_refinable"
+
+    def test_a_neckline_refinement_of_a_v1_concept_is_category_unavailable(self):
+        # ADR 0028's version dispatch, at the API boundary: the fixture concept
+        # is DesignSpec v1, which carries no neckline_style at all, so there is
+        # nothing for a neckline refinement to change. A controlled 409 — the
+        # request is well formed, it is this design that cannot accept it — and
+        # no job is queued.
+        client, token = signed_in_client()
+        design_id, version = _generated_design(client, token)
+        body = {
+            "source_version_id": str(version.pk),
+            "change_type": "neckline",
+            "note": "",
+        }
+        response = _post_refine(client, design_id, token=token, body=body)
+        assert response.status_code == 409, response.content
+        assert response.json()["error"]["code"] == "refinement_category_unavailable"
+        assert not DesignVersion.objects.filter(design_id=design_id, version_number=2).exists()
 
     def test_foreign_source_version_is_source_unavailable(self):
         client, token = signed_in_client()

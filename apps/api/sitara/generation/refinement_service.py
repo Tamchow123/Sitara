@@ -43,18 +43,26 @@ from .design_spec import (
 from .input_safety import GeneratedContentRejected, contains_phrase, iter_strings
 from .inspiration_context import InspirationContextSnapshot, inspiration_context_sha256
 from .refinement import (
-    REFINEMENT_ALLOWED_PATHS,
     REFINEMENT_IMMUTABLE_ROOTS,
+    REFINEMENT_IMMUTABLE_SELECTION_FIELDS,
     REFINEMENT_REQUEST_SCHEMA_VERSION,
     RefinementRequest,
+    canonical_refinement_fields,
+    changed_selection_field,
     diff_design_spec_paths,
     path_is_allowed,
+    refinement_allowed_paths,
     refinement_request_sha256,
 )
 from .refinement_prompting import (
     REFINEMENT_SYSTEM_PROMPT,
     REFINEMENT_TEMPLATE_VERSION,
     build_refinement_user_message,
+)
+from .refinement_selections import (
+    RefinedSelectionsInvalid,
+    RefinementQuestionnaireUnavailable,
+    assert_refined_selections_are_answerable,
 )
 from .services import (
     AggregatedUsage,
@@ -185,6 +193,16 @@ def validate_source_version(source_version: DesignVersion) -> _SourceContext:
             "the source specification failed the safety scan"
         ) from None
 
+    # A refinement may now change a canonical selection, and that change is only
+    # safe because it is revalidated against the design's own PINNED
+    # questionnaire (ADR 0028). A design with no pinned version has nothing to
+    # validate against, so it is refused here — before any provider is selected
+    # — rather than accepted on trust. Pinned, not active: assign-once, and a
+    # design pinned to a RETIRED version must stay refinable.
+    questionnaire = source_version.design.questionnaire_version
+    if questionnaire is None or not isinstance(questionnaire.schema, dict):
+        raise RefinementSourceUnavailable("the source design has no usable questionnaire version")
+
     inspiration_context = None
     if source_version.inspiration_context is not None:
         try:
@@ -233,9 +251,57 @@ class RefinementOutputRejected(Exception):
         super().__init__(f"refinement output rejected: {category.value}")
 
 
-def _assert_source_selections_unchanged(spec: DesignSpec, canonical: dict) -> None:
-    if spec.source_selections.model_dump() != canonical:
-        raise RefinementOutputRejected(RefinementOutputCategory.SOURCE_SELECTIONS_CHANGED)
+class RefinementCategoryUnavailable(Exception):
+    """This refinement category has nothing to change on this DesignSpec version.
+
+    Version dispatch is mandatory, not optional (ADR 0028): a version-1 spec
+    carries no ``neckline_style`` at all, because the questionnaire that produced
+    it had no neckline question. Refusing up front with a controlled code is the
+    honest answer — the alternative is offering a control that can only ever
+    produce an unchanged concept. Safe message; never echoes the spec."""
+
+    code = "refinement_category_unavailable"
+
+
+def assert_category_refinable(schema_version: object, change_type: str) -> None:
+    """Raise :class:`RefinementCategoryUnavailable` when ``change_type`` owns no
+    canonical selection on a spec of ``schema_version``.
+
+    Called at the enqueue boundary, so an impossible refinement is refused before
+    an attempt row exists and before any provider is selected, and again inside
+    the service as defence in depth."""
+    if not canonical_refinement_fields(change_type, schema_version):
+        raise RefinementCategoryUnavailable(
+            "this change cannot be applied to this design's questionnaire version"
+        )
+
+
+def _assert_selection_changes_allowed(
+    changed_paths: frozenset[str], change_type: str, schema_version: object
+) -> None:
+    """Every changed canonical selection must be one this category owns.
+
+    Two checks, deliberately not one. The immutable set is tested EXPLICITLY
+    rather than left to the allowlist's silence, so a future allowlist entry
+    cannot grant ``garment_type`` or ``ceremony`` by accident; only then does
+    membership of the category's own group decide the rest."""
+    allowed = set(canonical_refinement_fields(change_type, schema_version))
+    for path in sorted(changed_paths):
+        field = changed_selection_field(path)
+        if field is None:
+            continue  # not a selection path at all; the allowlist check owns it
+        if not field:
+            # The bare ``source_selections`` root: a change this diff could not
+            # attribute to any one field. A well-formed diff of two valid specs
+            # cannot produce it (both carry every declared key), so reaching
+            # here means something is wrong with the payload's shape — refuse
+            # rather than let it fall through to a membership test that would
+            # reject it only incidentally.
+            raise RefinementOutputRejected(RefinementOutputCategory.IMMUTABLE_FIELD_CHANGED)
+        if field in REFINEMENT_IMMUTABLE_SELECTION_FIELDS:
+            raise RefinementOutputRejected(RefinementOutputCategory.IMMUTABLE_FIELD_CHANGED)
+        if field not in allowed:
+            raise RefinementOutputRejected(RefinementOutputCategory.SOURCE_SELECTIONS_CHANGED)
 
 
 def _assert_no_refinement_process_leakage(spec: DesignSpec) -> None:
@@ -247,19 +313,24 @@ def _assert_no_refinement_process_leakage(spec: DesignSpec) -> None:
 
 
 def _validate_refined_output(
-    payload: dict, source_spec: DesignSpec, change_type: str
+    payload: dict, source_spec: DesignSpec, change_type: str, design=None
 ) -> DesignSpec:
     """Fresh Django-side revalidation, exact-diff and safety checks. Raises
     on any failure (all treated as retryable by the caller, EXCEPT an empty
     diff, which is tracked separately so the caller can distinguish "no
-    change produced" from every other invalid-output reason)."""
+    change produced" from every other invalid-output reason).
+
+    ``design`` supplies the pinned questionnaire a changed canonical selection
+    is revalidated against (ADR 0028). It is optional ONLY so unit tests can
+    exercise the pure diff/allowlist half in isolation; every production caller
+    passes it, and the service refuses a design with no pinned questionnaire
+    long before reaching here."""
     spec = validate_design_spec(payload)
     # A refinement never changes the DesignSpec structure version — a mismatch
     # is treated the same as any other immutable change.
     if spec.schema_version != source_spec.schema_version:
         raise RefinementOutputRejected(RefinementOutputCategory.IMMUTABLE_FIELD_CHANGED)
     scan_design_spec_or_raise(spec)
-    _assert_source_selections_unchanged(spec, source_spec.source_selections.model_dump())
     _assert_no_refinement_process_leakage(spec)
 
     original = source_spec.model_dump(mode="json")
@@ -271,9 +342,18 @@ def _validate_refined_output(
         root = path.split(".", 1)[0].split("[", 1)[0]
         if root in REFINEMENT_IMMUTABLE_ROOTS:
             raise RefinementOutputRejected(RefinementOutputCategory.IMMUTABLE_FIELD_CHANGED)
-    allowed_roots = REFINEMENT_ALLOWED_PATHS[change_type]
+    _assert_selection_changes_allowed(changed_paths, change_type, source_spec.schema_version)
+    allowed_roots = refinement_allowed_paths(change_type, source_spec.schema_version)
     if any(not path_is_allowed(path, allowed_roots) for path in changed_paths):
         raise RefinementOutputRejected(RefinementOutputCategory.DISALLOWED_FIELD_CHANGED)
+    # The replacement for ADR 0015's exact-echo guarantee. Everything above
+    # decides WHICH canonical field may move; this decides whether the value it
+    # moved to is one the user could have chosen — under the design's own pinned
+    # questionnaire version, never the active one. Last, because it is the only
+    # check here that reads the database, and there is no sense querying for an
+    # output the cheap pure checks already refused.
+    if design is not None and any(changed_selection_field(path) for path in changed_paths):
+        assert_refined_selections_are_answerable(design, spec)
     return spec
 
 
@@ -284,13 +364,18 @@ def _generate_valid_refined_spec(
     note: str,
     design_id,
     generation_attempt: GenerationAttempt | None = None,
+    design=None,
 ):
     """Make at most :data:`MAX_REFINEMENT_PROVIDER_REQUESTS` controlled
     requests. Returns ``(spec, usage, attempts)``. A provider transport error
     or refusal aborts immediately (no retry). Raises
     :class:`RefinementNoChangeProduced` when every attempt's output was
     identical to the source, or :class:`RefinementGenerationFailed` for any
-    other exhausted-retry reason."""
+    other exhausted-retry reason.
+
+    ``design`` carries the pinned questionnaire a changed canonical selection is
+    revalidated against; ``design_id`` stays a separate parameter because it is
+    the only thing that reaches a log line."""
     responses: list = []
     attempts = 0
     no_change_only = True
@@ -301,7 +386,18 @@ def _generate_valid_refined_spec(
         request = StructuredDesignRequest(
             system_prompt=REFINEMENT_SYSTEM_PROMPT,
             user_message=build_refinement_user_message(
-                source_spec.model_dump(mode="json"), change_type, note, retry=attempt > 1
+                source_spec.model_dump(mode="json"),
+                change_type,
+                note,
+                # Which canonical selections this category may change is decided
+                # HERE, from the source spec's own schema version, and told to
+                # the model explicitly — never inferred by the model from the
+                # category name, and never trusted from its output either (the
+                # exact diff below re-checks every path regardless).
+                changeable_selection_fields=canonical_refinement_fields(
+                    change_type, source_spec.schema_version
+                ),
+                retry=attempt > 1,
             ),
             source_selections=source_spec.source_selections.model_dump(),
             max_output_tokens=settings.DESIGN_SPEC_MAX_OUTPUT_TOKENS,
@@ -353,7 +449,7 @@ def _generate_valid_refined_spec(
             raise GenerationRefused("the provider refused to refine the specification")
         if result.payload is not None:
             try:
-                spec = _validate_refined_output(result.payload, source_spec, change_type)
+                spec = _validate_refined_output(result.payload, source_spec, change_type, design)
             except _NoChangeInAttempt:
                 logger.warning(
                     "refinement output unchanged design=%s attempt=%s", design_id, attempt
@@ -363,6 +459,10 @@ def _generate_valid_refined_spec(
                 UnsupportedDesignSpecVersion,
                 GeneratedContentRejected,
                 RefinementOutputRejected,
+                # A canonical value the design's own questionnaire never
+                # offered. Retryable like every other invalid output: the model
+                # gets one corrected attempt, then the whole refinement fails.
+                RefinedSelectionsInvalid,
             ) as exc:
                 no_change_only = False
                 logger.warning(
@@ -487,6 +587,11 @@ def generate_refined_design_spec_for_design(
     on failure, persisting nothing."""
     # Every pre-spend validation FIRST (before any provider selection/call).
     source_context = validate_source_version(source_version)
+    # Defence in depth: the enqueue guard already refused a category with no
+    # canonical field on this spec version, so reaching here means a caller
+    # bypassed it. Refuse before spending rather than produce a concept the user
+    # asked to change and did not.
+    assert_category_refinable(source_context.spec.schema_version, refinement_request.change_type)
     if source_version.refined_versions.exists():
         raise RefinementLimitReached("this design has already been refined")
 
@@ -498,14 +603,24 @@ def generate_refined_design_spec_for_design(
         if source_version.refined_versions.exists():
             raise RefinementLimitReached("this design has already been refined")
         selected = provider if provider is not None else get_structured_design_generation_provider()
-        spec, usage, refine_attempts = _generate_valid_refined_spec(
-            selected,
-            source_context.spec,
-            refinement_request.change_type,
-            refinement_request.note,
-            design.id,
-            generation_attempt=attempt,
-        )
+        try:
+            spec, usage, refine_attempts = _generate_valid_refined_spec(
+                selected,
+                source_context.spec,
+                refinement_request.change_type,
+                refinement_request.note,
+                design.id,
+                generation_attempt=attempt,
+                design=design,
+            )
+        except RefinementQuestionnaireUnavailable as exc:
+            # Unreachable: validate_source_version refused a design with no
+            # pinned questionnaire before any provider was selected. Kept so a
+            # future caller that skips that check still ends on a stable code
+            # rather than an unclassified internal error.
+            raise RefinementSourceUnavailable(
+                "the source design has no usable questionnaire version"
+            ) from exc
         version = _finalise_refinement_atomic(
             design,
             source_version,
@@ -531,6 +646,7 @@ __all__ = [
     "MAX_REFINEMENT_PROVIDER_REQUESTS",
     "REFINEMENT_DESIGN_SPEC_TEMPLATE_VERSION",
     "DesignChangedDuringRefinement",
+    "RefinementCategoryUnavailable",
     "GenerationLocked",
     "GenerationRefused",
     "ProviderIdentityChanged",
@@ -540,6 +656,7 @@ __all__ = [
     "RefinementOutputCategory",
     "RefinementOutputRejected",
     "RefinementSourceUnavailable",
+    "assert_category_refinable",
     "generate_refined_design_spec_for_design",
     "validate_source_version",
 ]

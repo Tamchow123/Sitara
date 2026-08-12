@@ -91,6 +91,12 @@ REFINEMENT_LIMIT_REACHED = "refinement_limit_reached"
 # The source version is missing, not version 1, or its persisted provenance
 # (spec/prompt/image/inspiration-context) is incomplete or corrupt.
 REFINEMENT_SOURCE_UNAVAILABLE = "refinement_source_unavailable"
+# The requested category owns no canonical selection on this DesignSpec version
+# (Phase 23, ADR 0028) — a version-1 spec has no neckline_style, so a neckline
+# refinement of one could only ever return an unchanged concept. Normally a
+# controlled 409 at enqueue time; the same code is used by the job's defence-in-
+# depth check, which no ordinary request can reach.
+REFINEMENT_CATEGORY_UNAVAILABLE = "refinement_category_unavailable"
 
 # The ingest-stage terminal codes the operator recovery path may act on —
 # defined ONCE so the ``ingest_design_image`` command's admission gate and
@@ -147,6 +153,7 @@ GENERATION_ERROR_CODES = frozenset(
         REFINEMENT_GENERATION_FAILED,
         REFINEMENT_LIMIT_REACHED,
         REFINEMENT_SOURCE_UNAVAILABLE,
+        REFINEMENT_CATEGORY_UNAVAILABLE,
         LIVE_GENERATION_BUDGET_EXHAUSTED,
         GENERATION_STUCK,
         INTERNAL_GENERATION_ERROR,

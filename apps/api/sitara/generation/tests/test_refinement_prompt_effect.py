@@ -204,14 +204,17 @@ def _drop_clause(prompt: str, needle: str) -> str:
 
 # --- Part A: a narrative-only refinement, category by category --------------
 #
-# The three categories whose ENTIRE allowlist is unrendered for a fully-answered
-# v4 concept, whatever the narrative budget does. `dupatta_or_saree_drape`:
-# head_covering is dropped for every version, the drape narrative is replaced by
-# the canonical clause and drape_or_layering is not rendered.
-# `sleeves_and_coverage`: both narrative slots are suppressed by the canonical
-# answers and garment_components is not rendered. `styling_details`: not one of
-# its five paths is rendered for any spec at all.
-PROMPT_DEAD_CATEGORIES = ("dupatta_or_saree_drape", "sleeves_and_coverage", "styling_details")
+# The categories whose ENTIRE narrative allowlist is unrendered for a
+# fully-answered v4 concept, whatever the narrative budget does.
+# `dupatta_or_saree_drape`: head_covering is dropped for every version, the drape
+# narrative is replaced by the canonical clause and drape_or_layering is not
+# rendered. `sleeves_and_coverage`: both narrative slots are suppressed by the
+# canonical answers and garment_components is not rendered.
+#
+# `styling_details` was the third and is absent because ADR 0028 retired it: not
+# one of its five paths was rendered for any spec at all, and it named no
+# canonical selection to fall back on. See TestTheRetiredCategory below.
+PROMPT_DEAD_CATEGORIES = ("dupatta_or_saree_drape", "sleeves_and_coverage")
 
 # The canonical clause each remaining category is NAMED AFTER. Every one is built
 # from source_selections alone, so a narrative-only refinement can never move it
@@ -331,18 +334,11 @@ def canonical_refinement(change_type: str) -> dict:
 
 @pytest.mark.django_db
 class TestCanonicalRefinementReachesTheImagePrompt:
-    # STRICT xfail, deliberately: this is the phase's evidence that the defect
-    # is real. Every case below fails today with
-    # RefinementOutputCategory.SOURCE_SELECTIONS_CHANGED, because ADR 0015 froze
-    # source_selections whole. Phase 23's canonical-selection commit removes this
-    # marker; strict=True means the marker cannot outlive the defect unnoticed.
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Phase 23 §1: a refinement may not change its own canonical selection "
-            "until the canonical-selection commit lands"
-        ),
-    )
+    # Until ADR 0028 every case below failed with
+    # RefinementOutputCategory.SOURCE_SELECTIONS_CHANGED and this class carried a
+    # strict xfail marker recording that. The marker is gone because the defect
+    # is: each category now changes the canonical selection it is named after,
+    # and the prompt says so.
     @pytest.mark.parametrize("change_type", sorted(CANONICAL_REFINEMENTS))
     def test_the_refined_selection_is_accepted_and_moves_the_prompt(self, change_type):
         _edits, introduces, retires = CANONICAL_REFINEMENTS[change_type]

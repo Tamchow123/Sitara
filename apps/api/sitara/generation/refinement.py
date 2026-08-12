@@ -41,6 +41,16 @@ from .input_safety import (
     strip_format_characters,
 )
 from .inspiration_context import canonical_text
+from .selection_semantics import (
+    COLOUR_SELECTION_FIELDS,
+    COVERAGE_SELECTION_FIELDS,
+    DRAPE_SELECTION_FIELDS,
+    EMBELLISHMENT_SELECTION_FIELDS,
+    FABRIC_SELECTION_FIELDS,
+    IMMUTABLE_SELECTION_FIELDS,
+    NECKLINE_SELECTION_FIELDS,
+    SILHOUETTE_SELECTION_FIELDS,
+)
 
 # Versions the persisted REQUEST SHAPE. Bump only with a documented migration
 # strategy for existing persisted DesignVersion.refinement_request rows.
@@ -65,6 +75,7 @@ DUPATTA_OR_SAREE_DRAPE = "dupatta_or_saree_drape"
 SILHOUETTE_DETAIL = "silhouette_detail"
 STYLING_DETAILS = "styling_details"
 
+# The categories a client may request TODAY.
 REFINEMENT_CHANGE_TYPES = (
     COLOUR_STORY,
     FABRIC_AND_TEXTURE,
@@ -73,12 +84,29 @@ REFINEMENT_CHANGE_TYPES = (
     NECKLINE,
     DUPATTA_OR_SAREE_DRAPE,
     SILHOUETTE_DETAIL,
-    STYLING_DETAILS,
 )
 
-# Derived from REFINEMENT_CHANGE_TYPES (never a second hand-maintained list)
-# so the two can never drift apart.
-_ChangeType = Literal[*REFINEMENT_CHANGE_TYPES]
+# Retired by Phase 23 (ADR 0028). ``styling_details`` names no canonical
+# selection, and every narrative path it could change — styling_notes, the
+# cultural interpretation notes, the title, the summary, the alt text — is
+# deliberately unrendered by prompt builder 8.0.0 for reasons that still hold
+# ("advisory beauty/jewellery prose pulls the provider toward portraiture and
+# can contradict the coverage requirements"). A control whose effect is
+# invisible in the thing the user is looking at is worse than an absent one, so
+# it is removed rather than left offering a promise it cannot keep.
+#
+# It stays NAMED here because a persisted DesignVersion.refinement_request row
+# may carry it, and a historical row is audit data that is read, never rewritten
+# (CLAUDE.md §14 applied to a different table). So the request MODEL below
+# accepts it and the client-input boundary does not.
+RETIRED_REFINEMENT_CHANGE_TYPES = (STYLING_DETAILS,)
+
+# Every value that may appear in a PERSISTED refinement request, current or
+# historical. Derived from the two tuples above (never a third hand-maintained
+# list) so they can never drift apart.
+PERSISTED_REFINEMENT_CHANGE_TYPES = REFINEMENT_CHANGE_TYPES + RETIRED_REFINEMENT_CHANGE_TYPES
+
+_ChangeType = Literal[*PERSISTED_REFINEMENT_CHANGE_TYPES]
 
 # The exact DesignSpec paths each category may change, as concrete dotted
 # strings (never a wildcard pattern). A root with no dot (e.g.
@@ -167,20 +195,97 @@ REFINEMENT_ALLOWED_PATHS: dict[str, frozenset[str]] = {
             "image_alt_text",
         }
     ),
-    STYLING_DETAILS: frozenset(
-        {
-            "title",
-            "concept_summary",
-            "styling_notes",
-            "cultural_context.interpretation_notes",
-            "image_alt_text",
-        }
-    ),
 }
 
 # Never changeable by ANY refinement category, regardless of the allowlist
 # above — checked unconditionally by Part B's exact-diff validation.
-REFINEMENT_IMMUTABLE_ROOTS = frozenset({"schema_version", "source_selections"})
+#
+# Phase 23 (ADR 0028) narrowed this from {"schema_version", "source_selections"}.
+# Freezing the whole of ``source_selections`` was right on ADR 0015's terms — a
+# spec's selections are the user's own answers echoed back, and a model must
+# never quietly rewrite what someone said — but it answered the wrong question.
+# A refinement IS the user changing one answer, deliberately, through a named
+# category, on a screen that exists for that purpose; refusing to record the
+# change discarded their answer rather than protecting it. What replaces the
+# blanket freeze is narrower and stronger: only the category's OWN canonical
+# field may move (:func:`refinement_allowed_paths`), the fields below may never
+# move at all, and the new value must be a legal answer to the design's own
+# pinned questionnaire (:mod:`sitara.generation.refinement_selections`).
+REFINEMENT_IMMUTABLE_ROOTS = frozenset({"schema_version"})
+
+# Canonical selections no category may change, checked explicitly rather than
+# left to the allowlist's silence — a future allowlist entry must not be able to
+# grant one of these by accident. Owned by selection_semantics, which is where
+# every other statement about what a canonical selection MEANS lives.
+REFINEMENT_IMMUTABLE_SELECTION_FIELDS = IMMUTABLE_SELECTION_FIELDS
+
+# The DesignSpec root holding the canonical selections.
+_SELECTIONS_ROOT = "source_selections"
+
+# Which canonical selection group each category owns. The category-to-group
+# decision is this module's; what each group contains on a given DesignSpec
+# version is selection_semantics'. A category absent here owns nothing.
+_CANONICAL_FIELDS_BY_CATEGORY: dict[str, dict[int, tuple[str, ...]]] = {
+    COLOUR_STORY: COLOUR_SELECTION_FIELDS,
+    FABRIC_AND_TEXTURE: FABRIC_SELECTION_FIELDS,
+    EMBELLISHMENT: EMBELLISHMENT_SELECTION_FIELDS,
+    SLEEVES_AND_COVERAGE: COVERAGE_SELECTION_FIELDS,
+    NECKLINE: NECKLINE_SELECTION_FIELDS,
+    DUPATTA_OR_SAREE_DRAPE: DRAPE_SELECTION_FIELDS,
+    SILHOUETTE_DETAIL: SILHOUETTE_SELECTION_FIELDS,
+}
+
+
+def canonical_refinement_fields(change_type: str, schema_version: object) -> tuple[str, ...]:
+    """The ``source_selections`` fields ``change_type`` may change on a spec of
+    ``schema_version``.
+
+    Empty means the category has nothing canonical to change on this version —
+    an unknown or retired category, or the real case this dispatch exists for: a
+    version-1 spec carries no ``neckline_style`` attribute at all. Total over
+    arbitrary input, so an unsupported persisted version yields ``()`` rather
+    than a ``KeyError`` or an ``AttributeError``.
+
+    The version must be a strict ``int``, exactly as
+    :func:`~sitara.generation.design_spec.design_spec_model_for_version`
+    requires: ``bool`` is an ``int`` subclass and ``1.0 == 1``, so a stored
+    ``true`` or ``1.0`` would otherwise silently resolve to version 1."""
+    by_version = _CANONICAL_FIELDS_BY_CATEGORY.get(change_type)
+    if by_version is None or isinstance(schema_version, bool) or type(schema_version) is not int:
+        return ()
+    return tuple(by_version.get(schema_version, ()))
+
+
+def refinement_allowed_paths(change_type: str, schema_version: object) -> frozenset[str]:
+    """Every DesignSpec path ``change_type`` may change on a spec of
+    ``schema_version``: its narrative allowlist plus this version's canonical
+    selection paths.
+
+    The canonical paths are ADDED to the narrative ones, never substituted — the
+    refined narrative should still agree with the refined selection."""
+    narrative = REFINEMENT_ALLOWED_PATHS.get(change_type, frozenset())
+    canonical = {
+        f"{_SELECTIONS_ROOT}.{field}"
+        for field in canonical_refinement_fields(change_type, schema_version)
+    }
+    return narrative | canonical
+
+
+def changed_selection_field(path: str) -> str | None:
+    """The ``source_selections`` field a changed path names, or ``None`` when the
+    path is not a selection path at all.
+
+    ``source_selections.fabrics[0].x`` and ``source_selections.fabrics`` both
+    name ``fabrics``. A bare ``source_selections`` — which a well-formed diff of
+    two valid specs cannot produce, since both carry every declared key — names
+    the empty string, so the caller treats it as a change it cannot attribute
+    and refuses it."""
+    if path == _SELECTIONS_ROOT:
+        return ""
+    prefix = _SELECTIONS_ROOT + "."
+    if not path.startswith(prefix):
+        return None
+    return path[len(prefix) :].split(".", 1)[0].split("[", 1)[0]
 
 
 class RefinementRequestInvalid(Exception):
@@ -296,11 +401,18 @@ def normalise_refinement_request(payload: object) -> RefinementRequest:
     outer whitespace stripped before length and safety checks. Raises
     :class:`RefinementRequestInvalid` for any malformed/out-of-contract
     payload (never a raw Pydantic error) and :class:`RefinementNoteUnsafe`
-    for an unsafe note — both generic, never echoing client input."""
+    for an unsafe note — both generic, never echoing client input.
+
+    This is the CLIENT-INPUT boundary, so a retired category is refused here
+    even though :class:`RefinementRequest` still accepts one: a new request
+    naming ``styling_details`` is a controlled invalid request, while the
+    historical row that named it stays readable."""
     if not isinstance(payload, dict):
         raise RefinementRequestInvalid()
     allowed_keys = {"schema_version", "change_type", "note"}
     if set(payload) - allowed_keys:
+        raise RefinementRequestInvalid()
+    if payload.get("change_type") in RETIRED_REFINEMENT_CHANGE_TYPES:
         raise RefinementRequestInvalid()
 
     note_raw = payload.get("note", "")

@@ -177,6 +177,16 @@ const GENERATION_ERROR_MESSAGES = {
     message: "The original concept is not available for refinement. Please try again shortly.",
     editable: false,
   },
+  // Since Phase 23 (ADR 0028): the change exists but this concept's own
+  // questionnaire version has no such choice to move, so the refinement could
+  // only ever return the same design back. Retrying will not help; choosing a
+  // different change will, so the copy says so rather than inviting a retry.
+  refinement_category_unavailable: {
+    heading: "That change isn't available for this concept",
+    message:
+      "This concept was created from an earlier version of the questionnaire, which has no such choice to change. Please choose a different change.",
+    editable: false,
+  },
   // Since Phase 16: the daily limit for generating new concepts has been
   // reached. Purely informational — retrying immediately will not help, so the
   // copy invites the user to come back later rather than resubmitting.
