@@ -6,6 +6,15 @@ recorded inline as **Owner decision** so a later reader can tell a decision from
 an inference. All eight open questions were answered on 2026-08-11 — the answers,
 and what each changed, are recorded at the end.
 
+> **Amended after delivery (2026-08-12).** This document records what was
+> commissioned and is left as written. One part of it has since been narrowed by
+> the owner: the reference step's "three ways in" are now one — the QR handoff —
+> and the code shows itself rather than waiting behind a button. The iPad's
+> camera capture, file picker, rights checkbox and disclosure copy are removed.
+> See the Amendment section of
+> [ADR 0026](../decisions/0026-in-store-reference-capture.md) for the decision,
+> what it deliberately does not change, and what it costs.
+
 ## Main objective
 
 Two changes to one screen, plus one thing the owner did not ask for that the
@@ -494,12 +503,18 @@ drift-free.
 ## Manual checkpoint
 
 Operator-run, on real hardware, and **not part of the PR**: on an actual iPad in
-the intended setting, complete the reference step three ways — camera, phone
-handoff, file picker — with a real phone that is not the iPad; confirm the
-disclosure is readable on the phone before the picker is usable; confirm a
-photographed QR stops working after expiry; confirm "Finish and hand back"
-leaves the next person anonymous. Until this is run, the honest claim is
-"implemented and exercised against the test suite", nothing stronger.
+the intended setting, complete the reference step **by phone handoff, with a real
+phone that is not the iPad**; confirm the disclosure is readable on the phone
+before the picker is usable; confirm a photographed QR stops working after
+expiry; confirm "Finish and hand back" leaves the next person anonymous. Until
+this is run, the honest claim is "implemented and exercised against the test
+suite", nothing stronger.
+
+> As commissioned this step read "three ways — camera, phone handoff, file
+> picker". The 2026-08-12 amendment removed the camera and the file picker, so
+> the handoff is the only path left to exercise. Corrected here rather than left
+> as written, because unlike the narrative above it is a checklist an operator
+> follows literally. See ADR 0026's Amendment.
 
 ## Non-goals
 

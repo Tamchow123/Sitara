@@ -1,4 +1,8 @@
-// The ADR 0019 disclosure is the same on both screens (Phase 22, ADR 0026).
+// The ADR 0019 disclosure, written for two screens and rendered by one
+// (Phase 22, ADR 0026 as amended 2026-08-12 — the iPad's camera and picker went,
+// and its affirmation went with them, so only the customer's phone shows this
+// today). Both scopes are still held to the same substance, because the wording
+// is what any future device-local path must reuse rather than reinvent.
 //
 // Phase 22 requires the customer's phone to show "the full ADR 0019 disclosure
 // ... in the same words as the iPad, not a shortened version. A phone screen is

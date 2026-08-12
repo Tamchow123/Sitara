@@ -63,9 +63,9 @@ class GrantDesignFull(Exception):
     """The design filled up before the code could be minted.
 
     Raised from inside the mint's own row lock. The view's cheap pre-check
-    cannot be the authority: a stylist who taps "Show the code" while their own
-    third photo is still committing would otherwise be handed a code that is
-    dead on arrival, and the customer scans it and blames her phone. Same
+    cannot be the authority: a step that mints as soon as it opens, while a
+    third photograph is still committing, would otherwise be handed a code that
+    is dead on arrival, and the customer scans it and blames her phone. Same
     condition, same 409 as the pre-check — only decided somewhere it cannot be
     overtaken."""
 

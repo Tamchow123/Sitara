@@ -1095,6 +1095,11 @@ function parseInspirationUpload(value: unknown): InspirationUpload | null {
   };
 }
 
+// The owning session's own upload path. No screen calls it since ADR 0026's
+// amendment removed the iPad's camera and file picker (2026-08-12) — the phone
+// uploads by grant instead. Kept, with its tests: the endpoint is live,
+// authorised and unchanged, and deleting a working client for a UI decision
+// would make restoring one a bigger job than the decision was.
 export function uploadInspirationImage(
   designId: string,
   file: File,

@@ -1,15 +1,20 @@
 // The ADR 0019 disclosure, in one place (Phase 22, ADR 0026).
 //
-// Two screens now show it: the shop's iPad and — since the phone handoff — the
-// customer's own phone. Phase 22 requires the phone to show "the full ADR 0019
-// disclosure ... in the same words as the iPad, not a shortened version. A
-// phone screen is smaller; that is a layout problem, not a licence to
-// abbreviate."
+// It was written for two screens — the shop's iPad and the customer's own
+// phone. Phase 22 requires the phone to show "the full ADR 0019 disclosure ...
+// in the same words as the iPad, not a shortened version. A phone screen is
+// smaller; that is a layout problem, not a licence to abbreviate."
 //
 // Two copies of that paragraph would eventually differ, and the one that got
 // shortened would be the phone's, because it is the one that does not fit. So
-// there is one copy and both screens render it. Layout differences belong in
-// CSS.
+// there is one copy. Layout differences belong in CSS.
+//
+// Since ADR 0026's amendment (2026-08-12) only the phone renders it: the iPad's
+// camera and file picker are gone, and its affirmation went with the controls it
+// gated. `scope="own-device"` therefore has no caller today. It is kept, with
+// its test, because it is one sentence and it is the wording any future
+// device-local upload path must reuse rather than reinvent — not because
+// anything still shows it.
 //
 // The substance is not ours to soften: BFL's terms take a perpetual,
 // irrevocable licence over inputs; Replicate publishes no input retention

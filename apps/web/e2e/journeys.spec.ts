@@ -183,8 +183,13 @@ test.describe("journey 5: the reference step", () => {
   // approved anywhere, was every stack. ADR 0025 retired the catalogue, so the
   // step is now the customer's own photographs and this journey runs for real
   // rather than skipping.
+  //
+  // Narrowed again after Phase 22 (ADR 0026's amendment): the iPad's camera and
+  // file picker are gone, so the phone is the only way a reference arrives. The
+  // upload and removal that used to be driven through this device's picker are
+  // driven through the phone's page below, from a separate browser context.
 
-  test("offers no catalogue, and takes an upload from this device", async ({ page }) => {
+  test("offers no catalogue, and no way in from this device", async ({ page }) => {
     await page.goto("/design/new");
     await advanceUntilQuestion(page, /inspiration images/i);
 
@@ -207,59 +212,30 @@ test.describe("journey 5: the reference step", () => {
     // And nothing on the screen is being served by the retired endpoints.
     await expect(page.locator('img[src*="inspiration-assets"]')).toHaveCount(0);
 
-    // The rights affirmation gates uploading and is never pre-ticked — the
-    // per-upload self-affirmation is the user's statement, so it cannot be
-    // made on their behalf (ADR 0018/0019, CLAUDE.md §13).
-    const affirmation = page.getByRole("checkbox").first();
-    await expect(affirmation).not.toBeChecked();
-    await expect(page.getByText(/take a photo/i)).toBeVisible();
-    await expect(page.getByText(/choose a file/i)).toBeVisible();
+    // No file input at all — neither the picker nor the camera. Asserted as an
+    // absence of the CONTROL rather than of two particular labels, because a
+    // renamed one would slip past that.
+    await expect(page.locator('input[type="file"]')).toHaveCount(0);
 
-    // The provider exposure must be readable BEFORE anyone uploads, not after.
-    await expect(page.getByText(/perpetual, irrevocable licence/i)).toBeVisible();
+    // And no rights affirmation on this device. Not a weakening: this checkbox
+    // only ever gated the two controls above, and an affirmation ticked by
+    // whoever holds the shop's screen was never allowed to satisfy the phone's
+    // (ADR 0026). The one that does the work is taken on the phone, per upload,
+    // from the person who chose the photograph — asserted in the handoff test
+    // below, where it is enforced.
+    await expect(page.getByRole("checkbox")).toHaveCount(0);
 
-    // The file is one of the project's OWN synthetic questionnaire visuals.
-    // CLAUDE.md §13 permits locally generated synthetic images for clearly
-    // labelled engineering tests and forbids downloaded or unlicensed ones, so
-    // reusing a build output we already produced is the correct source — no new
-    // asset, nothing with a real person in it.
-    await affirmation.check();
-    // The PICKER input, told apart from the camera one by the absence of
-    // `capture` rather than by a React useId — those contain colons, are
-    // invalid in a CSS selector unescaped, and change whenever the tree does.
-    await page
-      .locator('input[type="file"]:not([capture])')
-      .first()
-      .setInputFiles(SYNTHETIC_UPLOAD);
-
-    await expect(page.getByText(/image added to your design/i)).toBeVisible({ timeout: 30_000 });
-    const uploads = page.getByRole("list", { name: /your uploaded images/i });
-    await expect(uploads.getByRole("listitem")).toHaveCount(1);
-
-    // Removal frees the slot again and says so, rather than silently emptying
-    // the grid — the status is announced, not merely displayed.
-    // "Remove image 1", not a bare "Remove": each button names which image it
-    // removes, so a screen-reader user hears them apart.
-    await uploads.getByRole("button", { name: /^remove image 1$/i }).click();
-    await expect(page.getByText(/image removed from your design/i)).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(uploads).toHaveCount(0);
+    // The code is simply there. Nothing to press first, because the answer to
+    // "shall I show the code" on a step whose only way in IS the code was never
+    // going to be no.
+    await expect(
+      page.getByRole("img", { name: /scan this to send a photograph/i }),
+    ).toBeVisible({ timeout: 30_000 });
   });
 
   test("hands off to a phone by QR, and stops when the stylist says so", async ({ page }) => {
     await page.goto("/design/new");
     await advanceUntilQuestion(page, /inspiration images/i);
-
-    // The handoff is the headline option and is NOT behind this device's
-    // rights affirmation — the phone takes its own, from the person choosing
-    // the photograph (ADR 0026). Asserted here because gating it behind the
-    // iPad's checkbox is the exact substitution the ADR exists to prevent.
-    await expect(page.getByRole("checkbox").first()).not.toBeChecked();
-    const show = page.getByRole("button", { name: /show the code/i });
-    await expect(show).toBeEnabled();
-
-    await show.click();
 
     const code = page.getByRole("img", { name: /scan this to send a photograph/i });
     await expect(code).toBeVisible({ timeout: 30_000 });
@@ -274,7 +250,90 @@ test.describe("journey 5: the reference step", () => {
     // Sitara, so revocation is a fact rather than a hope.
     await page.getByRole("button", { name: /stop accepting photos/i }).click();
     await expect(code).toHaveCount(0, { timeout: 30_000 });
-    await expect(page.getByRole("button", { name: /show the code/i })).toBeVisible();
+
+    // A stop stays stopped. The panel shows a code on arrival, but not again
+    // after the stylist has deliberately killed one — the button is the way
+    // back, and pressing it is a decision rather than a re-render.
+    await expect(page.getByRole("button", { name: /show a new code/i })).toBeVisible();
+  });
+
+  test("a photograph sent from the phone arrives, and can be taken off", async ({
+    page,
+    browser,
+  }) => {
+    // The upload and removal this covers used to run through the iPad's own
+    // picker. With that gone the phone is the only way in, so leaving the path
+    // uncovered at the moment it became the sole one would be the wrong trade.
+    //
+    // A SEPARATE browser context, not a second tab: the phone shares no cookie,
+    // no session and no storage with the shop's iPad, which is the situation
+    // the grant exists for — the scanned code is the whole authorisation.
+    //
+    // What this still does not prove is the handoff itself: a real camera, a
+    // real second device, a code read off glass. That wants the manual
+    // checkpoint and cannot be faked here.
+    await page.goto("/design/new");
+    await advanceUntilQuestion(page, /inspiration images/i);
+
+    await expect(
+      page.getByRole("img", { name: /scan this to send a photograph/i }),
+    ).toBeVisible({ timeout: 30_000 });
+    await page.getByText(/the camera will not scan it/i).click();
+    // textContent, not innerText: the raw DOM string cannot be reshaped by
+    // whatever wrapping the panel's CSS does to a very long code.
+    const handoffUrl = ((await page.getByText(/\/r#/).textContent()) ?? "").trim();
+    expect(handoffUrl).toMatch(/\/r#.+/);
+
+    const phone = await browser.newContext();
+    try {
+      const phonePage = await phone.newPage();
+      await phonePage.goto(handoffUrl);
+      await expect(phonePage.getByRole("heading", { name: /send a photograph/i })).toBeVisible();
+
+      // The disclosure is readable, and the picker unusable, BEFORE anything is
+      // chosen — in the same words as the iPad used to show, from the shared
+      // component (ADR 0019/0026).
+      await expect(phonePage.getByText(/perpetual, irrevocable licence/i)).toBeVisible();
+      // The library input, told apart from the camera one by the absence of
+      // `capture` rather than by a React useId — those contain colons, are
+      // invalid in a CSS selector unescaped, and change whenever the tree does.
+      const library = phonePage.locator('input[type="file"]:not([capture])').first();
+      await expect(library).toBeDisabled();
+
+      // The file is one of the project's OWN synthetic questionnaire visuals.
+      // CLAUDE.md §13 permits locally generated synthetic images for clearly
+      // labelled engineering tests and forbids downloaded or unlicensed ones,
+      // so reusing a build output we already produced is the correct source —
+      // no new asset, nothing with a real person in it.
+      await phonePage.getByRole("checkbox").check();
+      await expect(library).toBeEnabled();
+      await library.setInputFiles(SYNTHETIC_UPLOAD);
+      await expect(phonePage.getByText(/1 photograph so far/i)).toBeVisible({ timeout: 30_000 });
+
+      // The phone is told nothing about the design's contents — no gallery, no
+      // remaining count. A grant grants upload and nothing else.
+      await expect(phonePage.getByRole("list", { name: /your uploaded images/i })).toHaveCount(0);
+      await expect(phonePage.getByText(/\b[0-9]+ of [0-9]+ free/i)).toHaveCount(0);
+    } finally {
+      await phone.close();
+    }
+
+    // Back on the shop's screen, which polls: the arrival is announced, not
+    // merely displayed, because the stylist may be looking at the customer.
+    await expect(page.getByText(/1 photograph arrived from the phone/i)).toBeVisible({
+      timeout: 30_000,
+    });
+    const uploads = page.getByRole("list", { name: /your uploaded images/i });
+    await expect(uploads.getByRole("listitem")).toHaveCount(1);
+
+    // Removal is the stylist's job — the phone deliberately cannot do it.
+    // "Remove image 1", not a bare "Remove": each button names which image it
+    // removes, so a screen-reader user hears them apart.
+    await uploads.getByRole("button", { name: /^remove image 1$/i }).click();
+    await expect(page.getByText(/image removed from your design/i)).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(uploads).toHaveCount(0);
   });
 
   test("a phone with no code is told so rather than shown a broken page", async ({ page }) => {

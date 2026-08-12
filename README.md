@@ -1,6 +1,6 @@
 # Sitara
 
-AI-assisted South Asian bridalwear **concept design**. A guided questionnaire, up to three of the customer's own reference photographs (sent from her phone by QR, taken with the device camera, or picked from a file), and an AI-generated concept: a FLUX-rendered visual plus a structured design description authored by Claude, with one constrained refinement round. The owner can then mark up their private concept and have the annotated render emailed to their own account address. A deterministic, zero-cost demo mode runs the complete journey through the same pipeline with no paid provider calls.
+AI-assisted South Asian bridalwear **concept design**. A guided questionnaire, up to three of the customer's own reference photographs (sent from her own phone by QR), and an AI-generated concept: a FLUX-rendered visual plus a structured design description authored by Claude, with one constrained refinement round. The owner can then mark up their private concept and have the annotated render emailed to their own account address. A deterministic, zero-cost demo mode runs the complete journey through the same pipeline with no paid provider calls.
 
 > Sitara is for concept visualisation only. It does not produce sewing patterns or manufacturing specifications, and does not guarantee a garment can be constructed exactly as shown.
 
@@ -29,9 +29,11 @@ records, ingest sanitiser, `publicly_eligible()`, services and admin stay intact
 staff-only, and every existing `DesignInspiration` row and frozen
 `inspiration_context` snapshot is untouched. Removing the stronger, staff-verified
 rights model does **not** upgrade the weaker per-upload self-affirmation that remains.
-**The reference step gets three ways in, ordered for the device** (ADR 0026): a QR
-handoff to the customer's own phone first — the primary path, not a fallback —
-on-device camera capture second, file picker last. Behind the QR is a
+**The reference step has one way in** (ADR 0026, as amended 2026-08-12): a QR
+handoff to the customer's own phone. It began as the primary path of three; the
+iPad's own camera capture and file picker were removed once it was clear the
+picture is always on the customer's phone, and the code now shows itself as soon
+as the step opens. Behind the QR is a
 `ReferenceUploadGrant`: a `secrets.token_urlsafe(32)` secret stored only as a SHA-256
 digest and returned exactly once, scoped to **upload into one design and nothing else**,
 expiring in 15 minutes, spent when the design fills up, revoked explicitly and on
@@ -45,10 +47,13 @@ there. The plaintext travels in the request **body** and reaches the phone in th
 **fragment**, which browsers do not send to servers — and the Sentry scrubber now cuts
 at the first `?` **or** `#`. Anyone who can see the iPad's screen can photograph the
 QR: that exposure is **accepted and bounded, not removed**. The ADR 0019 rights
-disclosure and affirmation move to **the phone**, per upload, in the same shared
-component and the same words — an affirmation ticked on the shop's device does not
-carry across, because a rights affirmation made by someone who never saw the photograph
-is worse than none. **The shop owns the design** (ADR 0027): one account per boutique,
+disclosure and affirmation move to **the phone**, per upload, from the one shared
+component — an affirmation ticked on the shop's device does not carry across, because a
+rights affirmation made by someone who never saw the photograph is worse than none.
+Since the amendment the phone's is the only one there is: the iPad's checkbox and
+disclosure went with the two controls they gated, which is not a weakening of the
+affirmation that does the work and does not make a per-upload self-affirmation into
+verified rights. **The shop owns the design** (ADR 0027): one account per boutique,
 the walk-in customer never registers, and the concepts are the shop's work product to
 pass on at its discretion — which supersedes an assumption ADR 0004 and ADR 0023 were
 built on. On a shared screen that makes *surface* the remaining concern, so the ADR

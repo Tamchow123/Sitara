@@ -1,6 +1,7 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetHandoffCoordination } from "./handoff-coordination";
 import { QuestionnaireWizard } from "./QuestionnaireWizard";
 import type { QuestionnaireSchema } from "./types";
 
@@ -12,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   validateDesignDraft: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
+  createReferenceGrant: vi.fn(),
+  revokeReferenceGrants: vi.fn(),
+  fetchDesignReferences: vi.fn(),
 }));
 
 vi.mock("./api", () => ({
@@ -26,6 +30,20 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
   useParams: () => ({}),
 }));
+
+// The reference step's handoff panel mints a grant on mount (ADR 0026's
+// amendment). Stubbed so this suite makes no network call and the panel settles
+// LIVE rather than into its error state, whose "Try again" button would
+// otherwise be mistaken for the retired catalogue's retry control.
+vi.mock("@/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+  return {
+    ...actual,
+    createReferenceGrant: mocks.createReferenceGrant,
+    revokeReferenceGrants: mocks.revokeReferenceGrants,
+    fetchDesignReferences: mocks.fetchDesignReferences,
+  };
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -90,6 +108,11 @@ function detail(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  // This suite reaches the reference step, which mounts the handoff panel.
+  // Its coordination state is module-level and outlives a component on
+  // purpose, so without this one test's stopped design silently suppresses
+  // the next one's code — and the failure reads as a broken panel.
+  resetHandoffCoordination();
   // resetAllMocks clears both call history AND implementations, so a
   // deferred/return-value set in one test never leaks into the next.
   vi.resetAllMocks();
@@ -99,10 +122,27 @@ beforeEach(() => {
   mocks.createDesignDraft.mockResolvedValue({ ok: true, data: detail() });
   mocks.updateDesignDraft.mockResolvedValue({ ok: true, data: detail() });
   mocks.validateDesignDraft.mockResolvedValue({ ok: true, data: { valid: true } });
+  mocks.createReferenceGrant.mockResolvedValue({
+    ok: true,
+    grant: {
+      id: "g1",
+      token: "a-plaintext-handoff-secret-value",
+      expires_at: new Date(Date.now() + 900_000).toISOString(),
+      slots_remaining: 3,
+    },
+  });
+  mocks.revokeReferenceGrants.mockResolvedValue({ ok: true });
+  mocks.fetchDesignReferences.mockResolvedValue([]);
 });
 
 afterEach(() => {
-  vi.resetAllMocks();
+  // Deliberately NOT vi.resetAllMocks() here. Testing Library's automatic
+  // cleanup unmounts after this hook, and unmounting the reference step fires
+  // the handoff panel's revoke — which would then be calling a mock whose
+  // implementation had just been stripped, returning undefined where the
+  // component expects a promise. `beforeEach` already resets and re-seeds
+  // every mock, so this hook had nothing left to do but break that.
+  cleanup();
 });
 
 async function flushMicrotasks() {

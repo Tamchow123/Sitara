@@ -1,6 +1,6 @@
 # 0026 — In-store reference capture by phone handoff
 
-- **Status:** accepted
+- **Status:** accepted, amended 2026-08-12 (see [Amendment](#amendment-2026-08-12--the-phone-is-the-only-way-in) — the iPad's camera and file picker are removed and the code shows itself)
 - **Date:** 2026-08-11
 - **Deciders:** Sitara project owner
 - **Phase:** Phase 22 (see ../phases/PHASES.md)
@@ -114,7 +114,10 @@ that got shortened would be the phone's, because it is the one that does not fit
 
 The QR control is deliberately **outside** the iPad's own affirmation checkbox.
 Gating it behind that tick would say the opposite of this decision: that whoever
-holds the shop's screen can consent on the customer's behalf.
+holds the shop's screen can consent on the customer's behalf. (The amendment
+below removes the iPad's checkbox altogether, along with the two controls it
+gated. The principle is unchanged and the phone's affirmation is untouched —
+there is simply no longer a second, weaker place to take one.)
 
 Get this wrong and the product records a rights affirmation made by someone who
 never saw the photograph. That is worse than no affirmation, because it looks
@@ -143,14 +146,16 @@ handoff grant does not open it, because a grant is upload-only, permanently.
   private storage, same three-slot cap, same deletion with the design.
 - The set of people who can put an image into a design widens from "whoever holds
   the shop's session" to "whoever holds the shop's session, plus whoever holds a
-  live code". That is the point, and it is what the bounds above are for.
+  live code". That is the point, and it is what the bounds above are for. (After
+  the amendment below it is no longer a widening but a **replacement**: only a
+  live code puts an image in. Removing one stays the session's.)
 - A customer's phone becomes a client of Sitara's API. It has no account, no
   workspace and no session relationship to the iPad — the grant is its entire
   authorisation, and it is CSRF-protected like every other unsafe endpoint.
 - The manual checkpoint is outstanding: a real iPad, a real phone that is not the
-  iPad, all three paths, and a photographed code confirmed dead after expiry.
-  Until that is run the honest claim is "implemented and exercised against the
-  test suite", nothing stronger.
+  iPad, the handoff end to end (one path, after the amendment below), and a
+  photographed code confirmed dead after expiry. Until that is run the honest
+  claim is "implemented and exercised against the test suite", nothing stronger.
 
 ### What would trigger revisiting this
 
@@ -180,3 +185,85 @@ customer, which is precisely the failure ADR 0027 is about.
 put a presentation concern in the API, and it would not achieve "encoded exactly
 once" anyway, because the typed fallback means the plaintext reaches the browser
 regardless.
+
+## Amendment (2026-08-12) — the phone is the only way in
+
+> **Owner decision (2026-08-12):** "I've decided I want the default to be the QR
+> code so only provide that option. […] reduce the text on the inspiration page
+> to only show what is necessary and have the QR code shown immediately."
+
+The original decision made the handoff *primary* and kept the iPad's camera
+capture and file picker behind it. In use that ordering was the whole answer:
+the picture is on the customer's phone, so the two device-local controls were
+alternatives nobody on a shop floor wanted. They are removed.
+
+Three changes, all in the browser. No endpoint, model, migration, gate or bound
+changes.
+
+1. **One way in.** The iPad's camera capture and file picker are gone. The
+   `POST /designs/<id>/inspiration-uploads/` endpoint and its client wrapper stay
+   — it is the owning session's own upload path, still tested, and removing a
+   working authorised endpoint to reflect a UI choice would be a different and
+   larger decision. **Standing note for whoever reaches for it next:** it now has
+   no UI caller, so nothing on screen demonstrates the affirmation rule any more.
+   Any future caller of `uploadInspirationImage`, or of `RightsDisclosure`'s
+   now-unused `scope="own-device"`, must re-derive that rule from this ADR before
+   wiring it up — the affirmation belongs to the person who chose the photograph,
+   and a `rights_acknowledged` flag set by anything other than that person's own
+   tick is the exact substitution this decision exists to prevent.
+2. **The step says only what it needs to.** The reference screen is now a
+   heading, a one-line budget, and the panel.
+3. **The code shows itself** when the step opens, rather than after "Show the
+   code" — a button whose answer, on a step whose only way in *is* the code, was
+   never going to be no.
+
+### What this does not change, and must not be read as changing
+
+**The affirmation.** The iPad's rights checkbox and its copy of the ADR 0019
+disclosure went with the two controls they gated, because that is all they gated.
+The affirmation this ADR is built on is the **phone's** — full disclosure in the
+same shared component and the same words, taken per upload, from the person who
+actually chose the photograph, and enforced server-side. It is unchanged in
+wording, placement and enforcement. Removing the weaker, wrongly-placed one does
+not upgrade the remaining one: a per-upload self-affirmation is still **not**
+verified, cleared or approved rights (CLAUDE.md §13).
+
+**The bearer exposure.** Still **accepted and bounded, not removed.** Every bound
+in the table above holds unchanged, and no read capability exists or may be added
+behind a grant.
+
+### What it costs
+
+A grant is now minted on **every visit** to the reference step rather than on
+demand. That is a real cost and it is bounded by the bounds that already existed:
+the 15-minute TTL, at most one live grant per design, revocation on leaving the
+step, and the mint throttles (`REFERENCE_UPLOAD_GRANT_MINT_LIMIT`, 30 per design
+per hour; `…_MINT_IP_LIMIT`, 90 per IP per hour). The single-live-grant rule is
+what makes it safe rather than merely frequent: a stylist who steps back and
+forward over the step invalidates the code a customer may be mid-scan on, and the
+customer sees a code that no longer works rather than two codes that both do.
+
+**A stop must stay stopped.** Showing the code automatically must not undo an
+explicit "Stop accepting photos" — that would make this ADR's revocability claim
+false at the one moment it is relied on. Two things enforce it: the auto-show is
+one-shot per mount, and a stop is remembered for the tab's life, so stepping away
+from the step and back does not hand the code back either. Only pressing "Show a
+new code" asks for one again. Pinned by tests proven to fail without each guard.
+
+**Two mints must not race.** Because each visit mints, a fast back-and-forward
+could put two mints in flight at once — and the server resolves them in whichever
+order they reach the design's row lock, each revoking the other's grant on the
+way. The response arriving last in the browser could then describe a grant the
+server had already killed, leaving a QR on screen with a ticking countdown that
+no phone can use and nothing to say so. A mint is therefore shared: a second
+mount joins the one already in flight instead of starting its own. For the same
+reason a departing panel revokes only a grant it still holds — a revoke is
+design-scoped, so an unconditional one could land after a newer mint and kill the
+code that replaced it. Both live in `handoff-coordination.ts`, memory only, and
+neither is a token cache: leaving the step still revokes.
+
+**A customer with no usable phone now has no way to attach a reference.** There
+is no device-local fallback left. References are optional and the design flow
+completes without them, so this costs a customer inspiration rather than a
+concept — but it is a genuine narrowing, accepted as part of this decision rather
+than mitigated.

@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { InspirationUpload as Upload } from "@/lib/api";
 
+import { resetHandoffCoordination } from "./handoff-coordination";
 import { PhoneHandoff } from "./PhoneHandoff";
 
 const createGrant = vi.fn();
@@ -66,11 +67,10 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof PhoneHandoff
   return { ...utils, onUploadsChanged };
 }
 
-function show(): void {
-  fireEvent.click(screen.getByRole("button", { name: /Show the code/i }));
-}
-
 beforeEach(() => {
+  // The handoff's cross-mount coordination outlives a component on purpose,
+  // so a test that stops a code would otherwise suppress the next test's.
+  resetHandoffCoordination();
   createGrant.mockReset();
   revokeGrants.mockReset();
   fetchReferencesMock.mockReset();
@@ -85,8 +85,6 @@ afterEach(() => {
 describe("PhoneHandoff — showing a code", () => {
   it("draws a QR carrying the token in the URL fragment", async () => {
     renderPanel();
-    show();
-
     const code = await screen.findByRole("img", {
       name: /Scan this to send a photograph/i,
     });
@@ -99,8 +97,6 @@ describe("PhoneHandoff — showing a code", () => {
 
   it("puts the secret after the '#', which browsers never send to a server", async () => {
     renderPanel();
-    show();
-
     const url = (await screen.findByText(/\/r#/)).textContent ?? "";
     const [beforeHash, afterHash] = url.split("#");
     expect(beforeHash).not.toContain(TOKEN);
@@ -110,7 +106,6 @@ describe("PhoneHandoff — showing a code", () => {
   it("never writes the secret to browser storage", async () => {
     const setLocal = vi.spyOn(Storage.prototype, "setItem");
     renderPanel();
-    show();
     await screen.findByRole("img", { name: /Scan this/i });
 
     // Nothing at all goes to storage from this panel — asserted as "no write
@@ -123,7 +118,6 @@ describe("PhoneHandoff — showing a code", () => {
   it("does not put the secret in the shop's own address bar", async () => {
     const before = window.location.href;
     renderPanel();
-    show();
     await screen.findByRole("img", { name: /Scan this/i });
 
     expect(window.location.href).toBe(before);
@@ -138,8 +132,6 @@ describe("PhoneHandoff — showing a code", () => {
     // fault, on the one screen the phase most needs to work.
     createGrant.mockResolvedValue(liveGrant(900));
     renderPanel();
-    show();
-
     expect(await screen.findByText(/works for about 14 minutes/i)).toBeInTheDocument();
   });
 
@@ -149,8 +141,6 @@ describe("PhoneHandoff — showing a code", () => {
     // panel must treat it as already gone rather than showing a live QR.
     createGrant.mockResolvedValue(liveGrant(8));
     renderPanel();
-    show();
-
     await vi.advanceTimersByTimeAsync(1100);
 
     await vi.waitFor(() =>
@@ -166,8 +156,6 @@ describe("PhoneHandoff — showing a code", () => {
       message: "This design already has all three reference photographs.",
     });
     renderPanel();
-    show();
-
     expect(await screen.findByText(/already has all three/i)).toBeInTheDocument();
     expect(screen.queryByRole("img", { name: /Scan this/i })).not.toBeInTheDocument();
   });
@@ -178,29 +166,23 @@ describe("PhoneHandoff — showing a code", () => {
       grant: { id: "g", token: TOKEN, expires_at: "not a date", slots_remaining: 3 },
     });
     renderPanel();
-    show();
-
     expect(await screen.findByText(/could not be created/i)).toBeInTheDocument();
     expect(screen.queryByText(new RegExp(TOKEN))).not.toBeInTheDocument();
   });
 });
 
 describe("PhoneHandoff — the affirmation boundary", () => {
-  it("is not gated behind the iPad's own rights checkbox", () => {
+  it("shows a code without any affirmation on this device", async () => {
     // The whole point of ADR 0026's affirmation rule: the person holding the
     // shop's screen cannot consent on the customer's behalf. Gating the QR
-    // behind this device's tick would say the opposite. The panel renders on
-    // its own here — there is no checkbox in scope — and the control is live.
+    // behind a tick here would say the opposite. The code appears on its own,
+    // with no checkbox in scope — and the phone takes its own affirmation
+    // before its picker is usable.
     renderPanel();
 
-    expect(screen.getByRole("button", { name: /Show the code/i })).toBeEnabled();
-  });
-
-  it("shows no rights affirmation of its own", () => {
-    // It must not: an affirmation ticked here would be the substitution the
-    // ADR forbids. The phone's own page carries the disclosure and the tick.
-    renderPanel();
-
+    expect(
+      await screen.findByRole("img", { name: /Scan this to send a photograph/i }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 });
@@ -208,7 +190,6 @@ describe("PhoneHandoff — the affirmation boundary", () => {
 describe("PhoneHandoff — stopping", () => {
   it("revokes when the stylist stops accepting photos", async () => {
     renderPanel();
-    show();
     await screen.findByRole("img", { name: /Scan this/i });
 
     fireEvent.click(screen.getByRole("button", { name: /Stop accepting photos/i }));
@@ -223,7 +204,6 @@ describe("PhoneHandoff — stopping", () => {
     // it. A revoke that failed must not look identical to one that worked.
     revokeGrants.mockResolvedValue({ ok: false });
     renderPanel();
-    show();
     await screen.findByRole("img", { name: /Scan this/i });
 
     fireEvent.click(screen.getByRole("button", { name: /Stop accepting photos/i }));
@@ -232,14 +212,92 @@ describe("PhoneHandoff — stopping", () => {
     expect(
       screen.getByRole("button", { name: /Try stopping again/i }),
     ).toBeInTheDocument();
-    // Specifically NOT back at the plain starting state.
-    expect(screen.queryByRole("button", { name: /^Show the code$/i })).not.toBeInTheDocument();
+    // Specifically NOT back at the plain idle state, which since the code
+    // shows itself is reachable only by a stop that actually succeeded.
+    expect(screen.queryByRole("button", { name: /^Show a new code$/i })).not.toBeInTheDocument();
+  });
+
+  it("does not quietly mint a replacement once a stop succeeds", async () => {
+    // TEST-001 regression, and the reason the auto-show guard is a permanent
+    // ref rather than a check on `handoff.kind === "idle"`: idle is where a
+    // deliberate stop lands too. Asserted on the MINT CALL, not on the DOM —
+    // a re-mint that resolved and re-rendered would leave the screen looking
+    // plausible either way, and it is the server-side grant that matters.
+    //
+    // This one pins the REF specifically. Verified by mutation: deleting the
+    // ref check fails this test, and neutering the sticky-stop leaves it
+    // passing — the two tests below are what pin that. Said explicitly because
+    // a test that looks like it proves two guards while proving one is how a
+    // guard gets deleted later without anything going red.
+    //
+    // If this ever fails, ADR 0026's "revocation is a fact rather than a hope"
+    // is false at the exact moment it is relied on: handing the iPad to the
+    // next customer.
+    const { rerender } = renderPanel({ uploads: [made("a", 1)] });
+    await screen.findByRole("img", { name: /Scan this/i });
+
+    fireEvent.click(screen.getByRole("button", { name: /Stop accepting photos/i }));
+    await screen.findByRole("button", { name: /Show a new code/i });
+    createGrant.mockClear();
+
+    // Then something perfectly ordinary happens: the stylist removes a
+    // photograph. That changes `slotsFree` and `start`'s identity, so the
+    // auto-show effect RE-RUNS — which is exactly when a guard keyed on state
+    // rather than on a one-shot ref would hand back a fresh live code seconds
+    // after the stylist killed the last one.
+    rerender(
+      <PhoneHandoff designId="design-1" uploads={[]} max={3} onUploadsChanged={vi.fn()} />,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(createGrant).not.toHaveBeenCalled();
+    expect(screen.queryByRole("img", { name: /Scan this/i })).not.toBeInTheDocument();
+  });
+
+  it("does not hand back a code after a stop just because the step was re-entered", async () => {
+    // The same property across a mount boundary. A stylist stops the code, the
+    // customer wanders off to look at fabric, the stylist steps back a question
+    // and forward again — and on arriving finds the code she killed is live
+    // again, on a screen she has already handed to someone else.
+    //
+    // The panel must also not sit on "Creating a code…" for a mint that will
+    // never run: the initial state and the auto-show effect answer the same
+    // question, so they have to answer it the same way.
+    const { unmount } = renderPanel();
+    await screen.findByRole("img", { name: /Scan this/i });
+    fireEvent.click(screen.getByRole("button", { name: /Stop accepting photos/i }));
+    await screen.findByRole("button", { name: /Show a new code/i });
+    unmount();
+    createGrant.mockClear();
+
+    renderPanel();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(createGrant).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /Show a new code/i })).toBeEnabled();
+    expect(screen.queryByText(/Creating a code/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a new code when the stylist asks for one after stopping", async () => {
+    // The other half: the stop is sticky, not permanent. Asking again works,
+    // and works on a fresh mount too.
+    const { unmount } = renderPanel();
+    await screen.findByRole("img", { name: /Scan this/i });
+    fireEvent.click(screen.getByRole("button", { name: /Stop accepting photos/i }));
+    await screen.findByRole("button", { name: /Show a new code/i });
+    unmount();
+    createGrant.mockClear();
+
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: /Show a new code/i }));
+
+    expect(await screen.findByRole("img", { name: /Scan this/i })).toBeInTheDocument();
+    expect(createGrant).toHaveBeenCalledTimes(1);
   });
 
   it("says the same thing when the revoke request throws", async () => {
     revokeGrants.mockRejectedValue(new Error("offline"));
     renderPanel();
-    show();
     await screen.findByRole("img", { name: /Scan this/i });
 
     fireEvent.click(screen.getByRole("button", { name: /Stop accepting photos/i }));
@@ -251,7 +309,6 @@ describe("PhoneHandoff — stopping", () => {
     // The actionable half: she can wait it out, and she needs to know that.
     revokeGrants.mockResolvedValue({ ok: false });
     renderPanel();
-    show();
     await screen.findByRole("img", { name: /Scan this/i });
 
     fireEvent.click(screen.getByRole("button", { name: /Stop accepting photos/i }));
@@ -262,7 +319,6 @@ describe("PhoneHandoff — stopping", () => {
   it("reaches idle once a retried stop succeeds", async () => {
     revokeGrants.mockResolvedValueOnce({ ok: false });
     renderPanel();
-    show();
     await screen.findByRole("img", { name: /Scan this/i });
     fireEvent.click(screen.getByRole("button", { name: /Stop accepting photos/i }));
     await screen.findByText(/could not be stopped/i);
@@ -270,12 +326,11 @@ describe("PhoneHandoff — stopping", () => {
     revokeGrants.mockResolvedValue({ ok: true });
     fireEvent.click(screen.getByRole("button", { name: /Try stopping again/i }));
 
-    expect(await screen.findByRole("button", { name: /^Show the code$/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Show a new code$/i })).toBeInTheDocument();
   });
 
   it("revokes when the step unmounts, so a photographed code does not outlive it", async () => {
     const { unmount } = renderPanel();
-    show();
     await screen.findByRole("img", { name: /Scan this/i });
     revokeGrants.mockClear();
 
@@ -296,7 +351,6 @@ describe("PhoneHandoff — stopping", () => {
 
   it("stops offering a code once the design is full", async () => {
     const { rerender } = renderPanel();
-    show();
     await screen.findByRole("img", { name: /Scan this/i });
 
     rerender(
@@ -315,15 +369,41 @@ describe("PhoneHandoff — stopping", () => {
   it("will not offer a code for a design with no free slots", () => {
     renderPanel({ uploads: [made("a", 1), made("b", 2), made("c", 3)] });
 
-    expect(screen.getByRole("button", { name: /Show the code/i })).toBeDisabled();
+    // Not merely a disabled button: nothing may be MINTED for a design that has
+    // nowhere to put a photograph, or the customer scans a code that is dead on
+    // arrival and blames her phone.
+    expect(createGrant).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /Show a new code/i })).toBeDisabled();
     expect(screen.getByText(/All 3 reference slots are used/i)).toBeInTheDocument();
+  });
+
+  it("shows a code by itself once a slot frees up on a full design", async () => {
+    // The mirror of the two above, and the one case where the one-shot
+    // auto-show guard is still unspent after a render: a design that was full
+    // when the step opened never minted. Removing a photograph has to bring the
+    // code back on its own — leaving the stylist to find a button on a screen
+    // whose whole point is that the code is already there would be the worst of
+    // both designs.
+    const { rerender } = renderPanel({ uploads: [made("a", 1), made("b", 2), made("c", 3)] });
+    expect(createGrant).not.toHaveBeenCalled();
+
+    rerender(
+      <PhoneHandoff
+        designId="design-1"
+        uploads={[made("a", 1), made("b", 2)]}
+        max={3}
+        onUploadsChanged={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole("img", { name: /Scan this/i })).toBeInTheDocument();
+    expect(createGrant).toHaveBeenCalledTimes(1);
   });
 
   it("offers a fresh code once the old one expires", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     createGrant.mockResolvedValue(liveGrant(2));
     renderPanel();
-    show();
     await vi.waitFor(() => expect(screen.getByRole("img", { name: /Scan this/i })).toBeTruthy());
 
     await vi.advanceTimersByTimeAsync(3000);
@@ -336,6 +416,50 @@ describe("PhoneHandoff — stopping", () => {
 });
 
 describe("PhoneHandoff — one action at a time", () => {
+  it("joins the mint already in flight when the step is left and re-entered", async () => {
+    // REL-001 regression. A stylist stepping Back and forward over this step
+    // unmounts and remounts the panel, and since the code shows itself each
+    // mount wants one. Two mints in flight at once are resolved by the server
+    // in whichever order they reach the design's row lock, each revoking the
+    // other's grant on the way — so the response that lands last in the browser
+    // can describe a grant the server has already killed, and the panel shows
+    // its QR with a ticking countdown that no phone can use.
+    let settle: (value: ReturnType<typeof liveGrant>) => void = () => {};
+    createGrant.mockReturnValue(
+      new Promise<ReturnType<typeof liveGrant>>((resolve) => {
+        settle = resolve;
+      }),
+    );
+
+    const first = render(
+      <PhoneHandoff designId="design-1" uploads={[]} max={3} onUploadsChanged={vi.fn()} />,
+    );
+    expect(createGrant).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    const second = render(
+      <PhoneHandoff designId="design-1" uploads={[]} max={3} onUploadsChanged={vi.fn()} />,
+    );
+
+    // The second mount joined the first mint rather than starting its own.
+    expect(createGrant).toHaveBeenCalledTimes(1);
+
+    settle(liveGrant());
+    expect(await screen.findByRole("img", { name: /Scan this/i })).toBeInTheDocument();
+
+    // And the mount that left holding nothing revoked nothing: the code it had
+    // asked for belongs to the mount still on screen, which will revoke it when
+    // IT leaves. A design-scoped revoke here would kill the live code.
+    expect(revokeGrants).not.toHaveBeenCalled();
+
+    // Which it must actually do. Ownership has to land on the mount that is on
+    // screen, or the grant ends up held by nobody and leaving the step stops
+    // revoking it at all — a silent regression the assertion above would miss.
+    second.unmount();
+    await waitFor(() => expect(revokeGrants).toHaveBeenCalledWith("design-1"));
+  });
+
+
   it("mints once for a double-tapped button", async () => {
     // REL-003 regression. A laggy shop iPad is the target device, and two
     // clicks dispatched before React commits the first render both see the
@@ -348,11 +472,40 @@ describe("PhoneHandoff — one action at a time", () => {
         release = resolve;
       }),
     );
-    renderPanel();
+    const { rerender } = renderPanel();
 
-    const button = screen.getByRole("button", { name: /Show the code/i });
-    fireEvent.click(button);
-    fireEvent.click(button);
+    // The mint is in flight from mount. A re-render — an arriving photograph,
+    // a parent state change — must not start a second one: a second mint
+    // revokes the first server-side, so the customer's half-scanned QR would
+    // stop working under her hands.
+    rerender(
+      <PhoneHandoff designId="design-1" uploads={[]} max={3} onUploadsChanged={vi.fn()} />,
+    );
+
+    expect(createGrant).toHaveBeenCalledTimes(1);
+    release(liveGrant());
+    await screen.findByRole("img", { name: /Scan this/i });
+  });
+
+  it("mints once for a double-tapped 'show a new code'", async () => {
+    // The same guard, on the one button that still mints. A laggy shop iPad is
+    // the target device, and two clicks dispatched before React commits the
+    // first render both see the same state — the button vanishing is a
+    // consequence of the re-render, not a lock.
+    renderPanel();
+    await screen.findByRole("img", { name: /Scan this/i });
+    fireEvent.click(screen.getByRole("button", { name: /Stop accepting photos/i }));
+    const again = await screen.findByRole("button", { name: /^Show a new code$/i });
+    createGrant.mockClear();
+    let release!: (value: ReturnType<typeof liveGrant>) => void;
+    createGrant.mockReturnValue(
+      new Promise<ReturnType<typeof liveGrant>>((resolve) => {
+        release = resolve;
+      }),
+    );
+
+    fireEvent.click(again);
+    fireEvent.click(again);
 
     expect(createGrant).toHaveBeenCalledTimes(1);
     release(liveGrant());
@@ -361,7 +514,6 @@ describe("PhoneHandoff — one action at a time", () => {
 
   it("stops once for a double-tapped stop", async () => {
     renderPanel();
-    show();
     await screen.findByRole("img", { name: /Scan this/i });
     let release!: (value: { ok: boolean }) => void;
     revokeGrants.mockReturnValue(
@@ -376,13 +528,12 @@ describe("PhoneHandoff — one action at a time", () => {
 
     expect(revokeGrants).toHaveBeenCalledTimes(1);
     release({ ok: true });
-    await screen.findByRole("button", { name: /^Show the code$/i });
+    await screen.findByRole("button", { name: /^Show a new code$/i });
   });
 
   it("recovers the button after a failed mint rather than jamming", async () => {
     createGrant.mockRejectedValueOnce(new Error("offline"));
     renderPanel();
-    show();
     await screen.findByText(/could not be created/i);
 
     createGrant.mockResolvedValue(liveGrant());
@@ -397,7 +548,6 @@ describe("PhoneHandoff — watching for arrivals", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fetchReferencesMock.mockResolvedValue([made("u1")]);
     const { onUploadsChanged } = renderPanel();
-    show();
     await vi.waitFor(() => expect(screen.getByRole("img", { name: /Scan this/i })).toBeTruthy());
 
     await vi.advanceTimersByTimeAsync(2100);
@@ -427,7 +577,6 @@ describe("PhoneHandoff — watching for arrivals", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fetchReferencesMock.mockResolvedValue([]);
     renderPanel();
-    show();
     await vi.waitFor(() => expect(screen.getByRole("img", { name: /Scan this/i })).toBeTruthy());
     await vi.advanceTimersByTimeAsync(2100);
     const pollsWhileLive = fetchReferencesMock.mock.calls.length;
@@ -452,7 +601,6 @@ describe("PhoneHandoff — watching for arrivals", () => {
         }),
     );
     const { onUploadsChanged } = renderPanel();
-    show();
     await vi.waitFor(() => expect(screen.getByRole("img", { name: /Scan this/i })).toBeTruthy());
 
     // Two polls in flight.
@@ -482,7 +630,6 @@ describe("PhoneHandoff — watching for arrivals", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fetchReferencesMock.mockRejectedValue(new Error("offline"));
     const { onUploadsChanged } = renderPanel();
-    show();
     await vi.waitFor(() => expect(screen.getByRole("img", { name: /Scan this/i })).toBeTruthy());
 
     await vi.advanceTimersByTimeAsync(2100);

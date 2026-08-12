@@ -8,7 +8,7 @@ assertions are written against the terminal state the server actually produces.
 | Spec | Covers |
 | --- | --- |
 | `safety.spec.ts` | The stack reports demo mode; no browser request reaches a provider host; the questionnaire stores nothing in browser storage |
-| `journeys.spec.ts` | §25 journeys 1–5 — draft persistence, keyboard-only wizard (choose, Back, Skip), the information drawer, the custom colour picker, and the reference step: uploads-only (disclosure, per-upload affirmation, synthetic upload, removal), the QR handoff at the iPad end, and the phone page with no code |
+| `journeys.spec.ts` | §25 journeys 1–5 — draft persistence, keyboard-only wizard (choose, Back, Skip), the information drawer, the custom colour picker, and the reference step: no catalogue and no way in from this device, the QR handoff at the iPad end, a photograph sent from a separate browser context arriving and being removed, and the phone page with no code |
 | `generation.spec.ts` | §25 journeys 6–10 — generate, resume mid-flight, a failed image with the brief intact, the one refinement, the two-version history |
 | `annotations.spec.ts` | Phase 19, extended in 21 — the private annotation workspace: draw a pin and a rectangle with real pointer gestures, note them, prove persistence across a reload, prove hiding is not deleting, prove nothing reaches browser storage, a stranger's indistinguishable 404, the original render left untouched, and the naming prompt: its pre-fill, its stated exposure, the allowance stated before it is spent, and a refused name answered in the dialog |
 | `gallery.spec.ts` | Phase 21 — the account gallery: a concept made through the real pipeline is findable afterwards under the same name, its card's links resolve to that concept and its workspace, its thumbnail actually decodes, and the list payload itself carries no bearer URL, storage key or spec description |
@@ -264,24 +264,37 @@ that evidence is forbidden (CLAUDE.md §13). On a clean stack the journey theref
 **skipped**, visibly.
 
 Phase 22 (ADR 0025) retired the catalogue from the product, so the skip is gone
-along with the thing it was waiting for. Journey 5 is three tests that all run:
+along with the thing it was waiting for. Journey 5 is four tests that all run:
 
-1. **No catalogue, and an upload from this device.** No picker grid is offered;
-   the ADR 0019 disclosure and its "perpetual, irrevocable licence" wording are
-   readable *before* anything is uploaded; the affirmation is never pre-ticked;
-   an upload succeeds and its removal frees the slot and is announced. The file
+1. **No catalogue, and no way in from this device.** No picker grid is offered,
+   and — since ADR 0026's amendment — no file input of any kind and no rights
+   affirmation either. Both are asserted as the absence of the *control*, not of
+   a particular label, so a rename cannot slip past. The code is on screen
+   without anything being pressed.
+2. **The QR handoff, at the iPad end.** The code renders by itself, the typed
+   fallback carries the same `/r#…` URL with the secret in the fragment, "Stop
+   accepting photos" really removes it, and a stop stays stopped — the panel
+   offers "Show a new code" rather than quietly minting one, because a stop that
+   undid itself would make ADR 0026's revocability claim false.
+3. **A photograph sent from the phone arrives, and can be taken off.** The code
+   is read from the iPad's typed fallback and opened in a **separate browser
+   context** — no shared cookie, session or storage, because the scanned code is
+   the whole authorisation. There the ADR 0019 disclosure is readable and the
+   picker is disabled *before* the affirmation is ticked; the upload lands; the
+   iPad's poll announces the arrival; and removal — the stylist's job, since the
+   phone deliberately cannot do it — frees the slot. The phone is also asserted
+   to be told nothing about the design: no gallery, no remaining count. The file
    is one of the project's own synthetic questionnaire visuals — §13 permits
    locally generated synthetic images for clearly labelled engineering tests and
    forbids downloaded or unlicensed ones.
-2. **The QR handoff, at the iPad end.** "Show the code" is enabled while this
-   device's affirmation is unticked — gating it behind that tick is the exact
-   substitution ADR 0026 exists to prevent — the code renders, the typed
-   fallback carries the same `/r#…` URL with the secret in the fragment, and
-   "Stop accepting photos" really removes it.
-3. **The phone page with no code** says so, and offers no picker.
+4. **The phone page with no code** says so, and offers no picker.
 
-What is **not** covered: the phone end with a live code, which needs a second
-physical device. Driving both ends in one browser context would assert that the
-plumbing works while proving nothing about the thing the path exists for. ADR
-0026 records it as an outstanding manual checkpoint instead — a real iPad, a real
-phone that is not the iPad, and a photographed code confirmed dead after expiry.
+Test 3 replaces the device-local upload the iPad used to cover. That coverage was
+not optional to lose: with the picker gone, this is the only way a reference ever
+reaches a design.
+
+What is still **not** covered is the handoff itself — a real camera, a real
+second device, a code read off glass. Two contexts in one browser prove the
+plumbing; they prove nothing about the thing the path exists for. ADR 0026 keeps
+it as an outstanding manual checkpoint: a real iPad, a real phone that is not the
+iPad, and a photographed code confirmed dead after expiry.

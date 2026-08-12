@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetHandoffCoordination } from "./handoff-coordination";
 import { QuestionnaireWizard } from "./QuestionnaireWizard";
 import type { QuestionnaireSchema } from "./types";
 
@@ -12,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   validateDesignDraft: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
+  createReferenceGrant: vi.fn(),
+  revokeReferenceGrants: vi.fn(),
+  fetchDesignReferences: vi.fn(),
 }));
 
 vi.mock("./api", () => ({
@@ -26,6 +30,21 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
   useParams: () => ({}),
 }));
+
+// The reference step's handoff panel mints a grant as soon as it mounts (ADR
+// 0026's amendment). Stubbed so this suite never reaches the network and so the
+// panel settles into its LIVE state — left unstubbed it lands in its error
+// state, whose "Try again" button then collides with assertions here about what
+// the retired catalogue must not leave behind.
+vi.mock("@/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+  return {
+    ...actual,
+    createReferenceGrant: mocks.createReferenceGrant,
+    revokeReferenceGrants: mocks.revokeReferenceGrants,
+    fetchDesignReferences: mocks.fetchDesignReferences,
+  };
+});
 
 const SCHEMA: QuestionnaireSchema = {
   schema_version: 1,
@@ -127,6 +146,11 @@ function detail(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  // This suite reaches the reference step, which mounts the handoff panel.
+  // Its coordination state is module-level and outlives a component on
+  // purpose, so without this one test's stopped design silently suppresses
+  // the next one's code — and the failure reads as a broken panel.
+  resetHandoffCoordination();
   vi.clearAllMocks();
   localStorage.clear();
   sessionStorage.clear();
@@ -134,6 +158,17 @@ beforeEach(() => {
   mocks.createDesignDraft.mockResolvedValue({ ok: true, data: detail() });
   mocks.updateDesignDraft.mockResolvedValue({ ok: true, data: detail() });
   mocks.validateDesignDraft.mockResolvedValue({ ok: true, data: { valid: true } });
+  mocks.createReferenceGrant.mockResolvedValue({
+    ok: true,
+    grant: {
+      id: "g1",
+      token: "a-plaintext-handoff-secret-value",
+      expires_at: new Date(Date.now() + 900_000).toISOString(),
+      slots_remaining: 3,
+    },
+  });
+  mocks.revokeReferenceGrants.mockResolvedValue({ ok: true });
+  mocks.fetchDesignReferences.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -679,19 +714,22 @@ describe("QuestionnaireWizard", () => {
       );
       // Uploads are now the only thing drawing on the three-reference budget,
       // so restoring one has to leave exactly two slots free.
-      expect(screen.getByText(/2 of your 3 reference slots are free/i)).toBeInTheDocument();
+      expect(screen.getByText(/2 of 3 free/i)).toBeInTheDocument();
     });
 
-    it("wires the upload control to the design created during the questionnaire", async () => {
-      // The design id only exists after the first autosave; the upload control
-      // has to pick it up, or an upload would have nothing to attach to.
+    it("wires the handoff panel to the design created during the questionnaire", async () => {
+      // The design id only exists after the first autosave; the handoff panel
+      // has to pick it up, or the code it mints would name nothing. Asserted
+      // through the mint call rather than through a disabled control, because
+      // the panel now mints on mount — a wrong id would produce a QR that fails
+      // on the customer's phone rather than a control that looks inert.
       render(<QuestionnaireWizard />);
       await goToInspirationStep();
       expect(
         await screen.findByRole("heading", { name: /Your own photographs/i }),
       ).toBeInTheDocument();
-      expect(screen.getByLabelText(/Choose a file/i)).toBeDisabled();
-      expect(screen.getByText(/3 of your 3 reference slots are free/i)).toBeInTheDocument();
+      await waitFor(() => expect(mocks.createReferenceGrant).toHaveBeenCalledWith("d1"));
+      expect(screen.getByText(/3 of 3 free/i)).toBeInTheDocument();
     });
 
     it("will not carry the user to review once a later change clears an answer", async () => {

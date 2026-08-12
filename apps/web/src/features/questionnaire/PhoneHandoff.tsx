@@ -2,12 +2,15 @@
 
 // The shop's side of the phone handoff (Phase 22, ADR 0026).
 //
-// A stylist on a shop-floor iPad taps "Send from your phone"; the customer
-// scans the QR with her own phone and sends the photographs that are already
-// on it. That is the PRIMARY way references arrive — a customer walks in with a
-// screenshot from Instagram or a photograph of her sister's wedding, and asking
-// her to email it to the shop or hand over her unlocked phone is the failure
-// mode this replaces.
+// The customer scans this QR with her own phone and sends the photographs that
+// are already on it. Since the iPad's camera and picker were removed it is the
+// ONLY way references arrive — a customer walks in with a screenshot from
+// Instagram or a photograph of her sister's wedding, and asking her to email it
+// to the shop or hand over her unlocked phone is the failure mode this
+// replaces.
+//
+// The code shows itself as soon as the step opens. Nothing is behind a button
+// that would only ever be pressed.
 //
 // Three things this component is responsible for keeping true:
 //
@@ -27,12 +30,20 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import {
-  createReferenceGrant,
   fetchDesignReferences,
   revokeReferenceGrants,
   type InspirationUpload as Upload,
 } from "@/lib/api";
 
+import {
+  claimGrant,
+  clearStopped,
+  holdsGrant,
+  isStopped,
+  markStopped,
+  mintShared,
+  releaseGrant,
+} from "./handoff-coordination";
 import { QrCode } from "./QrCode";
 
 /** How often the iPad asks whether a photograph has arrived.
@@ -82,7 +93,17 @@ function formatRemaining(seconds: number): string {
 }
 
 export function PhoneHandoff({ designId, uploads, max, onUploadsChanged }: Props) {
-  const [handoff, setHandoff] = useState<Handoff>({ kind: "idle" });
+  // Starts at "minting", not "idle", when there is room: the effect below mints
+  // on mount, so the first paint would otherwise flash a "Show the code" button
+  // that nobody is meant to press. "Creating a code…" is what is actually
+  // happening.
+  // Must agree with the auto-show effect's own conditions, or the panel paints
+  // "Creating a code…" for a mint that is never going to run.
+  const [handoff, setHandoff] = useState<Handoff>(() =>
+    max - uploads.length > 0 && !isStopped(designId)
+      ? { kind: "minting" }
+      : { kind: "idle" },
+  );
   const [remaining, setRemaining] = useState(0);
   const [arrived, setArrived] = useState(0);
   const headingId = useId();
@@ -107,9 +128,9 @@ export function PhoneHandoff({ designId, uploads, max, onUploadsChanged }: Props
   // this a double-tapped button on a laggy iPad mints twice, and the second
   // response can overwrite the first's QR while the customer is mid-scan.
   const busyRef = useRef(false);
-  // Whether anything is out there to revoke, so unmounting a panel that never
-  // showed a code does not fire a pointless DELETE.
-  const mintedRef = useRef(false);
+  // This mount's identity, used to claim and release the design's live grant.
+  // A symbol rather than a counter so two mounts can never collide.
+  const mineRef = useRef<symbol>(Symbol("handoff"));
   // Monotonic poll sequence. `cancelled` below only covers teardown; it does
   // nothing about two in-flight polls resolving out of order, which would let
   // an older response overwrite a newer one and visibly regress the count.
@@ -119,11 +140,14 @@ export function PhoneHandoff({ designId, uploads, max, onUploadsChanged }: Props
   const start = useCallback(async (): Promise<void> => {
     if (busyRef.current) return;
     busyRef.current = true;
+    // Any start at all — the automatic one or a deliberate press — is a code
+    // being asked for, so an earlier stop stops standing in the way.
+    clearStopped(designId);
     setHandoff({ kind: "minting" });
     setArrived(0);
     baselineRef.current = uploads.length;
     try {
-      const result = await createReferenceGrant(designId);
+      const result = await mintShared(designId);
       if (!result.ok) {
         setHandoff({ kind: "error", message: result.message });
         return;
@@ -136,7 +160,7 @@ export function PhoneHandoff({ designId, uploads, max, onUploadsChanged }: Props
         });
         return;
       }
-      mintedRef.current = true;
+      claimGrant(designId, mineRef.current);
       setHandoff({ kind: "live", token: result.grant.token, expiresAt });
       setRemaining(secondsLeft(expiresAt));
     } catch {
@@ -162,7 +186,8 @@ export function PhoneHandoff({ designId, uploads, max, onUploadsChanged }: Props
         setHandoff({ kind: "stop-failed" });
         return;
       }
-      mintedRef.current = false;
+      releaseGrant(designId, mineRef.current);
+      markStopped(designId);
       setArrived(0);
       setHandoff({ kind: "idle" });
     } catch {
@@ -227,15 +252,52 @@ export function PhoneHandoff({ designId, uploads, max, onUploadsChanged }: Props
     if (live && slotsFree <= 0) void stop();
   }, [live, slotsFree, stop]);
 
+  // Show a code as soon as the step opens, rather than behind a button.
+  //
+  // The phone IS the way references arrive now, so making the stylist tap
+  // "show the code" first was a step that only ever had one answer. The cost is
+  // a grant minted on every visit to this step; that is bounded by everything
+  // ADR 0026 already bounds it with — a short TTL, at most one live grant per
+  // design (a re-mint revokes the previous code), revocation on leaving the
+  // step, and the mint throttles.
+  //
+  // Guarded by a ref rather than by `handoff.kind === "idle"`, because idle is
+  // also where an explicit "Stop accepting photos" lands. Without the ref the
+  // stop button would mint a fresh code the instant it succeeded, which is the
+  // opposite of what the stylist just asked for — and ADR 0026 accepts the
+  // bearer exposure specifically on revocation meaning what it says.
+  const autoShownRef = useRef(false);
+  useEffect(() => {
+    if (isStopped(designId)) return;
+    if (autoShownRef.current) return;
+    if (slotsFree <= 0) return;
+    autoShownRef.current = true;
+    void start();
+  }, [designId, slotsFree, start]);
+
   // Leaving the step must not leave a photographed code working. A cleanup
   // cannot show an error, so this is the one place a failed revoke is silent —
   // it is a backstop under the explicit control above, not a replacement for
   // it, and the code still expires on its own.
+  //
+  // Only what this mount still HOLDS, though. A revoke is design-scoped: it
+  // kills whatever is live, not one named grant. So a departing mount that
+  // revoked unconditionally could reach the server after a newer mount's mint
+  // and kill the code that had already replaced its own — leaving a QR on
+  // screen that no phone can use. A mount whose own mint was still in flight
+  // holds nothing: the mount that joined that same mint owns the result, and
+  // will revoke it when IT leaves.
+  const mine = mineRef.current;
   useEffect(() => {
     return () => {
-      if (mintedRef.current) void revokeReferenceGrants(designId);
+      if (!holdsGrant(designId, mine)) return;
+      releaseGrant(designId, mine);
+      // Caught, not floated: this runs on every departure from the step now, so
+      // an unhandled rejection here would be routine noise in the console and
+      // in Sentry rather than a rare artefact.
+      void revokeReferenceGrants(designId).catch(() => {});
     };
-  }, [designId]);
+  }, [designId, mine]);
 
   const url =
     handoff.kind === "live" && typeof window !== "undefined"
@@ -253,11 +315,13 @@ export function PhoneHandoff({ designId, uploads, max, onUploadsChanged }: Props
         Send from your phone
       </h3>
       <p className="field-help">
-        Most people already have the picture on their phone. Scan this with the
-        phone&apos;s camera and it will open a page for sending it — no app, no
-        sign-in, nothing to type.
+        Scan this with your phone&apos;s camera — no app, no sign-in, nothing to
+        type.
       </p>
 
+      {/* Only reachable once a code has been deliberately stopped, or while the
+          design is full — the code shows itself otherwise. Labelled for that
+          situation rather than for a first visit. */}
       {handoff.kind === "idle" && (
         <button
           type="button"
@@ -265,7 +329,7 @@ export function PhoneHandoff({ designId, uploads, max, onUploadsChanged }: Props
           onClick={() => void start()}
           disabled={slotsFree <= 0}
         >
-          Show the code
+          Show a new code
         </button>
       )}
 

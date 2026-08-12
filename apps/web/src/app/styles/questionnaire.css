@@ -947,40 +947,15 @@
   white-space: nowrap;
   border: 0;
 }
-/* The ways in, in the order the phase decided they matter: the phone handoff
-   first and given real weight, then the camera, then the file picker. */
-.upload-ways {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
-}
-.upload-ways-heading {
-  margin: 0;
-  font-size: 0.95rem;
-}
+/* One way in per screen now, so this only lays out a single control. The
+   iPad's camera and file picker were removed with ADR 0026's amendment, taking
+   `.upload-ways`, `.upload-ways-heading` and `.upload-label` with them; what is
+   left is used by the customer's phone, whose own labels are `.phone-label`. */
 .upload-way {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
-}
-.upload-label {
-  display: inline-block;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0.5rem 1.1rem;
-  cursor: pointer;
-  font-size: 0.92rem;
-  background: var(--color-neutral-100);
-}
-.upload-input:focus-visible + .upload-label {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.upload-input:disabled + .upload-label {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 /* Holds its line height even when empty, so announcing an upload result does
    not shift the buttons underneath it. */

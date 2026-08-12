@@ -261,9 +261,21 @@ export async function completeQuestionnaire(page: Page): Promise<string> {
   for (let screen = 0; screen < 30; screen += 1) {
     if (page.url().includes("/review")) break;
 
+    // Wait for whichever forward control this screen has before asking which
+    // one it is. `count()` below is a single point-in-time query with no retry
+    // of its own, and the footer commits a tick after the heading does — so a
+    // slow render reads as "no Review here" and sends this loop off looking for
+    // a Continue the inspiration screen has never had. The reference step is
+    // where that window is widest, because its handoff panel fires a state
+    // update and a network request the moment it mounts.
+    await page
+      .getByRole("button", { name: /^(review|continue)$/i })
+      .first()
+      .waitFor({ state: "visible", timeout: 20_000 });
+
     // The final screen is Inspiration, whose forward control is "Review", not
     // "Continue". Choosing no inspiration is a valid answer, so this walks
-    // straight past it — journey 5 covers selecting and uploading separately.
+    // straight past it — journey 5 covers the handoff and removal separately.
     const review = page.getByRole("button", { name: /^review$/i });
     if (await review.count()) {
       // The draft saves on a debounce. Leaving while one is still in flight
