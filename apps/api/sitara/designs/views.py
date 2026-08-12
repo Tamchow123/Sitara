@@ -100,8 +100,13 @@ from .annotation_service import (
 from .grant_service import (
     GrantMintingThrottled,
     GrantMintingUnavailable,
+    GrantUnusable,
     create_reference_upload_grant,
+    enforce_grant_upload_address_throttle,
+    enforce_grant_upload_code_throttle,
     enforce_mint_throttle,
+    record_grant_use,
+    resolve_reference_upload_grant,
     revoke_reference_upload_grants,
 )
 from .jobs import _iso, public_job_payload
@@ -122,6 +127,8 @@ from .openapi import (
     DesignValidationSuccessSerializer,
     DesignVersionImagesResponseSerializer,
     GenerationJobResponseSerializer,
+    GrantUploadResponseSerializer,
+    GrantUploadWriteSerializer,
     InspirationUploadResponseSerializer,
     InspirationUploadWriteSerializer,
     ReferenceUploadGrantResponseSerializer,
@@ -208,6 +215,37 @@ def _not_found() -> Response:
     # One indistinguishable answer for nonexistent, other-session and
     # other-user designs.
     return _error("not_found", "Not found.", status.HTTP_404_NOT_FOUND)
+
+
+def _reference_upload_unavailable() -> Response:
+    """The ONE answer a phone gets for a code it cannot use.
+
+    Expired, revoked, spent and never-existed all land here with the same
+    status, the same code and the same body. Nothing above may branch on which
+    it was and nothing may log which it was: telling the four apart is exactly
+    how a guessed code would become a way to discover that a design exists."""
+    return _error(
+        "reference_upload_unavailable",
+        "This link is no longer usable. Please ask for a new code.",
+        status.HTTP_404_NOT_FOUND,
+    )
+
+
+def _grant_upload_throttled(retry_after: int) -> Response:
+    return _error(
+        "reference_upload_rate_limited",
+        "Too many attempts for now. Please try again shortly.",
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        headers={"Cache-Control": "no-store", "Retry-After": str(int(retry_after))},
+    )
+
+
+def _grant_upload_unavailable() -> Response:
+    return _error(
+        "reference_upload_throttle_unavailable",
+        "Adding photographs is temporarily unavailable. Please try again shortly.",
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
 
 
 def _generation_limit_response(retry_after: int) -> Response:
@@ -2323,3 +2361,137 @@ class DesignReferenceGrantView(APIView):
             return _not_found()
         revoked = revoke_reference_upload_grants(design)
         return Response({"revoked": revoked}, headers=NO_STORE)
+
+
+@method_decorator(_reject_oversized_upload, name="dispatch")
+@method_decorator(csrf_protect, name="dispatch")
+class ReferenceUploadGrantUploadView(APIView):
+    """Add a reference photograph to a design from the customer's own phone.
+
+    The one thing a handoff grant opens, and the only thing (Phase 22, ADR
+    0026). It takes no design id in its path or its body: the code names the
+    design, so a grant for design A can never reach design B — not because a
+    check refuses it, but because there is nowhere to express it.
+
+    Anonymous and CSRF-protected like every other unsafe design endpoint. It
+    consults no session ownership at all, which is the point: the phone has no
+    account, no workspace and no relationship to the shop's iPad beyond the code
+    it scanned. The grant is the whole authorisation, and it is a bearer
+    credential — whoever holds the code can upload. That exposure is accepted
+    and bounded (short TTL, one live code per design, revocable, upload-only,
+    rate-limited), not removed.
+
+    **Every unusable code gets one answer.** Expired, revoked, never-existed and
+    spent (the design's reference slots are full) are one 404 with one body.
+    That is §15's private-resource enumeration rule applied to a new identifier.
+    A rejection about the caller's OWN file — too large, not an image, already
+    added — is answered honestly instead, because it reveals nothing about the
+    design and the person holding the phone can act on it."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser]
+
+    @extend_schema(
+        operation_id="reference_uploads_create",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request={"multipart/form-data": GrantUploadWriteSerializer},
+        responses={
+            201: GrantUploadResponseSerializer,
+            400: ValidationErrorEnvelopeSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "reference_upload_unavailable: the code is expired, revoked, "
+                    "spent, or was never real. One indistinguishable answer for "
+                    "all four — nothing here reveals whether a design exists."
+                ),
+            ),
+            409: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="This exact image has already been added to the design.",
+            ),
+            413: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="The request body is too large."
+            ),
+            429: OpenApiResponse(ErrorEnvelopeSerializer, description="Too many attempts."),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="The image could not be stored, or uploads are briefly unavailable.",
+            ),
+        },
+        summary="Add a reference photograph using a handoff code",
+        description=(
+            "Sanitises one uploaded image (JPEG, PNG or single-frame WebP) into "
+            "a clean WebP — EXIF orientation applied, then all EXIF/GPS/XMP/ICC "
+            "metadata stripped — and attaches it to the design the code names. "
+            "The original bytes are never stored, and no filename or declared "
+            "content type is read. The rights affirmation must be given HERE, by "
+            "the person choosing the image: a tick on the shop's screen does not "
+            "carry across the handoff. Upload only — this code grants no way to "
+            "read the design, its answers, its versions or any generated image."
+        ),
+    )
+    def post(self, request):
+        # Both windows run BEFORE the code is resolved; each says why in its own
+        # docstring, and the ORDER between them is what the two calls here fix.
+        try:
+            enforce_grant_upload_address_throttle(request)
+        except GrantMintingThrottled as exc:
+            return _grant_upload_throttled(exc.retry_after)
+        except GrantMintingUnavailable:
+            return _grant_upload_unavailable()
+
+        serializer = GrantUploadWriteSerializer(data=request.data)
+        if not serializer.is_valid():
+            return _validation_failed(serializer.errors)
+        validated = serializer.validated_data
+
+        try:
+            enforce_grant_upload_code_throttle(validated["grant_token"])
+        except GrantMintingThrottled as exc:
+            return _grant_upload_throttled(exc.retry_after)
+        except GrantMintingUnavailable:
+            return _grant_upload_unavailable()
+
+        try:
+            grant = resolve_reference_upload_grant(validated["grant_token"])
+        except GrantUnusable:
+            return _reference_upload_unavailable()
+
+        try:
+            create_inspiration_upload(
+                grant.design,
+                validated["image"],
+                rights_acknowledged=validated["rights_acknowledged"],
+            )
+        except InspirationUploadError as exc:
+            if exc.code == "inspiration_limit_reached":
+                # The design is full, so this code is SPENT. Answered as the
+                # same 404 as an unknown one — "spent" would otherwise confirm
+                # that the design behind a guessed code is real. The check that
+                # produced it ran under the Design row lock inside the upload
+                # service, so it is also the answer that holds under concurrent
+                # uploads through one code.
+                return _reference_upload_unavailable()
+            # Everything else is about the caller's own file, so it is answered
+            # honestly: the person holding the phone can act on "too large" and
+            # can act on nothing at all if told only "unavailable".
+            return _upload_error(exc)
+
+        record_grant_use(grant)
+        # A constant, not a remaining-slots count. The cap is on the DESIGN and
+        # MAX_INSPIRATION_IMAGES is public, so a count would let the phone
+        # subtract its own uploads and recover how many references the design
+        # already had — a read capability reached by arithmetic, and the shop
+        # flow (stylist adds one on the iPad, then mints a code) triggers it on
+        # the very first upload. See GrantUploadAcceptedSerializer.
+        return Response(
+            {"upload": {"accepted": True}},
+            status=status.HTTP_201_CREATED,
+            headers=NO_STORE,
+        )

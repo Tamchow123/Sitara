@@ -28,7 +28,7 @@ import logging
 import secrets
 
 from django.conf import settings
-from django.db import transaction
+from django.db import DatabaseError, InterfaceError, transaction
 from django.db.models import F
 from django.utils import timezone
 
@@ -38,9 +38,12 @@ from .models import Design, ReferenceUploadGrant
 
 logger = logging.getLogger(__name__)
 
-# A key namespace of its own, so a handoff counter can never collide with — or
-# be cleared by — an authentication or an upload one.
+# Key namespaces of their own, so a handoff counter can never collide with — or
+# be cleared by — an authentication or an owner-side upload one. Minting and
+# consuming are counted separately: they are different actors (the shop's iPad
+# and the customer's phone) doing different things at different rates.
 _MINT_THROTTLE_PREFIX = "grantrl"
+_UPLOAD_THROTTLE_PREFIX = "grantul"
 
 #: Bytes of entropy behind the plaintext. 32 bytes is ~43 url-safe characters —
 #: comfortably beyond guessing, and still a QR code an old phone scans at arm's
@@ -65,6 +68,70 @@ class GrantMintingThrottled(Exception):
     def __init__(self, retry_after: int):
         self.retry_after = retry_after
         super().__init__("grant minting rate limit reached")
+
+
+def _count_upload_attempt(scope: str, identifier: str, limit: int, window: int) -> None:
+    """Shared body of the two phone-upload windows below.
+
+    Fails CLOSED, as a 503 rather than a 429, for the same reason every other
+    throttle here does: an infrastructure fault is not the caller's abuse, and a
+    cache outage must not quietly remove the only bound guessing has."""
+    try:
+        retry_after = check_and_count(
+            scope, identifier, limit, window, prefix=_UPLOAD_THROTTLE_PREFIX
+        )
+    except RateLimitUnavailable:
+        raise GrantMintingUnavailable("grant throttle cache unavailable") from None
+    if retry_after is not None:
+        raise GrantMintingThrottled(retry_after)
+
+
+def enforce_grant_upload_address_throttle(request) -> None:
+    """Bound how hard ONE address may try, whatever it presents.
+
+    Runs ahead of the serializer, the grant lookup, the database and any image
+    processing, because an unresolvable code is exactly what a guesser produces:
+    a window that only counted resolvable codes would leave guessing unbounded.
+    It also bounds a flood of malformed bodies, which never reach the
+    serializer.
+
+    It does NOT run before the body is parsed, and the difference matters enough
+    to write down. Django's CSRF check reads ``request.POST`` before falling
+    back to the ``X-CSRFToken`` header, and touching ``POST`` fully receives and
+    parses the multipart body — so by the time any check inside the view runs,
+    the body has already been taken. What stands between an enormous body and
+    the parser is the ``Content-Length`` gate wrapped OUTSIDE ``csrf_protect``,
+    not this. Do not relax that gate on the strength of this window."""
+    _count_upload_attempt(
+        "grant_upload_ip",
+        client_ip(request),
+        settings.REFERENCE_UPLOAD_GRANT_IP_LIMIT,
+        settings.REFERENCE_UPLOAD_GRANT_IP_WINDOW_SECONDS,
+    )
+
+
+def enforce_grant_upload_code_throttle(plaintext: str) -> None:
+    """Bound how hard ONE code may be used, from however many addresses.
+
+    Must run BEFORE the code is resolved. A window that only opened for codes
+    which resolved would answer 429 for a real code and 404 for an unknown one
+    at the same request count, which is a distinguisher — the very thing
+    :class:`GrantUnusable` exists to prevent. Counting every presented code,
+    each under its own digest-keyed window, makes the two answer alike.
+
+    Keyed on the DIGEST, never the plaintext: the limiter HMACs whatever it is
+    handed before it reaches the cache, but handing it a secret at all would put
+    one in a call frame and a traceback for no reason.
+
+    Takes the code as a required positional argument rather than an optional
+    keyword, so that a future caller cannot silently get the address window by
+    forgetting to pass it."""
+    _count_upload_attempt(
+        "grant_upload_code",
+        _digest(plaintext),
+        settings.REFERENCE_UPLOAD_GRANT_LIMIT,
+        settings.REFERENCE_UPLOAD_GRANT_WINDOW_SECONDS,
+    )
 
 
 def enforce_mint_throttle(request) -> None:
@@ -211,13 +278,43 @@ def resolve_reference_upload_grant(plaintext: str) -> ReferenceUploadGrant:
 
 
 def record_grant_use(grant: ReferenceUploadGrant, *, now=None) -> None:
-    """Count one accepted upload against ``grant``.
+    """Count one accepted upload against ``grant``. Best-effort, by design.
 
-    Audit only — see the model docstring. Written with a targeted UPDATE and an
-    F() increment so two concurrent uploads through one grant cannot lose a
-    count to a read-modify-write race, and so nothing else on the row is
-    rewritten by a stray full ``save()``."""
+    Audit only — see the model docstring. Nothing cap-relevant or
+    security-relevant ever reads ``uses``: what spends a grant is the design's
+    reference slots filling up, decided under the Design row lock in
+    ``upload_service``.
+
+    Which is why this SWALLOWS a database fault rather than raising. By the time
+    it runs, the upload it describes has already committed — the row is durable
+    and the object is in storage. Letting a transient fault here propagate would
+    turn an upload that genuinely succeeded into a client-visible failure, and
+    the customer's natural retry with the same photograph would then come back
+    as ``duplicate_image``, which makes no sense as an answer to "it failed".
+    Losing a counter is the cheaper failure, and the log line records that it
+    happened. Same idiom as ``upload_service._delete_quietly`` and
+    ``rate_limits.clear()``.
+
+    The write itself is a targeted UPDATE with an F() increment, so two
+    concurrent uploads through one grant cannot lose a count to a
+    read-modify-write race, and nothing else on the row is rewritten by a stray
+    full ``save()``."""
     stamped = now or timezone.now()
-    ReferenceUploadGrant.objects.filter(pk=grant.pk).update(
-        uses=F("uses") + 1, last_used_at=stamped
-    )
+    try:
+        ReferenceUploadGrant.objects.filter(pk=grant.pk).update(
+            uses=F("uses") + 1, last_used_at=stamped
+        )
+    except (DatabaseError, InterfaceError) as exc:
+        # BOTH, because they are siblings in Django's hierarchy rather than
+        # parent and child: a live database rejecting a live query raises
+        # DatabaseError, while a connection object torn down under a pooler
+        # surfaces as InterfaceError. Catching only the first would leave the
+        # second reproducing exactly the failure this guard exists to prevent.
+        #
+        # Type and row id only — never the exception text, which can carry
+        # query fragments, and never anything about the code itself.
+        logger.warning(
+            "reference upload grant use not recorded grant_id=%s error=%s",
+            grant.pk,
+            type(exc).__name__,
+        )

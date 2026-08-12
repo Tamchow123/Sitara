@@ -678,12 +678,32 @@ class GrantUploadWriteSerializer(serializers.Serializer):
 class GrantUploadAcceptedSerializer(serializers.Serializer):
     """What the phone learns after a successful upload — and nothing more.
 
-    Deliberately NOT the design's id, title, answers, versions, images or how
-    many references it already had. A grant carries no read capability, so this
-    reports only the consequence of the caller's own action."""
+    One constant field, which is a decision rather than an oversight. Not the
+    design's id, title, answers, versions or images; and — the part that is easy
+    to get wrong — not how many reference slots are left either.
 
-    slots_remaining = serializers.IntegerField(
-        min_value=0, help_text="How many more photographs this code can still add."
+    A remaining-slots count looks harmless and is not. The cap is on the DESIGN
+    and ``MAX_INSPIRATION_IMAGES`` is public, so a caller who knows how many
+    photographs they sent through this code can subtract and recover how many
+    references the design already had before their code existed. In the ordinary
+    shop flow — a stylist adds one photograph on the iPad, then mints a code for
+    the customer — the very first upload would tell the phone that something
+    else was already attached to a design it is not allowed to read. That is a
+    read capability, arrived at by arithmetic, and ADR 0026's non-goal is
+    permanent.
+
+    So the phone learns capacity only by trying: an upload succeeds, or the code
+    answers with the one indistinguishable "no longer usable". That is one bit
+    at a time and each bit is the direct consequence of the caller's own
+    action — which is the least that can be disclosed while the customer is
+    still able to send a photograph at all."""
+
+    accepted = serializers.BooleanField(
+        help_text=(
+            "Always true. A constant, so that the success body carries no "
+            "information beyond the 201 itself — see the class docstring for "
+            "why a remaining-slots count was removed."
+        )
     )
 
 

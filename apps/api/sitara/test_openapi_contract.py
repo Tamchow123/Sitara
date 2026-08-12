@@ -45,6 +45,10 @@ EXPECTED_OPERATIONS = frozenset(
         # and its secret cannot be read back after minting.
         ("/api/v1/designs/{design_id}/reference-grants/", "post"),
         ("/api/v1/designs/{design_id}/reference-grants/", "delete"),
+        # The phone side of the same handoff, and the ONLY operation a grant
+        # opens. No design id in the path — the code names the design — and no
+        # sibling read operation, permanently.
+        ("/api/v1/reference-uploads/", "post"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/", "post"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/", "delete"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/image/", "get"),
@@ -87,6 +91,7 @@ UNSAFE_OPERATIONS = frozenset(
         # is enforced by Django rather than by DRF's SessionAuthentication.
         ("/api/v1/designs/{design_id}/reference-grants/", "post"),
         ("/api/v1/designs/{design_id}/reference-grants/", "delete"),
+        ("/api/v1/reference-uploads/", "post"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/", "post"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/", "delete"),
         ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "put"),

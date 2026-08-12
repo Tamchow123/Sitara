@@ -97,5 +97,14 @@ urlpatterns = [
         views.DesignInspirationUploadImageView.as_view(),
         name="design-inspiration-upload-image",
     ),
+    # No design id in the path: the handoff code names the design, so a grant
+    # for one design has nowhere to express another (ADR 0026). The code itself
+    # travels in the BODY, never the URL, so it cannot reach a web-server access
+    # log, a Referer header or a browser history entry.
+    re_path(
+        r"^reference-uploads/?$",
+        views.ReferenceUploadGrantUploadView.as_view(),
+        name="reference-upload-create",
+    ),
     re_path(rf"^jobs/{_JOB_UUID}/?$", views.GenerationJobView.as_view(), name="generation-job"),
 ]

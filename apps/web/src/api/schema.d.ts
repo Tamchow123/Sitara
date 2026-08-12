@@ -512,6 +512,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reference-uploads/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a reference photograph using a handoff code
+         * @description Sanitises one uploaded image (JPEG, PNG or single-frame WebP) into a clean WebP — EXIF orientation applied, then all EXIF/GPS/XMP/ICC metadata stripped — and attaches it to the design the code names. The original bytes are never stored, and no filename or declared content type is read. The rights affirmation must be given HERE, by the person choosing the image: a tick on the shop's screen does not carry across the handoff. Upload only — this code grants no way to read the design, its answers, its versions or any generated image.
+         */
+        post: operations["reference_uploads_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1087,6 +1107,56 @@ export interface components {
          * @enum {string}
          */
         GenerationModeEnum: "demo" | "live" | "unavailable";
+        /**
+         * @description What the phone learns after a successful upload — and nothing more.
+         *
+         *     One constant field, which is a decision rather than an oversight. Not the
+         *     design's id, title, answers, versions or images; and — the part that is easy
+         *     to get wrong — not how many reference slots are left either.
+         *
+         *     A remaining-slots count looks harmless and is not. The cap is on the DESIGN
+         *     and ``MAX_INSPIRATION_IMAGES`` is public, so a caller who knows how many
+         *     photographs they sent through this code can subtract and recover how many
+         *     references the design already had before their code existed. In the ordinary
+         *     shop flow — a stylist adds one photograph on the iPad, then mints a code for
+         *     the customer — the very first upload would tell the phone that something
+         *     else was already attached to a design it is not allowed to read. That is a
+         *     read capability, arrived at by arithmetic, and ADR 0026's non-goal is
+         *     permanent.
+         *
+         *     So the phone learns capacity only by trying: an upload succeeds, or the code
+         *     answers with the one indistinguishable "no longer usable". That is one bit
+         *     at a time and each bit is the direct consequence of the caller's own
+         *     action — which is the least that can be disclosed while the customer is
+         *     still able to send a photograph at all.
+         */
+        GrantUploadAccepted: {
+            /** @description Always true. A constant, so that the success body carries no information beyond the 201 itself — see the class docstring for why a remaining-slots count was removed. */
+            accepted: boolean;
+        };
+        GrantUploadResponse: {
+            upload: components["schemas"]["GrantUploadAccepted"];
+        };
+        /**
+         * @description The phone-side multipart body.
+         *
+         *     ``grant_token`` is the secret, sent in the BODY rather than the URL so it
+         *     cannot land in a web-server access log, a Referer header or a browser
+         *     history entry. The client's filename and declared content type are ignored
+         *     exactly as on the owner's own upload endpoint — only the decoded image is
+         *     trusted, and the storage key is server-generated.
+         */
+        GrantUploadWriteRequest: {
+            /** @description The handoff secret, from the scanned code. Never logged. */
+            grant_token: string;
+            /**
+             * Format: binary
+             * @description The image file. JPEG, PNG or single-frame WebP.
+             */
+            image: string;
+            /** @description Must be true, and must be given ON THIS DEVICE by the person choosing the image. A tick on the iPad does not carry across. */
+            rights_acknowledged: boolean;
+        };
         /**
          * @description One private audit acknowledgement from the persisted, historical
          *     inspiration-context snapshot (Phase 13). Deliberately excludes the asset
@@ -2949,6 +3019,94 @@ export interface operations {
                 };
             };
             /** @description No valid active questionnaire version is available. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reference_uploads_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["GrantUploadWriteRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantUploadResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorEnvelope"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description reference_upload_unavailable: the code is expired, revoked, spent, or was never real. One indistinguishable answer for all four — nothing here reveals whether a design exists. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This exact image has already been added to the design. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request body is too large. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many attempts. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The image could not be stored, or uploads are briefly unavailable. */
             503: {
                 headers: {
                     [name: string]: unknown;
