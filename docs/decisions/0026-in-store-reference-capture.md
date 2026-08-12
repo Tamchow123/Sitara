@@ -237,11 +237,53 @@ behind a grant.
 A grant is now minted on **every visit** to the reference step rather than on
 demand. That is a real cost and it is bounded by the bounds that already existed:
 the 15-minute TTL, at most one live grant per design, revocation on leaving the
-step, and the mint throttles (`REFERENCE_UPLOAD_GRANT_MINT_LIMIT`, 30 per design
-per hour; `…_MINT_IP_LIMIT`, 90 per IP per hour). The single-live-grant rule is
-what makes it safe rather than merely frequent: a stylist who steps back and
-forward over the step invalidates the code a customer may be mid-scan on, and the
-customer sees a code that no longer works rather than two codes that both do.
+step, and the mint throttles (`REFERENCE_UPLOAD_GRANT_MINT_LIMIT`, 60 per hour;
+`…_MINT_IP_LIMIT`, 90 per IP per hour). The single-live-grant rule is what makes
+it safe rather than merely frequent: a stylist who steps back and forward over
+the step invalidates the code a customer may be mid-scan on, and the customer
+sees a code that no longer works rather than two codes that both do.
+
+That first limit is keyed on the **shop's session**, not on the design — and
+"Finish and hand back" deliberately does not rotate the session (ADR 0027), so
+one counter is spent across every walk-in served in the window. Under the
+original design that budget was drawn on by deliberate presses; minting on
+arrival draws on it by navigation, which is a materially faster rate against a
+number chosen for the slower one.
+
+> **Owner decision (2026-08-12),** taken after review put the trade-off and the
+> option of leaving it alone: "I would raise it to 60 and then push the changes."
+
+Raised from 30 to 60, then. What changed is the number, not what the number is
+for: a refused mint still fails closed with a stated error and a manual retry,
+never an unbounded code supply, and a script still cannot grow the grant table
+without limit. Said plainly rather than as a euphemism — doubling a rate limit
+does loosen it against a single scripted session; the judgement is that the
+headroom is worth more than that tightness, given a legitimate call pattern that
+would otherwise refuse a real customer at the busiest hour.
+
+Three things a later reader should know about the sizing.
+
+**The cliff moved; it was not removed.** Reviewed arithmetic: a busy hour was
+estimated at roughly 32–75 mints, so 30 refused almost immediately across that
+whole range, and 60 clears its lower half. The shape that produced the number is
+unchanged — one fixed pool, session-keyed, not rotated by hand-back, spent by
+navigation, shared across an unbounded number of customers and designs in the
+window. A busier day, more corrections, or a second design for one customer
+reaches the same ceiling later and more rarely. Reaching it is a refusal the
+stylist sees and can retry, not a failure of the bound.
+
+**Nobody has measured a real shop.** Both 30 and 60 are judgement against an
+estimated rate. The honest test is a boutique in use, not a number chosen at a
+desk — and `check_and_count` is a fixed window, so the practical worst case sits
+somewhat above the nominal rate anyway (a burst either side of a window boundary
+can approach twice it). That is a property of the shared limiter, not of this
+number.
+
+**The gap to the per-IP ceiling has compressed from 3× to 1.5×.** Two devices
+behind one NAT now total 120 against a 90 limit where they used to total 60. The
+IP bound itself is untouched, so nothing new is permitted — but the margin that
+kept it from ever binding first was implicitly relied on and is now gone. A
+two-iPad shop is the topology to check first if codes start being refused.
 
 **A stop must stay stopped.** Showing the code automatically must not undo an
 explicit "Stop accepting photos" — that would make this ADR's revocability claim

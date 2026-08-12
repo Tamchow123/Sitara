@@ -1140,10 +1140,17 @@ REFERENCE_UPLOAD_GRANT_IP_WINDOW_SECONDS = env_positive_int(
 
 # Minting is owner-only and CSRF-protected, which decides WHO may ask for a code
 # but not how often. Each mint writes a durable row that only the retention
-# purge removes, so the rate needs its own bound. Generous against real use — a
-# stylist re-showing the panel a few times per customer is well inside it — and
+# purge removes, so the rate needs its own bound. Generous against real use and
 # tight enough that a loop cannot grow the table.
-REFERENCE_UPLOAD_GRANT_MINT_LIMIT = env_positive_int("REFERENCE_UPLOAD_GRANT_MINT_LIMIT", 30)
+#
+# Raised from 30 to 60 by the project owner (2026-08-12) when ADR 0026's
+# amendment made the reference step mint on arrival rather than on a deliberate
+# press. The counter is keyed on the SHOP'S SESSION — which "Finish and hand
+# back" deliberately does not rotate — so it accumulates across every walk-in
+# customer served in the window, and a step that mints on navigation reaches it
+# far sooner than one that minted on intent. Sizing, not a relaxation of what
+# the bound is for: a loop still cannot grow the table unboundedly.
+REFERENCE_UPLOAD_GRANT_MINT_LIMIT = env_positive_int("REFERENCE_UPLOAD_GRANT_MINT_LIMIT", 60)
 REFERENCE_UPLOAD_GRANT_MINT_WINDOW_SECONDS = env_positive_int(
     "REFERENCE_UPLOAD_GRANT_MINT_WINDOW_SECONDS", 3600
 )
