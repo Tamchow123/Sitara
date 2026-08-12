@@ -138,6 +138,17 @@ export function RefinementPanel({
             of these may hold, and a radio group is what says so to assistive
             technology and to the keyboard (arrow keys move within the group).
             The card look is styling on top of that, not a replacement for it. */}
+        {/* Each chip names the answer it will move, not just the category
+            (ADR 0028). Until this phase a refinement could not alter the image
+            at all, so a promise about what would change was one the product
+            could not keep; now it can, and "Changes the fabrics you chose" is
+            what makes a choice between seven chips meaningful.
+
+            The radio is named by the category span and DESCRIBED by the effect
+            span, explicitly. Without the explicit aria-labelledby the wrapping
+            label would fold both spans into the accessible name, and the
+            aria-describedby would then read the effect out a second time — the
+            same sentence twice per option, seven times over. */}
         <div className="refinement-chips">
           {REFINEMENT_CHANGE_TYPE_OPTIONS.map((option) => (
             <label
@@ -151,9 +162,16 @@ export function RefinementPanel({
                 name="refinement-change-type"
                 value={option.value}
                 checked={changeType === option.value}
+                aria-labelledby={`refinement-label-${option.value}`}
+                aria-describedby={`refinement-effect-${option.value}`}
                 onChange={() => setChangeType(option.value)}
               />
-              <span className="refinement-chip-label">{option.label}</span>
+              <span className="refinement-chip-label" id={`refinement-label-${option.value}`}>
+                {option.label}
+              </span>
+              <span className="refinement-chip-effect" id={`refinement-effect-${option.value}`}>
+                {option.effect}
+              </span>
             </label>
           ))}
         </div>

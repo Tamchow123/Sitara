@@ -2,7 +2,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RefinementPanel } from "./RefinementPanel";
-import { REFINEMENT_NOTE_MAX_LENGTH } from "./refinement-options";
+import {
+  REFINEMENT_CHANGE_TYPE_OPTIONS,
+  REFINEMENT_NOTE_MAX_LENGTH,
+} from "./refinement-options";
 import { axeViolations } from "@/test-utils/axe";
 
 const mocks = vi.hoisted(() => ({
@@ -53,6 +56,50 @@ describe("RefinementPanel — chip selection", () => {
     render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
     acknowledge();
     expect(screen.getByRole("button", { name: /request refinement/i })).toBeDisabled();
+  });
+
+  // ADR 0028: a chip now says which ANSWER it will change, not just its
+  // category name. Before this phase a refinement could not alter the image at
+  // all, so naming the field would have been a promise the product could not
+  // keep.
+  it("names the answer each chip will change", () => {
+    render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
+    expect(screen.getByText(/changes the fabrics you chose/i)).toBeInTheDocument();
+    expect(screen.getByText(/changes the neckline you chose/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/changes the coverage you chose — sleeves, back and midriff/i),
+    ).toBeInTheDocument();
+  });
+
+  it("associates each effect with its own radio rather than leaving it decoration", () => {
+    render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
+    for (const option of REFINEMENT_CHANGE_TYPE_OPTIONS) {
+      const radio = screen.getByRole("radio", { name: new RegExp(option.label, "i") });
+      const describedBy = radio.getAttribute("aria-describedby");
+      expect(describedBy).toBe(`refinement-effect-${option.value}`);
+      expect(document.getElementById(describedBy!)).toHaveTextContent(option.effect);
+    }
+  });
+
+  it("names each radio by its category alone, so the effect is not read twice", () => {
+    // The label wraps both spans, so without an explicit aria-labelledby the
+    // effect sentence would land in the accessible NAME as well as the
+    // description — the same sentence announced twice, seven times over.
+    render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
+    for (const option of REFINEMENT_CHANGE_TYPE_OPTIONS) {
+      const radio = screen.getByRole("radio", { name: new RegExp(`^${option.label}$`, "i") });
+      expect(radio).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("radio", { name: /changes the fabrics you chose/i })).toBeNull();
+  });
+
+  it("offers the seven requestable categories and never the retired one", () => {
+    // The panel is the REQUEST side. `styling_details` is still labelled for a
+    // historical result (see CHANGE_TYPE_LABELS), but offering it here would
+    // present a control the API answers with a 400.
+    render(<RefinementPanel designId="d1" sourceVersionId="v1" />);
+    expect(screen.getAllByRole("radio")).toHaveLength(7);
+    expect(screen.queryByRole("radio", { name: /styling details/i })).not.toBeInTheDocument();
   });
 });
 

@@ -535,10 +535,15 @@
   }
 }
 
+/* A grid, not a row, since Phase 23: each chip now carries a second line
+   saying which answer it will change, and that line belongs under the label
+   rather than beside the radio. The radio keeps its own column and spans both
+   rows, so it stays centred against the pair. */
 .refinement-chip {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: var(--space-2);
+  gap: 0 var(--space-2);
   min-height: 44px;
   padding: var(--space-3);
   border: 2px solid transparent;
@@ -557,10 +562,24 @@
    the label around it, not a replacement for it. Selection is therefore
    never signalled by the accent fill alone. */
 .refinement-chip input {
-  flex: none;
+  grid-row: 1 / span 2;
   accent-color: var(--color-accent-700);
   width: 18px;
   height: 18px;
+}
+
+/* Lighter than the label and never the only thing carrying meaning: the
+   category name still stands on its own, this only says what it will move. */
+.refinement-chip-effect {
+  grid-column: 2;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--color-neutral-700);
+}
+
+.refinement-chip-selected .refinement-chip-effect {
+  color: var(--color-accent-900);
 }
 
 .refinement-chip:focus-within {
