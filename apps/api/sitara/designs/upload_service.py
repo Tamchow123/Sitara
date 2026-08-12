@@ -168,17 +168,6 @@ def _delete_quietly(storage_key: str) -> bool:
     return True
 
 
-def inspiration_slots_used(design: Design) -> int:
-    """How many of the design's reference slots are already taken.
-
-    Historical curated selections still count. Nothing can add one since ADR
-    0025, but an old design that holds one has genuinely used the slot — it is
-    still sent to the provider by ``generation.reference_images`` when it is
-    still eligible — so ignoring it here would let that design exceed the
-    provider ceiling."""
-    return design.inspiration_selections.count() + design.inspiration_uploads.count()
-
-
 def _lowest_free_position(design: Design) -> int:
     """The smallest unused upload position for this design.
 
@@ -228,7 +217,7 @@ def create_inspiration_upload(
     limit = settings.MAX_INSPIRATION_IMAGES
     # A cheap pre-check so an over-limit request never spends CPU decoding an
     # image. It is NOT the guarantee — the locked re-check below is.
-    if inspiration_slots_used(design) >= limit:
+    if design.inspiration_slots_used() >= limit:
         raise InspirationUploadError(
             "inspiration_limit_reached",
             f"You can use at most {limit} inspiration images.",
@@ -268,7 +257,7 @@ def create_inspiration_upload(
                 raise InspirationUploadError(
                     "grant_unusable", "That link is no longer accepting photographs."
                 )
-            if inspiration_slots_used(locked) >= limit:
+            if locked.inspiration_slots_used() >= limit:
                 raise InspirationUploadError(
                     "inspiration_limit_reached",
                     f"You can use at most {limit} inspiration images.",

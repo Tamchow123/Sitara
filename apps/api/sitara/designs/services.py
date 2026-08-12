@@ -254,10 +254,14 @@ def resolve_current_design_session(request, *, create: bool) -> DesignSession | 
     pointer, ``create=True`` starts a fresh user-owned workspace; list-style
     callers pass ``create=False`` and query by user instead.
 
-    ``create=False`` is the lightweight read path. ``create=True`` (which
-    may raise WorkspaceCoordinationError) serialises against other requests
-    sharing the same browser session by locking the django_session row —
-    see ``_resolve_for_create``.
+    ``create=False`` is the lightweight read path, with ONE exception worth
+    knowing before adding a caller on a busy route: when the workspace it
+    resolves has gone idle, releasing it is a write, and that branch takes the
+    same django_session row lock ``create=True`` does — see
+    ``_release_idle_workspace``. Every other read is lock-free.
+    ``create=True`` (which may raise WorkspaceCoordinationError) serialises
+    against other requests sharing the same browser session by locking the
+    django_session row — see ``_resolve_for_create``.
     """
     if create:
         return _resolve_for_create(request)
@@ -274,19 +278,51 @@ def resolve_current_design_session(request, *, create: bool) -> DesignSession | 
         return None
     if _is_idle(design_session):
         # The customer walked away and nobody tapped "Finish and hand back".
-        # Treat the workspace as handed back: stop any handoff code that is
-        # still live, and only then forget it here.
-        #
-        # Revoke BEFORE dropping. Dropping first and failing in the revoke
-        # would leave the pointer gone and the codes alive, and — because the
-        # next attempt finds no pointer — with nothing left that would ever
-        # retry them. The pointer is the only handle back to this workspace.
-        _release_workspace(design_session)
-        _drop_pointer(request)
-        logger.info("walk-in session timed out workspace_id=%s", design_session.pk)
+        # Treat the workspace as handed back.
+        _release_idle_workspace(request, design_session)
         return None
     _touch(design_session)
     return design_session
+
+
+def _release_idle_workspace(request, design_session: DesignSession) -> None:
+    """Hand back a workspace that timed out, from the READ path.
+
+    Under the same browser-session row lock the create path uses, because
+    dropping the pointer is a WRITE and SessionMiddleware persists THIS
+    request's whole snapshot at response time. Unlocked, a concurrent, properly
+    locked create can have its brand-new pointer overwritten by our stale
+    snapshot — stranding the design it just made, which is the exact hazard
+    ``_resolve_for_create``'s lock exists to prevent. Only the idle branch pays
+    for the lock, so the ordinary read stays as light as its docstring claims.
+
+    Revoke BEFORE clearing, for the same reason ``end_walk_in_session`` does:
+    the pointer is the only handle back to this workspace, so clearing first
+    and failing in the revoke would leave live codes with nothing that could
+    ever retry them.
+
+    If the session row cannot be locked, nothing is released and the pointer
+    stays. The caller still gets ``None`` — the workspace IS idle and must not
+    resolve — and the next locked path cleans up. Declining to write beats
+    writing unlocked."""
+    try:
+        with transaction.atomic():
+            row, fresh_data = _lock_browser_session(request)
+            if fresh_data.get(DESIGN_SESSION_KEY) != str(design_session.id):
+                # Another tab already moved on. This pointer is not ours to
+                # clear, and the workspace it names is somebody else's problem.
+                return
+            _release_workspace(design_session)
+            _clear_pointer(request, row, fresh_data)
+            _drop_pointer(request)
+    except WorkspaceCoordinationError:
+        # Safe operation name and row id only.
+        logger.warning(
+            "idle workspace release skipped, session row unavailable workspace_id=%s",
+            design_session.pk,
+        )
+        return
+    logger.info("walk-in session timed out workspace_id=%s", design_session.pk)
 
 
 def _lock_browser_session(request) -> tuple[Session, dict]:

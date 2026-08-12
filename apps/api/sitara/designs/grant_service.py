@@ -59,6 +59,17 @@ class GrantMintingUnavailable(Exception):
     own abuse. -> 503, exactly as the upload throttle does it."""
 
 
+class GrantDesignFull(Exception):
+    """The design filled up before the code could be minted.
+
+    Raised from inside the mint's own row lock. The view's cheap pre-check
+    cannot be the authority: a stylist who taps "Show the code" while their own
+    third photo is still committing would otherwise be handed a code that is
+    dead on arrival, and the customer scans it and blames her phone. Same
+    condition, same 409 as the pre-check — only decided somewhere it cannot be
+    overtaken."""
+
+
 class GrantMintingThrottled(Exception):
     """Too many codes asked for from this session or address.
 
@@ -214,6 +225,14 @@ def create_reference_upload_grant(design: Design) -> tuple[ReferenceUploadGrant,
         # Re-read under the lock. The caller's instance may be stale, and it is
         # the ROW that serialises us against a concurrent mint, not the object.
         locked = Design.objects.select_for_update().get(pk=design.pk)
+        # The AUTHORITATIVE room-to-upload check, on the same row lock the
+        # uploads themselves take. The view's identical check before this call
+        # is a cheap pre-check only — it reads unlocked, so an upload landing in
+        # the gap between the two would otherwise mint a code with nowhere to
+        # put a photograph. Cheap unlocked pre-check, mandatory locked re-check,
+        # exactly as `create_inspiration_upload` does it.
+        if locked.inspiration_slots_used() >= settings.MAX_INSPIRATION_IMAGES:
+            raise GrantDesignFull()
         revoke_reference_upload_grants(locked, now=now)
         grant = ReferenceUploadGrant.objects.create(
             design=locked,
@@ -235,11 +254,28 @@ def revoke_reference_upload_grants(design: Design, *, now=None) -> int:
 
     Idempotent, and safe to call on a design that never had one — which is why
     the automatic callers (leaving the reference step, ending a shop-floor
-    session) can call it unconditionally."""
+    session) can call it unconditionally.
+
+    It takes the design's row lock ITSELF rather than trusting callers to hold
+    one. An unlocked revoke is only a bare UPDATE, so a mint sitting between its
+    own revoke and its INSERT is invisible to it: the UPDATE matches nothing,
+    this returns 0, the stylist is told the code was stopped, and the mint then
+    commits a live grant that outlives the stop. ADR 0026 accepts the bearer
+    credential specifically because revocation genuinely works, so the one place
+    a stylist deliberately stops a code cannot be the place that races.
+
+    Locking here rather than at each call site is deliberate: it costs the
+    already-locked callers nothing (re-acquiring a row lock inside the same
+    transaction is free) and removes the possibility of a future unlocked one.
+    """
     stamped = now or timezone.now()
-    revoked = ReferenceUploadGrant.objects.filter(design=design, revoked_at__isnull=True).update(
-        revoked_at=stamped
-    )
+    with transaction.atomic():
+        # Materialised, like the workspace revoke below: the lock is the point
+        # of the query, and a lazy queryset would take none of it.
+        list(Design.objects.select_for_update().filter(pk=design.pk).values_list("pk", flat=True))
+        revoked = ReferenceUploadGrant.objects.filter(
+            design=design, revoked_at__isnull=True
+        ).update(revoked_at=stamped)
     if revoked:
         logger.info("reference upload grants revoked design_id=%s count=%s", design.pk, revoked)
     return revoked

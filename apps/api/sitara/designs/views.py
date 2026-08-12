@@ -98,6 +98,7 @@ from .annotation_service import (
     replace_annotation_document,
 )
 from .grant_service import (
+    GrantDesignFull,
     GrantMintingThrottled,
     GrantMintingUnavailable,
     GrantUnusable,
@@ -184,7 +185,6 @@ from .upload_service import (
     create_inspiration_upload,
     delete_inspiration_upload,
     enforce_upload_throttle,
-    inspiration_slots_used,
     reject_oversized_body,
 )
 
@@ -2336,17 +2336,38 @@ class DesignReferenceGrantView(APIView):
                 "Phone handoff is temporarily unavailable. Please try again shortly.",
                 status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        remaining = max(settings.MAX_INSPIRATION_IMAGES - inspiration_slots_used(design), 0)
-        if remaining <= 0:
-            # Refused rather than minted-and-immediately-spent: a code that
-            # cannot work is worse than no code, because the customer scans it
-            # and blames their phone.
+
+        def _limit_reached():
+            # ONE construction, deliberately, for both refusals below. Routing
+            # the locked refusal through GrantDesignFull is only worth anything
+            # if it answers identically to the cheap pre-check — that is what
+            # gives the screen one case to handle instead of two. Two
+            # hand-written copies would let a reworded message drift them apart
+            # with every test still green.
             return _error(
                 "inspiration_limit_reached",
                 f"You can use at most {settings.MAX_INSPIRATION_IMAGES} inspiration images.",
                 status.HTTP_409_CONFLICT,
             )
-        grant, plaintext = create_reference_upload_grant(design)
+
+        remaining = max(settings.MAX_INSPIRATION_IMAGES - design.inspiration_slots_used(), 0)
+        if remaining <= 0:
+            # Refused rather than minted-and-immediately-spent: a code that
+            # cannot work is worse than no code, because the customer scans it
+            # and blames their phone.
+            #
+            # A CHEAP pre-check only. It reads unlocked, so the authoritative
+            # one is inside the mint's own row lock; this exists to avoid
+            # generating a secret we are about to throw away.
+            return _limit_reached()
+        try:
+            grant, plaintext = create_reference_upload_grant(design)
+        except GrantDesignFull:
+            # The design filled up between the pre-check and the lock — the
+            # stylist's own third photo landing while they tapped "Show the
+            # code". Same answer as the pre-check, decided somewhere it could
+            # not be overtaken.
+            return _limit_reached()
         return Response(
             {
                 "grant": {

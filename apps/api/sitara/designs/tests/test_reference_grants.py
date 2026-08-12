@@ -9,16 +9,23 @@ probe for designs.
 """
 
 import hashlib
+import io
 
 import pytest
+from django.conf import settings as django_settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
+from PIL import Image
 
 from sitara.designs.grant_service import (
+    GrantDesignFull,
     GrantUnusable,
+    create_reference_upload_grant,
     resolve_reference_upload_grant,
     revoke_reference_upload_grants,
 )
 from sitara.designs.models import Design, ReferenceUploadGrant
+from sitara.designs.upload_service import create_inspiration_upload
 
 from .utils import (
     DESIGNS_URL,
@@ -54,6 +61,24 @@ def expire(design_id) -> None:
 def mint(client, design_id, token=None):
     token = token or bootstrap_csrf(client)
     return send_json(client, "post", grants_url(design_id), {}, token=token)
+
+
+def fill_reference_slots(design: Design) -> None:
+    """Use up every reference slot the design has, the way the product does.
+
+    Real uploads through the real service rather than hand-written rows: the
+    slot count is what the mint's lock guards, so a test that invented its own
+    idea of a used slot would be testing itself."""
+    for index in range(django_settings.MAX_INSPIRATION_IMAGES):
+        buffer = io.BytesIO()
+        # A different colour each time: the service refuses a second copy of an
+        # image it already holds, so identical fixtures would fill one slot.
+        Image.new("RGB", (40, 60), (200, 30 + index * 40, 60)).save(buffer, format="PNG")
+        create_inspiration_upload(
+            design,
+            SimpleUploadedFile("reference.png", buffer.getvalue(), content_type="image/png"),
+            rights_acknowledged=True,
+        )
 
 
 class TestMinting:
@@ -404,6 +429,82 @@ class TestMintThrottling:
         assert foreign.json() == missing.json()
 
 
+class TestTheSlotCheckIsAuthoritative:
+    """A code that cannot work is worse than no code at all.
+
+    The customer scans it, her phone is refused, and she blames her phone. So
+    "is there room for another photograph?" is decided inside the mint's own row
+    lock — the same lock the uploads themselves take — and the view's identical
+    check before it is only a courtesy that saves generating a secret nobody
+    will use.
+    """
+
+    def test_a_full_design_is_refused_by_the_service_itself(self):
+        client = csrf_client()
+        design_id = create_owned_design_id(client)
+        design = Design.objects.get(pk=design_id)
+        fill_reference_slots(design)
+
+        with pytest.raises(GrantDesignFull):
+            create_reference_upload_grant(design)
+
+        # Nothing was written on the way out either: no row, so nothing for a
+        # later expiry sweep or an admin view to have to explain.
+        assert not ReferenceUploadGrant.objects.filter(design=design).exists()
+
+    def test_a_photograph_landing_mid_mint_still_refuses(self, monkeypatch):
+        """The gap the locked re-check closes.
+
+        The view's unlocked read sees room; by the time the lock is taken the
+        stylist's own third photograph has landed. Simulated rather than
+        threaded because the assertion is about WHICH check decides, not about
+        the scheduler."""
+        client = csrf_client()
+        design_id = create_owned_design_id(client)
+        reads = {"count": 0}
+
+        def racing_count(self) -> int:
+            reads["count"] += 1
+            # Only the view's pre-check sees room.
+            return 0 if reads["count"] == 1 else django_settings.MAX_INSPIRATION_IMAGES
+
+        monkeypatch.setattr(Design, "inspiration_slots_used", racing_count)
+        response = mint(client, design_id)
+
+        assert reads["count"] >= 2, "the locked re-check never ran"
+        assert response.status_code == 409, response.content
+        # And the same answer the pre-check gives, so the screen has one case
+        # to handle rather than two.
+        assert response.json()["error"]["code"] == "inspiration_limit_reached"
+        assert not ReferenceUploadGrant.objects.filter(design_id=design_id).exists()
+
+    def test_both_refusals_are_the_same_answer_word_for_word(self, monkeypatch):
+        """Not merely the same error code — the same body.
+
+        The locked re-check is only worth routing through its own exception if
+        a caller cannot tell which of the two checks refused it. Asserted on the
+        whole body because a reworded message is exactly the drift that would
+        slip past a code-only assertion."""
+        pre_check_client = csrf_client()
+        full_design_id = create_owned_design_id(pre_check_client)
+        fill_reference_slots(Design.objects.get(pk=full_design_id))
+        from_pre_check = mint(pre_check_client, full_design_id)
+
+        raced_client = csrf_client()
+        raced_design_id = create_owned_design_id(raced_client)
+        reads = {"count": 0}
+
+        def racing_count(self) -> int:
+            reads["count"] += 1
+            return 0 if reads["count"] == 1 else django_settings.MAX_INSPIRATION_IMAGES
+
+        monkeypatch.setattr(Design, "inspiration_slots_used", racing_count)
+        from_the_lock = mint(raced_client, raced_design_id)
+
+        assert from_pre_check.status_code == from_the_lock.status_code == 409
+        assert from_pre_check.json() == from_the_lock.json()
+
+
 class TestLifecycle:
     def test_only_one_grant_can_be_live_at_a_time(self):
         """The database's own word on it, independent of any lock.
@@ -491,3 +592,61 @@ def test_concurrent_mints_leave_exactly_one_live_grant():
     assert len(dead) == 1
     with pytest.raises(GrantUnusable):
         resolve_reference_upload_grant(dead[0])
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_mint_in_flight_cannot_outlive_a_stop():
+    """ "Stop accepting photographs" has to mean it, even mid-mint.
+
+    An unlocked revoke is only a bare UPDATE, so a mint sitting between taking
+    its own lock and inserting its row is invisible to it: the UPDATE matches
+    nothing, the stylist is told the code was stopped, and the mint then commits
+    a live grant that outlives the stop. ADR 0026 accepts the bearer credential
+    specifically because revocation genuinely works, so the one place a stylist
+    deliberately stops a code is the last place that may race.
+    """
+    import threading
+    import time
+
+    from django.db import connection, transaction
+
+    from sitara.designs.models import DesignSession
+
+    session = DesignSession.objects.create()
+    design = Design.objects.create(design_session=session)
+
+    holding = threading.Event()
+    failures = []
+
+    def mint_slowly():
+        """The shape of ``create_reference_upload_grant``, paused mid-way."""
+        try:
+            with transaction.atomic():
+                locked = Design.objects.select_for_update().get(pk=design.pk)
+                holding.set()
+                # Wide enough that the revoke is unambiguously inside the
+                # window; no assertion depends on the exact length.
+                time.sleep(1)
+                ReferenceUploadGrant.objects.create(
+                    design=locked,
+                    token_digest="a" * 64,
+                    created_at=timezone.now(),
+                    expires_at=timezone.now() + timezone.timedelta(minutes=15),
+                )
+        except BaseException as exc:  # noqa: BLE001 - surfaced below
+            failures.append(exc)
+        finally:
+            connection.close()
+
+    thread = threading.Thread(target=mint_slowly)
+    thread.start()
+    assert holding.wait(timeout=10)
+
+    revoked = revoke_reference_upload_grants(design)
+
+    thread.join(timeout=30)
+    assert failures == []
+    # It waited for the mint rather than sailing past it, and then killed
+    # exactly what the mint had just written.
+    assert revoked == 1
+    assert not ReferenceUploadGrant.objects.filter(design=design, revoked_at__isnull=True).exists()

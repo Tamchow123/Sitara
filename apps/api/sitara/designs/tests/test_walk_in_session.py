@@ -425,6 +425,139 @@ class TestCoordinationAndFailure:
         assert DESIGN_SESSION_KEY in client.session
 
 
+class TestTheIdleReleaseCoordinates:
+    """The timeout's release is a WRITE, and has to coordinate like one.
+
+    Dropping the pointer looks like a read-path tidy-up, but SessionMiddleware
+    persists this request's whole session snapshot at response time. Unlocked,
+    a concurrent — properly locked — create can have its brand-new pointer
+    overwritten by our stale snapshot, stranding the design it just made. That
+    is the exact hazard ``_resolve_for_create``'s lock exists to prevent, so
+    the idle branch takes the same lock.
+    """
+
+    def test_the_idle_release_locks_the_browser_session_row(self, settings):
+        """Asserted directly rather than by scheduling a real race, for the
+        same reason the hand-back's lock is: that race cannot be made
+        deterministic in a test."""
+        import sitara.designs.services as services
+
+        settings.WALK_IN_IDLE_TIMEOUT_SECONDS = 60
+        client = csrf_client()
+        design_id = create_owned_design_id(client)
+        go_idle(design_id)
+
+        locked: list[str] = []
+        original = services._lock_browser_session
+
+        def record(request):
+            row, data = original(request)
+            locked.append("locked")
+            return row, data
+
+        services._lock_browser_session = record
+        try:
+            response = client.get(f"{DESIGNS_URL}{design_id}/", REMOTE_ADDR=unique_ip())
+        finally:
+            services._lock_browser_session = original
+
+        assert response.status_code == 404
+        assert locked == ["locked"]
+
+    def test_an_ordinary_read_does_not_pay_for_it(self, settings):
+        """Only the idle branch takes the lock. Every other read is the
+        lightweight path its docstring promises, and this is what holds it to
+        that — a row lock on every design GET would be a real cost on the one
+        request a stylist makes most."""
+        import sitara.designs.services as services
+
+        settings.WALK_IN_IDLE_TIMEOUT_SECONDS = 3600
+        client = csrf_client()
+        design_id = create_owned_design_id(client)
+
+        locked: list[str] = []
+        original = services._lock_browser_session
+
+        def record(request):
+            row, data = original(request)
+            locked.append("locked")
+            return row, data
+
+        services._lock_browser_session = record
+        try:
+            response = client.get(f"{DESIGNS_URL}{design_id}/", REMOTE_ADDR=unique_ip())
+        finally:
+            services._lock_browser_session = original
+
+        assert response.status_code == 200
+        assert locked == []
+
+    def test_a_release_that_cannot_lock_declines_to_write(self, settings, monkeypatch):
+        """Declining to write beats writing unlocked.
+
+        The workspace still must not resolve — it IS idle — but nothing is
+        released, so the pointer survives for the next locked path to finish
+        the job with."""
+        settings.WALK_IN_IDLE_TIMEOUT_SECONDS = 60
+        client = csrf_client()
+        design_id = create_owned_design_id(client)
+        _, plaintext = create_reference_upload_grant(Design.objects.get(pk=design_id))
+        pointer = client.session[DESIGN_SESSION_KEY]
+        go_idle(design_id)
+
+        def unavailable(request):
+            raise WorkspaceCoordinationError("the browser session could not be locked")
+
+        monkeypatch.setattr("sitara.designs.services._lock_browser_session", unavailable)
+        response = client.get(f"{DESIGNS_URL}{design_id}/", REMOTE_ADDR=unique_ip())
+
+        assert response.status_code == 404
+        assert client.session[DESIGN_SESSION_KEY] == pointer
+        assert resolve_reference_upload_grant(plaintext) is not None
+
+        # And the next locked path does finish it, so declining is a deferral
+        # rather than a leak.
+        monkeypatch.undo()
+        create_owned_design_id(client)
+        with pytest.raises(GrantUnusable):
+            resolve_reference_upload_grant(plaintext)
+
+    def test_it_will_not_clear_a_pointer_that_has_moved_on(self, settings):
+        """Another tab already started a new workspace, under the lock.
+
+        That pointer is not ours to clear: clearing it would strand the design
+        that tab just made, which is precisely the outcome the lock was taken
+        to prevent."""
+        import sitara.designs.services as services
+
+        settings.WALK_IN_IDLE_TIMEOUT_SECONDS = 60
+        client = csrf_client()
+        design_id = create_owned_design_id(client)
+        _, plaintext = create_reference_upload_grant(Design.objects.get(pk=design_id))
+        pointer = client.session[DESIGN_SESSION_KEY]
+        go_idle(design_id)
+
+        original = services._lock_browser_session
+
+        def moved_on(request):
+            row, data = original(request)
+            # What the locked row looks like once another tab has committed a
+            # workspace of its own.
+            return row, {**data, DESIGN_SESSION_KEY: str(uuid.uuid4())}
+
+        services._lock_browser_session = moved_on
+        try:
+            response = client.get(f"{DESIGNS_URL}{design_id}/", REMOTE_ADDR=unique_ip())
+        finally:
+            services._lock_browser_session = original
+
+        # The idle workspace still does not resolve for this request...
+        assert response.status_code == 404
+        # ...but it released nothing and wrote nothing over the other tab.
+        assert client.session[DESIGN_SESSION_KEY] == pointer
+        assert resolve_reference_upload_grant(plaintext) is not None
+
+
 class TestTheCostOfRevoking:
     def test_revoking_a_workspace_does_not_scale_its_queries_with_it(self):
         """One locked statement plus one update, whatever the workspace holds.

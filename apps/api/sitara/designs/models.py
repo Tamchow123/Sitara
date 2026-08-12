@@ -122,6 +122,21 @@ class Design(models.Model):
         self.title = (self.title or "").strip()
         super().save(*args, **kwargs)
 
+    def inspiration_slots_used(self) -> int:
+        """How many of this design's reference slots are already taken.
+
+        Historical curated selections still count. Nothing can add one since
+        ADR 0025, but an old design that holds one has genuinely used the slot
+        — it is still sent to the provider by ``generation.reference_images``
+        while it stays eligible — so ignoring it here would let that design
+        exceed the provider ceiling.
+
+        On the model rather than in ``upload_service`` because the grant mint
+        needs the same authoritative count under its own row lock, and one
+        service importing another for a single read would be a cycle.
+        """
+        return self.inspiration_selections.count() + self.inspiration_uploads.count()
+
 
 class DesignInspiration(models.Model):
     """One inspiration image a user selected for a design, at a position.
