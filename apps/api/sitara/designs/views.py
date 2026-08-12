@@ -135,6 +135,7 @@ from .openapi import (
     ReferenceUploadGrantRevokedSerializer,
     RenderSendResponseSerializer,
     RenderSendStateResponseSerializer,
+    WalkInSessionEndedSerializer,
 )
 from .ownership import accessible_designs, accessible_generation_attempts
 from .render_delivery import (
@@ -172,6 +173,7 @@ from .services import (
     DraftUpdateError,
     WorkspaceCoordinationError,
     design_completion_errors,
+    end_walk_in_session,
     resolve_current_design_session,
     update_design_draft,
 )
@@ -2493,15 +2495,22 @@ class ReferenceUploadGrantUploadView(APIView):
                 grant.design,
                 validated["image"],
                 rights_acknowledged=validated["rights_acknowledged"],
+                # Re-checked under the design row lock, immediately before the
+                # row is written. Resolution above happened before the decode,
+                # sanitise and storage write, which is long enough for a
+                # hand-back or the idle timeout to revoke this code mid-upload.
+                require_live_grant=grant,
             )
         except InspirationUploadError as exc:
-            if exc.code == "inspiration_limit_reached":
-                # The design is full, so this code is SPENT. Answered as the
-                # same 404 as an unknown one — "spent" would otherwise confirm
-                # that the design behind a guessed code is real. The check that
-                # produced it ran under the Design row lock inside the upload
-                # service, so it is also the answer that holds under concurrent
-                # uploads through one code.
+            if exc.code in ("inspiration_limit_reached", "grant_unusable"):
+                # Two ways for the CODE rather than the file to be at fault:
+                # the design filled up, so this code is spent; or the code was
+                # revoked while this upload was being processed. Both answer as
+                # the same 404 as an unknown code — "spent" or "revoked" would
+                # otherwise confirm that the design behind a guessed code is
+                # real. Both checks ran under the Design row lock inside the
+                # upload service, so they hold under concurrent uploads through
+                # one code and against a concurrent hand-back.
                 return _reference_upload_unavailable()
             # Everything else is about the caller's own file, so it is answered
             # honestly: the person holding the phone can act on "too large" and
@@ -2520,3 +2529,68 @@ class ReferenceUploadGrantUploadView(APIView):
             status=status.HTTP_201_CREATED,
             headers=NO_STORE,
         )
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class WalkInSessionEndView(APIView):
+    """Hand the shop's screen back (Phase 22, ADR 0027).
+
+    "Finish and hand back". Ends the walk-in session in front of the iPad:
+    forgets the workspace pointer and revokes any live handoff code, so the
+    next person to sit down starts clean.
+
+    Three things it deliberately does NOT do.
+
+    It does not sign the shop out. The account is the boutique's and the next
+    customer using it is the intended state — putting a login screen between
+    every customer would buy no privacy and cost the stylist a password every
+    time.
+
+    It does not delete anything. Those concepts are the shop's work product; it
+    decides whether to pass them to the customer. Ending a session ends this
+    browser's claim on a workspace, not the workspace.
+
+    It reports nothing about what it ended. The next person may already be
+    looking at the screen."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        operation_id="designs_end_walk_in_session",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=None,
+        responses={
+            200: WalkInSessionEndedSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "The browser session row could not be locked, so the "
+                    "hand-back did not happen. Fails closed and says so rather "
+                    "than reporting a hand-back it did not perform."
+                ),
+            ),
+        },
+        summary="Finish and hand back",
+        description=(
+            "Ends the walk-in session on a shared shop device: drops the "
+            "workspace pointer and revokes any live phone-handoff code. "
+            "Idempotent — ending when there is nothing to end succeeds and "
+            "reports false. Does not sign out, and deletes nothing. A "
+            "server-enforced idle timeout does the same thing unprompted, "
+            "because customers walk away without anyone tapping this."
+        ),
+    )
+    def post(self, request):
+        try:
+            ended = end_walk_in_session(request)
+        except WorkspaceCoordinationError as exc:
+            # The stylist is about to turn this screen towards someone else on
+            # the strength of the answer, so a hand-back that could not be
+            # coordinated must fail visibly rather than report success.
+            return _workspace_unavailable(exc)
+        return Response({"ended": ended}, headers=NO_STORE)

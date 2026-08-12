@@ -49,6 +49,9 @@ EXPECTED_OPERATIONS = frozenset(
         # opens. No design id in the path — the code names the design — and no
         # sibling read operation, permanently.
         ("/api/v1/reference-uploads/", "post"),
+        # Phase 22 (ADR 0027): "Finish and hand back" on a shared shop device.
+        # No design id — it ends whatever walk-in session this browser holds.
+        ("/api/v1/designs/end-session/", "post"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/", "post"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/", "delete"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/image/", "get"),
@@ -92,6 +95,7 @@ UNSAFE_OPERATIONS = frozenset(
         ("/api/v1/designs/{design_id}/reference-grants/", "post"),
         ("/api/v1/designs/{design_id}/reference-grants/", "delete"),
         ("/api/v1/reference-uploads/", "post"),
+        ("/api/v1/designs/end-session/", "post"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/", "post"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/", "delete"),
         ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "put"),

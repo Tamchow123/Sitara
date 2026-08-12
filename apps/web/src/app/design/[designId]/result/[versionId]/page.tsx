@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 
 import { AppShell } from "@/components/AppShell";
+import { FinishAndHandBack } from "@/features/shopfloor/FinishAndHandBack";
 import { DesignResult } from "@/features/results/DesignResult";
 
 export default function DesignResultPage() {
@@ -12,7 +13,7 @@ export default function DesignResultPage() {
   return (
     // The concept screen is the handoff's widest layout: a sticky render
     // column beside the specification.
-    <AppShell width="wide">
+    <AppShell width="wide" actions={<FinishAndHandBack />}>
       <DesignResult designId={designId} versionId={versionId} />
     </AppShell>
   );

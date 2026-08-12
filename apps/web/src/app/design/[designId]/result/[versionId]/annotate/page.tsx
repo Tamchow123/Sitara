@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 
 import { AppShell } from "@/components/AppShell";
 import { AnnotationWorkspace } from "@/features/annotations/AnnotationWorkspace";
+import { FinishAndHandBack } from "@/features/shopfloor/FinishAndHandBack";
 
 // Private and ownership-backed by the API. The Next.js middleware is a
 // navigation optimisation only — a foreign or nonexistent design is an
@@ -15,7 +16,11 @@ export default function AnnotatePage() {
   return (
     // The widest layout in the system: a tool rail, a canvas and a list panel
     // side by side.
-    <AppShell width="wide">
+    //
+    // This screen most needs the hand-back control, not least: ADR 0027 names
+    // the annotation note as the sharpest case for why a shared iPad must not
+    // carry one customer's work into the next consultation.
+    <AppShell width="wide" actions={<FinishAndHandBack />}>
       <AnnotationWorkspace designId={designId} versionId={versionId} />
     </AppShell>
   );

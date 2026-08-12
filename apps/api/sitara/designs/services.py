@@ -22,6 +22,7 @@ from sitara.questionnaire.answer_validation import (
 )
 from sitara.questionnaire.models import QuestionnaireVersion
 
+from .grant_service import revoke_grants_for_workspace
 from .models import Design, DesignSession, DesignVersion
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,101 @@ def _touch(design_session: DesignSession) -> None:
     now = timezone.now()
     DesignSession.objects.filter(pk=design_session.pk).update(last_seen_at=now)
     design_session.last_seen_at = now
+
+
+def _is_idle(design_session: DesignSession, *, now=None) -> bool:
+    """Has this workspace gone quiet for longer than the walk-in timeout?
+
+    Measured on the workspace's own ``last_seen_at``, which every design
+    request already updates — so this is server-side state, not a client's
+    word for how long it has been sitting there. A backgrounded tab runs no
+    timers and a closed lid runs nothing at all, which is precisely why the
+    phase requires the boundary to be here rather than in a browser prompt."""
+    cutoff = (now or timezone.now()) - timezone.timedelta(
+        seconds=settings.WALK_IN_IDLE_TIMEOUT_SECONDS
+    )
+    return design_session.last_seen_at < cutoff
+
+
+def _release_workspace(design_session: DesignSession) -> None:
+    """Detach a workspace from the walk-in in front of the screen.
+
+    Revokes any live handoff code, because a code outliving the customer who
+    scanned it is the one piece of this that a stranger could still use. The
+    workspace ROW and its designs are untouched: the shop owns that work (ADR
+    0027) and ending a session is not deleting it.
+
+    Locking and batching both live in ``grant_service`` — grants are its
+    subject, and one locked statement there beats a loop here that would take
+    no locks and scale its round trips with the workspace's design count."""
+    revoke_grants_for_workspace(design_session)
+
+
+def end_walk_in_session(request) -> bool:
+    """End the walk-in session in front of the shop's screen (ADR 0027).
+
+    Drops the workspace pointer and revokes any live handoff code. Returns
+    whether there was a workspace to end, and is safe to call when there was
+    not.
+
+    It deliberately does NOT sign the shop out. The account is the boutique's
+    and the next customer using it is the intended state — that is the one real
+    simplification the shop-account decision buys, and undoing it here would
+    put a login screen between every customer for no privacy gain.
+
+    Nor does it delete anything. The concepts are the shop's work product; what
+    ends is this browser's claim on the workspace, not the workspace.
+
+    Be precise about what that leaves, because it is easy to overclaim. What
+    ends is the workspace pointer: the NEXT thing the browser starts is a fresh
+    workspace, and nothing of the previous customer is offered on any screen.
+    What does NOT end is the shop's ownership of the work it just produced —
+    ``accessible_designs`` gives a signed-in account every design it has ever
+    owned, deliberately, because the shop owns them (ADR 0027 §1). So a design
+    whose UUID is still in this browser's history remains fetchable by
+    deliberate back-navigation to that URL. That residual exposure is ACCEPTED
+    AND BOUNDED, not removed; ADR 0027 records it, its bounds and why closing
+    it belongs to the deferred gallery redesign rather than here.
+
+    Coordinated exactly like the create path, and for the same reason: the
+    browser's ``django_session`` row is locked first and the pointer is removed
+    THROUGH that row. Without it, a hand-back on one tab and a first design
+    create on another are two blind whole-blob session writes, and whichever
+    lands second silently undoes the other — either stranding the next
+    customer's new design or resurrecting the last one's workspace.
+
+    Order matters within the lock: revoke, then clear. Clearing first and
+    failing in the revoke would leave the codes live and the only handle back
+    to that workspace gone, so a retry would find nothing to end and say so.
+    Raises :class:`WorkspaceCoordinationError` (a controlled 503) when the
+    session row cannot be locked or written — there is no unlocked fallback,
+    because a hand-back that quietly did not happen is worse than one that
+    visibly failed and can be pressed again."""
+    user = request.user if request.user.is_authenticated else None
+    # Do NOT catch around _release_workspace below. Its own atomic() is a
+    # SAVEPOINT inside this transaction, so swallowing its exception would let
+    # execution reach the pointer clear with the revoke already rolled back —
+    # the exact pointer-gone-codes-live state this ordering exists to prevent,
+    # reintroduced one well-meant `except` at a time. Letting it propagate
+    # aborts the whole transaction, which is the outcome we want.
+    with transaction.atomic():
+        row, fresh_data = _lock_browser_session(request)
+        raw = fresh_data.get(DESIGN_SESSION_KEY)
+        design_session = _workspace_for_pointer(raw, user) if raw is not None else None
+        if design_session is not None:
+            _release_workspace(design_session)
+        if raw is not None:
+            _clear_pointer(request, row, fresh_data)
+        # Synchronise this request's own snapshot too: SessionMiddleware saves
+        # it at response time and would otherwise write the pointer back.
+        _drop_pointer(request)
+    if design_session is None:
+        # Either no pointer at all, or one that was already unusable. Nothing
+        # was ended, and saying so is not a leak: the caller is the browser
+        # that held (or did not hold) the pointer.
+        return False
+    logger.info("walk-in session ended workspace_id=%s", design_session.pk)
+    return True
 
 
 def _claim_for_user(design_session: DesignSession, user) -> DesignSession | None:
@@ -176,6 +272,19 @@ def resolve_current_design_session(request, *, create: bool) -> DesignSession | 
         # ignored pointer would be equally unusable next time).
         _drop_pointer(request)
         return None
+    if _is_idle(design_session):
+        # The customer walked away and nobody tapped "Finish and hand back".
+        # Treat the workspace as handed back: stop any handoff code that is
+        # still live, and only then forget it here.
+        #
+        # Revoke BEFORE dropping. Dropping first and failing in the revoke
+        # would leave the pointer gone and the codes alive, and — because the
+        # next attempt finds no pointer — with nothing left that would ever
+        # retry them. The pointer is the only handle back to this workspace.
+        _release_workspace(design_session)
+        _drop_pointer(request)
+        logger.info("walk-in session timed out workspace_id=%s", design_session.pk)
+        return None
     _touch(design_session)
     return design_session
 
@@ -215,6 +324,20 @@ def _persist_pointer(request, row: Session, fresh_data: dict, pointer: str) -> N
         raise WorkspaceCoordinationError("the browser session could not be persisted") from exc
 
 
+def _clear_pointer(request, row: Session, fresh_data: dict) -> None:
+    """Remove the pointer from the LOCKED session row.
+
+    The mirror of :func:`_persist_pointer`. Writing through the locked row
+    rather than only through ``request.session`` is what stops a concurrent
+    tab's save from resurrecting a pointer this request just ended."""
+    try:
+        fresh_data.pop(DESIGN_SESSION_KEY, None)
+        row.session_data = request.session.encode(fresh_data)
+        row.save(update_fields=["session_data"])
+    except Exception as exc:
+        raise WorkspaceCoordinationError("the browser session could not be persisted") from exc
+
+
 def _resolve_for_create(request) -> DesignSession:
     """Concurrency-safe workspace resolution for the create path.
 
@@ -233,6 +356,14 @@ def _resolve_for_create(request) -> DesignSession:
     with transaction.atomic():
         row, fresh_data = _lock_browser_session(request)
         design_session = _workspace_for_pointer(fresh_data.get(DESIGN_SESSION_KEY), user)
+        if design_session is not None and _is_idle(design_session):
+            # Same timeout as the read path, checked under the same lock that
+            # everything else here is checked under. A walk-in who comes back
+            # after the timeout starts a new workspace rather than resuming
+            # one the next customer may already have been handed.
+            _release_workspace(design_session)
+            logger.info("walk-in session timed out workspace_id=%s", design_session.pk)
+            design_session = None
         if design_session is None:
             design_session = DesignSession.objects.create(user=user)
         pointer = str(design_session.id)
@@ -515,6 +646,7 @@ __all__ = [
     "create_next_design_version",
     "create_next_design_version_locked",
     "design_completion_errors",
+    "end_walk_in_session",
     "inspiration_availability_errors",
     "resolve_current_design_session",
     "update_design_draft",

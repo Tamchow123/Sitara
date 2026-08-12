@@ -247,9 +247,29 @@ class TestTheOneThingItDoes:
         def broken(*args, **kwargs):
             raise exception_type("connection reset")
 
-        monkeypatch.setattr(
-            "sitara.designs.grant_service.ReferenceUploadGrant.objects.filter", broken
-        )
+        # Break the grant query ONLY for the after-commit counter write. It
+        # used to be safe to patch the manager for the whole request, because
+        # the counter was the only thing that queried it. The REL-003 fix added
+        # a second, earlier query — the liveness re-check under the design row
+        # lock — and a blanket patch would break that instead, testing the
+        # opposite of what this test is about.
+        import sitara.designs.grant_service as grant_service
+        import sitara.designs.views as views
+
+        real_record = grant_service.record_grant_use
+        real_filter = grant_service.ReferenceUploadGrant.objects.filter
+
+        def record_against_a_broken_database(grant, **kwargs):
+            grant_service.ReferenceUploadGrant.objects.filter = broken
+            try:
+                return real_record(grant, **kwargs)
+            finally:
+                grant_service.ReferenceUploadGrant.objects.filter = real_filter
+
+        # Patched on the VIEW: it imported the name directly, so replacing the
+        # attribute on grant_service alone would leave the view calling the
+        # original.
+        monkeypatch.setattr(views, "record_grant_use", record_against_a_broken_database)
         with caplog.at_level(logging.WARNING):
             response = post_upload(csrf_client(), code, data=_png_bytes())
 

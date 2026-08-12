@@ -101,6 +101,13 @@ urlpatterns = [
     # for one design has nowhere to express another (ADR 0026). The code itself
     # travels in the BODY, never the URL, so it cannot reach a web-server access
     # log, a Referer header or a browser history entry.
+    # Before the `designs/<uuid>/` pattern only for readability — "end-session"
+    # is not a UUID, so the two cannot collide.
+    re_path(
+        r"^designs/end-session/?$",
+        views.WalkInSessionEndView.as_view(),
+        name="walk-in-session-end",
+    ),
     re_path(
         r"^reference-uploads/?$",
         views.ReferenceUploadGrantUploadView.as_view(),

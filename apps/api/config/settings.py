@@ -741,6 +741,28 @@ ACCOUNT_EMAIL_DELIVERY_ENABLED = env_bool("ACCOUNT_EMAIL_DELIVERY_ENABLED", defa
 # also off, a concept is reachable only during the session that produced it.
 # ---------------------------------------------------------------------------
 ACCOUNT_GALLERY_ENABLED = env_bool("ACCOUNT_GALLERY_ENABLED", default=False)
+# ---------------------------------------------------------------------------
+# The walk-in session's idle timeout (Phase 22, ADR 0027).
+#
+# A shop-floor iPad is a shared screen. Customers walk away mid-questionnaire —
+# to take a call, to look at a rail, to leave — and the stylist does not always
+# remember to tap "Finish and hand back". After this long without a design
+# request, the workspace pointer is dropped and any live handoff code revoked,
+# so the next person to pick up the iPad starts clean whether or not anyone
+# ended the session deliberately.
+#
+# Enforced SERVER-SIDE, on the workspace's own `last_seen_at`, because a
+# client-side prompt is not a boundary — a backgrounded tab runs no timers, and
+# a closed lid runs nothing at all. Thirty minutes is long enough not to
+# interrupt a real consultation (a bridal questionnaire is not quick, and there
+# are pauses for tea and for fetching a sample) and short enough that a
+# customer who walked out is gone before the next one sits down.
+#
+# It does NOT sign the shop out. The account is the boutique's (ADR 0027) and
+# the next customer signing into it is the intended state; what ends is the
+# walk-in workspace, not the shop's session.
+# ---------------------------------------------------------------------------
+WALK_IN_IDLE_TIMEOUT_SECONDS = env_positive_int("WALK_IN_IDLE_TIMEOUT_SECONDS", 1800)
 
 
 # Console outside production, so a developer sees the whole message without a

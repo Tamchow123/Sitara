@@ -34,7 +34,7 @@ from django.utils import timezone
 
 from sitara.accounts.rate_limits import RateLimitUnavailable, check_and_count, client_ip
 
-from .models import Design, ReferenceUploadGrant
+from .models import Design, DesignSession, ReferenceUploadGrant
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +243,69 @@ def revoke_reference_upload_grants(design: Design, *, now=None) -> int:
     if revoked:
         logger.info("reference upload grants revoked design_id=%s count=%s", design.pk, revoked)
     return revoked
+
+
+def revoke_grants_for_workspace(design_session: DesignSession, *, now=None) -> int:
+    """Revoke every live grant across one workspace's designs (ADR 0027).
+
+    Two properties this needs that a loop over
+    :func:`revoke_reference_upload_grants` did not have.
+
+    It **locks first**. A mint racing a hand-back would otherwise be able to
+    commit its new grant after the release's UPDATE had already run, leaving a
+    live code behind a session the shop believes it has closed — and ADR 0026
+    accepts the bearer-credential exposure specifically on the strength of
+    revocation working. One ``SELECT ... FOR UPDATE`` takes every lock, ordered
+    by primary key so it can never deadlock against
+    :func:`create_reference_upload_grant`, which locks a single design row.
+
+    It is **one UPDATE regardless of how many designs the workspace holds**.
+    The release runs on the read path's idle-timeout branch as well as the
+    explicit control, so per-design round trips would scale a hot path against
+    a number nothing bounds.
+
+    Returns how many grants were revoked. Idempotent; safe on a workspace that
+    never had one."""
+    stamped = now or timezone.now()
+    with transaction.atomic():
+        # Materialised deliberately: the locks are the point of the query, and
+        # a lazy queryset would take none of them.
+        list(
+            Design.objects.select_for_update()
+            .filter(design_session=design_session)
+            .order_by("pk")
+            .values_list("pk", flat=True)
+        )
+        revoked = ReferenceUploadGrant.objects.filter(
+            design__design_session=design_session, revoked_at__isnull=True
+        ).update(revoked_at=stamped)
+    if revoked:
+        # Workspace row id and a count. Never a digest, never a plaintext.
+        logger.info(
+            "reference upload grants revoked workspace_id=%s count=%s",
+            design_session.pk,
+            revoked,
+        )
+    return revoked
+
+
+def grant_is_still_live(grant: ReferenceUploadGrant, *, now=None) -> bool:
+    """Re-read one grant and report whether it is STILL usable.
+
+    Resolution happens once, unlocked, before an upload is decoded, sanitised
+    and written to storage — work that takes long enough for a hand-back or the
+    idle timeout to land in the middle of it. Without this the upload would
+    commit into a design the shop had already closed off, which would make
+    "revocation genuinely stops it" untrue in exactly the case someone would
+    rely on it.
+
+    Call it inside the caller's existing design row lock, immediately before
+    the row is written. Says nothing about WHY a grant is unusable — the caller
+    answers with the same indistinguishable 404 either way."""
+    stamped = now or timezone.now()
+    return ReferenceUploadGrant.objects.filter(
+        pk=grant.pk, revoked_at__isnull=True, expires_at__gt=stamped
+    ).exists()
 
 
 def resolve_reference_upload_grant(plaintext: str) -> ReferenceUploadGrant:

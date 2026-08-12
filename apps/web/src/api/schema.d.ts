@@ -432,6 +432,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/designs/end-session/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish and hand back
+         * @description Ends the walk-in session on a shared shop device: drops the workspace pointer and revokes any live phone-handoff code. Idempotent — ending when there is nothing to end succeeds and reports false. Does not sign out, and deletes nothing. A server-enforced idle timeout does the same thing unprompted, because customers walk away without anyone tapping this.
+         */
+        post: operations["designs_end_walk_in_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health/live": {
         parameters: {
             query?: never;
@@ -1530,6 +1550,18 @@ export interface components {
         /** @description The error body for 400 validation failures (adds ``fields``). */
         ValidationErrorEnvelope: {
             error: components["schemas"]["FieldValidationErrorDetail"];
+        };
+        /**
+         * @description What ending a walk-in session reports back (Phase 22, ADR 0027).
+         *
+         *     One boolean, and deliberately nothing else — not the workspace id, not how
+         *     many designs it held, not how many handoff codes were revoked. The next
+         *     person to pick up this iPad may be reading the screen, and a count is a
+         *     fact about the customer who just left.
+         */
+        WalkInSessionEnded: {
+            /** @description True when there was a walk-in workspace to hand back, false when there was not. Ending twice is not an error. */
+            ended: boolean;
         };
     };
     responses: never;
@@ -2925,6 +2957,46 @@ export interface operations {
                 };
             };
             /** @description email_delivery_disabled when the operator has not enabled account email, or email_send_unavailable when the throttle store cannot be reached. Neither carries Retry-After. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_end_walk_in_session: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WalkInSessionEnded"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The browser session row could not be locked, so the hand-back did not happen. Fails closed and says so rather than reporting a hand-back it did not perform. */
             503: {
                 headers: {
                     [name: string]: unknown;

@@ -2147,6 +2147,65 @@
                 }
             }
         },
+        "/api/v1/designs/end-session/": {
+            "post": {
+                "operationId": "designs_end_walk_in_session",
+                "description": "Ends the walk-in session on a shared shop device: drops the workspace pointer and revokes any live phone-handoff code. Idempotent — ending when there is nothing to end succeeds and reports false. Does not sign out, and deletes nothing. A server-enforced idle timeout does the same thing unprompted, because customers walk away without anyone tapping this.",
+                "summary": "Finish and hand back",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WalkInSessionEnded"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "The browser session row could not be locked, so the hand-back did not happen. Fails closed and says so rather than reporting a hand-back it did not perform."
+                    }
+                }
+            }
+        },
         "/api/v1/health/live": {
             "get": {
                 "operationId": "health_live",
@@ -4586,6 +4645,19 @@
                 },
                 "required": [
                     "error"
+                ]
+            },
+            "WalkInSessionEnded": {
+                "type": "object",
+                "description": "What ending a walk-in session reports back (Phase 22, ADR 0027).\n\nOne boolean, and deliberately nothing else — not the workspace id, not how\nmany designs it held, not how many handoff codes were revoked. The next\nperson to pick up this iPad may be reading the screen, and a count is a\nfact about the customer who just left.",
+                "properties": {
+                    "ended": {
+                        "type": "boolean",
+                        "description": "True when there was a walk-in workspace to hand back, false when there was not. Ending twice is not an error."
+                    }
+                },
+                "required": [
+                    "ended"
                 ]
             }
         },

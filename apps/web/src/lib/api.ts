@@ -1236,6 +1236,47 @@ export async function revokeReferenceGrants(designId: string): Promise<{ ok: boo
   return { ok: status === 200 };
 }
 
+/** End the walk-in session on a shared shop device (Phase 22, ADR 0027).
+ *
+ * Server-side is where this counts: it drops the workspace pointer and revokes
+ * any live handoff code. The caller must clear its own in-memory state too, but
+ * that is housekeeping — the boundary is the endpoint.
+ *
+ * Returns `ok: false` on ANY failure, including a timeout, so a caller can
+ * refuse to claim a hand-back that did not happen. It does not sign out, and
+ * it deletes nothing. */
+export async function endWalkInSession(hasRetried = false): Promise<{ ok: boolean }> {
+  let token: string;
+  try {
+    token = await ensureCsrfToken();
+  } catch {
+    return { ok: false };
+  }
+  let response: Response;
+  try {
+    response = await fetchWithTimeout("/api/v1/designs/end-session/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": token },
+      body: JSON.stringify({}),
+    });
+  } catch {
+    return { ok: false };
+  }
+  if (response.status === 403 && !hasRetried) {
+    let body: ErrorBody = {};
+    try {
+      body = (await response.json()) as ErrorBody;
+    } catch {
+      body = {};
+    }
+    if (body?.error?.code === "csrf_failed") {
+      csrfToken = null;
+      return endWalkInSession(true);
+    }
+  }
+  return { ok: response.status === 200 };
+}
+
 export type GrantUploadResult = { ok: true } | UploadFailure;
 
 const GRANT_UPLOAD_MESSAGES: Record<string, string> = {

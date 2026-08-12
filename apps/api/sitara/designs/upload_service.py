@@ -32,6 +32,7 @@ from django.utils import timezone
 
 from sitara.accounts.rate_limits import RateLimitUnavailable, check_and_count, client_ip
 
+from .grant_service import grant_is_still_live
 from .models import Design, DesignInspirationUpload
 from .upload_processing import InspirationUploadRejected, process_user_inspiration_upload
 
@@ -202,13 +203,22 @@ def _lowest_free_position(design: Design) -> int:
 
 
 def create_inspiration_upload(
-    design: Design, uploaded_file, *, rights_acknowledged: bool
+    design: Design, uploaded_file, *, rights_acknowledged: bool, require_live_grant=None
 ) -> DesignInspirationUpload:
     """Sanitise one user upload and attach it to ``design``.
 
     Raises :class:`InspirationUploadError` for every rejection; the caller maps
     the code onto an HTTP response. The client's filename and declared content
-    type are never read — the decoded image is the only thing trusted."""
+    type are never read — the decoded image is the only thing trusted.
+
+    ``require_live_grant`` is the phone-handoff caller's grant (ADR 0026). Its
+    liveness was checked once, unlocked, before any of the decode, sanitise and
+    storage-write work below — long enough for a "Finish and hand back" tap or
+    the idle timeout to land in the middle of a slow upload. Passing the grant
+    here re-checks it inside the design row lock, immediately before the row is
+    written, so a revoked code cannot land a photograph in a design the shop
+    has already closed off. Rejection reuses ``grant_unusable``, which the view
+    answers with the same indistinguishable 404 as an unknown code."""
     if not rights_acknowledged:
         raise InspirationUploadError(
             "rights_not_acknowledged",
@@ -252,6 +262,12 @@ def create_inspiration_upload(
             # the combined cap and the position sequence are both decided by one
             # writer at a time.
             locked = Design.objects.select_for_update().get(pk=design.pk)
+            if require_live_grant is not None and not grant_is_still_live(require_live_grant):
+                # Revoked or expired while this upload was being processed.
+                # Same code, same response, as a code that never existed.
+                raise InspirationUploadError(
+                    "grant_unusable", "That link is no longer accepting photographs."
+                )
             if inspiration_slots_used(locked) >= limit:
                 raise InspirationUploadError(
                     "inspiration_limit_reached",

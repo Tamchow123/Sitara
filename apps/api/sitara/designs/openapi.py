@@ -709,3 +709,19 @@ class GrantUploadAcceptedSerializer(serializers.Serializer):
 
 class GrantUploadResponseSerializer(serializers.Serializer):
     upload = GrantUploadAcceptedSerializer()
+
+
+class WalkInSessionEndedSerializer(serializers.Serializer):
+    """What ending a walk-in session reports back (Phase 22, ADR 0027).
+
+    One boolean, and deliberately nothing else — not the workspace id, not how
+    many designs it held, not how many handoff codes were revoked. The next
+    person to pick up this iPad may be reading the screen, and a count is a
+    fact about the customer who just left."""
+
+    ended = serializers.BooleanField(
+        help_text=(
+            "True when there was a walk-in workspace to hand back, false when "
+            "there was not. Ending twice is not an error."
+        )
+    )
