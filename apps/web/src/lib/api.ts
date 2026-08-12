@@ -1128,6 +1128,183 @@ export function inspirationUploadImageUrl(designId: string, uploadId: string): s
 }
 
 // ---------------------------------------------------------------------------
+// The phone handoff (Phase 22, ADR 0026)
+// ---------------------------------------------------------------------------
+//
+// Three calls: the shop's iPad mints a code and revokes it; the customer's own
+// phone spends it. They are the same transport as everything above — relative
+// path, same-origin, in-memory CSRF, one retry — because the phone is an
+// ordinary browser hitting the same origin, not a special client.
+//
+// The plaintext code is held in React state for as long as the panel is open
+// and is never written to localStorage, sessionStorage, IndexedDB or a cookie.
+// It is a bearer credential; that exposure is accepted and bounded, not
+// removed, and the shortest way to keep the bound honest is to keep the only
+// copy somewhere that dies with the tab.
+
+export type ReferenceGrant = components["schemas"]["ReferenceUploadGrant"];
+
+export type GrantResult = { ok: true; grant: ReferenceGrant } | UploadFailure;
+
+const GRANT_MESSAGES: Record<string, string> = {
+  inspiration_limit_reached:
+    "This design already has all three reference photographs. Remove one before asking for a code.",
+  grant_rate_limited: "That is a lot of codes at once. Please wait a moment.",
+  grant_throttle_unavailable:
+    "Phone handoff is temporarily unavailable. Please try again shortly.",
+  csrf_failed: "Your session expired. Reload the page and try again.",
+};
+
+function toGrantFailure(status: number, body: ErrorBody): UploadFailure {
+  const code = body?.error?.code ?? "grant_failed";
+  return {
+    ok: false,
+    status,
+    code,
+    message:
+      GRANT_MESSAGES[code] ?? "A code could not be created just now. Please try again.",
+  };
+}
+
+async function sendGrantRequest(
+  designId: string,
+  method: "POST" | "DELETE",
+  hasRetried = false,
+): Promise<{ status: number; body: (ErrorBody & { grant?: unknown }) | null }> {
+  const token = await ensureCsrfToken();
+  const response = await fetchWithTimeout(
+    `/api/v1/designs/${designId}/reference-grants/`,
+    { method, headers: { "X-CSRFToken": token } },
+  );
+  let body: (ErrorBody & { grant?: unknown }) | null = null;
+  try {
+    body = (await response.json()) as ErrorBody & { grant?: unknown };
+  } catch {
+    body = null;
+  }
+  if (response.status === 403 && body?.error?.code === "csrf_failed" && !hasRetried) {
+    csrfToken = null;
+    return sendGrantRequest(designId, method, true);
+  }
+  return { status: response.status, body };
+}
+
+/** Projects the mint response onto exactly the four documented fields.
+ *
+ * By construction rather than by the backend's continued good behaviour, in the
+ * same spirit as `parseInspirationUpload` — and here it also means a field the
+ * server should never send (a storage key, another design's id) cannot reach
+ * component state, a re-render, or the QR code itself. */
+function parseGrant(value: unknown): ReferenceGrant | null {
+  if (typeof value !== "object" || value === null) return null;
+  const grant = value as Record<string, unknown>;
+  if (
+    typeof grant.id !== "string" ||
+    typeof grant.token !== "string" ||
+    typeof grant.expires_at !== "string" ||
+    typeof grant.slots_remaining !== "number"
+  ) {
+    return null;
+  }
+  return {
+    id: grant.id,
+    token: grant.token,
+    expires_at: grant.expires_at,
+    slots_remaining: grant.slots_remaining,
+  };
+}
+
+export async function createReferenceGrant(designId: string): Promise<GrantResult> {
+  const { status, body } = await sendGrantRequest(designId, "POST");
+  const grant = status === 201 ? parseGrant(body?.grant) : null;
+  if (grant) return { ok: true, grant };
+  if (status === 201) {
+    return {
+      ok: false,
+      status,
+      code: "invalid_response",
+      message: "The service returned an unexpected response.",
+    };
+  }
+  return toGrantFailure(status, body ?? {});
+}
+
+/** Stop accepting photographs from a phone. Idempotent server-side, so the
+ *  caller never has to know whether a code was live. */
+export async function revokeReferenceGrants(designId: string): Promise<{ ok: boolean }> {
+  const { status } = await sendGrantRequest(designId, "DELETE");
+  return { ok: status === 200 };
+}
+
+export type GrantUploadResult = { ok: true } | UploadFailure;
+
+const GRANT_UPLOAD_MESSAGES: Record<string, string> = {
+  reference_upload_unavailable:
+    "This link is no longer usable. Ask for a new code on the shop's screen.",
+  reference_upload_rate_limited: "That is a lot of attempts. Please wait a moment.",
+  reference_upload_throttle_unavailable:
+    "Adding photographs is temporarily unavailable. Please try again shortly.",
+};
+
+/** Spend a handoff code on one photograph, from the customer's own phone.
+ *
+ * The code goes in the BODY, never the URL, so it cannot reach a web-server
+ * access log, a Referer header or a browser history entry. The affirmation is
+ * this device's own: the caller passes what the person holding THIS phone
+ * ticked, never a value carried over from the shop's screen. */
+export async function uploadReferenceByGrant(
+  grantToken: string,
+  file: File,
+  rightsAcknowledged: boolean,
+  hasRetried = false,
+): Promise<GrantUploadResult> {
+  const token = await ensureCsrfToken();
+  const form = new FormData();
+  form.append("grant_token", grantToken);
+  form.append("image", file);
+  form.append("rights_acknowledged", rightsAcknowledged ? "true" : "false");
+  const response = await fetchWithTimeout(
+    "/api/v1/reference-uploads/",
+    // No Content-Type: the browser must supply the multipart boundary.
+    { method: "POST", headers: { "X-CSRFToken": token }, body: form },
+    UPLOAD_TIMEOUT_MS,
+  );
+  let body: (ErrorBody & { upload?: { accepted?: unknown } }) | null = null;
+  try {
+    body = (await response.json()) as ErrorBody & { upload?: { accepted?: unknown } };
+  } catch {
+    // A 413 can arrive from a proxy as HTML, with no JSON at all.
+    body = null;
+  }
+  if (response.status === 403 && body?.error?.code === "csrf_failed" && !hasRetried) {
+    csrfToken = null;
+    return uploadReferenceByGrant(grantToken, file, rightsAcknowledged, true);
+  }
+  // The success body carries one constant field and deliberately no
+  // remaining-slots count: the phone learns capacity only by trying, because a
+  // count would let it subtract its own uploads and recover how many
+  // references the design already had.
+  if (response.status === 201 && body?.upload?.accepted === true) {
+    return { ok: true };
+  }
+  const code = body?.error?.code ?? "upload_failed";
+  const failure: UploadFailure = {
+    ok: false,
+    status: response.status,
+    code,
+    message:
+      GRANT_UPLOAD_MESSAGES[code] ??
+      UPLOAD_MESSAGES[code] ??
+      "The photograph could not be added. Please try again.",
+  };
+  const retryAfter = Number(response.headers.get("Retry-After"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    failure.retryAfterSeconds = retryAfter;
+  }
+  return failure;
+}
+
+// ---------------------------------------------------------------------------
 // Private annotations (Phase 19) — the stylist worktable
 // ---------------------------------------------------------------------------
 //

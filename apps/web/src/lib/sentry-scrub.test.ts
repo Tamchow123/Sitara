@@ -50,3 +50,62 @@ describe("scrubSentryEvent", () => {
     expect(scrubSentryEvent({})).toEqual({});
   });
 });
+
+describe("scrubSentryEvent — the handoff fragment (Phase 22, ADR 0026)", () => {
+  const TOKEN = "a-plaintext-handoff-secret-value";
+
+  it("strips a fragment from a URL that has no query string at all", () => {
+    // The regression that matters. `/r#<token>` is the customer's phone
+    // holding a live bearer credential, and it has no `?` — so a scrub that
+    // only fired on a query string sent the whole token to Sentry.
+    const event = scrubSentryEvent({
+      request: { url: `https://shop.example/r#${TOKEN}` },
+    });
+
+    expect(event.request?.url).toBe("https://shop.example/r");
+    expect(JSON.stringify(event)).not.toContain(TOKEN);
+  });
+
+  it("strips both when a URL carries a query string and a fragment", () => {
+    const event = scrubSentryEvent({
+      request: { url: `https://shop.example/r?utm=x#${TOKEN}` },
+    });
+
+    expect(event.request?.url).toBe("https://shop.example/r");
+  });
+
+  it("leaves a plain URL alone", () => {
+    const event = scrubSentryEvent({ request: { url: "https://shop.example/design/new" } });
+
+    expect(event.request?.url).toBe("https://shop.example/design/new");
+  });
+
+  it("strips a fragment out of breadcrumb urls", () => {
+    // A navigation or fetch breadcrumb carries a URL of its own, and Sentry
+    // attaches breadcrumbs to the event alongside request.url.
+    const event = scrubSentryEvent({
+      breadcrumbs: [
+        { category: "navigation", data: { from: "/design/new", to: `/r#${TOKEN}` } },
+        { category: "fetch", data: { url: `https://shop.example/r#${TOKEN}` } },
+      ],
+    });
+
+    expect(JSON.stringify(event)).not.toContain(TOKEN);
+  });
+
+  it("strips a fragment out of the enveloped breadcrumb shape too", () => {
+    const event = scrubSentryEvent({
+      breadcrumbs: { values: [{ message: `https://shop.example/r#${TOKEN}` }] },
+    });
+
+    expect(JSON.stringify(event)).not.toContain(TOKEN);
+  });
+
+  it("survives malformed breadcrumbs rather than throwing on the way to Sentry", () => {
+    expect(() =>
+      scrubSentryEvent({
+        breadcrumbs: [null as never, { data: null as never }, { message: 7 as never }],
+      }),
+    ).not.toThrow();
+  });
+});

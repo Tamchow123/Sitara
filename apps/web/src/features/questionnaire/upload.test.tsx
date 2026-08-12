@@ -14,6 +14,13 @@ import { InspirationUpload } from "./InspirationUpload";
 
 const uploadImage = vi.fn();
 const removeUpload = vi.fn();
+// The reference step now nests the phone-handoff panel (Phase 22, ADR 0026),
+// which mints and revokes grants of its own. Stubbed here so this suite keeps
+// testing the device-local path without reaching the network — the handoff has
+// its own suite in phone-handoff.test.tsx.
+const createGrant = vi.fn();
+const revokeGrants = vi.fn();
+const fetchDesignMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -21,6 +28,9 @@ vi.mock("@/lib/api", async () => {
     ...actual,
     uploadInspirationImage: (...args: unknown[]) => uploadImage(...args),
     removeInspirationUpload: (...args: unknown[]) => removeUpload(...args),
+    createReferenceGrant: (...args: unknown[]) => createGrant(...args),
+    revokeReferenceGrants: (...args: unknown[]) => revokeGrants(...args),
+    fetchDesign: (...args: unknown[]) => fetchDesignMock(...args),
   };
 });
 
@@ -68,6 +78,10 @@ function acknowledge(): void {
 beforeEach(() => {
   uploadImage.mockReset();
   removeUpload.mockReset();
+  createGrant.mockReset();
+  revokeGrants.mockReset();
+  fetchDesignMock.mockReset();
+  revokeGrants.mockResolvedValue({ ok: true });
 });
 
 describe("InspirationUpload — consent", () => {
@@ -142,7 +156,7 @@ describe("InspirationUpload — consent", () => {
     fireEvent.change(input, { target: { files: [file()] } });
 
     expect(uploadImage).not.toHaveBeenCalled();
-    expect(screen.getByRole("status")).toHaveTextContent("");
+    expect(screen.getByRole("status", { name: /from this device/i })).toHaveTextContent("");
   });
 });
 
@@ -170,7 +184,7 @@ describe("InspirationUpload — states", () => {
     renderUpload();
     acknowledge();
     fireEvent.change(chooser(), { target: { files: [file()] } });
-    const status = await screen.findByRole("status");
+    const status = await screen.findByRole("status", { name: /from this device/i });
     await waitFor(() => expect(status).toHaveTextContent(/Image added/i));
   });
 
@@ -362,7 +376,7 @@ describe("InspirationUpload — previews and removal", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Remove image 1/i }));
 
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/could not be/i));
+    await waitFor(() => expect(screen.getByRole("status", { name: /from this device/i })).toHaveTextContent(/could not be/i));
     expect(onChange).not.toHaveBeenCalled();
   });
 

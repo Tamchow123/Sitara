@@ -29,6 +29,9 @@ import {
   type InspirationUpload as Upload,
 } from "@/lib/api";
 
+import { PhoneHandoff } from "./PhoneHandoff";
+import { RIGHTS_AFFIRMATION_LABEL, RightsDisclosure } from "./RightsDisclosure";
+
 const ACCEPTED = "image/jpeg,image/png,image/webp";
 
 type Props = {
@@ -138,42 +141,7 @@ export function InspirationUpload({ designId, uploads, max, onChange }: Props) {
         add.
       </p>
 
-      <div className="upload-disclosure" id={disclosureId}>
-        <p>
-          These are private to your design. They are never added to Sitara&apos;s
-          catalogue, never shown to anyone else, and are deleted with your design.
-        </p>
-        <p>
-          <strong>Before you add a photograph, please read this.</strong> If you
-          use an image as a reference, its file is sent to the external AI image
-          provider that draws your concept. That provider&apos;s terms take a
-          perpetual, irrevocable licence over what it receives, to train and
-          improve their technology. They publish no time limit on how long they
-          keep it, and it is unresolved whether those terms differ when Sitara
-          reaches them through Replicate. Sitara cannot undo that once an image is
-          sent. Please only add an image you are comfortable handing over on those
-          terms — and not one that shows someone who has not agreed to it.
-        </p>
-      </div>
-
-      <div className="upload-acknowledge">
-        <input
-          type="checkbox"
-          id={acknowledgeId}
-          checked={acknowledged}
-          onChange={(event) => setAcknowledged(event.target.checked)}
-          aria-describedby={disclosureId}
-        />
-        <label htmlFor={acknowledgeId}>
-          I have the right to use these images, and I understand they will be sent
-          to the AI image provider on the terms above.
-        </label>
-      </div>
-
       <p className="field-help" id={helpId}>
-        {/* The affirmation stays ticked between photographs, so it has to be
-            clear it covers each one and not just the first. */}
-        This applies to every image you add. JPEG, PNG or WebP, up to 15 MB.{" "}
         {full
           ? "You have used all of your reference slots."
           : `${slotsRemaining} of your ${max} reference slots ${
@@ -185,6 +153,46 @@ export function InspirationUpload({ designId, uploads, max, onChange }: Props) {
         <h3 className="upload-ways-heading" id={`${helpId}-ways`}>
           Ways to add a photograph
         </h3>
+
+        {/* First and dominant, because it is the normal case rather than the
+            fallback: the picture is already on the customer's own phone.
+
+            Deliberately OUTSIDE the affirmation below. The phone takes its own
+            affirmation from the person choosing the photograph, and gating the
+            QR behind this device's checkbox would say the opposite — that
+            whoever is holding the shop's screen can consent on her behalf. That
+            is exactly the substitution ADR 0026 exists to prevent. */}
+        {designId && (
+          <PhoneHandoff
+            designId={designId}
+            uploads={uploads}
+            max={max}
+            onUploadsChanged={onChange}
+          />
+        )}
+
+        <h4 className="upload-ways-heading" id={`${helpId}-own`}>
+          Or add one from this device
+        </h4>
+
+        <RightsDisclosure id={disclosureId} scope="own-device" />
+
+        <div className="upload-acknowledge">
+          <input
+            type="checkbox"
+            id={acknowledgeId}
+            checked={acknowledged}
+            onChange={(event) => setAcknowledged(event.target.checked)}
+            aria-describedby={disclosureId}
+          />
+          <label htmlFor={acknowledgeId}>{RIGHTS_AFFIRMATION_LABEL}</label>
+        </div>
+
+        <p className="field-help" id={`${helpId}-own-help`}>
+          {/* The affirmation stays ticked between photographs, so it has to be
+              clear it covers each one and not just the first. */}
+          This applies to every image you add here. JPEG, PNG or WebP, up to 15 MB.
+        </p>
 
         {/* `capture` asks the device for its rear camera. It is a HINT: a
             browser that does not honour it opens an ordinary file picker
@@ -207,7 +215,7 @@ export function InspirationUpload({ designId, uploads, max, onChange }: Props) {
             id={cameraInputId}
             onChange={onSelect}
             disabled={!canAdd}
-            aria-describedby={helpId}
+            aria-describedby={`${helpId}-own-help`}
           />
           <label className="upload-label" htmlFor={cameraInputId}>
             Take a photo
@@ -222,7 +230,7 @@ export function InspirationUpload({ designId, uploads, max, onChange }: Props) {
             id={fileInputId}
             onChange={onSelect}
             disabled={!canAdd}
-            aria-describedby={helpId}
+            aria-describedby={`${helpId}-own-help`}
           />
           <label className="upload-label" htmlFor={fileInputId}>
             Choose a file
@@ -238,12 +246,17 @@ export function InspirationUpload({ designId, uploads, max, onChange }: Props) {
       )}
 
       {/* Announced, not merely displayed: a screen-reader user gets no visual
-          cue that an upload finished, failed, or that a slot freed up. */}
+          cue that an upload finished, failed, or that a slot freed up.
+
+          Named, because the handoff panel above has a live region of its own
+          and two unnamed ones on a single screen leave a screen-reader user
+          unable to tell which just spoke. */}
       <p
         className={
           status.kind === "error" ? "upload-status upload-status-error" : "upload-status"
         }
         role="status"
+        aria-label="Photographs added from this device"
       >
         {status.kind === "uploading" && "Adding your photograph…"}
         {status.kind === "added" && "Image added to your design."}

@@ -947,8 +947,8 @@
   white-space: nowrap;
   border: 0;
 }
-/* The ways in, laid out so the list can grow: a camera capture and a phone
-   handoff join the file picker later in this phase. */
+/* The ways in, in the order the phase decided they matter: the phone handoff
+   first and given real weight, then the camera, then the file picker. */
 .upload-ways {
   display: flex;
   flex-direction: column;
@@ -1035,5 +1035,144 @@
 }
 .upload-remove[disabled] {
   opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+   The phone handoff — the shop's side (Phase 22, ADR 0026)
+   ------------------------------------------------------------------------ */
+
+/* Framed and accented, because the spec makes it the headline option rather
+   than one of three equals: most customers already have the picture on their
+   own phone, and a handoff buried among the other two would not get used. */
+.handoff {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: var(--space-4);
+  background: var(--color-neutral-100);
+}
+.handoff-heading {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+.handoff-start,
+.handoff-stop {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.55rem 1.2rem;
+  cursor: pointer;
+  font-size: 0.92rem;
+  background: var(--color-surface);
+}
+.handoff-start:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.handoff-start:focus-visible,
+.handoff-stop:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.handoff-live {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+/* A fixed light plate under the code whatever the shell's theme is. A QR
+   rendered dark-on-dark is not a styling flaw, it is an unscannable code. */
+.qr-code {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--color-qr-light);
+  padding: 0;
+  /* Never let a container shrink it below what a phone camera can resolve
+     across a counter. */
+  min-width: 200px;
+  min-height: 200px;
+}
+.handoff-expiry {
+  margin: 0;
+  font-size: 14px;
+}
+.handoff-fallback summary {
+  cursor: pointer;
+  font-size: 14px;
+}
+/* The long code, wrapped so it cannot push the panel sideways, and monospaced
+   so a person reading it aloud can tell l from 1 and O from 0. */
+.handoff-url {
+  font-family: var(--font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
+  font-size: 13px;
+  word-break: break-all;
+  margin: 0.4rem 0 0;
+}
+.handoff-status {
+  margin: 0;
+  font-size: 14px;
+}
+.handoff-status-error {
+  font-weight: 700;
+  color: var(--color-bad);
+}
+/* Holds its line even when empty, so a photograph arriving does not shove the
+   panel around under the stylist's finger. */
+.handoff-arrivals {
+  min-height: 1.4em;
+  margin: var(--space-3) 0 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+   The phone handoff — the customer's own phone (/r)
+   ------------------------------------------------------------------------ */
+
+/* Sized for a phone held in one hand in a shop, not for the iPad. Generous
+   tap targets and a single column, because this page has exactly one job. */
+.phone-page {
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-6);
+}
+.phone-heading {
+  margin: 0 0 0.5rem;
+  font-size: 1.3rem;
+}
+.phone-ways {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.phone-label {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  /* 3rem of vertical padding puts the control well past the 44px minimum
+     target on every phone this has to work on, including an old one. */
+  padding: 0.9rem 1.2rem;
+  cursor: pointer;
+  font-size: 1rem;
+  background: var(--color-neutral-100);
+}
+/* The library is the primary control: the picture is already on the phone,
+   which is the entire reason this page exists. */
+.phone-label-primary {
+  border-color: var(--accent);
+  border-width: 2px;
+  font-weight: 700;
+}
+.upload-input:focus-visible + .phone-label {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.upload-input:disabled + .phone-label {
+  opacity: 0.5;
   cursor: not-allowed;
 }
