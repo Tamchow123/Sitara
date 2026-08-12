@@ -41,6 +41,21 @@ def inmemory_design_image_storage(settings):
 
 
 @pytest.fixture(autouse=True)
+def gallery_enabled_by_default(settings):
+    """Phase 22 (ADR 0027) gated ``GET /designs/`` behind
+    ``ACCOUNT_GALLERY_ENABLED``, which ships FALSE. Default it on here so the
+    pre-Phase-22 list, paging, ownership and session tests keep exercising what
+    they were written to exercise, exactly as ``live_admission_ready`` does for
+    the live-generation flag.
+
+    The gate itself is not left untested by this: ``test_gallery_gate.py``
+    turns it off explicitly and is the suite that owns that behaviour. A
+    fixture that quietly enabled a security gate everywhere AND had no
+    counterpart proving the disabled path would be the bad version of this."""
+    settings.ACCOUNT_GALLERY_ENABLED = True
+
+
+@pytest.fixture(autouse=True)
 def live_mode_by_default(settings):
     """Most generation/refinement HTTP tests exercise the LIVE pipeline
     (mocking ``generation_is_available``) and predate Phase 15's demo/live

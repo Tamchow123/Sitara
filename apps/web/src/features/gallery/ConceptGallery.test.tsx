@@ -340,6 +340,62 @@ describe("ConceptGallery", () => {
     expect(screen.getByRole("heading", { name: "Ivory lehenga" })).toBeInTheDocument();
   });
 
+  describe("when the gallery is switched off (Phase 22, ADR 0027)", () => {
+    it("says it is switched off rather than that something broke", async () => {
+      // The distinction matters to the person reading it. "Try again shortly"
+      // sends someone back to a screen that will never work; "switched off"
+      // tells them the truth, which is that this is a decision.
+      mockList({ error: { code: "gallery_disabled", message: "Not available." } }, 503);
+      render(<ConceptGallery />);
+
+      expect(await screen.findByText(/switched off for this account/i)).toBeInTheDocument();
+      expect(screen.queryByText(/could not be loaded/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("says nothing has been deleted", async () => {
+      mockList({ error: { code: "gallery_disabled", message: "Not available." } }, 503);
+      render(<ConceptGallery />);
+
+      expect(await screen.findByText(/Nothing has been deleted/i)).toBeInTheDocument();
+    });
+
+    it("does not claim an email safety net that ships switched off", async () => {
+      // ADR 0027's accepted consequence: with the gallery gated AND email
+      // delivery still disabled — which is how it ships, and how it has always
+      // run — a concept is reachable only during the session that produced it.
+      // Copy promising it will be "emailed as usual" would tell a shop it has
+      // a way back to a customer's concept when it does not.
+      mockList({ error: { code: "gallery_disabled", message: "Not available." } }, 503);
+      render(<ConceptGallery />);
+      await screen.findByText(/switched off/i);
+
+      const text = document.body.textContent?.toLowerCase() ?? "";
+      expect(text).not.toContain("email");
+      expect(await screen.findByText(/no way back to it here/i)).toBeInTheDocument();
+    });
+
+    it("does not read as an empty gallery", async () => {
+      // The dangerous misreading: "you have not made a concept yet" told to a
+      // shop that has made dozens.
+      mockList({ error: { code: "gallery_disabled", message: "Not available." } }, 503);
+      render(<ConceptGallery />);
+      await screen.findByText(/switched off/i);
+
+      expect(screen.queryByText(/have not made a concept yet/i)).not.toBeInTheDocument();
+    });
+
+    it("still treats a different 503 as a failure", async () => {
+      // The switched-off branch keys on the CODE, not the status, so an
+      // ordinary outage is still reported as one.
+      mockList({ error: { code: "unavailable", message: "down" } }, 503);
+      render(<ConceptGallery />);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/i);
+      expect(screen.queryByText(/switched off/i)).not.toBeInTheDocument();
+    });
+  });
+
   it("says the list failed rather than showing an empty gallery", async () => {
     // The dangerous failure mode: a 500 rendered as "you have no concepts".
     mockList({ error: { code: "unavailable", message: "down" } }, 503);

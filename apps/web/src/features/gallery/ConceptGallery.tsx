@@ -28,6 +28,11 @@ const PAGE_SIZE = 20;
 type Load =
   | { status: "loading" }
   | { status: "ready"; designs: DesignListItem[]; total: number }
+  // Switched off is its own state, not a failure (Phase 22, ADR 0027). "Could
+  // not be loaded, try again shortly" would send someone back to a screen that
+  // is never going to work, and would hide a deliberate decision behind what
+  // looks like a fault.
+  | { status: "disabled" }
   | { status: "failed"; message: string };
 
 type VersionState = {
@@ -212,6 +217,10 @@ export function ConceptGallery() {
       setLoad({ status: "ready", designs: result.data.designs, total: result.data.total });
       return;
     }
+    if (result.code === "gallery_disabled") {
+      setLoad({ status: "disabled" });
+      return;
+    }
     // The list either loaded or it did not. Showing an empty gallery on a
     // failed request would tell someone their concepts are gone.
     setLoad({
@@ -235,6 +244,29 @@ export function ConceptGallery() {
           out of it: a thumbnail that fails is not worth an announcement. */}
       <div role="status" aria-live="polite">
         {load.status === "loading" && <p className="loading-note">Loading your concepts…</p>}
+        {load.status === "disabled" && (
+          <>
+            {/* Said plainly, and without pretending it is temporary or a
+                fault. The concepts are not gone — this account's own list of
+                them is switched off, because on a shared shop screen it would
+                put one customer's work in front of the next.
+
+                And without claiming a way out that may not exist. An earlier
+                draft of this said concepts were "emailed as usual", which is
+                false while ACCOUNT_EMAIL_DELIVERY_ENABLED is off — as it ships
+                and as it has always run. With both gates closed a concept is
+                reachable only during the session that produced it, and that is
+                exactly the accepted consequence the phase requires be stated
+                rather than softened. */}
+            <p>Browsing past concepts is switched off for this account.</p>
+            <p className="loading-note">
+              Nothing has been deleted — concepts are still made and refined
+              here, they are just not listed on this screen. Keep this session
+              open while you need a concept: there is no way back to it here
+              once the session ends.
+            </p>
+          </>
+        )}
         {load.status === "ready" && shown === 0 && (
           <>
             <p>You have not made a concept yet.</p>

@@ -376,8 +376,11 @@ class TestThereIsNoReadPath:
                 response = phone.get(url, REMOTE_ADDR=unique_ip(), **attempt)
                 # The list is an empty workspace for this stranger, a detail
                 # read is the ordinary indistinguishable 404, and validate is
-                # POST-only. What matters is the last line: none of them ever
-                # returns the shop's design because a grant is not an identity.
+                # POST-only. Kept narrow deliberately: this package's fixture
+                # enables the gallery, so a 503 here would be a regression, not
+                # a configuration. What matters most is the last line — none of
+                # them ever returns the shop's design, because a grant is not
+                # an identity.
                 assert response.status_code in (200, 404, 405), (url, attempt)
                 assert design_id not in response.content.decode()
 

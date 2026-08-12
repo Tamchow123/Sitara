@@ -133,7 +133,7 @@ export interface paths {
         };
         /**
          * List your designs
-         * @description Returns the private designs owned by the current session or account as compact rows (no questionnaire schema, no inspiration records, no job snapshot), newest first, each with its versions in creation order. Carries no signed image URL — a gallery mints one per card through the ownership-checked images endpoint. Bounded page size. A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Returns the private designs owned by the current session or account as compact rows (no questionnaire schema, no inspiration records, no job snapshot), newest first, each with its versions in creation order. Carries no signed image URL — a gallery mints one per card through the ownership-checked images endpoint. Bounded page size. A list request never creates a workspace. Requires ACCOUNT_GALLERY_ENABLED. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         get: operations["designs_list"];
         put?: never;
@@ -1278,6 +1278,8 @@ export interface components {
             generation_mode: components["schemas"]["GenerationModeEnum"];
             max_inspiration_images: number;
             max_refinements: number;
+            /** @description Whether the account concept gallery is switched on (ADR 0027). Off by default. Informational only: Sitara's own frontend deliberately does NOT read this, and decides what to show from the design list endpoint's own refusal instead, so there is one copy of the answer rather than a cached second one that can drift. A client may use it to explain the absence, never to enforce it — the endpoint refuses on its own and that refusal is the boundary. */
+            account_gallery_enabled: boolean;
         };
         /**
          * @description Bounded per-question-type constraint mapping (all keys optional).
@@ -1787,6 +1789,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ValidationErrorEnvelope"];
+                };
+            };
+            /** @description gallery_disabled: the operator has not enabled the account concept gallery (ADR 0027). A controlled refusal, not a 404 — the surface exists and is switched off. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };

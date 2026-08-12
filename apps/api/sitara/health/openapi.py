@@ -40,3 +40,15 @@ class PublicConfigSerializer(serializers.Serializer):
     )
     max_inspiration_images = serializers.IntegerField()
     max_refinements = serializers.IntegerField()
+    account_gallery_enabled = serializers.BooleanField(
+        help_text=(
+            "Whether the account concept gallery is switched on (ADR 0027). "
+            "Off by default. Informational only: Sitara's own frontend "
+            "deliberately does NOT read this, and decides what to show from "
+            "the design list endpoint's own refusal instead, so there is one "
+            "copy of the answer rather than a cached second one that can "
+            "drift. A client may use it to explain the absence, never to "
+            "enforce it — the endpoint refuses on its own and that refusal is "
+            "the boundary."
+        )
+    )

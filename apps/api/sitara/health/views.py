@@ -98,5 +98,10 @@ def public_config(request):
             "generation_mode": resolve_generation_mode(),
             "max_inspiration_images": settings.MAX_INSPIRATION_IMAGES,
             "max_refinements": settings.MAX_REFINEMENTS,
+            # Advertised so a frontend can say WHY the gallery is not there
+            # instead of drawing an empty one or a broken request. It is not a
+            # permission: the list endpoint refuses on its own, and §10 is
+            # explicit that a route guard is not authorisation.
+            "account_gallery_enabled": settings.ACCOUNT_GALLERY_ENABLED,
         }
     )

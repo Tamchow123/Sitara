@@ -720,6 +720,29 @@ ANNOTATION_RENDER_READ_DEADLINE_SECONDS = env_positive_int(
 # ---------------------------------------------------------------------------
 ACCOUNT_EMAIL_DELIVERY_ENABLED = env_bool("ACCOUNT_EMAIL_DELIVERY_ENABLED", default=False)
 
+# ---------------------------------------------------------------------------
+# The account concept gallery (Phase 22, ADR 0027). GATED, NOT DELETED.
+#
+# Everything ADR 0024 built is still here, still tested, and comes back by
+# setting one flag. What changed is not the gallery's quality — it is who is
+# holding the device. Sitara is used on a shop-floor iPad where one account
+# serves many walk-in customers in a day, so a list of every concept the shop
+# has ever produced is, on that screen, a list of other customers' concepts
+# shown to whoever is sitting there now. The shop OWNS those designs (ADR
+# 0027); it is still their data controller, and the product should make the
+# responsible choice the easy one rather than leaving it to whoever is holding
+# the iPad.
+#
+# A third independent operator decision, on the same pattern as
+# LIVE_GENERATION_ENABLED and ACCOUNT_EMAIL_DELIVERY_ENABLED: nothing else
+# turns it on, and being signed in is not enough.
+#
+# Its consequence is accepted, not mitigated: with this off and email delivery
+# also off, a concept is reachable only during the session that produced it.
+# ---------------------------------------------------------------------------
+ACCOUNT_GALLERY_ENABLED = env_bool("ACCOUNT_GALLERY_ENABLED", default=False)
+
+
 # Console outside production, so a developer sees the whole message without a
 # relay; SMTP in production. Django's setup_test_environment() replaces whatever
 # this resolves to with the locmem backend for the entire test session, which is

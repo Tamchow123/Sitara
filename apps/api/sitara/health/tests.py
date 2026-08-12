@@ -69,6 +69,9 @@ class TestPublicConfig:
             "generation_mode": "unavailable",
             "max_inspiration_images": 3,
             "max_refinements": 1,
+            # Phase 22 (ADR 0027): advertised so a frontend can explain the
+            # gallery's absence. Off by default.
+            "account_gallery_enabled": False,
         }
 
     @pytest.mark.parametrize(
@@ -119,6 +122,7 @@ class TestPublicConfig:
             "generation_mode",
             "max_inspiration_images",
             "max_refinements",
+            "account_gallery_enabled",
         }
         assert "flux" not in client.get(reverse("config-public")).content.decode()
 

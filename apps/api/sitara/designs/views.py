@@ -527,6 +527,14 @@ class DesignListCreateView(APIView):
         responses={
             200: DesignListResponseSerializer,
             400: ValidationErrorEnvelopeSerializer,
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "gallery_disabled: the operator has not enabled the account "
+                    "concept gallery (ADR 0027). A controlled refusal, not a 404 — "
+                    "the surface exists and is switched off."
+                ),
+            ),
         },
         summary="List your designs",
         description=(
@@ -535,10 +543,27 @@ class DesignListCreateView(APIView):
             "records, no job snapshot), newest first, each with its versions in "
             "creation order. Carries no signed image URL — a gallery mints one "
             "per card through the ownership-checked images endpoint. Bounded page "
-            "size. A list request never creates a workspace. " + _OWNERSHIP_NOTE
+            "size. A list request never creates a workspace. Requires "
+            "ACCOUNT_GALLERY_ENABLED. " + _OWNERSHIP_NOTE
         ),
     )
     def get(self, request):
+        # Reading the whole list is the gallery, and the gallery is gated
+        # (ADR 0027). Refused BEFORE the page parameters are read and before
+        # any ownership query runs, so a disabled deployment answers a
+        # signed-in caller and a stranger identically and does no work.
+        #
+        # 503 with a stable code, exactly as `email_delivery_disabled` does it:
+        # a 404 would say the surface was never there, and it was — an operator
+        # can switch it back on. Only GET is gated; POST still creates designs,
+        # because the walk-in flow starts there and gating it would end the
+        # product rather than the gallery.
+        if not settings.ACCOUNT_GALLERY_ENABLED:
+            return _error(
+                "gallery_disabled",
+                "Browsing past concepts is not available at the moment.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         page, page_failure = _read_gallery_page(request)
         if page_failure is not None:
             return page_failure
