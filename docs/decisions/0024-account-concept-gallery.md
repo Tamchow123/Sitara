@@ -2,6 +2,12 @@
 
 - **Status:** accepted; **amended 2026-08-11** — the gallery shows only designs that
   actually produced a concept. See "Amendment: concepts, not works-in-progress" below.
+  **Gated off 2026-08-11 by ADR 0027**: `ACCOUNT_GALLERY_ENABLED` defaults to false
+  and `GET /designs/` answers `503 gallery_disabled`, because on a shared shop-floor
+  iPad one account's whole history is one customer's concepts, colours and annotation
+  notes in front of the next customer. **Gated, not deleted** — everything below stays
+  in the codebase and tested, and returns by setting one flag once there is a design
+  that scopes what is shown.
 - **Date:** 2026-08-11
 - **Deciders:** Sitara project owner
 - **Phase:** Phase 21 (see ../phases/PHASES.md)

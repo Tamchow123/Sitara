@@ -1,6 +1,11 @@
 # 0019 — Reference-image conditioning and the flux-2-max switch
 
-- **Status:** accepted
+- **Status:** accepted; **extended 2026-08-11 by ADR 0026** — the disclosure and
+  the per-upload affirmation below are now shown and taken on **the customer's own
+  phone**, by the person whose photograph it is, when a reference arrives through
+  the QR handoff. An affirmation ticked on the shop's iPad does not carry across.
+  The rights override itself is unchanged and still **accepted, not removed**; ADR
+  0025 makes it the only provider-facing rights position Sitara has.
 - **Date:** 2026-07-29
 - **Deciders:** project owner (the rights decision is the owner's, taken with the
   provider-terms evidence in view and reaffirmed after it was put explicitly)

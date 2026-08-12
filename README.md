@@ -1,6 +1,6 @@
 # Sitara
 
-AI-assisted South Asian bridalwear **concept design**. A guided questionnaire, an optional pick of up to three rights-cleared inspiration images, and an AI-generated concept: a FLUX-rendered visual plus a structured design description authored by Claude, with one constrained refinement round. The owner can then mark up their private concept and have the annotated render emailed to their own account address. A deterministic, zero-cost demo mode runs the complete journey through the same pipeline with no paid provider calls.
+AI-assisted South Asian bridalwear **concept design**. A guided questionnaire, up to three of the customer's own reference photographs (sent from her phone by QR, taken with the device camera, or picked from a file), and an AI-generated concept: a FLUX-rendered visual plus a structured design description authored by Claude, with one constrained refinement round. The owner can then mark up their private concept and have the annotated render emailed to their own account address. A deterministic, zero-cost demo mode runs the complete journey through the same pipeline with no paid provider calls.
 
 > Sitara is for concept visualisation only. It does not produce sewing patterns or manufacturing specifications, and does not guarantee a garment can be constructed exactly as shown.
 
@@ -11,8 +11,61 @@ E2E half exists anyway: Phase 17 built the Playwright suite and a CI `e2e` job t
 drives the real stack in demo mode, and Phases 19 and 21 extended both. Its deployment
 half does not exist at all — no deployment configuration, no smoke script, no runbook,
 and nothing is deployed anywhere. Phase 20 (optional height and body representation)
-remains optional and unstarted; Phase 21 was delivered before it. See
+remains optional and unstarted; Phases 21 and 22 were delivered before it. See
 `docs/phases/PHASES.md`.
+
+**Two gates are now closed by default that were not before.** The account concept
+gallery is off (`ACCOUNT_GALLERY_ENABLED=false`, ADR 0027) and the curated
+inspiration catalogue has no public endpoints (ADR 0025). Both are retirements by
+decision, not by deletion: the code, the tests and the data are all still there.
+
+**Phase 22 — references the customer supplies, on a device in a shop.** Sitara runs
+on a shop-floor iPad, and the picture the customer wants to show is on her own phone.
+Three changes follow from that. **The curated catalogue is retired from the product**
+(ADR 0025) — no asset was ever approved, so its three public endpoints had returned an
+empty list to every caller for their entire life; they, the questionnaire picker and
+the `inspiration_asset_ids` write field are gone, while the models, migrations, rights
+records, ingest sanitiser, `publicly_eligible()`, services and admin stay intact and
+staff-only, and every existing `DesignInspiration` row and frozen
+`inspiration_context` snapshot is untouched. Removing the stronger, staff-verified
+rights model does **not** upgrade the weaker per-upload self-affirmation that remains.
+**The reference step gets three ways in, ordered for the device** (ADR 0026): a QR
+handoff to the customer's own phone first — the primary path, not a fallback —
+on-device camera capture second, file picker last. Behind the QR is a
+`ReferenceUploadGrant`: a `secrets.token_urlsafe(32)` secret stored only as a SHA-256
+digest and returned exactly once, scoped to **upload into one design and nothing else**,
+expiring in 15 minutes, spent when the design fills up, revoked explicitly and on
+leaving the step, on the design filling, and on the session ending, limited to one live
+grant per design by a partial unique constraint under a `Design` row lock, and rate
+limited per address and per code with both windows running **before** the code is
+resolved so a real code and an unknown one answer alike. Expired, revoked, spent and
+never-existed are one indistinguishable 404; the success body is a constant, because a
+remaining-slots count would let the phone recover how many references were already
+there. The plaintext travels in the request **body** and reaches the phone in the URL
+**fragment**, which browsers do not send to servers — and the Sentry scrubber now cuts
+at the first `?` **or** `#`. Anyone who can see the iPad's screen can photograph the
+QR: that exposure is **accepted and bounded, not removed**. The ADR 0019 rights
+disclosure and affirmation move to **the phone**, per upload, in the same shared
+component and the same words — an affirmation ticked on the shop's device does not
+carry across, because a rights affirmation made by someone who never saw the photograph
+is worse than none. **The shop owns the design** (ADR 0027): one account per boutique,
+the walk-in customer never registers, and the concepts are the shop's work product to
+pass on at its discretion — which supersedes an assumption ADR 0004 and ADR 0023 were
+built on. On a shared screen that makes *surface* the remaining concern, so the ADR
+0024 account gallery ships behind `ACCOUNT_GALLERY_ENABLED`, **default false** and
+gated rather than deleted (`GET /designs/` answers `503 gallery_disabled`; `POST` is
+untouched, because the walk-in flow starts there), joined by an explicit "Finish and
+hand back" control — it drops the workspace pointer and revokes any live grant, deletes
+nothing, and deliberately does not sign the shop out — and a server-enforced
+`WALK_IN_IDLE_TIMEOUT_SECONDS` behind it, checked on the workspace's own `last_seen_at`
+in both resolution paths because a browser timer is not a boundary. **Accepted
+consequence:** with the gallery gated and `ACCOUNT_EMAIL_DELIVERY_ENABLED` still false
+and still never once exercised, a concept is reachable only during the session that
+produced it. The manual checkpoint — a real iPad, a real separate phone, all three
+paths, and a photographed code confirmed dead after expiry — is outstanding; see
+`docs/decisions/0025-inspiration-catalogue-retired.md`,
+`docs/decisions/0026-in-store-reference-capture.md` and
+`docs/decisions/0027-the-shop-owns-the-design.md`.
 
 **Phase 21 — account render delivery and the concept gallery.** Three things a
 stylist needs once concepts start accumulating. **The file gets a name.** Pressing
@@ -268,7 +321,18 @@ version. Once active or retired, a version's number and schema are
 immutable and active versions cannot be deleted — corrections ship as new
 versions.
 
-### 7e. Inspiration catalogue (Phase 5B)
+### 7e. Inspiration catalogue (Phase 5B — **retired from the product in Phase 22**)
+
+> **Retired, not deleted (ADR 0025).** No asset was ever approved, so the three
+> public endpoints below returned an empty list to every caller for their entire
+> life; they, the questionnaire picker and the `inspiration_asset_ids` write field
+> are gone. Everything else described here — the models, migrations, rights
+> records, ingest sanitiser, `publicly_eligible()`, services and admin — is intact
+> and reachable only by an admin login, and every `DesignInspiration` row and
+> frozen `inspiration_context` snapshot already in the database is untouched. The
+> reference step is now the customer's own photographs alone. Removing the
+> stronger rights model does **not** upgrade the weaker per-upload
+> self-affirmation that remains.
 
 A small, staff-managed catalogue of **rights-approved** inspiration images
 (ADR 0006). Staff create a `UsageRights` record (basis, holder, evidence,
@@ -285,15 +349,17 @@ original upload is discarded**. No user uploads, no URL fetching.
 
 Approval ("Approve selected inspiration asset") requires the processed
 image, title, alt text and verified, unexpired, fully-permissive rights;
-retirement is immediate and terminal. Public, identity-free endpoints —
+retirement is immediate and terminal. The public, identity-free endpoints
+**removed in Phase 22** —
 
-- `GET /api/v1/inspiration-assets/` (catalogue JSON, `no-store`)
-- `GET /api/v1/inspiration-assets/<uuid>/image/`
-- `GET /api/v1/inspiration-assets/<uuid>/thumbnail/`
+- ~~`GET /api/v1/inspiration-assets/`~~ (catalogue JSON, `no-store`)
+- ~~`GET /api/v1/inspiration-assets/<uuid>/image/`~~
+- ~~`GET /api/v1/inspiration-assets/<uuid>/thumbnail/`~~
 
-— share one eligibility queryset (approved + verified + unexpired + all
-permissions), stream WebP through Django (never a storage URL) and answer
-an indistinguishable 404 for anything ineligible. Ingestion bounds are
+— shared one eligibility queryset (approved + verified + unexpired + all
+permissions), streamed WebP through Django (never a storage URL) and answered
+an indistinguishable 404 for anything ineligible. `publicly_eligible()` itself remains in use: `generation/reference_images.py` still re-validates a
+pre-Phase-22 curated selection against it before minting a reference URL. Ingestion bounds are
 configurable via `INSPIRATION_MAX_UPLOAD_BYTES`,
 `INSPIRATION_MAX_IMAGE_PIXELS`, `INSPIRATION_OUTPUT_MAX_EDGE` and
 `INSPIRATION_THUMBNAIL_EDGE`.
