@@ -15,7 +15,7 @@ import { PhoneHandoff } from "./PhoneHandoff";
 
 const createGrant = vi.fn();
 const revokeGrants = vi.fn();
-const fetchDesignMock = vi.fn();
+const fetchReferencesMock = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -23,7 +23,7 @@ vi.mock("@/lib/api", async () => {
     ...actual,
     createReferenceGrant: (...args: unknown[]) => createGrant(...args),
     revokeReferenceGrants: (...args: unknown[]) => revokeGrants(...args),
-    fetchDesign: (...args: unknown[]) => fetchDesignMock(...args),
+    fetchDesignReferences: (...args: unknown[]) => fetchReferencesMock(...args),
   };
 });
 
@@ -73,7 +73,7 @@ function show(): void {
 beforeEach(() => {
   createGrant.mockReset();
   revokeGrants.mockReset();
-  fetchDesignMock.mockReset();
+  fetchReferencesMock.mockReset();
   revokeGrants.mockResolvedValue({ ok: true });
   createGrant.mockResolvedValue(liveGrant());
 });
@@ -393,16 +393,16 @@ describe("PhoneHandoff — one action at a time", () => {
 });
 
 describe("PhoneHandoff — watching for arrivals", () => {
-  it("polls the design and reports what arrived", async () => {
+  it("polls the narrow references read and reports what arrived", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    fetchDesignMock.mockResolvedValue({ inspiration_uploads: [made("u1")] });
+    fetchReferencesMock.mockResolvedValue([made("u1")]);
     const { onUploadsChanged } = renderPanel();
     show();
     await vi.waitFor(() => expect(screen.getByRole("img", { name: /Scan this/i })).toBeTruthy());
 
     await vi.advanceTimersByTimeAsync(2100);
 
-    await vi.waitFor(() => expect(fetchDesignMock).toHaveBeenCalledWith("design-1"));
+    await vi.waitFor(() => expect(fetchReferencesMock).toHaveBeenCalledWith("design-1"));
     await vi.waitFor(() =>
       expect(onUploadsChanged).toHaveBeenCalledWith([expect.objectContaining({ id: "u1" })]),
     );
@@ -415,28 +415,28 @@ describe("PhoneHandoff — watching for arrivals", () => {
 
   it("does not poll before a code is shown", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    fetchDesignMock.mockResolvedValue({ inspiration_uploads: [] });
+    fetchReferencesMock.mockResolvedValue([]);
     renderPanel();
 
     await vi.advanceTimersByTimeAsync(6000);
 
-    expect(fetchDesignMock).not.toHaveBeenCalled();
+    expect(fetchReferencesMock).not.toHaveBeenCalled();
   });
 
   it("stops polling once the code is stopped", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    fetchDesignMock.mockResolvedValue({ inspiration_uploads: [] });
+    fetchReferencesMock.mockResolvedValue([]);
     renderPanel();
     show();
     await vi.waitFor(() => expect(screen.getByRole("img", { name: /Scan this/i })).toBeTruthy());
     await vi.advanceTimersByTimeAsync(2100);
-    const pollsWhileLive = fetchDesignMock.mock.calls.length;
+    const pollsWhileLive = fetchReferencesMock.mock.calls.length;
     expect(pollsWhileLive).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /Stop accepting photos/i }));
     await vi.advanceTimersByTimeAsync(6000);
 
-    expect(fetchDesignMock.mock.calls.length).toBe(pollsWhileLive);
+    expect(fetchReferencesMock.mock.calls.length).toBe(pollsWhileLive);
   });
 
   it("ignores a slow poll that resolves after a newer one", async () => {
@@ -444,10 +444,10 @@ describe("PhoneHandoff — watching for arrivals", () => {
     // same time, a poll sent first can land last. Applying it would drag the
     // arrival count — and the parent's uploads list — backwards.
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const resolvers: ((value: { inspiration_uploads: Upload[] }) => void)[] = [];
-    fetchDesignMock.mockImplementation(
+    const resolvers: ((value: Upload[]) => void)[] = [];
+    fetchReferencesMock.mockImplementation(
       () =>
-        new Promise<{ inspiration_uploads: Upload[] }>((resolve) => {
+        new Promise<Upload[]>((resolve) => {
           resolvers.push(resolve);
         }),
     );
@@ -461,14 +461,14 @@ describe("PhoneHandoff — watching for arrivals", () => {
     await vi.waitFor(() => expect(resolvers.length).toBeGreaterThanOrEqual(2));
 
     // The SECOND lands first, carrying two photographs...
-    resolvers[1]({ inspiration_uploads: [made("u1", 1), made("u2", 2)] });
+    resolvers[1]([made("u1", 1), made("u2", 2)]);
     await vi.waitFor(() =>
       expect(
         screen.getByRole("status", { name: /arriving from a phone/i }),
       ).toHaveTextContent(/2 photographs arrived/i),
     );
     // ...then the stale FIRST arrives with only one. It must be discarded.
-    resolvers[0]({ inspiration_uploads: [made("u1", 1)] });
+    resolvers[0]([made("u1", 1)]);
     await vi.advanceTimersByTimeAsync(50);
 
     expect(
@@ -480,7 +480,7 @@ describe("PhoneHandoff — watching for arrivals", () => {
 
   it("swallows a dropped poll rather than alarming the stylist", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    fetchDesignMock.mockRejectedValue(new Error("offline"));
+    fetchReferencesMock.mockRejectedValue(new Error("offline"));
     const { onUploadsChanged } = renderPanel();
     show();
     await vi.waitFor(() => expect(screen.getByRole("img", { name: /Scan this/i })).toBeTruthy());

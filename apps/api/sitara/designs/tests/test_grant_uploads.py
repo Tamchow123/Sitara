@@ -386,6 +386,11 @@ class TestThereIsNoReadPath:
             f"{DESIGNS_URL}{design_id}/",
             DESIGNS_URL,
             f"{DESIGNS_URL}{design_id}/validate/",
+            # The narrow references read the iPad's own panel polls. It is the
+            # closest thing in the API to "show me what this design holds", so
+            # it is the one a future reader would most expect a grant to open.
+            # It does not.
+            f"{DESIGNS_URL}{design_id}/references/",
         ]
         for url in targets:
             for attempt in (

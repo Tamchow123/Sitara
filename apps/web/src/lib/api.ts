@@ -337,6 +337,22 @@ export async function fetchDesign(designId: string): Promise<DesignDraft> {
   return data;
 }
 
+// Just this design's own uploaded references (Phase 22).
+//
+// The phone-handoff panel asks "has a photograph arrived yet?" every couple of
+// seconds for as long as a code is live. Asking it with fetchDesign() meant
+// re-downloading the whole versioned questionnaire schema, the customer's saved
+// answers and the latest job snapshot each time — none of it part of the
+// question, none of it changed since the last poll — over the same shop wifi
+// the customer's phone is using to push a multi-megabyte photograph.
+export async function fetchDesignReferences(designId: string): Promise<InspirationUpload[]> {
+  const { data } = await apiClient.GET("/api/v1/designs/{design_id}/references/", {
+    params: { path: { design_id: designId } },
+  });
+  if (!data) throw new Error("not_found");
+  return data.inspiration_uploads;
+}
+
 // ---------------------------------------------------------------------------
 // Generation jobs (Phase 10) — CSRF-aware start + GET-only poll
 // ---------------------------------------------------------------------------

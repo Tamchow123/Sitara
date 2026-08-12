@@ -224,8 +224,15 @@ def inspiration_upload_payload(upload) -> dict:
     }
 
 
-def _inspiration_uploads_payload(design: Design) -> list[dict]:
-    """Every upload on this design, ordered by position."""
+def inspiration_uploads_payload(design: Design) -> list[dict]:
+    """Every upload on this design, ordered by position.
+
+    Public, and deliberately so: the design detail and the narrow references
+    read (Phase 22) both answer with this list, and one decision about WHICH
+    uploads belong in it — the queryset, the ordering, any future prefetch or
+    exclusion — has to be made in one place. Two call sites writing the same
+    comprehension would only be caught by the equality test between them, after
+    they had already diverged."""
     return [inspiration_upload_payload(upload) for upload in design.inspiration_uploads.all()]
 
 
@@ -249,7 +256,7 @@ def design_detail_payload(design: Design) -> dict:
         "questionnaire": _questionnaire_payload(design),
         "answers": design.answers,
         "selected_inspirations": _selected_inspirations_payload(design),
-        "inspiration_uploads": _inspiration_uploads_payload(design),
+        "inspiration_uploads": inspiration_uploads_payload(design),
         "latest_job": _latest_job_payload(design),
         "created_at": _DATETIME.to_representation(design.created_at),
         "updated_at": _DATETIME.to_representation(design.updated_at),

@@ -276,6 +276,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/designs/{design_id}/references/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a design's own uploaded references
+         * @description The design's own uploaded reference images, ordered by position — the same objects the design detail carries, without the questionnaire, the answers or the job snapshot. Intended for the phone-handoff panel's arrival poll, which needs this and nothing else. No image bytes and no signed URL: those come only from the ownership-checked image endpoint. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        get: operations["designs_references_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/designs/{design_id}/refine/": {
         parameters: {
             query?: never;
@@ -941,6 +961,20 @@ export interface components {
             id: string;
             version: number;
             schema: components["schemas"]["QuestionnaireSchema"];
+        };
+        /**
+         * @description Just the design's own uploaded references, and nothing else.
+         *
+         *     The whole point is what is ABSENT. The phone-handoff panel asks "has a
+         *     photograph arrived yet?" every couple of seconds for as long as a code is
+         *     live, and answering that with the full design detail meant re-sending the
+         *     entire versioned questionnaire schema, the customer's saved answers and the
+         *     latest job snapshot — none of which the question is about, and none of which
+         *     changes between two polls — over the same shop wifi the customer's phone is
+         *     using to push the photograph. Widening this payload puts that back.
+         */
+        DesignReferencesResponse: {
+            inspiration_uploads: components["schemas"]["InspirationUpload"][];
         };
         /**
          * @description The purpose-built, curated concept result (Phase 12).
@@ -2345,6 +2379,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_references_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                design_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DesignReferencesResponse"];
                 };
             };
             /** @description Not found or not owned (indistinguishable). */

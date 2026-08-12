@@ -28,7 +28,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import {
   createReferenceGrant,
-  fetchDesign,
+  fetchDesignReferences,
   revokeReferenceGrants,
   type InspirationUpload as Upload,
 } from "@/lib/api";
@@ -193,9 +193,12 @@ export function PhoneHandoff({ designId, uploads, max, onUploadsChanged }: Props
     pollSeqRef.current = 0;
     const poll = async (): Promise<void> => {
       const seq = (pollSeqRef.current += 1);
-      let design;
+      let found;
       try {
-        design = await fetchDesign(designId);
+        // The narrow references read, not the whole design: this runs every
+        // two seconds for the life of the code, and the questionnaire schema
+        // it used to drag along cannot have changed between two of them.
+        found = await fetchDesignReferences(designId);
       } catch {
         // A dropped poll is not worth telling the stylist about: the next one
         // is two seconds away and the customer's upload already succeeded or
@@ -209,7 +212,6 @@ export function PhoneHandoff({ designId, uploads, max, onUploadsChanged }: Props
       // the arrival count backwards.
       if (seq <= appliedSeqRef.current) return;
       appliedSeqRef.current = seq;
-      const found = design.inspiration_uploads;
       latestRef.current(found);
       setArrived(Math.max(found.length - baselineRef.current, 0));
     };

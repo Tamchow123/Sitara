@@ -83,6 +83,11 @@ urlpatterns = [
         name="design-reference-grant",
     ),
     re_path(
+        rf"^designs/{_UUID}/references/?$",
+        views.DesignReferencesView.as_view(),
+        name="design-references",
+    ),
+    re_path(
         rf"^designs/{_UUID}/inspiration-uploads/?$",
         views.DesignInspirationUploadView.as_view(),
         name="design-inspiration-upload-list",

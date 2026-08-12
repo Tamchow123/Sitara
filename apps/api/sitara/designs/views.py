@@ -124,6 +124,7 @@ from .openapi import (
     AnnotationDocumentWriteSerializer,
     DesignDetailResponseSerializer,
     DesignListResponseSerializer,
+    DesignReferencesResponseSerializer,
     DesignResultResponseSerializer,
     DesignValidationSuccessSerializer,
     DesignVersionImagesResponseSerializer,
@@ -169,6 +170,7 @@ from .serializers import (
     design_detail_payload,
     design_list_item_payload,
     inspiration_upload_payload,
+    inspiration_uploads_payload,
 )
 from .services import (
     DraftUpdateError,
@@ -2250,6 +2252,63 @@ class DesignInspirationUploadImageView(_OwnedUploadMixin, APIView):
         response["X-Content-Type-Options"] = "nosniff"
         response["Cache-Control"] = "no-store"
         return response
+
+
+class DesignReferencesView(APIView):
+    """This design's own uploaded references, and nothing else (Phase 22).
+
+    A narrow read for one question the phone-handoff panel asks repeatedly:
+    "has a photograph arrived yet?" It polls every couple of seconds for as long
+    as a code is live, and answering that with ``GET /designs/<id>/`` meant
+    re-sending the whole versioned questionnaire schema, the customer's saved
+    answers and the latest job snapshot every time — none of it part of the
+    question, none of it changed since the last poll, and all of it competing
+    for the same shop wifi the customer's phone is using to push the photograph.
+
+    Owner-only through the ordinary ownership filter, so a design that is not
+    the caller's is the same indistinguishable 404 as everywhere else. Read-only
+    and identity-bearing rather than identity-free: it names a private
+    resource, so it authenticates the session like every other design read.
+
+    It is emphatically NOT reachable behind a handoff grant — a grant is
+    upload-only, permanently (ADR 0026 non-goal). This endpoint answers the
+    IPAD's own session, which already owns the design."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        operation_id="designs_references_retrieve",
+        tags=_DESIGN_TAGS,
+        responses={
+            200: DesignReferencesResponseSerializer,
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+        },
+        summary="List a design's own uploaded references",
+        description=(
+            "The design's own uploaded reference images, ordered by position — "
+            "the same objects the design detail carries, without the "
+            "questionnaire, the answers or the job snapshot. Intended for the "
+            "phone-handoff panel's arrival poll, which needs this and nothing "
+            "else. No image bytes and no signed URL: those come only from the "
+            "ownership-checked image endpoint. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def get(self, request, design_id: str):
+        # Ownership filter FIRST, UUID lookup second — never the reverse.
+        design = accessible_designs(request).filter(pk=design_id).first()
+        if design is None:
+            return _not_found()
+        # Through the SHARED builder, not a second comprehension: which uploads
+        # belong in this list is one decision, and the design detail already
+        # makes it. A copy here would agree today and drift the moment either
+        # side gained a prefetch or an exclusion.
+        return Response(
+            {"inspiration_uploads": inspiration_uploads_payload(design)},
+            headers=NO_STORE,
+        )
 
 
 @method_decorator(csrf_protect, name="dispatch")

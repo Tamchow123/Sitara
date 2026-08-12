@@ -125,6 +125,20 @@ class InspirationUploadResponseSerializer(serializers.Serializer):
     upload = InspirationUploadSerializer()
 
 
+class DesignReferencesResponseSerializer(serializers.Serializer):
+    """Just the design's own uploaded references, and nothing else.
+
+    The whole point is what is ABSENT. The phone-handoff panel asks "has a
+    photograph arrived yet?" every couple of seconds for as long as a code is
+    live, and answering that with the full design detail meant re-sending the
+    entire versioned questionnaire schema, the customer's saved answers and the
+    latest job snapshot — none of which the question is about, and none of which
+    changes between two polls — over the same shop wifi the customer's phone is
+    using to push the photograph. Widening this payload puts that back."""
+
+    inspiration_uploads = InspirationUploadSerializer(many=True)
+
+
 class InspirationUploadWriteSerializer(serializers.Serializer):
     """The multipart upload body.
 

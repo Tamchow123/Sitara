@@ -1181,6 +1181,55 @@
                 }
             }
         },
+        "/api/v1/designs/{design_id}/references/": {
+            "get": {
+                "operationId": "designs_references_retrieve",
+                "description": "The design's own uploaded reference images, ordered by position — the same objects the design detail carries, without the questionnaire, the answers or the job snapshot. Intended for the phone-handoff panel's arrival poll, which needs this and nothing else. No image bytes and no signed URL: those come only from the ownership-checked image endpoint. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "List a design's own uploaded references",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DesignReferencesResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    }
+                }
+            }
+        },
         "/api/v1/designs/{design_id}/refine/": {
             "post": {
                 "operationId": "designs_refine",
@@ -3400,6 +3449,21 @@
                     "id",
                     "schema",
                     "version"
+                ]
+            },
+            "DesignReferencesResponse": {
+                "type": "object",
+                "description": "Just the design's own uploaded references, and nothing else.\n\nThe whole point is what is ABSENT. The phone-handoff panel asks \"has a\nphotograph arrived yet?\" every couple of seconds for as long as a code is\nlive, and answering that with the full design detail meant re-sending the\nentire versioned questionnaire schema, the customer's saved answers and the\nlatest job snapshot — none of which the question is about, and none of which\nchanges between two polls — over the same shop wifi the customer's phone is\nusing to push the photograph. Widening this payload puts that back.",
+                "properties": {
+                    "inspiration_uploads": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/InspirationUpload"
+                        }
+                    }
+                },
+                "required": [
+                    "inspiration_uploads"
                 ]
             },
             "DesignResult": {

@@ -45,6 +45,10 @@ EXPECTED_OPERATIONS = frozenset(
         # and its secret cannot be read back after minting.
         ("/api/v1/designs/{design_id}/reference-grants/", "post"),
         ("/api/v1/designs/{design_id}/reference-grants/", "delete"),
+        # The narrow read the handoff panel polls while a code is live: this
+        # design's own uploaded references and nothing else. Owner-only, on the
+        # SHOP's session — a grant does not open it (see below).
+        ("/api/v1/designs/{design_id}/references/", "get"),
         # The phone side of the same handoff, and the ONLY operation a grant
         # opens. No design id in the path — the code names the design — and no
         # sibling read operation, permanently.

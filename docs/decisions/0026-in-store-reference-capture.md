@@ -126,6 +126,16 @@ A plain two-second interval while the panel is open. CLAUDE.md §17 confines
 TanStack Query to the generation-progress flow and this phase decided not to
 widen it for a panel open for a minute or two. No WebSockets, no SSE, no push.
 
+It polls a **narrow read** — `GET /designs/<id>/references/`, which returns the
+design's own uploaded references and nothing else — rather than the full design
+detail. The question being asked every two seconds is only "has a photograph
+arrived yet?", and answering it with the whole draft meant re-sending the
+versioned questionnaire schema, the customer's saved answers and the latest job
+snapshot on every poll, over the same shop wifi the customer's phone is using to
+push a multi-megabyte photograph. The narrow read is owner-only through the
+ordinary ownership filter and carries no image bytes and no signed URL; a
+handoff grant does not open it, because a grant is upload-only, permanently.
+
 ## Consequences
 
 - Nothing about what happens to the image afterwards changes: same endpoint
