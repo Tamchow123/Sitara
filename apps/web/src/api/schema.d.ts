@@ -252,6 +252,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/designs/{design_id}/reference-grants/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a phone handoff
+         * @description Mints a short-lived, revocable grant letting the customer's own phone add reference photographs to THIS design, and returns its plaintext secret exactly once so the caller can render a QR code. The secret is stored only as a digest and can never be read back. It is a bearer credential: whoever sees the code can use it, and that exposure is accepted and bounded, not removed. It grants upload only — there is no read path behind it. Minting revokes any earlier live grant on the same design. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        post: operations["designs_reference_grant_create"];
+        /**
+         * Stop accepting photographs from a phone
+         * @description Revokes every live grant on this design. Idempotent: revoking when there is nothing to revoke succeeds and reports zero. Unlike a signed storage URL this really does stop working, because it resolves through Sitara rather than through the object store. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        delete: operations["designs_reference_grant_revoke"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/designs/{design_id}/refine/": {
         parameters: {
             query?: never;
@@ -1246,6 +1270,38 @@ export interface components {
             checks: components["schemas"]["ReadyChecks"];
         };
         /**
+         * @description A freshly minted handoff grant, returned ONCE to the design's owner.
+         *
+         *     ``token`` is the plaintext secret and this is the only response in the whole
+         *     API that contains it: the row stores a digest, and no later request can read
+         *     it back. It is a BEARER credential — whoever can see it can add a reference
+         *     to this design — and the exposure is accepted and bounded (ADR 0026), not
+         *     removed. It carries no read capability of any kind.
+         */
+        ReferenceUploadGrant: {
+            /**
+             * Format: uuid
+             * @description The grant row, for revoking it later.
+             */
+            id: string;
+            /** @description The plaintext secret, returned exactly once. Put it in the QR code and nowhere else: never a log, never storage, never another response. */
+            token: string;
+            /**
+             * Format: date-time
+             * @description When the grant stops working, whatever else happens.
+             */
+            expires_at: string;
+            /** @description How many reference slots the design has left. A grant is spent when this reaches zero, and the phone is told no more than any other unusable grant would be told. */
+            slots_remaining: number;
+        };
+        ReferenceUploadGrantResponse: {
+            grant: components["schemas"]["ReferenceUploadGrant"];
+        };
+        ReferenceUploadGrantRevoked: {
+            /** @description How many live grants this call revoked. Zero is a success. */
+            revoked: number;
+        };
+        /**
          * @description The refinement-specific lineage detail (Phase 14) for a version whose
          *     ``lineage.kind`` is ``"refinement"``. Deliberately excludes the raw
          *     optional note, the refinement-request hash, its schema version, the
@@ -2069,6 +2125,117 @@ export interface operations {
             };
             /** @description The image is temporarily unreadable. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_reference_grant_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceUploadGrantResponse"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description inspiration_limit_reached: the design's reference slots are already full, so a code would be spent the moment it was shown. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many codes asked for just now. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Handoff codes are briefly unavailable (throttle cache outage). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_reference_grant_revoke: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceUploadGrantRevoked"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

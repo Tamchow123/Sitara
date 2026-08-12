@@ -1063,6 +1063,51 @@ USER_UPLOAD_IP_LIMIT = env_positive_int("USER_UPLOAD_IP_LIMIT", 60)
 USER_UPLOAD_IP_WINDOW_SECONDS = env_positive_int("USER_UPLOAD_IP_WINDOW_SECONDS", 3600)
 
 # ---------------------------------------------------------------------------
+# Reference upload grants (Phase 22, ADR 0026) — the phone handoff.
+#
+# A grant is a BEARER credential: whoever can see the iPad's screen can
+# photograph the QR code and use it. That exposure is accepted and bounded, not
+# removed, and these are the bounds. Read ADR 0026 before changing any of them.
+# ---------------------------------------------------------------------------
+
+# Minutes, not hours. A code photographed off a shop screen should be stale
+# before it leaves the building; 15 minutes is long enough for someone to find
+# the photograph they meant and short enough that a stolen frame is worthless
+# by the time anyone acts on it. Revocation does not wait for it — the stylist
+# has a control, and leaving the reference step revokes automatically.
+REFERENCE_UPLOAD_GRANT_TTL_SECONDS = env_positive_int("REFERENCE_UPLOAD_GRANT_TTL_SECONDS", 900)
+
+# Per-grant and per-hashed-IP fixed windows on the phone-side upload endpoint,
+# through the project's ONE limiter (accounts.rate_limits), which fails CLOSED
+# on a cache outage. The per-grant window is what stops one photographed code
+# being hammered; the per-IP window is what stops many codes being hammered
+# from one place. Both are deliberately tighter than the session-scoped upload
+# throttle, because this endpoint takes no account and no design ownership —
+# only a secret.
+REFERENCE_UPLOAD_GRANT_LIMIT = env_positive_int("REFERENCE_UPLOAD_GRANT_LIMIT", 12)
+REFERENCE_UPLOAD_GRANT_WINDOW_SECONDS = env_positive_int(
+    "REFERENCE_UPLOAD_GRANT_WINDOW_SECONDS", 900
+)
+REFERENCE_UPLOAD_GRANT_IP_LIMIT = env_positive_int("REFERENCE_UPLOAD_GRANT_IP_LIMIT", 40)
+REFERENCE_UPLOAD_GRANT_IP_WINDOW_SECONDS = env_positive_int(
+    "REFERENCE_UPLOAD_GRANT_IP_WINDOW_SECONDS", 3600
+)
+
+# Minting is owner-only and CSRF-protected, which decides WHO may ask for a code
+# but not how often. Each mint writes a durable row that only the retention
+# purge removes, so the rate needs its own bound. Generous against real use — a
+# stylist re-showing the panel a few times per customer is well inside it — and
+# tight enough that a loop cannot grow the table.
+REFERENCE_UPLOAD_GRANT_MINT_LIMIT = env_positive_int("REFERENCE_UPLOAD_GRANT_MINT_LIMIT", 30)
+REFERENCE_UPLOAD_GRANT_MINT_WINDOW_SECONDS = env_positive_int(
+    "REFERENCE_UPLOAD_GRANT_MINT_WINDOW_SECONDS", 3600
+)
+REFERENCE_UPLOAD_GRANT_MINT_IP_LIMIT = env_positive_int("REFERENCE_UPLOAD_GRANT_MINT_IP_LIMIT", 90)
+REFERENCE_UPLOAD_GRANT_MINT_IP_WINDOW_SECONDS = env_positive_int(
+    "REFERENCE_UPLOAD_GRANT_MINT_IP_WINDOW_SECONDS", 3600
+)
+
+# ---------------------------------------------------------------------------
 # Authentication (Phase 3B) — Django sessions only. No JWT, no token
 # cookies, no localStorage tokens.
 # ---------------------------------------------------------------------------

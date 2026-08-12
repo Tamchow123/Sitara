@@ -1007,6 +1007,170 @@
                 }
             }
         },
+        "/api/v1/designs/{design_id}/reference-grants/": {
+            "post": {
+                "operationId": "designs_reference_grant_create",
+                "description": "Mints a short-lived, revocable grant letting the customer's own phone add reference photographs to THIS design, and returns its plaintext secret exactly once so the caller can render a QR code. The secret is stored only as a digest and can never be read back. It is a bearer credential: whoever sees the code can use it, and that exposure is accepted and bounded, not removed. It grants upload only — there is no read path behind it. Minting revokes any earlier live grant on the same design. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Start a phone handoff",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReferenceUploadGrantResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "inspiration_limit_reached: the design's reference slots are already full, so a code would be spent the moment it was shown."
+                    },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Too many codes asked for just now."
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Handoff codes are briefly unavailable (throttle cache outage)."
+                    }
+                }
+            },
+            "delete": {
+                "operationId": "designs_reference_grant_revoke",
+                "description": "Revokes every live grant on this design. Idempotent: revoking when there is nothing to revoke succeeds and reports zero. Unlike a signed storage URL this really does stop working, because it resolves through Sitara rather than through the object store. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "summary": "Stop accepting photographs from a phone",
+                "parameters": [
+                    {
+                        "in": "header",
+                        "name": "X-CSRFToken",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed.",
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "design_id",
+                        "schema": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Designs"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {}
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReferenceUploadGrantRevoked"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "CSRF token missing/invalid."
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        },
+                        "description": "Not found or not owned (indistinguishable)."
+                    }
+                }
+            }
+        },
         "/api/v1/designs/{design_id}/refine/": {
             "post": {
                 "operationId": "designs_refine",
@@ -3921,6 +4085,61 @@
                 "required": [
                     "checks",
                     "status"
+                ]
+            },
+            "ReferenceUploadGrant": {
+                "type": "object",
+                "description": "A freshly minted handoff grant, returned ONCE to the design's owner.\n\n``token`` is the plaintext secret and this is the only response in the whole\nAPI that contains it: the row stores a digest, and no later request can read\nit back. It is a BEARER credential — whoever can see it can add a reference\nto this design — and the exposure is accepted and bounded (ADR 0026), not\nremoved. It carries no read capability of any kind.",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "The grant row, for revoking it later."
+                    },
+                    "token": {
+                        "type": "string",
+                        "description": "The plaintext secret, returned exactly once. Put it in the QR code and nowhere else: never a log, never storage, never another response."
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "When the grant stops working, whatever else happens."
+                    },
+                    "slots_remaining": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "How many reference slots the design has left. A grant is spent when this reaches zero, and the phone is told no more than any other unusable grant would be told."
+                    }
+                },
+                "required": [
+                    "expires_at",
+                    "id",
+                    "slots_remaining",
+                    "token"
+                ]
+            },
+            "ReferenceUploadGrantResponse": {
+                "type": "object",
+                "properties": {
+                    "grant": {
+                        "$ref": "#/components/schemas/ReferenceUploadGrant"
+                    }
+                },
+                "required": [
+                    "grant"
+                ]
+            },
+            "ReferenceUploadGrantRevoked": {
+                "type": "object",
+                "properties": {
+                    "revoked": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "How many live grants this call revoked. Zero is a success."
+                    }
+                },
+                "required": [
+                    "revoked"
                 ]
             },
             "RefinementLineage": {

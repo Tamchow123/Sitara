@@ -25,6 +25,7 @@ import logging
 import uuid
 from functools import wraps
 
+from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Exists, OuterRef
@@ -96,6 +97,13 @@ from .annotation_service import (
     read_annotation_document,
     replace_annotation_document,
 )
+from .grant_service import (
+    GrantMintingThrottled,
+    GrantMintingUnavailable,
+    create_reference_upload_grant,
+    enforce_mint_throttle,
+    revoke_reference_upload_grants,
+)
 from .jobs import _iso, public_job_payload
 from .models import (
     Design,
@@ -116,6 +124,8 @@ from .openapi import (
     GenerationJobResponseSerializer,
     InspirationUploadResponseSerializer,
     InspirationUploadWriteSerializer,
+    ReferenceUploadGrantResponseSerializer,
+    ReferenceUploadGrantRevokedSerializer,
     RenderSendResponseSerializer,
     RenderSendStateResponseSerializer,
 )
@@ -165,6 +175,7 @@ from .upload_service import (
     create_inspiration_upload,
     delete_inspiration_upload,
     enforce_upload_throttle,
+    inspiration_slots_used,
     reject_oversized_body,
 )
 
@@ -2174,3 +2185,141 @@ class DesignInspirationUploadImageView(_OwnedUploadMixin, APIView):
         response["X-Content-Type-Options"] = "nosniff"
         response["Cache-Control"] = "no-store"
         return response
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class DesignReferenceGrantView(APIView):
+    """Mint or revoke this design's phone-handoff grant (Phase 22, ADR 0026).
+
+    Owner-only, through the ordinary ownership filter, so a design that is not
+    the caller's is the same indistinguishable 404 as everywhere else. POST
+    returns the plaintext secret — the ONE response in this API that does — and
+    DELETE revokes every live grant on the design.
+
+    There is no GET. A grant's secret cannot be read back after it is minted
+    (the row holds only a digest), and listing grants would say something about
+    a design without adding anything the owner cannot already see on the screen
+    that minted one."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    def _get_owned(self, request, design_id: str) -> Design | None:
+        # Ownership filter FIRST, UUID lookup second — never the reverse.
+        return accessible_designs(request).filter(pk=design_id).first()
+
+    @extend_schema(
+        operation_id="designs_reference_grant_create",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=None,
+        responses={
+            201: ReferenceUploadGrantResponseSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "inspiration_limit_reached: the design's reference slots are "
+                    "already full, so a code would be spent the moment it was shown."
+                ),
+            ),
+            429: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Too many codes asked for just now."
+            ),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="Handoff codes are briefly unavailable (throttle cache outage).",
+            ),
+        },
+        summary="Start a phone handoff",
+        description=(
+            "Mints a short-lived, revocable grant letting the customer's own "
+            "phone add reference photographs to THIS design, and returns its "
+            "plaintext secret exactly once so the caller can render a QR code. "
+            "The secret is stored only as a digest and can never be read back. "
+            "It is a bearer credential: whoever sees the code can use it, and "
+            "that exposure is accepted and bounded, not removed. It grants "
+            "upload only — there is no read path behind it. Minting revokes any "
+            "earlier live grant on the same design. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def post(self, request, design_id: str):
+        design = self._get_owned(request, design_id)
+        if design is None:
+            return _not_found()
+        # AFTER ownership, exactly as the upload endpoint orders it: a
+        # cross-origin page must not be able to burn a victim's quota, and a
+        # throttled caller still cannot tell an owned design from one that does
+        # not exist.
+        try:
+            enforce_mint_throttle(request)
+        except GrantMintingThrottled as exc:
+            return _error(
+                "grant_rate_limited",
+                "Too many codes for now. Please try again shortly.",
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Cache-Control": "no-store", "Retry-After": str(int(exc.retry_after))},
+            )
+        except GrantMintingUnavailable:
+            return _error(
+                "grant_throttle_unavailable",
+                "Phone handoff is temporarily unavailable. Please try again shortly.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        remaining = max(settings.MAX_INSPIRATION_IMAGES - inspiration_slots_used(design), 0)
+        if remaining <= 0:
+            # Refused rather than minted-and-immediately-spent: a code that
+            # cannot work is worse than no code, because the customer scans it
+            # and blames their phone.
+            return _error(
+                "inspiration_limit_reached",
+                f"You can use at most {settings.MAX_INSPIRATION_IMAGES} inspiration images.",
+                status.HTTP_409_CONFLICT,
+            )
+        grant, plaintext = create_reference_upload_grant(design)
+        return Response(
+            {
+                "grant": {
+                    "id": str(grant.id),
+                    # The only time this value is ever in a response body.
+                    "token": plaintext,
+                    "expires_at": _iso(grant.expires_at),
+                    "slots_remaining": remaining,
+                }
+            },
+            status=status.HTTP_201_CREATED,
+            headers=NO_STORE,
+        )
+
+    @extend_schema(
+        operation_id="designs_reference_grant_revoke",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        responses={
+            200: ReferenceUploadGrantRevokedSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+        },
+        summary="Stop accepting photographs from a phone",
+        description=(
+            "Revokes every live grant on this design. Idempotent: revoking when "
+            "there is nothing to revoke succeeds and reports zero. Unlike a "
+            "signed storage URL this really does stop working, because it "
+            "resolves through Sitara rather than through the object store. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def delete(self, request, design_id: str):
+        design = self._get_owned(request, design_id)
+        if design is None:
+            return _not_found()
+        revoked = revoke_reference_upload_grants(design)
+        return Response({"revoked": revoked}, headers=NO_STORE)

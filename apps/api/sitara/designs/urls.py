@@ -78,6 +78,11 @@ urlpatterns = [
         name="design-version-send",
     ),
     re_path(
+        rf"^designs/{_UUID}/reference-grants/?$",
+        views.DesignReferenceGrantView.as_view(),
+        name="design-reference-grant",
+    ),
+    re_path(
         rf"^designs/{_UUID}/inspiration-uploads/?$",
         views.DesignInspirationUploadView.as_view(),
         name="design-inspiration-upload-list",

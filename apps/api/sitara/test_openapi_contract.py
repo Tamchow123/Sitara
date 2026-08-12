@@ -39,6 +39,12 @@ EXPECTED_OPERATIONS = frozenset(
         ("/api/v1/designs/{design_id}/validate/", "post"),
         ("/api/v1/designs/{design_id}/generate/", "post"),
         ("/api/v1/designs/{design_id}/refine/", "post"),
+        # Phase 22 (ADR 0026): the phone handoff. POST mints a grant and
+        # returns its plaintext secret once; DELETE revokes every live one.
+        # There is deliberately no GET — a grant carries no read capability,
+        # and its secret cannot be read back after minting.
+        ("/api/v1/designs/{design_id}/reference-grants/", "post"),
+        ("/api/v1/designs/{design_id}/reference-grants/", "delete"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/", "post"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/", "delete"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/image/", "get"),
@@ -77,6 +83,10 @@ UNSAFE_OPERATIONS = frozenset(
         ("/api/v1/designs/{design_id}/validate/", "post"),
         ("/api/v1/designs/{design_id}/generate/", "post"),
         ("/api/v1/designs/{design_id}/refine/", "post"),
+        # Both handoff operations are unsafe and anonymous-capable, so CSRF
+        # is enforced by Django rather than by DRF's SessionAuthentication.
+        ("/api/v1/designs/{design_id}/reference-grants/", "post"),
+        ("/api/v1/designs/{design_id}/reference-grants/", "delete"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/", "post"),
         ("/api/v1/designs/{design_id}/inspiration-uploads/{upload_id}/", "delete"),
         ("/api/v1/designs/{design_id}/versions/{version_id}/annotations/", "put"),

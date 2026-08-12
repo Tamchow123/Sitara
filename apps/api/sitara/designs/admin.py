@@ -16,6 +16,7 @@ from .models import (
     DesignSession,
     DesignVersion,
     GenerationAttempt,
+    ReferenceUploadGrant,
 )
 
 
@@ -64,6 +65,44 @@ class DesignInspirationAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         # Selections are created only through the design API service.
+        return False
+
+
+@admin.register(ReferenceUploadGrant)
+class ReferenceUploadGrantAdmin(admin.ModelAdmin):
+    """Read-only, and deliberately without ``token_digest`` anywhere.
+
+    An admin screen is one of the easiest places for a secret to walk out of a
+    system — over a shoulder, into a screenshot, into a support ticket. The row
+    holds only a digest, so nothing usable could leak even if it were shown, but
+    it is left off the list, the detail form and the search fields all the same:
+    there is no staff task that needs it, and a value with no reader is a value
+    that cannot be leaked. Revocation is an owner action through the API, not a
+    staff one, so nothing here writes either."""
+
+    list_display = ("id", "design", "expires_at", "revoked_at", "uses", "created_at")
+    list_filter = ("created_at", "expires_at", "revoked_at")
+    search_fields = ("id", "design__id")
+    readonly_fields = (
+        "id",
+        "design",
+        "expires_at",
+        "revoked_at",
+        "uses",
+        "last_used_at",
+        "created_at",
+    )
+    # Explicit rather than inherited: naming the fields is what keeps
+    # ``token_digest`` out of the change form, which would otherwise render
+    # every editable field on the model.
+    fields = readonly_fields
+    ordering = ("-created_at",)
+
+    def has_add_permission(self, request):
+        # Grants are minted only by the design's owner, through the API.
+        return False
+
+    def has_change_permission(self, request, obj=None):
         return False
 
 

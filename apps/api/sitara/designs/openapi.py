@@ -610,3 +610,82 @@ class RenderSendStateSerializer(serializers.Serializer):
 
 class RenderSendStateResponseSerializer(serializers.Serializer):
     send = RenderSendStateSerializer()
+
+
+class ReferenceUploadGrantSerializer(serializers.Serializer):
+    """A freshly minted handoff grant, returned ONCE to the design's owner.
+
+    ``token`` is the plaintext secret and this is the only response in the whole
+    API that contains it: the row stores a digest, and no later request can read
+    it back. It is a BEARER credential — whoever can see it can add a reference
+    to this design — and the exposure is accepted and bounded (ADR 0026), not
+    removed. It carries no read capability of any kind."""
+
+    id = serializers.UUIDField(help_text="The grant row, for revoking it later.")
+    token = serializers.CharField(
+        help_text=(
+            "The plaintext secret, returned exactly once. Put it in the QR code "
+            "and nowhere else: never a log, never storage, never another response."
+        )
+    )
+    expires_at = serializers.DateTimeField(
+        help_text="When the grant stops working, whatever else happens."
+    )
+    slots_remaining = serializers.IntegerField(
+        min_value=0,
+        help_text=(
+            "How many reference slots the design has left. A grant is spent when "
+            "this reaches zero, and the phone is told no more than any other "
+            "unusable grant would be told."
+        ),
+    )
+
+
+class ReferenceUploadGrantResponseSerializer(serializers.Serializer):
+    grant = ReferenceUploadGrantSerializer()
+
+
+class ReferenceUploadGrantRevokedSerializer(serializers.Serializer):
+    revoked = serializers.IntegerField(
+        min_value=0, help_text="How many live grants this call revoked. Zero is a success."
+    )
+
+
+class GrantUploadWriteSerializer(serializers.Serializer):
+    """The phone-side multipart body.
+
+    ``grant_token`` is the secret, sent in the BODY rather than the URL so it
+    cannot land in a web-server access log, a Referer header or a browser
+    history entry. The client's filename and declared content type are ignored
+    exactly as on the owner's own upload endpoint — only the decoded image is
+    trusted, and the storage key is server-generated."""
+
+    grant_token = serializers.CharField(
+        write_only=True,
+        trim_whitespace=True,
+        max_length=512,
+        help_text="The handoff secret, from the scanned code. Never logged.",
+    )
+    image = serializers.FileField(help_text="The image file. JPEG, PNG or single-frame WebP.")
+    rights_acknowledged = serializers.BooleanField(
+        help_text=(
+            "Must be true, and must be given ON THIS DEVICE by the person "
+            "choosing the image. A tick on the iPad does not carry across."
+        )
+    )
+
+
+class GrantUploadAcceptedSerializer(serializers.Serializer):
+    """What the phone learns after a successful upload — and nothing more.
+
+    Deliberately NOT the design's id, title, answers, versions, images or how
+    many references it already had. A grant carries no read capability, so this
+    reports only the consequence of the caller's own action."""
+
+    slots_remaining = serializers.IntegerField(
+        min_value=0, help_text="How many more photographs this code can still add."
+    )
+
+
+class GrantUploadResponseSerializer(serializers.Serializer):
+    upload = GrantUploadAcceptedSerializer()
