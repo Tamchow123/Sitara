@@ -177,69 +177,60 @@ test.describe("journey 4: the custom colour picker", () => {
   });
 });
 
-test.describe("journey 5: inspiration selection", () => {
-  test("a catalogue reference can be selected and cleared again", async ({ page }) => {
+test.describe("journey 5: the reference step", () => {
+  // Rewritten for Phase 22. It used to select a curated catalogue asset and
+  // skipped on any stack that had none — which, since no asset was ever
+  // approved anywhere, was every stack. ADR 0025 retired the catalogue, so the
+  // step is now the customer's own photographs and this journey runs for real
+  // rather than skipping.
+
+  test("offers no catalogue, and takes an upload from this device", async ({ page }) => {
     await page.goto("/design/new");
-
-    // The inspiration catalogue is staff-managed by design (CLAUDE.md §13):
-    // there is deliberately no fixture, seed command or import path that
-    // populates it, because every asset needs staff-verified, evidenced rights
-    // and fabricating those is forbidden. So on a clean stack this journey has
-    // nothing to select, and the honest outcome is a visible skip rather than
-    // either a failure or a silent pass. It runs in full on a stack whose
-    // catalogue an operator has approved assets into.
-    // Deliberately NOT a hard-coded title, and deliberately not `.first()`:
-    // the title comes from the catalogue itself so the journey runs against
-    // whatever an operator approved, and titles beginning "E2 " are skipped
-    // because they are engineering fixtures — one of them exists precisely to
-    // be ineligible, so picking it would exercise the rejection path by
-    // accident and read as a selection bug.
-    const title = await page.evaluate(async () => {
-      const response = await fetch("/api/v1/inspiration-assets/", { credentials: "same-origin" });
-      if (!response.ok) return null;
-      const body = await response.json();
-      const assets: { title?: string }[] = body.assets ?? [];
-      return assets.map((a) => a.title ?? "").find((t) => t && !t.startsWith("E2 ")) ?? null;
-    });
-    test.skip(title === null, "no publicly-eligible catalogue asset on this stack — see §13");
-
-    // The wizard refuses to jump past unanswered required questions, so the
-    // inspiration screen has to be walked to rather than deep-linked.
     await advanceUntilQuestion(page, /inspiration images/i);
 
-    // A regex rather than a plain string because the card's accessible name is
-    // the title PLUS its selection state, which a whole-string match would
-    // miss; the title is escaped because it is catalogue data, not a pattern.
-    const escaped = title!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const first = page.getByRole("button", { name: new RegExp(escaped, "i") }).first();
-    await expect(first).toBeVisible();
-    await first.click();
-    // The card states its own selection in words, so the change is visible to
-    // a screen reader and not carried by the border alone.
-    await expect(first).not.toContainText(/not selected/i);
-    await expect(first).toContainText(/selected/i);
+    // The catalogue is gone from the product, asserted at the screen rather
+    // than by the absence of a request: what matters is that nobody is offered
+    // a grid of somebody else's approved looks.
+    //
+    // Asserted on AFFORDANCES, not on the word "catalogue" appearing anywhere.
+    // A blanket text ban failed against the privacy line "never added to
+    // Sitara's catalogue" — which is a guarantee ADR 0025 wants said out loud,
+    // so a test that pressured someone into deleting it would be the wrong
+    // test. What must be absent is a way IN, not a mention.
+    await expect(page.getByRole("button", { name: /not selected/i })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /browse|catalogue|inspiration library/i }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: /browse|catalogue|inspiration library/i }),
+    ).toHaveCount(0);
+    // And nothing on the screen is being served by the retired endpoints.
+    await expect(page.locator('img[src*="inspiration-assets"]')).toHaveCount(0);
 
     // The rights affirmation gates uploading and is never pre-ticked — the
     // per-upload self-affirmation is the user's statement, so it cannot be
     // made on their behalf (ADR 0018/0019, CLAUDE.md §13).
     const affirmation = page.getByRole("checkbox").first();
     await expect(affirmation).not.toBeChecked();
-    await expect(page.getByRole("button", { name: /choose an image/i })).toBeDisabled();
+    await expect(page.getByText(/take a photo/i)).toBeVisible();
+    await expect(page.getByText(/choose a file/i)).toBeVisible();
 
-    // The upload warning must state the provider exposure before anyone
-    // uploads, not after.
+    // The provider exposure must be readable BEFORE anyone uploads, not after.
     await expect(page.getByText(/perpetual, irrevocable licence/i)).toBeVisible();
 
-    // --- the upload half of journey 5 -------------------------------------
-    //
     // The file is one of the project's OWN synthetic questionnaire visuals.
     // CLAUDE.md §13 permits locally generated synthetic images for clearly
     // labelled engineering tests and forbids downloaded or unlicensed ones, so
     // reusing a build output we already produced is the correct source — no new
     // asset, nothing with a real person in it.
     await affirmation.check();
-    await expect(page.getByRole("button", { name: /choose an image/i })).toBeEnabled();
-    await page.locator('input[type="file"]').setInputFiles(SYNTHETIC_UPLOAD);
+    // The PICKER input, told apart from the camera one by the absence of
+    // `capture` rather than by a React useId — those contain colons, are
+    // invalid in a CSS selector unescaped, and change whenever the tree does.
+    await page
+      .locator('input[type="file"]:not([capture])')
+      .first()
+      .setInputFiles(SYNTHETIC_UPLOAD);
 
     await expect(page.getByText(/image added to your design/i)).toBeVisible({ timeout: 30_000 });
     const uploads = page.getByRole("list", { name: /your uploaded images/i });
@@ -254,5 +245,43 @@ test.describe("journey 5: inspiration selection", () => {
       timeout: 30_000,
     });
     await expect(uploads).toHaveCount(0);
+  });
+
+  test("hands off to a phone by QR, and stops when the stylist says so", async ({ page }) => {
+    await page.goto("/design/new");
+    await advanceUntilQuestion(page, /inspiration images/i);
+
+    // The handoff is the headline option and is NOT behind this device's
+    // rights affirmation — the phone takes its own, from the person choosing
+    // the photograph (ADR 0026). Asserted here because gating it behind the
+    // iPad's checkbox is the exact substitution the ADR exists to prevent.
+    await expect(page.getByRole("checkbox").first()).not.toBeChecked();
+    const show = page.getByRole("button", { name: /show the code/i });
+    await expect(show).toBeEnabled();
+
+    await show.click();
+
+    const code = page.getByRole("img", { name: /scan this to send a photograph/i });
+    await expect(code).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/this code works for about/i)).toBeVisible();
+
+    // The typed fallback carries the same URL the QR encodes, with the secret
+    // in the fragment — which is what keeps it out of a server access log.
+    await page.getByText(/the camera will not scan it/i).click();
+    await expect(page.getByText(/\/r#/)).toBeVisible();
+
+    // And it really stops. Unlike a signed storage URL this resolves through
+    // Sitara, so revocation is a fact rather than a hope.
+    await page.getByRole("button", { name: /stop accepting photos/i }).click();
+    await expect(code).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByRole("button", { name: /show the code/i })).toBeVisible();
+  });
+
+  test("a phone with no code is told so rather than shown a broken page", async ({ page }) => {
+    // The customer's page, reached without scanning anything.
+    await page.goto("/r");
+
+    await expect(page.getByRole("heading", { name: /nothing to send to/i })).toBeVisible();
+    await expect(page.getByText(/choose from your photos/i)).toHaveCount(0);
   });
 });

@@ -8,7 +8,7 @@ assertions are written against the terminal state the server actually produces.
 | Spec | Covers |
 | --- | --- |
 | `safety.spec.ts` | The stack reports demo mode; no browser request reaches a provider host; the questionnaire stores nothing in browser storage |
-| `journeys.spec.ts` | §25 journeys 1–5 — draft persistence, keyboard-only wizard (choose, Back, Skip), the information drawer, the custom colour picker, inspiration selection and synthetic upload/removal |
+| `journeys.spec.ts` | §25 journeys 1–5 — draft persistence, keyboard-only wizard (choose, Back, Skip), the information drawer, the custom colour picker, and the reference step: uploads-only (disclosure, per-upload affirmation, synthetic upload, removal), the QR handoff at the iPad end, and the phone page with no code |
 | `generation.spec.ts` | §25 journeys 6–10 — generate, resume mid-flight, a failed image with the brief intact, the one refinement, the two-version history |
 | `annotations.spec.ts` | Phase 19, extended in 21 — the private annotation workspace: draw a pin and a rectangle with real pointer gestures, note them, prove persistence across a reload, prove hiding is not deleting, prove nothing reaches browser storage, a stranger's indistinguishable 404, the original render left untouched, and the naming prompt: its pre-fill, its stated exposure, the allowance stated before it is spent, and a refused name answered in the dialog |
 | `gallery.spec.ts` | Phase 21 — the account gallery: a concept made through the real pipeline is findable afterwards under the same name, its card's links resolve to that concept and its workspace, its thumbnail actually decodes, and the list payload itself carries no bearer URL, storage key or spec description |
@@ -255,11 +255,33 @@ on mobile rather than being hidden, because a rough circle around a hem is still
 useful, but detailed strokes want a wider screen. Stated here rather than papered
 over; §15 asks for the limitation to be documented honestly.
 
-## Known gap: the inspiration catalogue
+## Resolved gap: the inspiration catalogue (Phase 22)
 
-Journey 5 needs an approved catalogue asset, and there is deliberately **no**
-fixture, seed command or import path that creates one: the catalogue is
-staff-managed, every asset needs staff-verified evidenced rights, and fabricating
+Journey 5 used to need an approved catalogue asset, and there was deliberately
+**no** fixture, seed command or import path that created one: the catalogue was
+staff-managed, every asset needed staff-verified evidenced rights, and fabricating
 that evidence is forbidden (CLAUDE.md §13). On a clean stack the journey therefore
-**skips**, visibly, rather than failing or passing silently. It runs in full
-against a stack whose catalogue an operator has approved assets into.
+**skipped**, visibly.
+
+Phase 22 (ADR 0025) retired the catalogue from the product, so the skip is gone
+along with the thing it was waiting for. Journey 5 is three tests that all run:
+
+1. **No catalogue, and an upload from this device.** No picker grid is offered;
+   the ADR 0019 disclosure and its "perpetual, irrevocable licence" wording are
+   readable *before* anything is uploaded; the affirmation is never pre-ticked;
+   an upload succeeds and its removal frees the slot and is announced. The file
+   is one of the project's own synthetic questionnaire visuals — §13 permits
+   locally generated synthetic images for clearly labelled engineering tests and
+   forbids downloaded or unlicensed ones.
+2. **The QR handoff, at the iPad end.** "Show the code" is enabled while this
+   device's affirmation is unticked — gating it behind that tick is the exact
+   substitution ADR 0026 exists to prevent — the code renders, the typed
+   fallback carries the same `/r#…` URL with the secret in the fragment, and
+   "Stop accepting photos" really removes it.
+3. **The phone page with no code** says so, and offers no picker.
+
+What is **not** covered: the phone end with a live code, which needs a second
+physical device. Driving both ends in one browser context would assert that the
+plumbing works while proving nothing about the thing the path exists for. ADR
+0026 records it as an outstanding manual checkpoint instead — a real iPad, a real
+phone that is not the iPad, and a photographed code confirmed dead after expiry.

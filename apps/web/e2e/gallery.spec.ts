@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import type { APIRequestContext } from "@playwright/test";
 
 import { STYLIST_STATE_PATH } from "./helpers/account";
 import { completeQuestionnaire, waitForDesignQuiescent } from "./helpers/wizard";
@@ -16,13 +17,84 @@ import { completeQuestionnaire, waitForDesignQuiescent } from "./helpers/wizard"
 // every rendering branch (loading, empty, failed thumbnail, malformed body);
 // this owns the round trip.
 
+// Phase 22 (ADR 0027): the gallery now ships behind ACCOUNT_GALLERY_ENABLED,
+// default FALSE, because one account's whole history on a shared shop-floor
+// iPad means one customer's concepts in front of the next. Gated, not deleted —
+// so this spec covers BOTH states rather than deleting the ADR 0024 assertions.
+//
+// The gate is read from the stack under test rather than assumed, and the
+// enabled-only tests skip visibly when it is closed. That is a legitimate
+// conditional skip: unlike the catalogue skip this file's neighbour used to
+// carry, the condition is one flag an operator can set, not a rights checkpoint
+// that was never going to be run.
 test.describe.configure({ mode: "serial", timeout: 240_000 });
 
 // The gallery only exists for an account, so every test here is signed in as
 // the run's shared stylist.
 test.use({ storageState: STYLIST_STATE_PATH });
 
+async function galleryIsEnabled(request: APIRequestContext): Promise<boolean> {
+  // Read from the stack, not from a build-time constant: the flag is an
+  // operator decision and this spec has to describe whichever stack it is
+  // pointed at. The endpoint advertises it so the frontend can say WHY the
+  // gallery is absent — it is not a permission, the list endpoint refuses on
+  // its own.
+  const response = await request.get("/api/v1/config/public");
+  expect(response.status()).toBe(200);
+  const config = (await response.json()) as { account_gallery_enabled?: boolean };
+  return config.account_gallery_enabled === true;
+}
+
+test.describe("the account gallery, switched off", () => {
+  test("says so plainly instead of showing an empty shelf", async ({ page, request }) => {
+    test.skip(await galleryIsEnabled(request), "gallery is enabled on this stack");
+
+    // The dangerous failure is an empty gallery, which would tell a shop its
+    // concepts are gone. A refusal has to read as a refusal.
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.url().includes("/api/v1/designs/") &&
+          !res.url().includes("/images/") &&
+          res.request().method() === "GET",
+      ),
+      page.goto("/account"),
+    ]);
+
+    expect(response.status()).toBe(503);
+    expect(((await response.json()) as { error?: { code?: string } }).error?.code).toBe(
+      "gallery_disabled",
+    );
+
+    await expect(page.getByText(/switched off for this account/i)).toBeVisible();
+    // And it is honest about the consequence ADR 0027 accepts, rather than
+    // implying the concept can be retrieved some other way.
+    await expect(page.getByText(/no way back to it here/i)).toBeVisible();
+    await expect(page.locator("article.gallery-card")).toHaveCount(0);
+  });
+
+  test("does not stop a walk-in starting a new concept", async ({ page, request }) => {
+    test.skip(await galleryIsEnabled(request), "gallery is enabled on this stack");
+
+    // POST /designs/ is deliberately NOT gated: the walk-in flow starts there,
+    // and gating it would end the product rather than the gallery.
+    await page.goto("/account");
+    await expect(page.getByText(/switched off for this account/i)).toBeVisible();
+
+    const designId = await completeQuestionnaire(page);
+
+    expect(designId).toBeTruthy();
+  });
+});
+
 test.describe("the account gallery", () => {
+  test.beforeEach(async ({ request }) => {
+    test.skip(
+      !(await galleryIsEnabled(request)),
+      "ACCOUNT_GALLERY_ENABLED is false (the shipped default, ADR 0027)",
+    );
+  });
+
   test("a concept made through the pipeline is findable from the account page", async ({
     page,
   }) => {
