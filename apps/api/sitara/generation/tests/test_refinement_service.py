@@ -6,15 +6,13 @@ import logging
 
 import pytest
 from django.conf import settings
-from django.utils import timezone
 
 from sitara.ai_gateway.structured_design import StructuredDesignResult
-from sitara.designs.models import Design, DesignVersion, GenerationAttempt
+from sitara.designs.models import DesignVersion, GenerationAttempt
 from sitara.generation import cost_control
 from sitara.generation.context import build_generation_context
 from sitara.generation.design_spec import (
     DESIGN_SPEC_SCHEMA_VERSION,
-    SPEC_TEMPLATE_VERSION,
     DesignSpec,
 )
 from sitara.generation.fixture_provider import build_fixture_spec
@@ -25,7 +23,6 @@ from sitara.generation.inspiration_context import (
     InspirationProviderCues,
     inspiration_context_sha256,
 )
-from sitara.generation.prompt_builder import PROMPT_BUILDER_VERSION
 from sitara.generation.refinement import REFINEMENT_CHANGE_TYPES, normalise_refinement_request
 from sitara.generation.refinement_service import (
     REFINEMENT_DESIGN_SPEC_TEMPLATE_VERSION,
@@ -39,7 +36,7 @@ from sitara.generation.refinement_service import (
     generate_refined_design_spec_for_design,
 )
 
-from .factory import make_complete_design
+from .factory import make_complete_design, make_source_version
 from .fakes import SequenceProvider
 
 pytestmark = pytest.mark.django_db
@@ -70,35 +67,6 @@ def _refused_result() -> StructuredDesignResult:
         stop_reason="refusal",
         refused=True,
     )
-
-
-def make_source_version(design: Design, spec_payload: dict, **overrides) -> DesignVersion:
-    fields = {
-        "design": design,
-        "version_number": 1,
-        "design_spec": spec_payload,
-        "design_spec_schema_version": DESIGN_SPEC_SCHEMA_VERSION,
-        "design_spec_template_version": SPEC_TEMPLATE_VERSION,
-        "design_spec_provider": "fixture",
-        "design_spec_model": "fixture-model",
-        "design_spec_generated_at": timezone.now(),
-        "image_prompt": "A deterministic placeholder prompt.",
-        "prompt_builder_version": PROMPT_BUILDER_VERSION,
-        "image_storage_key": f"design-images/{design.id}/v1/original.webp",
-        "image_sha256": "a" * 64,
-        "image_size_bytes": 100_000,
-        "image_width": 900,
-        "image_height": 1200,
-        "thumbnail_storage_key": f"design-images/{design.id}/v1/thumbnail.webp",
-        "thumbnail_sha256": "b" * 64,
-        "thumbnail_size_bytes": 5_000,
-        "thumbnail_width": 200,
-        "thumbnail_height": 260,
-        "image_processor_version": "1.0.0",
-        "image_ingested_at": timezone.now(),
-    }
-    fields.update(overrides)
-    return DesignVersion.objects.create(**fields)
 
 
 def make_snapshot() -> InspirationContextSnapshot:
