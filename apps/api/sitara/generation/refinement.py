@@ -28,6 +28,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
@@ -286,6 +287,28 @@ def changed_selection_field(path: str) -> str | None:
     if not path.startswith(prefix):
         return None
     return path[len(prefix) :].split(".", 1)[0].split("[", 1)[0]
+
+
+def references_suppressed_for_request(refinement_request: object) -> bool:
+    """True when a refinement of this category must be sent NO reference images.
+
+    ``colour_story``, and only ``colour_story`` (ADR 0028, §7). A reference
+    photograph is a far stronger colour signal to the image model than a text
+    clause, so "make it green" against a red reference keeps losing to the
+    reference — the reported defect this phase exists to fix. Every other
+    category keeps its references, because for them the customer's own
+    photographs are the anchor that keeps a refinement recognisable as the same
+    concept.
+
+    Takes the persisted request MAPPING rather than an attempt row, so the fact
+    lives here beside the other per-category tables without this module gaining
+    an ORM dependency. Total over arbitrary input: anything that is not a
+    refinement request at all — an initial generation's absent one included —
+    answers ``False``, so this can only ever REMOVE a reference URL and never
+    add one."""
+    if not isinstance(refinement_request, Mapping):
+        return False
+    return refinement_request.get("change_type") == COLOUR_STORY
 
 
 class RefinementRequestInvalid(Exception):

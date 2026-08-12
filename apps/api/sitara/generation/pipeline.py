@@ -91,6 +91,7 @@ from .reference_images import reference_image_urls
 from .refinement import (
     REFINEMENT_REQUEST_SCHEMA_VERSION,
     RefinementRequest,
+    references_suppressed_for_request,
     refinement_request_sha256,
 )
 from .refinement_service import (
@@ -1583,7 +1584,7 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
     # Demo attempts never reach this: the branch is on the FROZEN is_demo flag,
     # so a demo run constructs no URL at all and the zero-cost guarantee holds.
     references: tuple[str, ...] = ()
-    if not attempt.is_demo:
+    if not attempt.is_demo and not _references_suppressed(attempt):
         try:
             references = reference_image_urls(version.design)
         except SoftTimeLimitExceeded:
@@ -2092,6 +2093,16 @@ def _provably_no_provider_call(attempt) -> bool:
 def _generate_seed() -> int:
     """A cryptographically-generated non-negative 32-bit seed (zero allowed)."""
     return secrets.randbelow(2**32)
+
+
+def _references_suppressed(attempt: GenerationAttempt) -> bool:
+    """True when this attempt must be sent NO reference images (ADR 0028).
+
+    The per-category FACT lives in ``refinement.py`` beside the other category
+    tables; this only unwraps the attempt's own durable copy of the validated
+    refinement request, so a redelivery decides identically to the first run
+    and this module stays the one that knows about rows."""
+    return references_suppressed_for_request(attempt.refinement_request)
 
 
 def _find_source_attempt_seed(attempt: GenerationAttempt) -> int | None:

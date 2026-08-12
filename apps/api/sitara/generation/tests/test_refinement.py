@@ -25,6 +25,7 @@ from sitara.generation.refinement import (
     diff_design_spec_paths,
     normalise_refinement_request,
     path_is_allowed,
+    references_suppressed_for_request,
     refinement_allowed_paths,
     refinement_request_canonical_json,
     refinement_request_sha256,
@@ -396,3 +397,36 @@ class TestPathIsAllowed:
 
     def test_dict_root_covers_nested_child(self):
         assert path_is_allowed("colour_story.palette_summary", frozenset({"colour_story"}))
+
+
+class TestReferencesSuppressedForRequest:
+    """ADR 0028 §7: the one category whose references fight the request.
+
+    Total over arbitrary input on purpose — the caller hands it a JSONField's
+    contents, which is whatever was persisted, and a wrong answer here silently
+    changes what reaches a paid provider."""
+
+    def test_a_colour_story_request_suppresses(self):
+        assert references_suppressed_for_request(
+            {"schema_version": 1, "change_type": "colour_story"}
+        )
+
+    @pytest.mark.parametrize(
+        "change_type", [c for c in REFINEMENT_CHANGE_TYPES if c != "colour_story"]
+    )
+    def test_every_other_requestable_category_does_not(self, change_type):
+        assert not references_suppressed_for_request({"change_type": change_type})
+
+    def test_the_retired_category_does_not(self):
+        # A historical row can still name it. It must not acquire a behaviour it
+        # never had.
+        assert not references_suppressed_for_request({"change_type": "styling_details"})
+
+    @pytest.mark.parametrize(
+        "value", [None, {}, {"change_type": None}, {"change_type": "colour"}, "colour_story", 7, []]
+    )
+    def test_anything_that_is_not_a_colour_refinement_request_does_not(self, value):
+        # An INITIAL attempt's absent request is the None case, and it is the
+        # one that matters most: answering True there would strip references
+        # from every first generation in the product.
+        assert not references_suppressed_for_request(value)
