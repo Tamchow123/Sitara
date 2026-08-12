@@ -95,7 +95,11 @@ class InspirationAssetIneligible(Exception):
 
     Raised strictly before any provider selection. Safe message; never
     reveals which asset or why (mirrors
-    ``designs.services.inspiration_availability_errors``)."""
+    ``designs.services.inspiration_availability_errors``).
+
+    Since Phase 22 (ADR 0025) retired the catalogue nothing can make a NEW
+    selection, so only a design that already held one reaches this. It stays
+    because those designs still exist and their rights re-check must too."""
 
 
 class InspirationMetadataUnavailable(Exception):

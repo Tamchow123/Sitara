@@ -86,6 +86,17 @@
      happens to be pale. */
   --color-on-accent: #ffffff;
 
+  /* The QR code's own two colours (Phase 22, ADR 0026). Deliberately pure
+     black on pure white and deliberately NOT theme-responsive: a QR is a
+     machine-readable target, and a scanner needs maximum module contrast plus
+     a light quiet zone. Retuning these towards the palette would make the code
+     look more at home and scan worse in shop lighting, which is the only place
+     it is ever used. They live here rather than as literals in the partial
+     because colour enters the system through this file — but they are the one
+     pair a palette retune must leave alone. */
+  --color-qr-light: #ffffff;
+  --color-qr-dark: #000000;
+
   /* Ink veils. The scrim sits behind a modal drawer; the swatch edge is
      the hairline that keeps a pale colour swatch visible against the
      cream ground; the glyph veil backs a tick drawn over photography. */

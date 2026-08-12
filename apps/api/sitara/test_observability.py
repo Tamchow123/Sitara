@@ -156,6 +156,80 @@ class TestSentry:
         assert req["url"] == "https://media.example/x.webp"
         assert "user" not in scrubbed  # no PII
 
+    def test_scrub_cuts_a_url_at_its_fragment_even_with_no_query_string(self):
+        """A handoff grant reaches the phone as ``/r#<secret>`` (ADR 0026).
+
+        A scrubber that cut only at ``?`` sails straight past that URL — there is
+        no query string in it to find. Browsers do not send fragments to servers,
+        which is why the fragment was chosen; this is the belt to that braces,
+        and it is what makes CLAUDE.md §13's unconditional claim true of the
+        backend as well as the browser."""
+        from config.sentry import scrub_event
+
+        event = {
+            "request": {"url": "https://shop.example/r#GRANT-SECRET"},
+            "breadcrumbs": {
+                "values": [
+                    {"data": {"url": "https://shop.example/r#GRANT-SECRET"}},
+                    {"url": "https://shop.example/r?a=1#GRANT-SECRET"},
+                    {"data": {"url": None}},
+                    "not a dict",
+                ]
+            },
+        }
+
+        scrubbed = scrub_event(event)
+
+        assert scrubbed["request"]["url"] == "https://shop.example/r"
+        crumbs = scrubbed["breadcrumbs"]["values"]
+        assert crumbs[0]["data"]["url"] == "https://shop.example/r"
+        # Whichever marker comes FIRST wins, so a URL carrying both loses both.
+        assert crumbs[1]["url"] == "https://shop.example/r"
+        # A malformed crumb must not raise inside before_send and cost the
+        # whole report.
+        assert crumbs[2]["data"]["url"] is None
+        assert crumbs[3] == "not a dict"
+
+    def test_scrub_handles_a_bare_breadcrumb_list(self):
+        """The SDK uses both shapes; neither may be the unscrubbed one."""
+        from config.sentry import scrub_event
+
+        scrubbed = scrub_event(
+            {"breadcrumbs": [{"data": {"url": "https://shop.example/r#GRANT-SECRET"}}]}
+        )
+
+        assert scrubbed["breadcrumbs"][0]["data"]["url"] == "https://shop.example/r"
+
+    def test_scrub_cuts_every_breadcrumb_field_the_browser_cuts(self):
+        """Field for field with ``scrubBreadcrumb`` in sentry-scrub.ts.
+
+        A navigation crumb puts the URL in ``message``, and a router crumb puts
+        it in ``data.to``/``data.from`` — so a scrubber that only knew about
+        ``data.url`` would leave the secret in the field Sentry displays most
+        prominently. One rule stated once (CLAUDE.md §13) is worth only as much
+        as its weaker implementation."""
+        from config.sentry import scrub_event
+
+        secret = "https://shop.example/r#GRANT-SECRET"
+        scrubbed = scrub_event(
+            {
+                "breadcrumbs": {
+                    "values": [
+                        {"message": f"navigated to {secret}"},
+                        {"data": {"to": secret, "from": secret, "url": secret}},
+                    ]
+                }
+            }
+        )
+
+        crumbs = scrubbed["breadcrumbs"]["values"]
+        assert crumbs[0]["message"] == "navigated to https://shop.example/r"
+        assert crumbs[1]["data"] == {
+            "to": "https://shop.example/r",
+            "from": "https://shop.example/r",
+            "url": "https://shop.example/r",
+        }
+
     def test_scrub_attaches_correlation_tags(self):
         from config.sentry import scrub_event
 

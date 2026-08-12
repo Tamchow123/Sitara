@@ -141,3 +141,29 @@
   min-height: 24px;
   font-weight: 600;
 }
+
+/* ---------------------------------------------------------------------------
+   "Finish and hand back" (Phase 22, ADR 0027)
+   ------------------------------------------------------------------------ */
+
+/* A header control on the walk-in routes, sized for a stylist tapping it with
+   a customer watching rather than for a mouse. */
+.handback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.handback-question {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+.handback-status {
+  margin: 0;
+  font-size: 14px;
+}
+.handback-status-error {
+  font-weight: 700;
+  color: var(--color-bad);
+}

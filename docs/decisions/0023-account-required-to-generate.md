@@ -4,8 +4,14 @@
 - **Date:** 2026-08-11
 - **Deciders:** Sitara project owner
 - **Phase:** Phase 21 (see ../phases/PHASES.md)
+- **Later:** an assumption this shares with ADR 0004 — that a design's owner is
+  the person who answered the questionnaire — was **superseded 2026-08-11 by ADR
+  0027**. The account that must be signed in to generate is the boutique's, not
+  the customer's, and the customer never registers at all. The requirement below
+  is unchanged; who satisfies it is.
 - **Related:** ADR 0003 (session authentication), ADR 0004 (private design
-  ownership — this **re-frames** it rather than replacing it), ADR 0017
+  ownership — this **re-frames** it rather than replacing it), ADR 0027 (the shop
+  owns the design), ADR 0017
   (live-generation security and cost controls), ADR 0021 (account render delivery
   by email), ADR 0022 (caller-named render attachments), ADR 0024 (the account
   concept gallery)

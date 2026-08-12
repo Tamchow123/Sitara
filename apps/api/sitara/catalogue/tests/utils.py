@@ -17,16 +17,6 @@ from sitara.catalogue.services import (
     ingest_inspiration_image,
 )
 
-CATALOGUE_LIST_URL = "/api/v1/inspiration-assets/"
-
-
-def image_url(asset) -> str:
-    return f"/api/v1/inspiration-assets/{asset.pk}/image/"
-
-
-def thumbnail_url(asset) -> str:
-    return f"/api/v1/inspiration-assets/{asset.pk}/thumbnail/"
-
 
 def make_image_bytes(
     fmt: str = "JPEG",

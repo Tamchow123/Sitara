@@ -1,4 +1,4 @@
-"""Phase 7 draft API: questionnaire linkage, answers, inspirations, validate.
+"""Phase 7 draft API: questionnaire linkage, answers, validate.
 
 Everything runs with enforce_csrf_checks=True — the same enforcement a real
 browser faces."""
@@ -7,9 +7,8 @@ import uuid
 
 import pytest
 
-from sitara.catalogue.models import UsageRights
 from sitara.catalogue.services import retire_inspiration_asset
-from sitara.catalogue.tests.utils import make_asset_with_image, make_eligible_asset, make_rights
+from sitara.catalogue.tests.utils import make_eligible_asset
 from sitara.designs.models import Design, DesignInspiration
 from sitara.questionnaire.models import QuestionnaireVersion
 from sitara.questionnaire.services import activate_questionnaire_version
@@ -261,32 +260,33 @@ class TestValidateEndpoint:
         assert response.json()["error"]["code"] == "not_found"
 
 
-class TestInspirationSelections:
-    def test_zero_to_three_selections_accepted_and_ordered(self, inmemory_storage):
-        version = make_active_questionnaire()
-        assets = [make_eligible_asset() for _ in range(3)]
-        client = csrf_client()
-        token = bootstrap_csrf(client)
-        design_id = _create(
-            client, {"questionnaire_version_id": str(version.id)}, token=token
-        ).json()["id"]
-        ordered_ids = [str(assets[2].id), str(assets[0].id), str(assets[1].id)]
-        response = send_json(
-            client,
-            "patch",
-            design_url(design_id),
-            {"inspiration_asset_ids": ordered_ids},
-            token=token,
-        )
-        assert response.status_code == 200, response.content
-        selections = response.json()["selected_inspirations"]
-        assert [s["id"] for s in selections] == ordered_ids
-        assert [s["position"] for s in selections] == [1, 2, 3]
-        assert all(s["available"] for s in selections)
+class TestCatalogueRetirement:
+    """Phase 22 / ADR 0025: the curated catalogue left the product.
 
-    def test_fourth_selection_is_rejected(self, inmemory_storage):
+    These replace the Phase 7 selection tests. What is asserted now is that the
+    write path is GONE rather than quietly ignored, that a design made before
+    the retirement keeps its rows and still renders, and that no migration in
+    this phase touched anything persisted."""
+
+    def test_creating_with_inspiration_asset_ids_is_a_controlled_unknown_field(self):
         version = make_active_questionnaire()
-        assets = [make_eligible_asset() for _ in range(4)]
+        client = csrf_client()
+        response = _create(
+            client,
+            {
+                "questionnaire_version_id": str(version.id),
+                "inspiration_asset_ids": [str(uuid.uuid4())],
+            },
+        )
+        assert response.status_code == 400
+        body = response.json()["error"]
+        assert body["code"] == "validation_failed"
+        # Named explicitly: a silent ignore would teach a client its selection
+        # was saved when nothing was.
+        assert "inspiration_asset_ids" in body["fields"]
+
+    def test_patching_inspiration_asset_ids_is_a_controlled_unknown_field(self):
+        version = make_active_questionnaire()
         client = csrf_client()
         token = bootstrap_csrf(client)
         design_id = _create(
@@ -296,14 +296,18 @@ class TestInspirationSelections:
             client,
             "patch",
             design_url(design_id),
-            {"inspiration_asset_ids": [str(a.id) for a in assets]},
+            {"inspiration_asset_ids": []},
             token=token,
         )
         assert response.status_code == 400
+        assert response.json()["error"]["code"] == "validation_failed"
         assert "inspiration_asset_ids" in response.json()["error"]["fields"]
         assert DesignInspiration.objects.filter(design_id=design_id).count() == 0
 
-    def test_duplicate_selection_is_rejected(self, inmemory_storage):
+    def test_a_historical_selection_still_renders_and_carries_no_asset(self, inmemory_storage):
+        # Written directly, because the write path this phase removed is the
+        # only thing that ever created one. That is exactly the design an old
+        # database holds.
         version = make_active_questionnaire()
         asset = make_eligible_asset()
         client = csrf_client()
@@ -311,108 +315,91 @@ class TestInspirationSelections:
         design_id = _create(
             client, {"questionnaire_version_id": str(version.id)}, token=token
         ).json()["id"]
-        response = send_json(
-            client,
-            "patch",
-            design_url(design_id),
-            {"inspiration_asset_ids": [str(asset.id), str(asset.id)]},
-            token=token,
-        )
-        assert response.status_code == 400
-        assert "inspiration_asset_ids" in response.json()["error"]["fields"]
+        DesignInspiration.objects.create(design_id=design_id, inspiration_asset=asset, position=1)
 
-    def test_ineligible_assets_are_rejected(self, inmemory_storage):
-        version = make_active_questionnaire()
-        # A draft (unapproved) asset with an image but no approval.
-        draft_asset = make_asset_with_image(usage_rights=make_rights(verified=True))
-        client = csrf_client()
-        token = bootstrap_csrf(client)
-        design_id = _create(
-            client, {"questionnaire_version_id": str(version.id)}, token=token
-        ).json()["id"]
-        response = send_json(
-            client,
-            "patch",
-            design_url(design_id),
-            {"inspiration_asset_ids": [str(draft_asset.id)]},
-            token=token,
-        )
-        assert response.status_code == 400
-        assert "inspiration_asset_ids" in response.json()["error"]["fields"]
-
-    def test_retired_selection_becomes_unavailable_without_private_data(self, inmemory_storage):
-        version = make_active_questionnaire()
-        asset = make_eligible_asset()
-        client = csrf_client()
-        token = bootstrap_csrf(client)
-        design_id = _create(
-            client,
-            {
-                "questionnaire_version_id": str(version.id),
-                "inspiration_asset_ids": [str(asset.id)],
-            },
-            token=token,
-        ).json()["id"]
-        # Retire the asset AFTER it was selected.
-        retire_inspiration_asset(asset)
-        detail = client.get(design_url(design_id)).json()
-        selection = detail["selected_inspirations"][0]
-        assert selection["available"] is False
-        assert selection["asset"] is None
-        assert selection["id"] == str(asset.id)
-        # No storage key, hash, rights evidence or internal note leaks.
-        body = client.get(design_url(design_id)).content.decode()
+        detail = client.get(design_url(design_id))
+        assert detail.status_code == 200
+        selection = detail.json()["selected_inspirations"][0]
+        assert selection == {"id": str(asset.id), "position": 1, "available": False}
+        # The asset is still publicly eligible in the dormant admin, and it is
+        # STILL reported unavailable: availability means "usable in a design",
+        # and after the retirement nothing is.
+        assert "asset" not in selection
+        body = detail.content.decode()
         assert asset.image_storage_key not in body
         assert asset.image_sha256 not in body
+        assert "inspiration-assets" not in body
 
-    def test_complete_validation_fails_while_a_selection_is_unavailable(self, inmemory_storage):
+    def test_an_ineligible_historical_selection_still_blocks_completion(self, inmemory_storage):
+        """Deliberately unchanged. The check mirrors the provider-facing rights
+        gate in ``generation.context``; relaxing it here would only move the
+        refusal to generation time, where it is less clear."""
         version = make_active_questionnaire()
         asset = make_eligible_asset()
         client = csrf_client()
         token = bootstrap_csrf(client)
         design_id = _create(
             client,
-            {
-                "questionnaire_version_id": str(version.id),
-                "answers": COMPLETE_ANSWERS,
-                "inspiration_asset_ids": [str(asset.id)],
-            },
+            {"questionnaire_version_id": str(version.id), "answers": COMPLETE_ANSWERS},
             token=token,
         ).json()["id"]
-        # Valid while eligible.
         assert (
             send_json(client, "post", validate_url(design_id), {}, token=token).status_code == 200
         )
+        DesignInspiration.objects.create(design_id=design_id, inspiration_asset=asset, position=1)
         retire_inspiration_asset(asset)
+
         response = send_json(client, "post", validate_url(design_id), {}, token=token)
         assert response.status_code == 400
         assert "inspiration_asset_ids" in response.json()["error"]["fields"]
 
-    def test_selection_can_be_replaced_and_reordered(self, inmemory_storage):
+    def test_the_row_survives_untouched(self, inmemory_storage):
+        """The FK is PROTECT and nothing in this phase deletes or rewrites it."""
         version = make_active_questionnaire()
-        first = make_eligible_asset()
-        second = make_eligible_asset()
+        asset = make_eligible_asset()
         client = csrf_client()
         token = bootstrap_csrf(client)
         design_id = _create(
-            client,
-            {
-                "questionnaire_version_id": str(version.id),
-                "inspiration_asset_ids": [str(first.id)],
-            },
-            token=token,
+            client, {"questionnaire_version_id": str(version.id)}, token=token
         ).json()["id"]
-        response = send_json(
-            client,
-            "patch",
-            design_url(design_id),
-            {"inspiration_asset_ids": [str(second.id)]},
-            token=token,
+        row = DesignInspiration.objects.create(
+            design_id=design_id, inspiration_asset=asset, position=1
         )
-        assert response.status_code == 200
-        selections = response.json()["selected_inspirations"]
-        assert [s["id"] for s in selections] == [str(second.id)]
-        assert DesignInspiration.objects.filter(design_id=design_id).count() == 1
+        client.get(design_url(design_id))
+        row.refresh_from_db()
+        assert row.inspiration_asset_id == asset.pk
+        assert row.position == 1
+
+
+class TestRetiredCatalogueRoutes:
+    """The three public endpoints are gone at the ROUTE layer.
+
+    404 from URL resolution, never a 500 from a view that survived its routes,
+    and never a redirect that would suggest a moved surface."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/v1/inspiration-assets/",
+            "/api/v1/inspiration-assets",
+            f"/api/v1/inspiration-assets/{uuid.uuid4()}/image/",
+            f"/api/v1/inspiration-assets/{uuid.uuid4()}/thumbnail/",
+        ],
+    )
+    def test_the_public_catalogue_endpoints_no_longer_resolve(self, path):
+        response = csrf_client().get(path)
+        assert response.status_code == 404
+
+    def test_no_catalogue_route_name_is_registered(self):
+        from django.urls import NoReverseMatch, reverse
+
+        for name in (
+            "inspiration-asset-list",
+            "inspiration-asset-image",
+            "inspiration-asset-thumbnail",
+        ):
+            with pytest.raises(NoReverseMatch):
+                reverse(name)
 
 
 class TestOwnershipAndPromotion:
@@ -448,35 +435,3 @@ class TestContentTypeAndCaching:
         token = bootstrap_csrf(client)
         response = _create(client, {"questionnaire_version_id": str(version.id)}, token=token)
         assert response["Cache-Control"] == "no-store"
-
-    def test_expired_rights_selection_is_rejected(self, inmemory_storage):
-        from datetime import timedelta
-
-        from django.utils import timezone
-
-        version = make_active_questionnaire()
-        now = timezone.now()
-        # Verified long ago with a future expiry (so approval succeeds), then
-        # move expiry into the past — still after verified_at, satisfying the
-        # DB constraint — so the asset stops being publicly eligible.
-        rights = make_rights(
-            verified=True,
-            verified_at=now - timedelta(days=10),
-            expires_at=now + timedelta(days=1),
-        )
-        asset = make_eligible_asset(rights=rights)
-        UsageRights.objects.filter(pk=rights.pk).update(expires_at=now - timedelta(days=1))
-        client = csrf_client()
-        token = bootstrap_csrf(client)
-        design_id = _create(
-            client, {"questionnaire_version_id": str(version.id)}, token=token
-        ).json()["id"]
-        response = send_json(
-            client,
-            "patch",
-            design_url(design_id),
-            {"inspiration_asset_ids": [str(asset.id)]},
-            token=token,
-        )
-        assert response.status_code == 400
-        assert "inspiration_asset_ids" in response.json()["error"]["fields"]

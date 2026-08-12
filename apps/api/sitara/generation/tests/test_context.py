@@ -90,7 +90,12 @@ class TestPreSpendGates:
         assert excinfo.value.code == "incomplete"
         assert "silhouette" in (excinfo.value.field_errors or {})
 
-    def test_unavailable_inspiration_is_rejected(self, inmemory_storage):
+    def test_an_ineligible_historical_selection_is_still_refused(self, inmemory_storage):
+        """Unchanged by Phase 22. Nothing can ADD a selection since ADR 0025
+        retired the catalogue, so only a pre-existing one reaches here — and the
+        provider-facing rights gate is exactly the wrong thing to relax on the
+        way out. An asset whose rights lapsed still stops the snapshot being
+        built, before any provider is chosen."""
         from sitara.catalogue.services import retire_inspiration_asset
         from sitara.catalogue.tests.utils import make_eligible_asset
         from sitara.designs.models import DesignInspiration

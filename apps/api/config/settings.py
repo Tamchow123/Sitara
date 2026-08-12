@@ -720,6 +720,51 @@ ANNOTATION_RENDER_READ_DEADLINE_SECONDS = env_positive_int(
 # ---------------------------------------------------------------------------
 ACCOUNT_EMAIL_DELIVERY_ENABLED = env_bool("ACCOUNT_EMAIL_DELIVERY_ENABLED", default=False)
 
+# ---------------------------------------------------------------------------
+# The account concept gallery (Phase 22, ADR 0027). GATED, NOT DELETED.
+#
+# Everything ADR 0024 built is still here, still tested, and comes back by
+# setting one flag. What changed is not the gallery's quality — it is who is
+# holding the device. Sitara is used on a shop-floor iPad where one account
+# serves many walk-in customers in a day, so a list of every concept the shop
+# has ever produced is, on that screen, a list of other customers' concepts
+# shown to whoever is sitting there now. The shop OWNS those designs (ADR
+# 0027); it is still their data controller, and the product should make the
+# responsible choice the easy one rather than leaving it to whoever is holding
+# the iPad.
+#
+# A third independent operator decision, on the same pattern as
+# LIVE_GENERATION_ENABLED and ACCOUNT_EMAIL_DELIVERY_ENABLED: nothing else
+# turns it on, and being signed in is not enough.
+#
+# Its consequence is accepted, not mitigated: with this off and email delivery
+# also off, a concept is reachable only during the session that produced it.
+# ---------------------------------------------------------------------------
+ACCOUNT_GALLERY_ENABLED = env_bool("ACCOUNT_GALLERY_ENABLED", default=False)
+# ---------------------------------------------------------------------------
+# The walk-in session's idle timeout (Phase 22, ADR 0027).
+#
+# A shop-floor iPad is a shared screen. Customers walk away mid-questionnaire —
+# to take a call, to look at a rail, to leave — and the stylist does not always
+# remember to tap "Finish and hand back". After this long without a design
+# request, the workspace pointer is dropped and any live handoff code revoked,
+# so the next person to pick up the iPad starts clean whether or not anyone
+# ended the session deliberately.
+#
+# Enforced SERVER-SIDE, on the workspace's own `last_seen_at`, because a
+# client-side prompt is not a boundary — a backgrounded tab runs no timers, and
+# a closed lid runs nothing at all. Thirty minutes is long enough not to
+# interrupt a real consultation (a bridal questionnaire is not quick, and there
+# are pauses for tea and for fetching a sample) and short enough that a
+# customer who walked out is gone before the next one sits down.
+#
+# It does NOT sign the shop out. The account is the boutique's (ADR 0027) and
+# the next customer signing into it is the intended state; what ends is the
+# walk-in workspace, not the shop's session.
+# ---------------------------------------------------------------------------
+WALK_IN_IDLE_TIMEOUT_SECONDS = env_positive_int("WALK_IN_IDLE_TIMEOUT_SECONDS", 1800)
+
+
 # Console outside production, so a developer sees the whole message without a
 # relay; SMTP in production. Django's setup_test_environment() replaces whatever
 # this resolves to with the locmem backend for the entire test session, which is
@@ -1061,6 +1106,58 @@ USER_UPLOAD_SESSION_LIMIT = env_positive_int("USER_UPLOAD_SESSION_LIMIT", 30)
 USER_UPLOAD_SESSION_WINDOW_SECONDS = env_positive_int("USER_UPLOAD_SESSION_WINDOW_SECONDS", 3600)
 USER_UPLOAD_IP_LIMIT = env_positive_int("USER_UPLOAD_IP_LIMIT", 60)
 USER_UPLOAD_IP_WINDOW_SECONDS = env_positive_int("USER_UPLOAD_IP_WINDOW_SECONDS", 3600)
+
+# ---------------------------------------------------------------------------
+# Reference upload grants (Phase 22, ADR 0026) — the phone handoff.
+#
+# A grant is a BEARER credential: whoever can see the iPad's screen can
+# photograph the QR code and use it. That exposure is accepted and bounded, not
+# removed, and these are the bounds. Read ADR 0026 before changing any of them.
+# ---------------------------------------------------------------------------
+
+# Minutes, not hours. A code photographed off a shop screen should be stale
+# before it leaves the building; 15 minutes is long enough for someone to find
+# the photograph they meant and short enough that a stolen frame is worthless
+# by the time anyone acts on it. Revocation does not wait for it — the stylist
+# has a control, and leaving the reference step revokes automatically.
+REFERENCE_UPLOAD_GRANT_TTL_SECONDS = env_positive_int("REFERENCE_UPLOAD_GRANT_TTL_SECONDS", 900)
+
+# Per-grant and per-hashed-IP fixed windows on the phone-side upload endpoint,
+# through the project's ONE limiter (accounts.rate_limits), which fails CLOSED
+# on a cache outage. The per-grant window is what stops one photographed code
+# being hammered; the per-IP window is what stops many codes being hammered
+# from one place. Both are deliberately tighter than the session-scoped upload
+# throttle, because this endpoint takes no account and no design ownership —
+# only a secret.
+REFERENCE_UPLOAD_GRANT_LIMIT = env_positive_int("REFERENCE_UPLOAD_GRANT_LIMIT", 12)
+REFERENCE_UPLOAD_GRANT_WINDOW_SECONDS = env_positive_int(
+    "REFERENCE_UPLOAD_GRANT_WINDOW_SECONDS", 900
+)
+REFERENCE_UPLOAD_GRANT_IP_LIMIT = env_positive_int("REFERENCE_UPLOAD_GRANT_IP_LIMIT", 40)
+REFERENCE_UPLOAD_GRANT_IP_WINDOW_SECONDS = env_positive_int(
+    "REFERENCE_UPLOAD_GRANT_IP_WINDOW_SECONDS", 3600
+)
+
+# Minting is owner-only and CSRF-protected, which decides WHO may ask for a code
+# but not how often. Each mint writes a durable row that only the retention
+# purge removes, so the rate needs its own bound. Generous against real use and
+# tight enough that a loop cannot grow the table.
+#
+# Raised from 30 to 60 by the project owner (2026-08-12) when ADR 0026's
+# amendment made the reference step mint on arrival rather than on a deliberate
+# press. The counter is keyed on the SHOP'S SESSION — which "Finish and hand
+# back" deliberately does not rotate — so it accumulates across every walk-in
+# customer served in the window, and a step that mints on navigation reaches it
+# far sooner than one that minted on intent. Sizing, not a relaxation of what
+# the bound is for: a loop still cannot grow the table unboundedly.
+REFERENCE_UPLOAD_GRANT_MINT_LIMIT = env_positive_int("REFERENCE_UPLOAD_GRANT_MINT_LIMIT", 60)
+REFERENCE_UPLOAD_GRANT_MINT_WINDOW_SECONDS = env_positive_int(
+    "REFERENCE_UPLOAD_GRANT_MINT_WINDOW_SECONDS", 3600
+)
+REFERENCE_UPLOAD_GRANT_MINT_IP_LIMIT = env_positive_int("REFERENCE_UPLOAD_GRANT_MINT_IP_LIMIT", 90)
+REFERENCE_UPLOAD_GRANT_MINT_IP_WINDOW_SECONDS = env_positive_int(
+    "REFERENCE_UPLOAD_GRANT_MINT_IP_WINDOW_SECONDS", 3600
+)
 
 # ---------------------------------------------------------------------------
 # Authentication (Phase 3B) — Django sessions only. No JWT, no token

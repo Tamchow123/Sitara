@@ -10,17 +10,22 @@ unchanged since Phase 4:
   CSRF for already-authenticated requests, but these endpoints accept
   anonymous unsafe requests too. Nothing here is csrf_exempt.
 
-Phase 7 extends the draft with a linked questionnaire version, validated
-answers and ordered inspiration selections. All answer/selection validation
-and persistence is authoritative in ``services.update_design_draft`` (one
-atomic, row-locked transaction); views stay thin. Inaccessible designs are
-404, never 403. Every response carries ``Cache-Control: no-store``.
+Phase 7 extends the draft with a linked questionnaire version and validated
+answers. All answer validation and persistence is authoritative in
+``services.update_design_draft`` (one atomic, row-locked transaction); views
+stay thin. Inaccessible designs are 404, never 403. Every response carries
+``Cache-Control: no-store``.
+
+Phase 22 (ADR 0025) retired the curated inspiration catalogue, so a draft no
+longer carries selectable references: the only references a design can gain
+are the user's own uploads, through their own endpoint below.
 """
 
 import logging
 import uuid
 from functools import wraps
 
+from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Exists, OuterRef
@@ -92,6 +97,19 @@ from .annotation_service import (
     read_annotation_document,
     replace_annotation_document,
 )
+from .grant_service import (
+    GrantDesignFull,
+    GrantMintingThrottled,
+    GrantMintingUnavailable,
+    GrantUnusable,
+    create_reference_upload_grant,
+    enforce_grant_upload_address_throttle,
+    enforce_grant_upload_code_throttle,
+    enforce_mint_throttle,
+    record_grant_use,
+    resolve_reference_upload_grant,
+    revoke_reference_upload_grants,
+)
 from .jobs import _iso, public_job_payload
 from .models import (
     Design,
@@ -106,14 +124,20 @@ from .openapi import (
     AnnotationDocumentWriteSerializer,
     DesignDetailResponseSerializer,
     DesignListResponseSerializer,
+    DesignReferencesResponseSerializer,
     DesignResultResponseSerializer,
     DesignValidationSuccessSerializer,
     DesignVersionImagesResponseSerializer,
     GenerationJobResponseSerializer,
+    GrantUploadResponseSerializer,
+    GrantUploadWriteSerializer,
     InspirationUploadResponseSerializer,
     InspirationUploadWriteSerializer,
+    ReferenceUploadGrantResponseSerializer,
+    ReferenceUploadGrantRevokedSerializer,
     RenderSendResponseSerializer,
     RenderSendStateResponseSerializer,
+    WalkInSessionEndedSerializer,
 )
 from .ownership import accessible_designs, accessible_generation_attempts
 from .render_delivery import (
@@ -146,11 +170,13 @@ from .serializers import (
     design_detail_payload,
     design_list_item_payload,
     inspiration_upload_payload,
+    inspiration_uploads_payload,
 )
 from .services import (
     DraftUpdateError,
     WorkspaceCoordinationError,
     design_completion_errors,
+    end_walk_in_session,
     resolve_current_design_session,
     update_design_draft,
 )
@@ -193,6 +219,37 @@ def _not_found() -> Response:
     # One indistinguishable answer for nonexistent, other-session and
     # other-user designs.
     return _error("not_found", "Not found.", status.HTTP_404_NOT_FOUND)
+
+
+def _reference_upload_unavailable() -> Response:
+    """The ONE answer a phone gets for a code it cannot use.
+
+    Expired, revoked, spent and never-existed all land here with the same
+    status, the same code and the same body. Nothing above may branch on which
+    it was and nothing may log which it was: telling the four apart is exactly
+    how a guessed code would become a way to discover that a design exists."""
+    return _error(
+        "reference_upload_unavailable",
+        "This link is no longer usable. Please ask for a new code.",
+        status.HTTP_404_NOT_FOUND,
+    )
+
+
+def _grant_upload_throttled(retry_after: int) -> Response:
+    return _error(
+        "reference_upload_rate_limited",
+        "Too many attempts for now. Please try again shortly.",
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        headers={"Cache-Control": "no-store", "Retry-After": str(int(retry_after))},
+    )
+
+
+def _grant_upload_unavailable() -> Response:
+    return _error(
+        "reference_upload_throttle_unavailable",
+        "Adding photographs is temporarily unavailable. Please try again shortly.",
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
 
 
 def _generation_limit_response(retry_after: int) -> Response:
@@ -325,8 +382,6 @@ def _draft_kwargs(validated: dict, *, include_title: bool) -> dict:
         kwargs["questionnaire_version_id"] = str(validated["questionnaire_version_id"])
     if "answers" in validated:
         kwargs["answers"] = validated["answers"]
-    if "inspiration_asset_ids" in validated:
-        kwargs["inspiration_asset_ids"] = [str(a) for a in validated["inspiration_asset_ids"]]
     return kwargs
 
 
@@ -476,6 +531,14 @@ class DesignListCreateView(APIView):
         responses={
             200: DesignListResponseSerializer,
             400: ValidationErrorEnvelopeSerializer,
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "gallery_disabled: the operator has not enabled the account "
+                    "concept gallery (ADR 0027). A controlled refusal, not a 404 — "
+                    "the surface exists and is switched off."
+                ),
+            ),
         },
         summary="List your designs",
         description=(
@@ -484,10 +547,27 @@ class DesignListCreateView(APIView):
             "records, no job snapshot), newest first, each with its versions in "
             "creation order. Carries no signed image URL — a gallery mints one "
             "per card through the ownership-checked images endpoint. Bounded page "
-            "size. A list request never creates a workspace. " + _OWNERSHIP_NOTE
+            "size. A list request never creates a workspace. Requires "
+            "ACCOUNT_GALLERY_ENABLED. " + _OWNERSHIP_NOTE
         ),
     )
     def get(self, request):
+        # Reading the whole list is the gallery, and the gallery is gated
+        # (ADR 0027). Refused BEFORE the page parameters are read and before
+        # any ownership query runs, so a disabled deployment answers a
+        # signed-in caller and a stranger identically and does no work.
+        #
+        # 503 with a stable code, exactly as `email_delivery_disabled` does it:
+        # a 404 would say the surface was never there, and it was — an operator
+        # can switch it back on. Only GET is gated; POST still creates designs,
+        # because the walk-in flow starts there and gating it would end the
+        # product rather than the gallery.
+        if not settings.ACCOUNT_GALLERY_ENABLED:
+            return _error(
+                "gallery_disabled",
+                "Browsing past concepts is not available at the moment.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         page, page_failure = _read_gallery_page(request)
         if page_failure is not None:
             return page_failure
@@ -541,9 +621,9 @@ class DesignListCreateView(APIView):
         summary="Create a design",
         description=(
             "Creates a private draft. Accepts optional title, questionnaire "
-            "version, answers and inspiration selections; status is "
-            "server-owned (draft). Answers and inspirations are validated "
-            "authoritatively and roll back together on any failure. " + _OWNERSHIP_NOTE
+            "version and answers; status is server-owned (draft). Answers are "
+            "validated authoritatively and roll back with the insert on any "
+            "failure. " + _OWNERSHIP_NOTE
         ),
     )
     def post(self, request):
@@ -558,8 +638,8 @@ class DesignListCreateView(APIView):
         try:
             # One coherent transaction: workspace resolution (which locks the
             # browser's django_session row), the design insert AND the draft
-            # update commit together, so a failed answer/inspiration update
-            # never leaves behind an empty workspace or a half-saved draft.
+            # update commit together, so a failed answer update never leaves
+            # behind an empty workspace or a half-saved draft.
             with transaction.atomic():
                 design_session = resolve_current_design_session(request, create=True)
                 design = Design.objects.create(
@@ -599,8 +679,10 @@ class DesignDetailView(APIView):
         },
         summary="Retrieve a design",
         description=(
-            "Returns the full draft: linked questionnaire (or null), answers "
-            "and ordered inspiration selections with live availability. " + _OWNERSHIP_NOTE
+            "Returns the full draft: linked questionnaire (or null), answers, "
+            "the design's own uploaded references and any historical curated "
+            "selection (always reported unavailable since the catalogue was "
+            "retired). " + _OWNERSHIP_NOTE
         ),
     )
     def get(self, request, design_id: str):
@@ -635,8 +717,7 @@ class DesignDetailView(APIView):
         summary="Update a design",
         description=(
             "Partial draft update: title, questionnaire version (assignable "
-            "once), answers (draft-validated) and inspiration selections "
-            "(replaced as one ordered set). Only a draft — or a "
+            "once) and answers (draft-validated). Only a draft — or a "
             "generation_failed design with no version, which returns to draft "
             "— may be edited. " + _OWNERSHIP_NOTE
         ),
@@ -1979,7 +2060,8 @@ class DesignInspirationUploadView(APIView):
     unsafe design endpoint. The client's filename and declared content type are
     never read: ``designs.upload_processing`` trusts only the decoded image, and
     the storage key is server-generated. The upload shares the design's
-    ``MAX_INSPIRATION_IMAGES`` budget with its curated catalogue selections."""
+    ``MAX_INSPIRATION_IMAGES`` reference budget, which since ADR 0025 nothing
+    else draws on."""
 
     authentication_classes = [SessionAuthentication]
     permission_classes = [AllowAny]
@@ -2170,3 +2252,425 @@ class DesignInspirationUploadImageView(_OwnedUploadMixin, APIView):
         response["X-Content-Type-Options"] = "nosniff"
         response["Cache-Control"] = "no-store"
         return response
+
+
+class DesignReferencesView(APIView):
+    """This design's own uploaded references, and nothing else (Phase 22).
+
+    A narrow read for one question the phone-handoff panel asks repeatedly:
+    "has a photograph arrived yet?" It polls every couple of seconds for as long
+    as a code is live, and answering that with ``GET /designs/<id>/`` meant
+    re-sending the whole versioned questionnaire schema, the customer's saved
+    answers and the latest job snapshot every time — none of it part of the
+    question, none of it changed since the last poll, and all of it competing
+    for the same shop wifi the customer's phone is using to push the photograph.
+
+    Owner-only through the ordinary ownership filter, so a design that is not
+    the caller's is the same indistinguishable 404 as everywhere else. Read-only
+    and identity-bearing rather than identity-free: it names a private
+    resource, so it authenticates the session like every other design read.
+
+    It is emphatically NOT reachable behind a handoff grant — a grant is
+    upload-only, permanently (ADR 0026 non-goal). This endpoint answers the
+    IPAD's own session, which already owns the design."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        operation_id="designs_references_retrieve",
+        tags=_DESIGN_TAGS,
+        responses={
+            200: DesignReferencesResponseSerializer,
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+        },
+        summary="List a design's own uploaded references",
+        description=(
+            "The design's own uploaded reference images, ordered by position — "
+            "the same objects the design detail carries, without the "
+            "questionnaire, the answers or the job snapshot. Intended for the "
+            "phone-handoff panel's arrival poll, which needs this and nothing "
+            "else. No image bytes and no signed URL: those come only from the "
+            "ownership-checked image endpoint. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def get(self, request, design_id: str):
+        # Ownership filter FIRST, UUID lookup second — never the reverse.
+        design = accessible_designs(request).filter(pk=design_id).first()
+        if design is None:
+            return _not_found()
+        # Through the SHARED builder, not a second comprehension: which uploads
+        # belong in this list is one decision, and the design detail already
+        # makes it. A copy here would agree today and drift the moment either
+        # side gained a prefetch or an exclusion.
+        return Response(
+            {"inspiration_uploads": inspiration_uploads_payload(design)},
+            headers=NO_STORE,
+        )
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class DesignReferenceGrantView(APIView):
+    """Mint or revoke this design's phone-handoff grant (Phase 22, ADR 0026).
+
+    Owner-only, through the ordinary ownership filter, so a design that is not
+    the caller's is the same indistinguishable 404 as everywhere else. POST
+    returns the plaintext secret — the ONE response in this API that does — and
+    DELETE revokes every live grant on the design.
+
+    There is no GET. A grant's secret cannot be read back after it is minted
+    (the row holds only a digest), and listing grants would say something about
+    a design without adding anything the owner cannot already see on the screen
+    that minted one."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    def _get_owned(self, request, design_id: str) -> Design | None:
+        # Ownership filter FIRST, UUID lookup second — never the reverse.
+        return accessible_designs(request).filter(pk=design_id).first()
+
+    @extend_schema(
+        operation_id="designs_reference_grant_create",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=None,
+        responses={
+            201: ReferenceUploadGrantResponseSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+            409: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "inspiration_limit_reached: the design's reference slots are "
+                    "already full, so a code would be spent the moment it was shown."
+                ),
+            ),
+            429: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Too many codes asked for just now."
+            ),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="Handoff codes are briefly unavailable (throttle cache outage).",
+            ),
+        },
+        summary="Start a phone handoff",
+        description=(
+            "Mints a short-lived, revocable grant letting the customer's own "
+            "phone add reference photographs to THIS design, and returns its "
+            "plaintext secret exactly once so the caller can render a QR code. "
+            "The secret is stored only as a digest and can never be read back. "
+            "It is a bearer credential: whoever sees the code can use it, and "
+            "that exposure is accepted and bounded, not removed. It grants "
+            "upload only — there is no read path behind it. Minting revokes any "
+            "earlier live grant on the same design. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def post(self, request, design_id: str):
+        design = self._get_owned(request, design_id)
+        if design is None:
+            return _not_found()
+        # AFTER ownership, exactly as the upload endpoint orders it: a
+        # cross-origin page must not be able to burn a victim's quota, and a
+        # throttled caller still cannot tell an owned design from one that does
+        # not exist.
+        try:
+            enforce_mint_throttle(request)
+        except GrantMintingThrottled as exc:
+            return _error(
+                "grant_rate_limited",
+                "Too many codes for now. Please try again shortly.",
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Cache-Control": "no-store", "Retry-After": str(int(exc.retry_after))},
+            )
+        except GrantMintingUnavailable:
+            return _error(
+                "grant_throttle_unavailable",
+                "Phone handoff is temporarily unavailable. Please try again shortly.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        def _limit_reached():
+            # ONE construction, deliberately, for both refusals below. Routing
+            # the locked refusal through GrantDesignFull is only worth anything
+            # if it answers identically to the cheap pre-check — that is what
+            # gives the screen one case to handle instead of two. Two
+            # hand-written copies would let a reworded message drift them apart
+            # with every test still green.
+            return _error(
+                "inspiration_limit_reached",
+                f"You can use at most {settings.MAX_INSPIRATION_IMAGES} inspiration images.",
+                status.HTTP_409_CONFLICT,
+            )
+
+        remaining = max(settings.MAX_INSPIRATION_IMAGES - design.inspiration_slots_used(), 0)
+        if remaining <= 0:
+            # Refused rather than minted-and-immediately-spent: a code that
+            # cannot work is worse than no code, because the customer scans it
+            # and blames their phone.
+            #
+            # A CHEAP pre-check only. It reads unlocked, so the authoritative
+            # one is inside the mint's own row lock; this exists to avoid
+            # generating a secret we are about to throw away.
+            return _limit_reached()
+        try:
+            grant, plaintext = create_reference_upload_grant(design)
+        except GrantDesignFull:
+            # The design filled up between the pre-check and the lock — the
+            # stylist's own third photo landing while they tapped "Show the
+            # code". Same answer as the pre-check, decided somewhere it could
+            # not be overtaken.
+            return _limit_reached()
+        return Response(
+            {
+                "grant": {
+                    "id": str(grant.id),
+                    # The only time this value is ever in a response body.
+                    "token": plaintext,
+                    "expires_at": _iso(grant.expires_at),
+                    "slots_remaining": remaining,
+                }
+            },
+            status=status.HTTP_201_CREATED,
+            headers=NO_STORE,
+        )
+
+    @extend_schema(
+        operation_id="designs_reference_grant_revoke",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        responses={
+            200: ReferenceUploadGrantRevokedSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="Not found or not owned (indistinguishable)."
+            ),
+        },
+        summary="Stop accepting photographs from a phone",
+        description=(
+            "Revokes every live grant on this design. Idempotent: revoking when "
+            "there is nothing to revoke succeeds and reports zero. Unlike a "
+            "signed storage URL this really does stop working, because it "
+            "resolves through Sitara rather than through the object store. " + _OWNERSHIP_NOTE
+        ),
+    )
+    def delete(self, request, design_id: str):
+        design = self._get_owned(request, design_id)
+        if design is None:
+            return _not_found()
+        revoked = revoke_reference_upload_grants(design)
+        return Response({"revoked": revoked}, headers=NO_STORE)
+
+
+@method_decorator(_reject_oversized_upload, name="dispatch")
+@method_decorator(csrf_protect, name="dispatch")
+class ReferenceUploadGrantUploadView(APIView):
+    """Add a reference photograph to a design from the customer's own phone.
+
+    The one thing a handoff grant opens, and the only thing (Phase 22, ADR
+    0026). It takes no design id in its path or its body: the code names the
+    design, so a grant for design A can never reach design B — not because a
+    check refuses it, but because there is nowhere to express it.
+
+    Anonymous and CSRF-protected like every other unsafe design endpoint. It
+    consults no session ownership at all, which is the point: the phone has no
+    account, no workspace and no relationship to the shop's iPad beyond the code
+    it scanned. The grant is the whole authorisation, and it is a bearer
+    credential — whoever holds the code can upload. That exposure is accepted
+    and bounded (short TTL, one live code per design, revocable, upload-only,
+    rate-limited), not removed.
+
+    **Every unusable code gets one answer.** Expired, revoked, never-existed and
+    spent (the design's reference slots are full) are one 404 with one body.
+    That is §15's private-resource enumeration rule applied to a new identifier.
+    A rejection about the caller's OWN file — too large, not an image, already
+    added — is answered honestly instead, because it reveals nothing about the
+    design and the person holding the phone can act on it."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser]
+
+    @extend_schema(
+        operation_id="reference_uploads_create",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request={"multipart/form-data": GrantUploadWriteSerializer},
+        responses={
+            201: GrantUploadResponseSerializer,
+            400: ValidationErrorEnvelopeSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            404: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "reference_upload_unavailable: the code is expired, revoked, "
+                    "spent, or was never real. One indistinguishable answer for "
+                    "all four — nothing here reveals whether a design exists."
+                ),
+            ),
+            409: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="This exact image has already been added to the design.",
+            ),
+            413: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="The request body is too large."
+            ),
+            429: OpenApiResponse(ErrorEnvelopeSerializer, description="Too many attempts."),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description="The image could not be stored, or uploads are briefly unavailable.",
+            ),
+        },
+        summary="Add a reference photograph using a handoff code",
+        description=(
+            "Sanitises one uploaded image (JPEG, PNG or single-frame WebP) into "
+            "a clean WebP — EXIF orientation applied, then all EXIF/GPS/XMP/ICC "
+            "metadata stripped — and attaches it to the design the code names. "
+            "The original bytes are never stored, and no filename or declared "
+            "content type is read. The rights affirmation must be given HERE, by "
+            "the person choosing the image: a tick on the shop's screen does not "
+            "carry across the handoff. Upload only — this code grants no way to "
+            "read the design, its answers, its versions or any generated image."
+        ),
+    )
+    def post(self, request):
+        # Both windows run BEFORE the code is resolved; each says why in its own
+        # docstring, and the ORDER between them is what the two calls here fix.
+        try:
+            enforce_grant_upload_address_throttle(request)
+        except GrantMintingThrottled as exc:
+            return _grant_upload_throttled(exc.retry_after)
+        except GrantMintingUnavailable:
+            return _grant_upload_unavailable()
+
+        serializer = GrantUploadWriteSerializer(data=request.data)
+        if not serializer.is_valid():
+            return _validation_failed(serializer.errors)
+        validated = serializer.validated_data
+
+        try:
+            enforce_grant_upload_code_throttle(validated["grant_token"])
+        except GrantMintingThrottled as exc:
+            return _grant_upload_throttled(exc.retry_after)
+        except GrantMintingUnavailable:
+            return _grant_upload_unavailable()
+
+        try:
+            grant = resolve_reference_upload_grant(validated["grant_token"])
+        except GrantUnusable:
+            return _reference_upload_unavailable()
+
+        try:
+            create_inspiration_upload(
+                grant.design,
+                validated["image"],
+                rights_acknowledged=validated["rights_acknowledged"],
+                # Re-checked under the design row lock, immediately before the
+                # row is written. Resolution above happened before the decode,
+                # sanitise and storage write, which is long enough for a
+                # hand-back or the idle timeout to revoke this code mid-upload.
+                require_live_grant=grant,
+            )
+        except InspirationUploadError as exc:
+            if exc.code in ("inspiration_limit_reached", "grant_unusable"):
+                # Two ways for the CODE rather than the file to be at fault:
+                # the design filled up, so this code is spent; or the code was
+                # revoked while this upload was being processed. Both answer as
+                # the same 404 as an unknown code — "spent" or "revoked" would
+                # otherwise confirm that the design behind a guessed code is
+                # real. Both checks ran under the Design row lock inside the
+                # upload service, so they hold under concurrent uploads through
+                # one code and against a concurrent hand-back.
+                return _reference_upload_unavailable()
+            # Everything else is about the caller's own file, so it is answered
+            # honestly: the person holding the phone can act on "too large" and
+            # can act on nothing at all if told only "unavailable".
+            return _upload_error(exc)
+
+        record_grant_use(grant)
+        # A constant, not a remaining-slots count. The cap is on the DESIGN and
+        # MAX_INSPIRATION_IMAGES is public, so a count would let the phone
+        # subtract its own uploads and recover how many references the design
+        # already had — a read capability reached by arithmetic, and the shop
+        # flow (stylist adds one on the iPad, then mints a code) triggers it on
+        # the very first upload. See GrantUploadAcceptedSerializer.
+        return Response(
+            {"upload": {"accepted": True}},
+            status=status.HTTP_201_CREATED,
+            headers=NO_STORE,
+        )
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class WalkInSessionEndView(APIView):
+    """Hand the shop's screen back (Phase 22, ADR 0027).
+
+    "Finish and hand back". Ends the walk-in session in front of the iPad:
+    forgets the workspace pointer and revokes any live handoff code, so the
+    next person to sit down starts clean.
+
+    Three things it deliberately does NOT do.
+
+    It does not sign the shop out. The account is the boutique's and the next
+    customer using it is the intended state — putting a login screen between
+    every customer would buy no privacy and cost the stylist a password every
+    time.
+
+    It does not delete anything. Those concepts are the shop's work product; it
+    decides whether to pass them to the customer. Ending a session ends this
+    browser's claim on a workspace, not the workspace.
+
+    It reports nothing about what it ended. The next person may already be
+    looking at the screen."""
+
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        operation_id="designs_end_walk_in_session",
+        tags=_DESIGN_TAGS,
+        parameters=[CSRF_HEADER_PARAMETER],
+        request=None,
+        responses={
+            200: WalkInSessionEndedSerializer,
+            403: OpenApiResponse(
+                ErrorEnvelopeSerializer, description="CSRF token missing/invalid."
+            ),
+            503: OpenApiResponse(
+                ErrorEnvelopeSerializer,
+                description=(
+                    "The browser session row could not be locked, so the "
+                    "hand-back did not happen. Fails closed and says so rather "
+                    "than reporting a hand-back it did not perform."
+                ),
+            ),
+        },
+        summary="Finish and hand back",
+        description=(
+            "Ends the walk-in session on a shared shop device: drops the "
+            "workspace pointer and revokes any live phone-handoff code. "
+            "Idempotent — ending when there is nothing to end succeeds and "
+            "reports false. Does not sign out, and deletes nothing. A "
+            "server-enforced idle timeout does the same thing unprompted, "
+            "because customers walk away without anyone tapping this."
+        ),
+    )
+    def post(self, request):
+        try:
+            ended = end_walk_in_session(request)
+        except WorkspaceCoordinationError as exc:
+            # The stylist is about to turn this screen towards someone else on
+            # the strength of the answer, so a hand-back that could not be
+            # coordinated must fail visibly rather than report success.
+            return _workspace_unavailable(exc)
+        return Response({"ended": ended}, headers=NO_STORE)

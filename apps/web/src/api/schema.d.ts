@@ -133,13 +133,13 @@ export interface paths {
         };
         /**
          * List your designs
-         * @description Returns the private designs owned by the current session or account as compact rows (no questionnaire schema, no inspiration records, no job snapshot), newest first, each with its versions in creation order. Carries no signed image URL — a gallery mints one per card through the ownership-checked images endpoint. Bounded page size. A list request never creates a workspace. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Returns the private designs owned by the current session or account as compact rows (no questionnaire schema, no inspiration records, no job snapshot), newest first, each with its versions in creation order. Carries no signed image URL — a gallery mints one per card through the ownership-checked images endpoint. Bounded page size. A list request never creates a workspace. Requires ACCOUNT_GALLERY_ENABLED. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         get: operations["designs_list"];
         put?: never;
         /**
          * Create a design
-         * @description Creates a private draft. Accepts optional title, questionnaire version, answers and inspiration selections; status is server-owned (draft). Answers and inspirations are validated authoritatively and roll back together on any failure. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Creates a private draft. Accepts optional title, questionnaire version and answers; status is server-owned (draft). Answers are validated authoritatively and roll back with the insert on any failure. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         post: operations["designs_create"];
         delete?: never;
@@ -157,7 +157,7 @@ export interface paths {
         };
         /**
          * Retrieve a design
-         * @description Returns the full draft: linked questionnaire (or null), answers and ordered inspiration selections with live availability. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Returns the full draft: linked questionnaire (or null), answers, the design's own uploaded references and any historical curated selection (always reported unavailable since the catalogue was retired). Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         get: operations["designs_retrieve"];
         put?: never;
@@ -167,7 +167,7 @@ export interface paths {
         head?: never;
         /**
          * Update a design
-         * @description Partial draft update: title, questionnaire version (assignable once), answers (draft-validated) and inspiration selections (replaced as one ordered set). Only a draft — or a generation_failed design with no version, which returns to draft — may be edited. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         * @description Partial draft update: title, questionnaire version (assignable once) and answers (draft-validated). Only a draft — or a generation_failed design with no version, which returns to draft — may be edited. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         patch: operations["designs_update"];
         trace?: never;
@@ -244,6 +244,50 @@ export interface paths {
          * @description Streams the sanitised WebP for one of the design's own uploads. No storage keys or storage URLs are exposed. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
          */
         get: operations["designs_inspiration_upload_image"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/designs/{design_id}/reference-grants/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a phone handoff
+         * @description Mints a short-lived, revocable grant letting the customer's own phone add reference photographs to THIS design, and returns its plaintext secret exactly once so the caller can render a QR code. The secret is stored only as a digest and can never be read back. It is a bearer credential: whoever sees the code can use it, and that exposure is accepted and bounded, not removed. It grants upload only — there is no read path behind it. Minting revokes any earlier live grant on the same design. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        post: operations["designs_reference_grant_create"];
+        /**
+         * Stop accepting photographs from a phone
+         * @description Revokes every live grant on this design. Idempotent: revoking when there is nothing to revoke succeeds and reports zero. Unlike a signed storage URL this really does stop working, because it resolves through Sitara rather than through the object store. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        delete: operations["designs_reference_grant_revoke"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/designs/{design_id}/references/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a design's own uploaded references
+         * @description The design's own uploaded reference images, ordered by position — the same objects the design detail carries, without the questionnaire, the answers or the job snapshot. Intended for the phone-handoff panel's arrival poll, which needs this and nothing else. No image bytes and no signed URL: those come only from the ownership-checked image endpoint. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.
+         */
+        get: operations["designs_references_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -408,6 +452,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/designs/end-session/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish and hand back
+         * @description Ends the walk-in session on a shared shop device: drops the workspace pointer and revokes any live phone-handoff code. Idempotent — ending when there is nothing to end succeeds and reports false. Does not sign out, and deletes nothing. A server-enforced idle timeout does the same thing unprompted, because customers walk away without anyone tapping this.
+         */
+        post: operations["designs_end_walk_in_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health/live": {
         parameters: {
             query?: never;
@@ -440,66 +504,6 @@ export interface paths {
          * @description PostgreSQL, the Redis broker, the auth-rate-limit cache and private object storage. Returns 503 with a displayable per-check body when any dependency is down. No authentication required.
          */
         get: operations["health_ready"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/inspiration-assets/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List inspiration assets
-         * @description Public, identity-free catalogue of rights-approved inspiration images (approved + verified + unexpired + all usage permissions). No authentication required; only the public fields are returned.
-         */
-        get: operations["inspiration_assets_list"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/inspiration-assets/{asset_id}/image/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Inspiration asset image
-         * @description Streams the full-size sanitised WebP for an eligible asset. No storage keys or storage URLs are exposed.
-         */
-        get: operations["inspiration_asset_image"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/inspiration-assets/{asset_id}/thumbnail/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Inspiration asset thumbnail
-         * @description Streams the thumbnail sanitised WebP for an eligible asset. No storage keys or storage URLs are exposed.
-         */
-        get: operations["inspiration_asset_thumbnail"];
         put?: never;
         post?: never;
         delete?: never;
@@ -542,6 +546,26 @@ export interface paths {
         get: operations["questionnaire_active"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reference-uploads/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a reference photograph using a handoff code
+         * @description Sanitises one uploaded image (JPEG, PNG or single-frame WebP) into a clean WebP — EXIF orientation applied, then all EXIF/GPS/XMP/ICC metadata stripped — and attaches it to the design the code names. The original bytes are never stored, and no filename or declared content type is read. The rights affirmation must be given HERE, by the person choosing the image: a tick on the shop's screen does not carry across the handoff. Upload only — this code grants no way to read the design, its answers, its versions or any generated image.
+         */
+        post: operations["reference_uploads_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -939,6 +963,20 @@ export interface components {
             schema: components["schemas"]["QuestionnaireSchema"];
         };
         /**
+         * @description Just the design's own uploaded references, and nothing else.
+         *
+         *     The whole point is what is ABSENT. The phone-handoff panel asks "has a
+         *     photograph arrived yet?" every couple of seconds for as long as a code is
+         *     live, and answering that with the full design detail meant re-sending the
+         *     entire versioned questionnaire schema, the customer's saved answers and the
+         *     latest job snapshot — none of which the question is about, and none of which
+         *     changes between two polls — over the same shop wifi the customer's phone is
+         *     using to push the photograph. Widening this payload puts that back.
+         */
+        DesignReferencesResponse: {
+            inspiration_uploads: components["schemas"]["InspirationUpload"][];
+        };
+        /**
          * @description The purpose-built, curated concept result (Phase 12).
          *
          *     Deliberately excludes ``source_selections``, questionnaire answers,
@@ -998,7 +1036,6 @@ export interface components {
             /** Format: uuid */
             questionnaire_version_id?: string;
             answers?: unknown;
-            inspiration_asset_ids?: string[];
         };
         EmbellishmentPlanResult: {
             techniques: string[];
@@ -1125,6 +1162,56 @@ export interface components {
          */
         GenerationModeEnum: "demo" | "live" | "unavailable";
         /**
+         * @description What the phone learns after a successful upload — and nothing more.
+         *
+         *     One constant field, which is a decision rather than an oversight. Not the
+         *     design's id, title, answers, versions or images; and — the part that is easy
+         *     to get wrong — not how many reference slots are left either.
+         *
+         *     A remaining-slots count looks harmless and is not. The cap is on the DESIGN
+         *     and ``MAX_INSPIRATION_IMAGES`` is public, so a caller who knows how many
+         *     photographs they sent through this code can subtract and recover how many
+         *     references the design already had before their code existed. In the ordinary
+         *     shop flow — a stylist adds one photograph on the iPad, then mints a code for
+         *     the customer — the very first upload would tell the phone that something
+         *     else was already attached to a design it is not allowed to read. That is a
+         *     read capability, arrived at by arithmetic, and ADR 0026's non-goal is
+         *     permanent.
+         *
+         *     So the phone learns capacity only by trying: an upload succeeds, or the code
+         *     answers with the one indistinguishable "no longer usable". That is one bit
+         *     at a time and each bit is the direct consequence of the caller's own
+         *     action — which is the least that can be disclosed while the customer is
+         *     still able to send a photograph at all.
+         */
+        GrantUploadAccepted: {
+            /** @description Always true. A constant, so that the success body carries no information beyond the 201 itself — see the class docstring for why a remaining-slots count was removed. */
+            accepted: boolean;
+        };
+        GrantUploadResponse: {
+            upload: components["schemas"]["GrantUploadAccepted"];
+        };
+        /**
+         * @description The phone-side multipart body.
+         *
+         *     ``grant_token`` is the secret, sent in the BODY rather than the URL so it
+         *     cannot land in a web-server access log, a Referer header or a browser
+         *     history entry. The client's filename and declared content type are ignored
+         *     exactly as on the owner's own upload endpoint — only the decoded image is
+         *     trusted, and the storage key is server-generated.
+         */
+        GrantUploadWriteRequest: {
+            /** @description The handoff secret, from the scanned code. Never logged. */
+            grant_token: string;
+            /**
+             * Format: binary
+             * @description The image file. JPEG, PNG or single-frame WebP.
+             */
+            image: string;
+            /** @description Must be true, and must be given ON THIS DEVICE by the person choosing the image. A tick on the iPad does not carry across. */
+            rights_acknowledged: boolean;
+        };
+        /**
          * @description One private audit acknowledgement from the persisted, historical
          *     inspiration-context snapshot (Phase 13). Deliberately excludes the asset
          *     UUID, provider cues (garment type, visual description, cultural
@@ -1135,9 +1222,6 @@ export interface components {
             position: number;
             title: string;
             attribution: string;
-        };
-        InspirationCatalogueResponse: {
-            assets: components["schemas"]["PublicInspirationAsset"][];
         };
         /**
          * @description One image the user uploaded as inspiration for their own design.
@@ -1233,7 +1317,6 @@ export interface components {
             /** Format: uuid */
             questionnaire_version_id?: string;
             answers?: unknown;
-            inspiration_asset_ids?: string[];
         };
         PublicConfig: {
             demo_mode: boolean;
@@ -1249,20 +1332,8 @@ export interface components {
             generation_mode: components["schemas"]["GenerationModeEnum"];
             max_inspiration_images: number;
             max_refinements: number;
-        };
-        PublicInspirationAsset: {
-            /** Format: uuid */
-            id: string;
-            title: string;
-            alt_text: string;
-            garment_type: string;
-            cultural_context: string;
-            /** @description Approved public attribution text, if any. */
-            attribution: string;
-            /** @description Relative Django endpoint streaming WebP bytes. */
-            image_url: string;
-            /** @description Relative Django endpoint streaming WebP bytes. */
-            thumbnail_url: string;
+            /** @description Whether the account concept gallery is switched on (ADR 0027). Off by default. Informational only: Sitara's own frontend deliberately does NOT read this, and decides what to show from the design list endpoint's own refusal instead, so there is one copy of the answer rather than a cached second one that can drift. A client may use it to explain the absence, never to enforce it — the endpoint refuses on its own and that refusal is the boundary. */
+            account_gallery_enabled: boolean;
         };
         /**
          * @description Bounded per-question-type constraint mapping (all keys optional).
@@ -1323,6 +1394,38 @@ export interface components {
             /** @description "ok" (200) or "unavailable" (503). */
             status: string;
             checks: components["schemas"]["ReadyChecks"];
+        };
+        /**
+         * @description A freshly minted handoff grant, returned ONCE to the design's owner.
+         *
+         *     ``token`` is the plaintext secret and this is the only response in the whole
+         *     API that contains it: the row stores a digest, and no later request can read
+         *     it back. It is a BEARER credential — whoever can see it can add a reference
+         *     to this design — and the exposure is accepted and bounded (ADR 0026), not
+         *     removed. It carries no read capability of any kind.
+         */
+        ReferenceUploadGrant: {
+            /**
+             * Format: uuid
+             * @description The grant row, for revoking it later.
+             */
+            id: string;
+            /** @description The plaintext secret, returned exactly once. Put it in the QR code and nowhere else: never a log, never storage, never another response. */
+            token: string;
+            /**
+             * Format: date-time
+             * @description When the grant stops working, whatever else happens.
+             */
+            expires_at: string;
+            /** @description How many reference slots the design has left. A grant is spent when this reaches zero, and the phone is told no more than any other unusable grant would be told. */
+            slots_remaining: number;
+        };
+        ReferenceUploadGrantResponse: {
+            grant: components["schemas"]["ReferenceUploadGrant"];
+        };
+        ReferenceUploadGrantRevoked: {
+            /** @description How many live grants this call revoked. Zero is a success. */
+            revoked: number;
         };
         /**
          * @description The refinement-specific lineage detail (Phase 14) for a version whose
@@ -1440,11 +1543,18 @@ export interface components {
             values: string[];
         };
         /**
-         * @description One inspiration selection with its live availability.
+         * @description One HISTORICAL curated-catalogue selection, made before Phase 22.
          *
-         *     ``available: false`` with ``asset: null`` means the previously-selected
-         *     asset is no longer publicly eligible (retired, expired or revoked). The
-         *     reason is deliberately not disclosed.
+         *     Phase 22 (ADR 0025) retired the catalogue from the product: no design can
+         *     gain a selection any more, and the three endpoints that once streamed an
+         *     asset's bytes and attribution are gone. So the asset object went with them —
+         *     documenting a payload that named dead URLs would be worse than documenting
+         *     none — and ``available`` is permanently false, meaning "no longer usable in
+         *     a design".
+         *
+         *     The rows themselves are untouched, as is every ``DesignVersion``'s frozen
+         *     ``inspiration_context`` acknowledgement, which is rendered from its own
+         *     snapshot by the result endpoint.
          */
         SelectedInspiration: {
             /**
@@ -1453,20 +1563,8 @@ export interface components {
              */
             id: string;
             position: number;
+            /** @description Always false since the catalogue was retired (ADR 0025). */
             available: boolean;
-            asset: components["schemas"]["SelectedInspirationAsset"] | null;
-        };
-        /** @description The public catalogue fields for an inspiration that is still eligible. */
-        SelectedInspirationAsset: {
-            /** Format: uuid */
-            id: string;
-            title: string;
-            alt_text: string;
-            garment_type: string;
-            cultural_context: string;
-            attribution: string;
-            image_url: string;
-            thumbnail_url: string;
         };
         StepSchema: {
             id: string;
@@ -1486,6 +1584,18 @@ export interface components {
         /** @description The error body for 400 validation failures (adds ``fields``). */
         ValidationErrorEnvelope: {
             error: components["schemas"]["FieldValidationErrorDetail"];
+        };
+        /**
+         * @description What ending a walk-in session reports back (Phase 22, ADR 0027).
+         *
+         *     One boolean, and deliberately nothing else — not the workspace id, not how
+         *     many designs it held, not how many handoff codes were revoked. The next
+         *     person to pick up this iPad may be reading the screen, and a count is a
+         *     fact about the customer who just left.
+         */
+        WalkInSessionEnded: {
+            /** @description True when there was a walk-in workspace to hand back, false when there was not. Ending twice is not an error. */
+            ended: boolean;
         };
     };
     responses: never;
@@ -1745,6 +1855,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ValidationErrorEnvelope"];
+                };
+            };
+            /** @description gallery_disabled: the operator has not enabled the account concept gallery (ADR 0027). A controlled refusal, not a 404 — the surface exists and is switched off. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -2153,6 +2272,147 @@ export interface operations {
             };
             /** @description The image is temporarily unreadable. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_reference_grant_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceUploadGrantResponse"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description inspiration_limit_reached: the design's reference slots are already full, so a code would be spent the moment it was shown. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many codes asked for just now. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Handoff codes are briefly unavailable (throttle cache outage). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_reference_grant_revoke: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path: {
+                design_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceUploadGrantRevoked"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    designs_references_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                design_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DesignReferencesResponse"];
+                };
+            };
+            /** @description Not found or not owned (indistinguishable). */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2771,6 +3031,46 @@ export interface operations {
             };
         };
     };
+    designs_end_walk_in_session: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WalkInSessionEnded"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The browser session row could not be locked, so the hand-back did not happen. Fails closed and says so rather than reporting a hand-back it did not perform. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     health_live: {
         parameters: {
             query?: never;
@@ -2814,105 +3114,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadyResponse"];
-                };
-            };
-        };
-    };
-    inspiration_assets_list: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InspirationCatalogueResponse"];
-                };
-            };
-        };
-    };
-    inspiration_asset_image: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                asset_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Sanitised WebP image bytes streamed through Django. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "image/webp": string;
-                };
-            };
-            /** @description Missing or ineligible asset (indistinguishable from absent). */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-            /** @description Eligible asset whose private storage object is unavailable. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-        };
-    };
-    inspiration_asset_thumbnail: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                asset_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Sanitised WebP image bytes streamed through Django. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "image/webp": string;
-                };
-            };
-            /** @description Missing or ineligible asset (indistinguishable from absent). */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-            /** @description Eligible asset whose private storage object is unavailable. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -2965,6 +3166,94 @@ export interface operations {
                 };
             };
             /** @description No valid active questionnaire version is available. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reference_uploads_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token obtained from GET /api/v1/auth/csrf/. Required on every unsafe (POST/PATCH) browser request; a missing or stale token yields 403 csrf_failed. */
+                "X-CSRFToken": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["GrantUploadWriteRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantUploadResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorEnvelope"];
+                };
+            };
+            /** @description CSRF token missing/invalid. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description reference_upload_unavailable: the code is expired, revoked, spent, or was never real. One indistinguishable answer for all four — nothing here reveals whether a design exists. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This exact image has already been added to the design. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The request body is too large. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too many attempts. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The image could not be stored, or uploads are briefly unavailable. */
             503: {
                 headers: {
                     [name: string]: unknown;

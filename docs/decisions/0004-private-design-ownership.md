@@ -2,7 +2,11 @@
 
 - **Status:** Accepted (2026-07-17, after the Phase 4 test suite passed);
   amended 2026-07-17 with the workspace-creation concurrency correction
-  (see "Concurrency" below)
+  (see "Concurrency" below); **an assumption this rests on was superseded
+  2026-08-11 by ADR 0027** — a design's owner is no longer the person who
+  answered the questionnaire but the boutique whose iPad it was answered on, so
+  one account now owns work produced for many customers. The mechanics below are
+  unchanged; what they protect is now a shop's book of work.
 - **Deciders:** Sitara project
 - **Related:** ADR 0002 (application foundation), ADR 0003 (session authentication)
 

@@ -9,9 +9,10 @@ of Replicate-routed traffic, no published retention window), not the feature.
 
 What crosses the boundary is deliberately narrow:
 
-- ONLY the references the user selected for THIS design — their own uploads and
-  the curated catalogue assets they picked. Never a whole bucket, never another
-  design's, never an unselected asset.
+- ONLY the references the user selected for THIS design — their own uploads and,
+  for a design made before ADR 0025 retired the catalogue, the curated assets
+  they picked. Never a whole bucket, never another design's, never an
+  unselected asset.
 - ONLY as a presigned GET URL with a short TTL, minted here and handed straight
   to the provider. The URL is never persisted, returned by an API, cached or
   logged; nor is the storage key it was built from.
@@ -109,6 +110,11 @@ def _selected_storage_keys(design) -> list[str]:
         if upload.storage_key
     ]
 
+    # Kept deliberately, guarded by "no selections exist" (ADR 0025 decision 2).
+    # Nothing can create a selection any more, so for every design made after
+    # Phase 22 this branch is skipped entirely. It stays because a design made
+    # BEFORE it may hold one, and that design must keep the live
+    # ``publicly_eligible()`` re-check below rather than lose it to a cleanup.
     selections = list(design.inspiration_selections.order_by("position"))
     if selections:
         asset_ids = [selection.inspiration_asset_id for selection in selections]

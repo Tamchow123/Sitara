@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 
 import { AppShell } from "@/components/AppShell";
+import { FinishAndHandBack } from "@/features/shopfloor/FinishAndHandBack";
 import { GenerationProgress } from "@/features/generation/GenerationProgress";
 
 export default function DesignGenerationPage() {
@@ -13,7 +14,7 @@ export default function DesignGenerationPage() {
     // Generation runs as a durable background job, so leaving this page does
     // not stop it. Saying so beside Home is the difference between a user
     // waiting on a tab and a user believing they have to.
-    <AppShell homeHint="Sitara keeps working if you leave this page — your concept will be waiting.">
+    <AppShell homeHint="Sitara keeps working if you leave this page — your concept will be waiting." actions={<FinishAndHandBack />}>
       <GenerationProgress designId={designId} jobId={jobId} />
     </AppShell>
   );

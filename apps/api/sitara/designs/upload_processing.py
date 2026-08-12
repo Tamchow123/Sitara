@@ -22,7 +22,12 @@ a user upload is private user content, and nothing here may drift into implying
 catalogue rights status.
 
 Error messages are generic and structural — they never echo uploaded bytes,
-filenames or decoded metadata.
+filenames or decoded metadata. The two SIZE refusals are the exception to
+"generic": since Phase 22 a reference is routinely a photograph taken on the
+spot, and a modern phone sensor clears both ceilings at its default setting.
+A bare "outside the accepted bounds" leaves someone holding a camera with
+nothing to do about it, so those two say what to change. They still name only
+the configured limit, never anything about the image itself.
 """
 
 import hashlib
@@ -44,6 +49,24 @@ from sitara.image_sanitize import (
 logger = logging.getLogger(__name__)
 
 _WEBP_QUALITY = 85
+
+
+def _too_many_bytes_message(limit_bytes: int) -> str:
+    # Rounded down to whole megabytes: the point is to name a figure someone can
+    # act on, not to be exact about a limit they cannot see anyway.
+    return (
+        f"That image file is larger than {limit_bytes // 1_000_000} MB. "
+        "Most phones can send a smaller copy — choose a reduced size when you "
+        "share it, or take the photo again at a lower resolution."
+    )
+
+
+def _too_many_pixels_message(limit_pixels: int) -> str:
+    return (
+        f"That photograph is larger than {limit_pixels // 1_000_000} megapixels. "
+        "Your camera is probably set to its highest resolution — lower it and "
+        "take the photo again, or send a smaller copy of it."
+    )
 
 
 class InspirationUploadRejected(Exception):
@@ -78,21 +101,25 @@ def process_user_inspiration_upload(uploaded_file) -> ProcessedUpload:
     if size is None or size <= 0:
         raise InspirationUploadRejected("The upload is empty.")
     if size > max_upload_bytes:
-        raise InspirationUploadRejected("The upload exceeds the maximum allowed size.")
+        raise InspirationUploadRejected(_too_many_bytes_message(max_upload_bytes))
 
     uploaded_file.seek(0)
     data = uploaded_file.read(max_upload_bytes + 1)
     if len(data) > max_upload_bytes:
         # A stated size can lie; the real read is what bounds memory.
-        raise InspirationUploadRejected("The upload exceeds the maximum allowed size.")
+        raise InspirationUploadRejected(_too_many_bytes_message(max_upload_bytes))
 
     try:
         image = open_and_validate(data)
         width, height = image.size
-        if width < 1 or height < 1 or width * height > max_pixels:
-            # Header dimensions gate the decode: a decompression bomb is
-            # rejected before its pixels are ever allocated.
+        if width < 1 or height < 1:
             raise ImageSanitizeRejected("The image dimensions are outside the accepted bounds.")
+        if width * height > max_pixels:
+            # Header dimensions gate the decode: a decompression bomb is
+            # rejected before its pixels are ever allocated. This is also the
+            # gate an ordinary 48-megapixel phone photograph meets, which is
+            # why it answers with instructions rather than a bare refusal.
+            raise ImageSanitizeRejected(_too_many_pixels_message(max_pixels))
 
         oriented = load_and_orient(image)
         flattened = flatten_to_rgb(oriented)

@@ -431,7 +431,6 @@ export const designEnvelopeSchema = z.object({
   title: z.string().max(120).optional(),
   questionnaire_version_id: z.string().min(1).optional(),
   answers: z.record(z.union([z.string(), z.array(z.string())])).optional(),
-  inspiration_asset_ids: z.array(z.string()).optional(),
 });
 
 // A React Hook Form resolver that validates the CURRENT visible step against

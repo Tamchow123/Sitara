@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 
 import { AppShell } from "@/components/AppShell";
+import { FinishAndHandBack } from "@/features/shopfloor/FinishAndHandBack";
 import { QuestionnaireWizard } from "@/features/questionnaire/QuestionnaireWizard";
 
 // Resume: reconstruct the wizard from the persisted answers and the design's
@@ -15,7 +16,7 @@ export default function DesignPage() {
     // The Home hint matters here: the draft is saved on the server as the user
     // answers, so going Home is not "throw this away". "Start over" is the
     // separate, confirmed, destructive action.
-    <AppShell homeHint="Your answers are saved as you go.">
+    <AppShell homeHint="Your answers are saved as you go." actions={<FinishAndHandBack />}>
       <QuestionnaireWizard initialDesignId={designId} />
     </AppShell>
   );

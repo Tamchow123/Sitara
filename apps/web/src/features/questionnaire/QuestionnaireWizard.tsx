@@ -21,10 +21,10 @@ import { Controller, useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-import { fetchActiveQuestionnaire, fetchCatalogue, fetchDesign } from "./api";
+import { fetchActiveQuestionnaire, fetchDesign } from "./api";
 import type { InspirationUpload } from "@/lib/api";
 
-import { InspirationPicker } from "./InspirationPicker";
+import { InspirationUpload as InspirationUploadPanel } from "./InspirationUpload";
 import { ProgressNav } from "./ProgressNav";
 import { QuestionField } from "./QuestionField";
 import { allowedOptions, questionsById, requiredQuestions, visibleQuestions } from "./rules";
@@ -44,7 +44,7 @@ import { useLatest } from "./use-latest";
 import { resolveDesignLifecycleTarget } from "@/lib/design-lifecycle";
 import type { ProgressCategory } from "./ProgressNav";
 import type { Screen } from "./screens";
-import type { Answers, AnswerValue, PublicAsset, QuestionnaireSchema, Step } from "./types";
+import type { Answers, AnswerValue, QuestionnaireSchema, Step } from "./types";
 
 const MAX_INSPIRATIONS = 3;
 
@@ -54,10 +54,6 @@ const MAX_INSPIRATIONS = 3;
 const EDIT_QUESTION_PARAM = "q";
 
 type LoadState = "loading" | "ready" | "unavailable" | "notfound" | "redirecting";
-type CatalogueState = {
-  status: "idle" | "loading" | "ready" | "unavailable";
-  assets: PublicAsset[];
-};
 
 type Props = { initialDesignId?: string };
 type StepValues = Record<string, AnswerValue>;
@@ -82,13 +78,10 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
   const [schema, setSchema] = useState<QuestionnaireSchema | null>(null);
   const [versionId, setVersionId] = useState<string>("");
   const [answers, setAnswers] = useState<Answers>({});
-  const [selection, setSelection] = useState<string[]>([]);
-  // The user's own uploaded references. Held here rather than inside the picker
-  // so a resumed design restores them from the server, and so both kinds of
-  // reference are counted against the one shared cap in a single place.
+  // The user's own uploaded references — the only kind there is since ADR 0025
+  // retired the curated catalogue. Held here rather than inside the upload
+  // panel so a resumed design restores them from the server.
   const [uploads, setUploads] = useState<InspirationUpload[]>([]);
-  const [catalogue, setCatalogue] = useState<CatalogueState>({ status: "idle", assets: [] });
-  const [catalogueAttempt, setCatalogueAttempt] = useState(0);
   const [screenIndex, setScreenIndex] = useState(0);
   // The furthest screen reached so far. Progress-nav jumps are limited to it,
   // so a pill can never carry the user past a screen whose required answers
@@ -229,7 +222,6 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
           setVersionId(loadedVersionId);
           adopt(design.id);
           setAnswersSynced(loadedAnswers);
-          setSelection(design.selected_inspirations.map((entry) => entry.id));
           setUploads(design.inspiration_uploads ?? []);
           const loadedPlan = buildScreenPlan(loadedSchema, loadedAnswers);
           const visibility = visibleQuestions(loadedSchema, loadedAnswers);
@@ -271,34 +263,6 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialDesignId, reloadCounter, setAnswersSynced, adopt]);
 
-  // -- Catalogue (loaded lazily; empty is valid, failure is distinct) --------
-  // Gated on catalogueAttempt (an explicit trigger), never on catalogue.status
-  // itself: setting catalogue.status inside this effect always schedules a
-  // re-render in which the effect's own dependency array has changed, so
-  // React tears the effect down (cancelled = true) and re-runs it — the
-  // re-run's guard then sees "loading" (not "idle") and bails out without
-  // starting a replacement fetch, so when the original fetch resolves (which
-  // it always does after that re-render for any real, non-instant network
-  // call) its result is discarded by the stale cancelled flag, leaving the
-  // catalogue stuck loading forever.
-  useEffect(() => {
-    if (load !== "ready" || !onInspirationScreen) return;
-    let cancelled = false;
-    setCatalogue({ status: "loading", assets: [] });
-    fetchCatalogue()
-      .then((response) => {
-        if (!cancelled) setCatalogue({ status: "ready", assets: response.assets });
-      })
-      .catch(() => {
-        // A network/timeout/malformed/5xx failure is UNAVAILABLE — never a
-        // silent empty catalogue.
-        if (!cancelled) setCatalogue({ status: "unavailable", assets: [] });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [load, onInspirationScreen, catalogueAttempt]);
-
   useEffect(() => {
     if (errorTick > 0) errorSummaryRef.current?.focus();
   }, [errorTick]);
@@ -337,14 +301,6 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
       if (question?.type === "text") void flush(); // flush the debounce immediately
     },
     [schema, flush],
-  );
-
-  const onSelectionChange = useCallback(
-    (ids: string[]) => {
-      setSelection(ids);
-      save({ inspiration_asset_ids: ids });
-    },
-    [save],
   );
 
   // -- Navigation (always flushes pending saves first) -----------------------
@@ -600,36 +556,12 @@ export function QuestionnaireWizard({ initialDesignId }: Props) {
       {onInspirationScreen ? (
         <section aria-labelledby="inspiration-heading">
           <h1 id="inspiration-heading">Inspiration images</h1>
-          {catalogue.status === "loading" || catalogue.status === "idle" ? (
-            <p role="status" aria-live="polite" className="loading-note">
-              Loading inspiration images…
-            </p>
-          ) : catalogue.status === "unavailable" ? (
-            // An in-page alert, not a route error: the questionnaire around it
-            // is fine and inspiration images are optional, so this must not
-            // read as though the design itself failed.
-            <div role="alert" className="alert alert-error">
-              <p className="alert-title">Inspiration images are temporarily unavailable</p>
-              <p>You can continue without them, or try loading them again.</p>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setCatalogueAttempt((attempt) => attempt + 1)}
-              >
-                Try again
-              </button>
-            </div>
-          ) : (
-            <InspirationPicker
-              assets={catalogue.assets}
-              selection={selection}
-              max={MAX_INSPIRATIONS}
-              onChange={onSelectionChange}
-              designId={saver.designId ?? undefined}
-              uploads={uploads}
-              onUploadsChange={setUploads}
-            />
-          )}
+          <InspirationUploadPanel
+            designId={saver.designId ?? undefined}
+            uploads={uploads}
+            max={MAX_INSPIRATIONS}
+            onChange={setUploads}
+          />
         </section>
       ) : (
         screen && (

@@ -30,9 +30,15 @@ const TEXT_DEBOUNCE_MS = 600;
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
-// The mutable fields of a draft update. Absent keys are left untouched server
-// side, so answer-only changes never re-send (and risk rejecting) selections.
-export type DraftPatch = { answers?: Answers; inspiration_asset_ids?: string[] };
+// The mutable fields of a draft update. Only `answers` remains: ADR 0025
+// retired the curated catalogue, so `inspiration_asset_ids` went with the
+// catalogue it selected from, and the backend now rejects that name as an
+// unknown field rather than ignoring it.
+//
+// Still an object rather than collapsed to `Answers`, because an ABSENT key is
+// what "leave this one untouched server side" means — the distinction survives
+// even while there is only one key to leave out.
+export type DraftPatch = { answers?: Answers };
 
 type Options = {
   versionId: string;
@@ -48,7 +54,7 @@ const ENVELOPE_FAILURE: DraftFailure = {
 };
 
 function isEmpty(patch: DraftPatch): boolean {
-  return patch.answers === undefined && patch.inspiration_asset_ids === undefined;
+  return patch.answers === undefined;
 }
 
 export function useDraftSaver({ versionId, onCreated, onLatestConfirmed }: Options) {

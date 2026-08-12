@@ -1,6 +1,12 @@
 # ADR 0006 — Rights-controlled inspiration catalogue (Phase 5B)
 
-- **Status:** Accepted (2026-07-17, after the Phase 5B test suite passed)
+- **Status:** Accepted (2026-07-17, after the Phase 5B test suite passed);
+  **product surface retired 2026-08-11 by ADR 0025.** The three public endpoints,
+  the questionnaire picker and the `inspiration_asset_ids` write field are gone;
+  no asset was ever approved, so they had returned an empty list to every caller
+  for their entire life. Everything else described below — models, migrations,
+  rights records, ingest, the sanitiser, `publicly_eligible()`, services and
+  admin — is intact, staff-only, and still bound by every rule here.
 - **Deciders:** Sitara project
 - **Related:** ADR 0002 (application foundation), ADR 0005 (versioned
   questionnaire schema)

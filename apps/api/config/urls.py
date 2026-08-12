@@ -6,7 +6,11 @@ urlpatterns = [
     path("api/v1/", include("sitara.health.urls")),
     path("api/v1/", include("sitara.designs.urls")),
     path("api/v1/", include("sitara.questionnaire.urls")),
-    path("api/v1/", include("sitara.catalogue.urls")),
+    # No `sitara.catalogue` routes: Phase 22 (ADR 0025) retired the public
+    # inspiration catalogue from the product. The app itself stays — models,
+    # rights machinery, ingest, services and admin are intact and staff-only —
+    # but nothing it holds is reachable without a Django admin login. A public
+    # endpoint with no caller is a surface with no owner.
     path("api/v1/auth/", include("sitara.accounts.urls")),
 ]
 

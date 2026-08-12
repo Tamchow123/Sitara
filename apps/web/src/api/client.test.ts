@@ -26,26 +26,42 @@ export type StepQuestions = components["schemas"]["StepSchema"]["questions"];
 export type QuestionnaireRules = components["schemas"]["QuestionnaireSchema"]["rules"];
 export type QuestionOptions = components["schemas"]["QuestionSchema"]["options"];
 
-// 5: the public catalogue asset exposes exactly the public fields.
-type PublicAsset = components["schemas"]["PublicInspirationAsset"];
-export type PublicAssetKeys = keyof PublicAsset;
-const _publicAssetShape: Record<PublicAssetKeys, true> = {
+// 5: a design's own uploaded reference exposes exactly its minimal fields.
+// (This replaced the same assertion on the public catalogue asset, whose type
+// went with the endpoints ADR 0025 retired. The upload is now the only
+// image-bearing public type, and it is the one that most needs pinning: it
+// describes a private photograph somebody handed us.)
+type UploadedReference = components["schemas"]["InspirationUpload"];
+export type UploadedReferenceKeys = keyof UploadedReference;
+const _uploadedReferenceShape: Record<UploadedReferenceKeys, true> = {
   id: true,
-  title: true,
-  alt_text: true,
-  garment_type: true,
-  cultural_context: true,
-  attribution: true,
-  image_url: true,
-  thumbnail_url: true,
+  position: true,
+  width: true,
+  height: true,
+  rights_acknowledged_at: true,
+  created_at: true,
 };
-void _publicAssetShape;
+void _uploadedReferenceShape;
 
-// 6: private storage/rights fields are NOT part of any generated public type.
-// @ts-expect-error storage keys are never exposed on the public asset type.
-export type NoStorageKey = PublicAsset["image_storage_key"];
-// @ts-expect-error rights evidence is never exposed on the public asset type.
-export type NoRightsEvidence = PublicAsset["evidence_reference"];
+// 6: private storage fields are NOT part of any generated public type.
+// @ts-expect-error storage keys are never exposed on an uploaded reference.
+export type NoStorageKey = UploadedReference["storage_key"];
+// @ts-expect-error image hashes are never exposed on an uploaded reference.
+export type NoImageHash = UploadedReference["image_sha256"];
+
+// 6b: a historical curated selection carries an id, a position and an
+// availability flag — and no asset object, because the endpoints that served
+// one no longer exist (ADR 0025).
+type HistoricalSelection = components["schemas"]["SelectedInspiration"];
+export type HistoricalSelectionKeys = keyof HistoricalSelection;
+const _historicalSelectionShape: Record<HistoricalSelectionKeys, true> = {
+  id: true,
+  position: true,
+  available: true,
+};
+void _historicalSelectionShape;
+// @ts-expect-error the asset sub-object was removed with the catalogue endpoints.
+export type NoAssetObject = HistoricalSelection["asset"];
 
 // 7: the exported client is GET-ONLY. GET is available and path-typed; the
 // unsafe methods are absent so a typed mutation cannot be written here (they

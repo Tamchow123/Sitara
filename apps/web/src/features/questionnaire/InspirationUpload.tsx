@@ -1,104 +1,61 @@
 "use client";
 
-// The user's own inspiration photographs (Phase 16B, ADR 0018/0019).
+// The reference step (Phase 16B ADR 0018/0019; rebuilt in Phase 22, ADR 0025;
+// narrowed to the phone handoff alone after Phase 22 — see ADR 0026's
+// amendment).
 //
-// An upload is private user content, not catalogue content: it is never listed,
-// never shown to another session, and can never be promoted into the catalogue.
-// Its rights position is ONE per-upload affirmation by the person uploading —
-// deliberately weaker than the staff-verified catalogue model, and never
-// presented as verified rights.
+// Since the curated catalogue was retired this screen holds one thing: the
+// customer's own photographs. There is no grid to browse, no shared budget to
+// arithmetic against, and no catalogue request to fail — the three reference
+// slots are the uploads' alone.
 //
-// The affirmation is gated behind the ADR 0019 disclosure, which must be
-// readable BEFORE the file picker is usable, because that decision sends the
-// bytes of a chosen reference to an image provider whose terms take a
-// perpetual, irrevocable licence over inputs. A user cannot consent to
-// something the interface has not told them.
+// And there is now one way in: the customer's own phone. The iPad's camera and
+// file picker are gone. That removes this screen's own rights affirmation with
+// them — it existed solely to gate those two controls, and the affirmation that
+// matters was never this one. It is taken on the PHONE, per upload, from the
+// person who actually chose the photograph (ADR 0026). Nothing about that
+// changed; there is simply no longer a second, weaker place to take it.
 //
-// Uploads share the single three-reference budget with curated presets, so this
-// component is told how many slots remain rather than counting its own.
+// A reference is private user content, not catalogue content: it is never
+// listed, never shown to another session, and can never be promoted into the
+// catalogue. Its rights position is ONE per-upload affirmation by the person
+// choosing the image — deliberately weaker than the staff-verified catalogue
+// model that left the product, and never to be presented as verified rights.
+// Removing the stronger model does not upgrade this one.
 
-import { useId, useRef, useState } from "react";
+import { useState } from "react";
 
 import {
   inspirationUploadImageUrl,
   removeInspirationUpload,
-  uploadInspirationImage,
   type InspirationUpload as Upload,
 } from "@/lib/api";
 
-const ACCEPTED = "image/jpeg,image/png,image/webp";
+import { PhoneHandoff } from "./PhoneHandoff";
 
 type Props = {
-  designId: string;
+  // Absent until the first autosave has created the draft. The step explains
+  // itself in that window rather than appearing to offer nothing.
+  designId?: string;
   uploads: Upload[];
-  slotsRemaining: number;
+  /** The whole reference budget — this screen is the only thing drawing on it. */
+  max: number;
   onChange: (uploads: Upload[]) => void;
 };
 
 type Status =
   | { kind: "idle" }
-  | { kind: "uploading"; name: string }
-  | { kind: "added" }
   | { kind: "removed" }
   | { kind: "error"; message: string };
 
-export function InspirationUpload({
-  designId,
-  uploads,
-  slotsRemaining,
-  onChange,
-}: Props) {
+export function InspirationUpload({ designId, uploads, max, onChange }: Props) {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
-  const [acknowledged, setAcknowledged] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const disclosureId = useId();
-  const acknowledgeId = useId();
-  const helpId = useId();
 
-  const full = slotsRemaining <= 0;
-  const uploading = status.kind === "uploading";
-  const canChoose = acknowledged && !full && !uploading;
-
-  const handleFile = async (file: File): Promise<void> => {
-    setStatus({ kind: "uploading", name: file.name });
-    let result;
-    try {
-      result = await uploadInspirationImage(designId, file, acknowledged);
-    } catch {
-      // A timeout or network drop — never a silent failure.
-      setStatus({
-        kind: "error",
-        message: "The upload did not finish. Check your connection and try again.",
-      });
-      return;
-    }
-    if (result?.ok) {
-      onChange([...uploads, result.upload]);
-      setStatus({ kind: "added" });
-      return;
-    }
-    setStatus({
-      kind: "error",
-      message: result?.message ?? "The image could not be added. Please try again.",
-    });
-  };
-
-  const onSelect = (event: React.ChangeEvent<HTMLInputElement>): void => {
-    const file = event.target.files?.[0];
-    // Clear immediately so choosing the SAME file again still fires a change
-    // event — otherwise a retry after a failure would appear to do nothing.
-    event.target.value = "";
-    if (!file) return;
-    // Checked explicitly, not left to the disabled attribute alone. This is the
-    // consent gate for sending someone's photograph to an external provider; it
-    // should not depend on a DOM property a stray programmatic change can
-    // bypass. The server refuses an unacknowledged upload too.
-    if (!canChoose) return;
-    void handleFile(file);
-  };
+  const slotsRemaining = Math.max(max - uploads.length, 0);
 
   const onRemove = async (uploadId: string): Promise<void> => {
+    if (!designId) return;
     setBusyId(uploadId);
     let result;
     try {
@@ -122,80 +79,49 @@ export function InspirationUpload({
 
   return (
     <div className="upload">
-      <h3 className="upload-heading">Your own photographs</h3>
+      <h2 className="upload-heading">Your own photographs</h2>
 
-      <div className="upload-disclosure" id={disclosureId}>
-        <p>
-          These are private to your design. They are never added to Sitara&apos;s
-          catalogue, never shown to anyone else, and are deleted with your design.
-        </p>
-        <p>
-          <strong>Before you upload, please read this.</strong> If you use an image
-          you upload as a reference, its file is sent to the external AI image
-          provider that draws your concept. That provider&apos;s terms take a
-          perpetual, irrevocable licence over what it receives, to train and
-          improve their technology. They publish no time limit on how long they
-          keep it, and it is unresolved whether those terms differ when Sitara
-          reaches them through Replicate. Sitara cannot undo that once an image is
-          sent. Please only upload an image you are comfortable handing over on
-          those terms — and not one that shows someone who has not agreed to it.
-        </p>
-      </div>
-
-      <div className="upload-acknowledge">
-        <input
-          type="checkbox"
-          id={acknowledgeId}
-          checked={acknowledged}
-          onChange={(event) => setAcknowledged(event.target.checked)}
-          aria-describedby={disclosureId}
-        />
-        <label htmlFor={acknowledgeId}>
-          I have the right to use these images, and I understand they will be sent
-          to the AI image provider on the terms above.
-        </label>
-      </div>
-
-      <p className="field-help" id={helpId}>
-        {/* The affirmation stays ticked between uploads, so it has to be clear
-            it covers each image and not just the first one. */}
-        This applies to every image you choose. JPEG, PNG or WebP, up to 15 MB.{" "}
-        {full
-          ? "You have used all of your inspiration slots."
-          : `${slotsRemaining} of your inspiration slots ${
-              slotsRemaining === 1 ? "is" : "are"
-            } free.`}
+      {/* One line. The panel below says where they come from, so saying it
+          here too was the kind of repetition this screen was asked to lose. */}
+      <p className="field-help">
+        Optional — up to {max}.{" "}
+        {slotsRemaining > 0
+          ? `${slotsRemaining} of ${max} free.`
+          : "All slots are used."}
       </p>
 
-      <input
-        ref={inputRef}
-        type="file"
-        accept={ACCEPTED}
-        className="upload-input"
-        id={`${acknowledgeId}-file`}
-        onChange={onSelect}
-        disabled={!canChoose}
-        aria-describedby={helpId}
-      />
-      <label className="upload-label" htmlFor={`${acknowledgeId}-file`}>
-        Choose an image
-      </label>
+      {designId ? (
+        <PhoneHandoff
+          designId={designId}
+          uploads={uploads}
+          max={max}
+          onUploadsChanged={onChange}
+        />
+      ) : (
+        <p className="field-help">
+          Answer a question first — your design has to exist before a photograph
+          can be attached to it.
+        </p>
+      )}
 
       {/* Announced, not merely displayed: a screen-reader user gets no visual
-          cue that an upload finished, failed, or that a slot freed up. */}
+          cue that a removal succeeded or failed, or that a slot freed up.
+
+          Named, because the handoff panel has a live region of its own and two
+          unnamed ones on a single screen leave a screen-reader user unable to
+          tell which just spoke. */}
       <p
         className={
           status.kind === "error" ? "upload-status upload-status-error" : "upload-status"
         }
         role="status"
+        aria-label="Changes to your photographs"
       >
-        {status.kind === "uploading" && `Uploading ${status.name}…`}
-        {status.kind === "added" && "Image added to your design."}
         {status.kind === "removed" && "Image removed from your design."}
         {status.kind === "error" && status.message}
       </p>
 
-      {uploads.length > 0 && (
+      {uploads.length > 0 && designId && (
         <ul className="upload-grid" aria-label="Your uploaded images">
           {uploads.map((upload, index) => (
             <li key={upload.id} className="upload-card">

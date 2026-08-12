@@ -82,30 +82,25 @@ class DesignQuestionnaireSerializer(serializers.Serializer):
     schema = QuestionnaireSchemaSerializer()
 
 
-class SelectedInspirationAssetSerializer(serializers.Serializer):
-    """The public catalogue fields for an inspiration that is still eligible."""
-
-    id = serializers.UUIDField()
-    title = serializers.CharField()
-    alt_text = serializers.CharField()
-    garment_type = serializers.CharField()
-    cultural_context = serializers.CharField()
-    attribution = serializers.CharField()
-    image_url = serializers.CharField()
-    thumbnail_url = serializers.CharField()
-
-
 class SelectedInspirationSerializer(serializers.Serializer):
-    """One inspiration selection with its live availability.
+    """One HISTORICAL curated-catalogue selection, made before Phase 22.
 
-    ``available: false`` with ``asset: null`` means the previously-selected
-    asset is no longer publicly eligible (retired, expired or revoked). The
-    reason is deliberately not disclosed."""
+    Phase 22 (ADR 0025) retired the catalogue from the product: no design can
+    gain a selection any more, and the three endpoints that once streamed an
+    asset's bytes and attribution are gone. So the asset object went with them —
+    documenting a payload that named dead URLs would be worse than documenting
+    none — and ``available`` is permanently false, meaning "no longer usable in
+    a design".
+
+    The rows themselves are untouched, as is every ``DesignVersion``'s frozen
+    ``inspiration_context`` acknowledgement, which is rendered from its own
+    snapshot by the result endpoint."""
 
     id = serializers.UUIDField(help_text="The selected inspiration asset id.")
     position = serializers.IntegerField()
-    available = serializers.BooleanField()
-    asset = SelectedInspirationAssetSerializer(allow_null=True)
+    available = serializers.BooleanField(
+        help_text="Always false since the catalogue was retired (ADR 0025)."
+    )
 
 
 class InspirationUploadSerializer(serializers.Serializer):
@@ -128,6 +123,20 @@ class InspirationUploadSerializer(serializers.Serializer):
 
 class InspirationUploadResponseSerializer(serializers.Serializer):
     upload = InspirationUploadSerializer()
+
+
+class DesignReferencesResponseSerializer(serializers.Serializer):
+    """Just the design's own uploaded references, and nothing else.
+
+    The whole point is what is ABSENT. The phone-handoff panel asks "has a
+    photograph arrived yet?" every couple of seconds for as long as a code is
+    live, and answering that with the full design detail meant re-sending the
+    entire versioned questionnaire schema, the customer's saved answers and the
+    latest job snapshot — none of which the question is about, and none of which
+    changes between two polls — over the same shop wifi the customer's phone is
+    using to push the photograph. Widening this payload puts that back."""
+
+    inspiration_uploads = InspirationUploadSerializer(many=True)
 
 
 class InspirationUploadWriteSerializer(serializers.Serializer):
@@ -615,3 +624,118 @@ class RenderSendStateSerializer(serializers.Serializer):
 
 class RenderSendStateResponseSerializer(serializers.Serializer):
     send = RenderSendStateSerializer()
+
+
+class ReferenceUploadGrantSerializer(serializers.Serializer):
+    """A freshly minted handoff grant, returned ONCE to the design's owner.
+
+    ``token`` is the plaintext secret and this is the only response in the whole
+    API that contains it: the row stores a digest, and no later request can read
+    it back. It is a BEARER credential — whoever can see it can add a reference
+    to this design — and the exposure is accepted and bounded (ADR 0026), not
+    removed. It carries no read capability of any kind."""
+
+    id = serializers.UUIDField(help_text="The grant row, for revoking it later.")
+    token = serializers.CharField(
+        help_text=(
+            "The plaintext secret, returned exactly once. Put it in the QR code "
+            "and nowhere else: never a log, never storage, never another response."
+        )
+    )
+    expires_at = serializers.DateTimeField(
+        help_text="When the grant stops working, whatever else happens."
+    )
+    slots_remaining = serializers.IntegerField(
+        min_value=0,
+        help_text=(
+            "How many reference slots the design has left. A grant is spent when "
+            "this reaches zero, and the phone is told no more than any other "
+            "unusable grant would be told."
+        ),
+    )
+
+
+class ReferenceUploadGrantResponseSerializer(serializers.Serializer):
+    grant = ReferenceUploadGrantSerializer()
+
+
+class ReferenceUploadGrantRevokedSerializer(serializers.Serializer):
+    revoked = serializers.IntegerField(
+        min_value=0, help_text="How many live grants this call revoked. Zero is a success."
+    )
+
+
+class GrantUploadWriteSerializer(serializers.Serializer):
+    """The phone-side multipart body.
+
+    ``grant_token`` is the secret, sent in the BODY rather than the URL so it
+    cannot land in a web-server access log, a Referer header or a browser
+    history entry. The client's filename and declared content type are ignored
+    exactly as on the owner's own upload endpoint — only the decoded image is
+    trusted, and the storage key is server-generated."""
+
+    grant_token = serializers.CharField(
+        write_only=True,
+        trim_whitespace=True,
+        max_length=512,
+        help_text="The handoff secret, from the scanned code. Never logged.",
+    )
+    image = serializers.FileField(help_text="The image file. JPEG, PNG or single-frame WebP.")
+    rights_acknowledged = serializers.BooleanField(
+        help_text=(
+            "Must be true, and must be given ON THIS DEVICE by the person "
+            "choosing the image. A tick on the iPad does not carry across."
+        )
+    )
+
+
+class GrantUploadAcceptedSerializer(serializers.Serializer):
+    """What the phone learns after a successful upload — and nothing more.
+
+    One constant field, which is a decision rather than an oversight. Not the
+    design's id, title, answers, versions or images; and — the part that is easy
+    to get wrong — not how many reference slots are left either.
+
+    A remaining-slots count looks harmless and is not. The cap is on the DESIGN
+    and ``MAX_INSPIRATION_IMAGES`` is public, so a caller who knows how many
+    photographs they sent through this code can subtract and recover how many
+    references the design already had before their code existed. In the ordinary
+    shop flow — a stylist adds one photograph on the iPad, then mints a code for
+    the customer — the very first upload would tell the phone that something
+    else was already attached to a design it is not allowed to read. That is a
+    read capability, arrived at by arithmetic, and ADR 0026's non-goal is
+    permanent.
+
+    So the phone learns capacity only by trying: an upload succeeds, or the code
+    answers with the one indistinguishable "no longer usable". That is one bit
+    at a time and each bit is the direct consequence of the caller's own
+    action — which is the least that can be disclosed while the customer is
+    still able to send a photograph at all."""
+
+    accepted = serializers.BooleanField(
+        help_text=(
+            "Always true. A constant, so that the success body carries no "
+            "information beyond the 201 itself — see the class docstring for "
+            "why a remaining-slots count was removed."
+        )
+    )
+
+
+class GrantUploadResponseSerializer(serializers.Serializer):
+    upload = GrantUploadAcceptedSerializer()
+
+
+class WalkInSessionEndedSerializer(serializers.Serializer):
+    """What ending a walk-in session reports back (Phase 22, ADR 0027).
+
+    One boolean, and deliberately nothing else — not the workspace id, not how
+    many designs it held, not how many handoff codes were revoked. The next
+    person to pick up this iPad may be reading the screen, and a count is a
+    fact about the customer who just left."""
+
+    ended = serializers.BooleanField(
+        help_text=(
+            "True when there was a walk-in workspace to hand back, false when "
+            "there was not. Ending twice is not an error."
+        )
+    )

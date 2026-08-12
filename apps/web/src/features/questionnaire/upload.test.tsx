@@ -1,19 +1,34 @@
-// User inspiration uploads (Phase 16B, ADR 0018/0019).
+// The reference step (Phase 16B ADR 0018/0019; the whole step since ADR 0025;
+// the phone handoff alone since ADR 0026's amendment).
 //
-// The load-bearing behaviours here are consent and honesty, not mechanics: the
-// ADR 0019 provider exposure must be readable BEFORE the picker is usable, the
-// affirmation must gate the upload, and every outcome must be announced rather
-// than only drawn.
+// The load-bearing behaviours here are honesty and what is ABSENT: this screen
+// no longer offers a device-local way to add a photograph, and therefore no
+// longer takes a rights affirmation of its own. The affirmation that matters is
+// the phone's, taken from the person who chose the photograph — asserted in
+// `../../app/r/page.test.tsx`, not here, because a screen that cannot upload is
+// the wrong place to claim it.
+//
+// What remains is the budget line, the handoff panel, and removal — removal
+// being the stylist's job, because the phone deliberately has no read or delete
+// capability (ADR 0026).
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { InspirationUpload as Upload } from "@/lib/api";
 
+import { resetHandoffCoordination } from "./handoff-coordination";
 import { InspirationUpload } from "./InspirationUpload";
 
 const uploadImage = vi.fn();
 const removeUpload = vi.fn();
+// The reference step nests the phone-handoff panel (Phase 22, ADR 0026), which
+// mints and revokes grants of its own — and now mints one as soon as it mounts.
+// Stubbed here so this suite never reaches the network; the handoff has its own
+// suite in phone-handoff.test.tsx.
+const createGrant = vi.fn();
+const revokeGrants = vi.fn();
+const fetchReferences = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -21,6 +36,9 @@ vi.mock("@/lib/api", async () => {
     ...actual,
     uploadInspirationImage: (...args: unknown[]) => uploadImage(...args),
     removeInspirationUpload: (...args: unknown[]) => removeUpload(...args),
+    createReferenceGrant: (...args: unknown[]) => createGrant(...args),
+    revokeReferenceGrants: (...args: unknown[]) => revokeGrants(...args),
+    fetchDesignReferences: (...args: unknown[]) => fetchReferences(...args),
   };
 });
 
@@ -35,17 +53,13 @@ function made(id: string, position = 1): Upload {
   };
 }
 
-function file(name = "dress.jpg"): File {
-  return new File([new Uint8Array([1, 2, 3])], name, { type: "image/jpeg" });
-}
-
 function renderUpload(overrides: Partial<React.ComponentProps<typeof InspirationUpload>> = {}) {
   const onChange = vi.fn();
   const utils = render(
     <InspirationUpload
       designId="design-1"
       uploads={[]}
-      slotsRemaining={3}
+      max={3}
       onChange={onChange}
       {...overrides}
     />,
@@ -53,193 +67,104 @@ function renderUpload(overrides: Partial<React.ComponentProps<typeof Inspiration
   return { ...utils, onChange };
 }
 
-function chooser(): HTMLInputElement {
-  return screen.getByLabelText(/Choose an image/i) as HTMLInputElement;
-}
-
-function acknowledge(): void {
-  fireEvent.click(screen.getByRole("checkbox"));
-}
-
 beforeEach(() => {
+  // The handoff's cross-mount coordination outlives a component on purpose,
+  // so a test that stops a code would otherwise suppress the next test's.
+  resetHandoffCoordination();
   uploadImage.mockReset();
   removeUpload.mockReset();
+  createGrant.mockReset();
+  revokeGrants.mockReset();
+  fetchReferences.mockReset();
+  revokeGrants.mockResolvedValue({ ok: true });
+  createGrant.mockResolvedValue({
+    ok: true,
+    grant: {
+      id: "g1",
+      token: "a-plaintext-handoff-secret-value",
+      expires_at: new Date(Date.now() + 900_000).toISOString(),
+      slots_remaining: 3,
+    },
+  });
+  fetchReferences.mockResolvedValue([]);
 });
 
-describe("InspirationUpload — consent", () => {
-  it("discloses the provider exposure before anything can be uploaded", () => {
+describe("InspirationUpload — the phone is the only way in", () => {
+  it("offers no file picker and no camera on this device", () => {
     renderUpload();
-    const disclosure = screen.getByText(/Before you upload, please read this/i).parentElement;
-    expect(disclosure).toHaveTextContent(/perpetual, irrevocable licence/i);
-    expect(disclosure).toHaveTextContent(/train and improve/i);
-    expect(disclosure).toHaveTextContent(/no time limit/i);
-    expect(disclosure).toHaveTextContent(/Replicate/i);
-    expect(disclosure).toHaveTextContent(/cannot undo/i);
+    // Asserted as the absence of any file input at all, not as the absence of
+    // two particular labels: a renamed control would slip past that.
+    expect(document.querySelectorAll('input[type="file"]')).toHaveLength(0);
   });
 
-  it("names the affirmation as the user's own claim, never as verified rights", () => {
+  it("takes no rights affirmation on this device", () => {
+    // Not a weakening. This checkbox only ever gated this screen's own picker
+    // and camera; with those gone it gated nothing. The affirmation is taken on
+    // the PHONE, per upload, from the person who chose the photograph — an
+    // affirmation ticked here by whoever holds the shop's screen was never
+    // allowed to satisfy that one (ADR 0026), and now cannot be mistaken for it.
     renderUpload();
-    const label = screen.getByText(/I have the right to use these images/i);
-    expect(label).toBeInTheDocument();
-    expect(document.body).not.toHaveTextContent(/rights verified/i);
-    expect(document.body).not.toHaveTextContent(/rights.cleared/i);
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
-  it("ties the checkbox to the disclosure for assistive technology", () => {
-    renderUpload();
-    const box = screen.getByRole("checkbox");
-    const describedBy = box.getAttribute("aria-describedby");
-    expect(describedBy).toBeTruthy();
-    expect(document.getElementById(describedBy!)).toHaveTextContent(
-      /perpetual, irrevocable licence/i,
-    );
-  });
-
-  it("says the affirmation covers every image, not just the first", () => {
-    // It stays ticked between uploads, so a second photo is covered by a box
-    // the user ticked while thinking about the first one.
-    renderUpload();
-    expect(screen.getByText(/applies to every image you choose/i)).toBeInTheDocument();
-  });
-
-  it("keeps the file picker disabled until the affirmation is given", () => {
-    renderUpload();
-    expect(chooser()).toBeDisabled();
-    acknowledge();
-    expect(chooser()).toBeEnabled();
-  });
-
-  it("re-disables the picker if the affirmation is withdrawn", () => {
-    renderUpload();
-    acknowledge();
-    expect(chooser()).toBeEnabled();
-    acknowledge();
-    expect(chooser()).toBeDisabled();
-  });
-
-  it("never uploads without the affirmation", () => {
-    renderUpload();
-    fireEvent.change(chooser(), { target: { files: [file()] } });
+  it("never calls the device-local upload endpoint", () => {
+    renderUpload({ uploads: [made("u1")] });
     expect(uploadImage).not.toHaveBeenCalled();
   });
 
-  it("refuses the upload even if the picker is re-enabled underneath it", () => {
-    // The `disabled` attribute is a DOM property, and this gate decides whether
-    // someone's photograph is handed to an external provider under a perpetual
-    // licence. Strip the attribute and fire the event anyway: the handler's own
-    // check must still refuse. Without that check this test fails while the one
-    // above still passes.
+  it("shows the handoff panel rather than a control that reveals it", () => {
     renderUpload();
-    const input = chooser();
-    input.removeAttribute("disabled");
-    expect(input).toBeEnabled();
-
-    fireEvent.change(input, { target: { files: [file()] } });
-
-    expect(uploadImage).not.toHaveBeenCalled();
-    expect(screen.getByRole("status")).toHaveTextContent("");
+    expect(
+      screen.getByRole("heading", { name: /send from your phone/i }),
+    ).toBeInTheDocument();
   });
 });
 
-describe("InspirationUpload — states", () => {
-  it("announces progress then success, and reports the new upload", async () => {
-    uploadImage.mockResolvedValue({ ok: true, upload: made("u1") });
-    const { onChange } = renderUpload();
-    acknowledge();
-
-    fireEvent.change(chooser(), { target: { files: [file("lehenga.jpg")] } });
-
-    expect(await screen.findByText(/Uploading lehenga.jpg/i)).toBeInTheDocument();
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith([made("u1")]));
-    expect(await screen.findByText(/Image added to your design/i)).toBeInTheDocument();
-  });
-
-  it("puts every announcement in a live region", async () => {
-    uploadImage.mockResolvedValue({ ok: true, upload: made("u1") });
-    renderUpload();
-    acknowledge();
-    fireEvent.change(chooser(), { target: { files: [file()] } });
-    const status = await screen.findByRole("status");
-    await waitFor(() => expect(status).toHaveTextContent(/Image added/i));
-  });
-
-  it("shows the backend's reason for a rejection", async () => {
-    uploadImage.mockResolvedValue({
-      ok: false,
-      status: 400,
-      code: "invalid_image",
-      message: "That file could not be read as a JPEG, PNG or single-frame WebP image.",
-    });
-    const { onChange } = renderUpload();
-    acknowledge();
-    fireEvent.change(chooser(), { target: { files: [file("notes.txt")] } });
-    expect(await screen.findByText(/could not be read as a JPEG/i)).toBeInTheDocument();
-    expect(onChange).not.toHaveBeenCalled();
-  });
-
-  it("turns a transport failure into a stated failure, never a silent one", async () => {
-    uploadImage.mockRejectedValue(new Error("network"));
-    const { onChange } = renderUpload();
-    acknowledge();
-    fireEvent.change(chooser(), { target: { files: [file()] } });
-    expect(await screen.findByText(/did not finish/i)).toBeInTheDocument();
-    expect(onChange).not.toHaveBeenCalled();
-  });
-
-  it("lets the same file be retried after a failure", async () => {
-    uploadImage.mockResolvedValueOnce({
-      ok: false,
-      status: 503,
-      code: "storage_unavailable",
-      message: "The image could not be stored. Please try again.",
-    });
-    uploadImage.mockResolvedValueOnce({ ok: true, upload: made("u1") });
-    const { onChange } = renderUpload();
-    acknowledge();
-    const input = chooser();
-    const same = file("same.jpg");
-
-    fireEvent.change(input, { target: { files: [same] } });
-    expect(await screen.findByText(/could not be stored/i)).toBeInTheDocument();
-    // The input is cleared after each selection, so re-choosing the SAME file
-    // still fires a change event — otherwise a retry would appear to do nothing.
-    expect(input.value).toBe("");
-
-    fireEvent.change(input, { target: { files: [same] } });
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith([made("u1")]));
-  });
-});
-
-describe("InspirationUpload — the shared budget", () => {
+describe("InspirationUpload — the reference budget", () => {
+  // The budget used to be SHARED with curated catalogue presets, so the count
+  // was passed in already spent. ADR 0025 left uploads as the only thing
+  // drawing on it, so this component owns the arithmetic — which is why these
+  // vary `uploads` rather than a remaining count.
   it("says how many slots are free", () => {
-    renderUpload({ slotsRemaining: 2 });
-    expect(screen.getByText(/2 of your inspiration slots are free/i)).toBeInTheDocument();
+    renderUpload({ uploads: [made("u1")] });
+    expect(screen.getByText(/2 of 3 free/i)).toBeInTheDocument();
   });
 
-  it("uses the singular for one remaining slot", () => {
-    renderUpload({ slotsRemaining: 1 });
-    expect(screen.getByText(/1 of your inspiration slots is free/i)).toBeInTheDocument();
+  it("says so when the budget is spent", () => {
+    renderUpload({ uploads: [made("u1"), made("u2", 2), made("u3", 3)] });
+    expect(screen.getByText(/all slots are used/i)).toBeInTheDocument();
   });
 
-  it("closes the picker when the shared budget is spent, even with the affirmation given", () => {
-    renderUpload({ slotsRemaining: 0 });
-    acknowledge();
-    expect(chooser()).toBeDisabled();
-    expect(screen.getByText(/used all of your inspiration slots/i)).toBeInTheDocument();
+  it("never reports a negative budget if the cap is lowered below what exists", () => {
+    renderUpload({ max: 1, uploads: [made("u1"), made("u2", 2)] });
+    expect(screen.getByText(/all slots are used/i)).toBeInTheDocument();
+    expect(screen.queryByText(/-1/)).not.toBeInTheDocument();
+  });
+});
+
+describe("InspirationUpload — before the draft exists", () => {
+  it("explains itself rather than rendering nothing", () => {
+    renderUpload({ designId: undefined });
+    expect(screen.getByText(/your design has to exist/i)).toBeInTheDocument();
+  });
+
+  it("mints no handoff code for a design that does not exist yet", () => {
+    renderUpload({ designId: undefined });
+    expect(createGrant).not.toHaveBeenCalled();
   });
 });
 
 describe("InspirationUpload — previews and removal", () => {
   it("renders a preview per upload from the ownership-checked endpoint", () => {
     renderUpload({ uploads: [made("u1"), made("u2", 2)] });
-    const images = screen.getAllByRole("img");
-    expect(images).toHaveLength(2);
-    expect(images[0]).toHaveAttribute(
+    const previews = screen.getAllByAltText(/uploaded inspiration image/i);
+    expect(previews).toHaveLength(2);
+    expect(previews[0]).toHaveAttribute(
       "src",
       "/api/v1/designs/design-1/inspiration-uploads/u1/image/",
     );
     // Never next/image: these bytes must not be proxied or cached.
-    expect(images[0].getAttribute("src")).not.toMatch(/_next\/image/);
+    expect(previews[0].getAttribute("src")).not.toMatch(/_next\/image/);
   });
 
   it("gives each preview a distinguishing accessible name", () => {
@@ -269,7 +194,11 @@ describe("InspirationUpload — previews and removal", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Remove image 1/i }));
 
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/could not be/i));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("status", { name: /changes to your photographs/i }),
+      ).toHaveTextContent(/could not be/i),
+    );
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -289,9 +218,16 @@ describe("InspirationUpload — previews and removal", () => {
     settle({ ok: true });
   });
 
-  it("restores previously persisted uploads without re-uploading", () => {
-    renderUpload({ uploads: [made("u1"), made("u2", 2)] });
-    expect(screen.getAllByRole("img")).toHaveLength(2);
-    expect(uploadImage).not.toHaveBeenCalled();
+  it("puts the removal announcement in its own named live region", () => {
+    // Two live regions on one screen — this one and the handoff panel's — leave
+    // a screen-reader user unable to tell which just spoke unless both are
+    // named.
+    renderUpload({ uploads: [made("u1")] });
+    expect(
+      screen.getByRole("status", { name: /changes to your photographs/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: /arriving from a phone/i }),
+    ).toBeInTheDocument();
   });
 });

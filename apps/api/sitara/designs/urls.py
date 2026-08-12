@@ -78,6 +78,16 @@ urlpatterns = [
         name="design-version-send",
     ),
     re_path(
+        rf"^designs/{_UUID}/reference-grants/?$",
+        views.DesignReferenceGrantView.as_view(),
+        name="design-reference-grant",
+    ),
+    re_path(
+        rf"^designs/{_UUID}/references/?$",
+        views.DesignReferencesView.as_view(),
+        name="design-references",
+    ),
+    re_path(
         rf"^designs/{_UUID}/inspiration-uploads/?$",
         views.DesignInspirationUploadView.as_view(),
         name="design-inspiration-upload-list",
@@ -91,6 +101,22 @@ urlpatterns = [
         rf"^designs/{_UUID}/inspiration-uploads/{_UPLOAD_UUID}/image/?$",
         views.DesignInspirationUploadImageView.as_view(),
         name="design-inspiration-upload-image",
+    ),
+    # No design id in the path: the handoff code names the design, so a grant
+    # for one design has nowhere to express another (ADR 0026). The code itself
+    # travels in the BODY, never the URL, so it cannot reach a web-server access
+    # log, a Referer header or a browser history entry.
+    # Before the `designs/<uuid>/` pattern only for readability — "end-session"
+    # is not a UUID, so the two cannot collide.
+    re_path(
+        r"^designs/end-session/?$",
+        views.WalkInSessionEndView.as_view(),
+        name="walk-in-session-end",
+    ),
+    re_path(
+        r"^reference-uploads/?$",
+        views.ReferenceUploadGrantUploadView.as_view(),
+        name="reference-upload-create",
     ),
     re_path(rf"^jobs/{_JOB_UUID}/?$", views.GenerationJobView.as_view(), name="generation-job"),
 ]

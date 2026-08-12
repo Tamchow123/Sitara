@@ -193,60 +193,29 @@ describe("ReviewSummary", () => {
     expect(screen.queryByText(/still need attention/i)).not.toBeInTheDocument();
   });
 
-  it("shows attribution for a selected inspiration", async () => {
+  it("renders a historical curated selection as a neutral placeholder", async () => {
+    // ADR 0025 retired the catalogue: the payload carries no asset object, no
+    // title and no attribution, so the only honest thing to render for an old
+    // design that still holds a selection is that it has gone.
     mocks.fetchDesign.mockResolvedValue(
-      design({
-        selected_inspirations: [
-          {
-            id: "a",
-            position: 1,
-            available: true,
-            asset: {
-              id: "a",
-              title: "Emerald look",
-              alt_text: "Alt",
-              garment_type: "lehenga",
-              cultural_context: "",
-              attribution: "Photo by Studio A",
-              image_url: "/api/v1/inspiration-assets/a/image/",
-              thumbnail_url: "/api/v1/inspiration-assets/a/thumbnail/",
-            },
-          },
-        ],
-      }),
-    );
-    render(<ReviewSummary designId="d1" />);
-    expect(await screen.findByText("Photo by Studio A")).toBeInTheDocument();
-  });
-
-  it("renders an unavailable selection as a neutral placeholder", async () => {
-    mocks.fetchDesign.mockResolvedValue(
-      design({
-        selected_inspirations: [{ id: "gone", position: 1, available: false, asset: null }],
-      }),
+      design({ selected_inspirations: [{ id: "gone", position: 1, available: false }] }),
     );
     render(<ReviewSummary designId="d1" />);
     expect(await screen.findByText(/no longer available/i)).toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
-  it("explains that questionnaire answers take priority when an inspiration is selected", async () => {
+  it("explains that questionnaire answers take priority when a reference is attached", async () => {
     mocks.fetchDesign.mockResolvedValue(
       design({
-        selected_inspirations: [
+        inspiration_uploads: [
           {
-            id: "a",
+            id: "u1",
             position: 1,
-            available: true,
-            asset: {
-              id: "a",
-              title: "Emerald look",
-              alt_text: "Alt",
-              garment_type: "lehenga",
-              cultural_context: "",
-              attribution: "",
-              image_url: "/api/v1/inspiration-assets/a/image/",
-              thumbnail_url: "/api/v1/inspiration-assets/a/thumbnail/",
-            },
+            width: 900,
+            height: 1200,
+            rights_acknowledged_at: "2026-07-29T00:00:00Z",
+            created_at: "2026-07-29T00:00:00Z",
           },
         ],
       }),
@@ -257,7 +226,7 @@ describe("ReviewSummary", () => {
 
   it("omits the priority note when no inspiration is selected", async () => {
     render(<ReviewSummary designId="d1" />);
-    expect(await screen.findByText("No inspiration images selected.")).toBeInTheDocument();
+    expect(await screen.findByText("No photographs added.")).toBeInTheDocument();
     expect(screen.queryByText(/answers always take priority/i)).not.toBeInTheDocument();
   });
 
@@ -283,7 +252,7 @@ describe("ReviewSummary", () => {
       render(<ReviewSummary designId="d1" />);
 
       expect(await screen.findByText("Your own photographs")).toBeInTheDocument();
-      expect(screen.queryByText("No inspiration images selected.")).not.toBeInTheDocument();
+      expect(screen.queryByText("No photographs added.")).not.toBeInTheDocument();
       expect(screen.getByText(/answers always take priority/i)).toHaveTextContent(
         /sent to the external ai image provider/i,
       );
@@ -311,7 +280,7 @@ describe("ReviewSummary", () => {
     it("keeps the section honest for a design with no images at all", async () => {
       mocks.fetchDesign.mockResolvedValue(design({ inspiration_uploads: [] }));
       render(<ReviewSummary designId="d1" />);
-      expect(await screen.findByText("No inspiration images selected.")).toBeInTheDocument();
+      expect(await screen.findByText("No photographs added.")).toBeInTheDocument();
       expect(screen.queryByText("Your own photographs")).not.toBeInTheDocument();
     });
   });

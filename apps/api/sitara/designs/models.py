@@ -122,6 +122,21 @@ class Design(models.Model):
         self.title = (self.title or "").strip()
         super().save(*args, **kwargs)
 
+    def inspiration_slots_used(self) -> int:
+        """How many of this design's reference slots are already taken.
+
+        Historical curated selections still count. Nothing can add one since
+        ADR 0025, but an old design that holds one has genuinely used the slot
+        — it is still sent to the provider by ``generation.reference_images``
+        while it stays eligible — so ignoring it here would let that design
+        exceed the provider ceiling.
+
+        On the model rather than in ``upload_service`` because the grant mint
+        needs the same authoritative count under its own row lock, and one
+        service importing another for a single read would be a cycle.
+        """
+        return self.inspiration_selections.count() + self.inspiration_uploads.count()
+
 
 class DesignInspiration(models.Model):
     """One inspiration image a user selected for a design, at a position.
@@ -1210,3 +1225,102 @@ class GenerationAttempt(models.Model):
 
     def __str__(self) -> str:
         return f"GenerationAttempt {self.id} ({self.status})"
+
+
+class ReferenceUploadGrant(models.Model):
+    """A short-lived permission to add reference photographs to ONE design,
+    handed to a customer's own phone by QR code (Phase 22, ADR 0026).
+
+    **This row backs a bearer credential, and the exposure is accepted and
+    bounded rather than removed.** Anyone who can see the iPad's screen can
+    photograph the code and use it. That is the same category CLAUDE.md §14
+    already names for signed design-image URLs, and it is stated here so nobody
+    reads the bounds below as elimination:
+
+    - it can only ever ADD a reference to the one design it names — there is no
+      read path behind it, in this app or any other;
+    - it lives minutes, not hours (``REFERENCE_UPLOAD_GRANT_TTL_SECONDS``);
+    - it is spent once the design's reference slots are full;
+    - unlike a signed storage URL it is genuinely revocable, because it resolves
+      through Sitara rather than through the object store — the stylist has a
+      control, and leaving the reference step revokes it automatically.
+
+    The secret itself is NEVER stored. ``token_digest`` is a SHA-256 of the
+    plaintext, which exists only long enough to render the QR; a database dump,
+    a backup or an admin screen therefore yields nothing usable. It is never
+    logged, never returned by any endpoint except the one that mints it for the
+    design's owner, and it is deleted with the design (CASCADE) and so by the
+    ordinary retention purge.
+
+    ``uses`` is an audit counter, not the limit: what bounds a grant is the
+    design's own remaining reference slots, decided under the Design row lock in
+    ``upload_service`` where every other reference passes the same check.
+
+    A design has AT MOST ONE live grant, enforced two ways: the minting service
+    takes the Design row lock so two concurrent mints serialise, and the partial
+    unique constraint below is the database's final word on it. Both are needed.
+    Without the lock two requests each see nothing to revoke; without the
+    constraint the invariant rests on one function remembering to hold a lock.
+    It matters because ADR 0026's whole argument for accepting the bearer
+    exposure is that revocation genuinely works — a race that leaves a
+    photographed code alive after the stylist replaced it would break exactly
+    the control the exposure is accepted on.
+
+    Rows are removed when their design is: the FK cascades, and the Phase 16
+    retention purge deletes aged designs on Celery Beat. There is deliberately
+    no separate sweep for expired or revoked grants — an inert row carrying only
+    a digest is not worth its own job — so until a design ages out its spent
+    grants stay, bounded by the mint throttle rather than by a cleaner."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    design = models.ForeignKey(
+        Design, on_delete=models.CASCADE, related_name="reference_upload_grants"
+    )
+    # SHA-256 hex of the plaintext secret. Unique so a (vanishingly unlikely)
+    # duplicate is a database error rather than two designs sharing one code.
+    # The uniqueness gives us the index for free — the lookup every phone upload
+    # performs is an equality match on exactly this column, and a second
+    # explicit index over it would be maintained on every insert for nothing.
+    token_digest = models.CharField(max_length=64, unique=True, db_index=False)
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    uses = models.PositiveIntegerField(default=0)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    # NOT auto_now_add: the service stamps this from the same instant it
+    # derives ``expires_at`` from, so the CHECK below compares two values taken
+    # from one clock reading. With auto_now_add the expiry is computed before
+    # the insert and the creation stamped during it, and a short enough
+    # configured TTL plus an unlucky pause between the two turns a legitimate
+    # mint into a raw IntegrityError.
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            # Revoking every live grant for one design, and finding them to purge.
+            models.Index(fields=["design", "revoked_at"], name="designs_grant_design_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=~Q(token_digest=""),
+                name="designs_grant_digest_present",
+            ),
+            models.CheckConstraint(
+                condition=Q(expires_at__gt=F("created_at")),
+                name="designs_grant_expiry_after_creation",
+            ),
+            # The database's final word on "at most one live grant per design".
+            # The service's row lock is what produces a clean error instead of a
+            # constraint violation; this is what makes the invariant true even
+            # if some future caller forgets the lock.
+            models.UniqueConstraint(
+                fields=["design"],
+                condition=Q(revoked_at__isnull=True),
+                name="designs_grant_one_live_per_design",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        # Never the digest, and certainly never a plaintext this row does not
+        # hold: an admin list is one of the places a secret would leak from.
+        return f"reference upload grant {self.id} for design {self.design_id}"
