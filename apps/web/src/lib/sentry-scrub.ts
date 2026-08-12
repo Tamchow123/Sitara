@@ -47,13 +47,24 @@ export type SentryEvent = {
 
 const SENSITIVE_HEADERS = new Set(["cookie", "authorization", "x-csrftoken", "x-csrf-token"]);
 
+/** Everything from the first of these onwards is cut off a URL.
+ *
+ * Mirrored by `URL_CUT_MARKERS` in `apps/api/config/sentry.py` and held there
+ * by `sentry-scrub-parity.test.ts` — one rule, two runtimes, and the guarantee
+ * is only ever as good as the weaker of them. */
+export const URL_CUT_MARKERS = /[?#]/;
+
+/** Breadcrumb `data` keys that hold a URL. Mirrored and parity-checked the same
+ * way; a crumb's own `message` is cut too. */
+export const BREADCRUMB_URL_FIELDS = ["url", "to", "from"] as const;
+
 /** Keep the path, drop everything a secret could be hiding in.
  *
  * Cuts at the FIRST `?` or `#`, whichever comes first, so a URL carrying both
  * loses both — and so a fragment is removed even when there is no query string
  * at all, which is exactly the shape `/r#<token>` has. */
 export function scrubUrl(url: string): string {
-  const cut = url.search(/[?#]/);
+  const cut = url.search(URL_CUT_MARKERS);
   return cut === -1 ? url : url.slice(0, cut);
 }
 
@@ -61,7 +72,7 @@ function scrubBreadcrumb(crumb: SentryBreadcrumb): void {
   if (!crumb || typeof crumb !== "object") return;
   const data = crumb.data;
   if (data && typeof data === "object") {
-    for (const key of ["url", "to", "from"]) {
+    for (const key of BREADCRUMB_URL_FIELDS) {
       const value = data[key];
       if (typeof value === "string") data[key] = scrubUrl(value);
     }

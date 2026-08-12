@@ -41,6 +41,74 @@ def _strip_frame_locals(stacktrace) -> None:
                 frame.pop("vars", None)
 
 
+#: Everything from the first of these onwards is cut off a URL. Mirrored by
+#: ``scrubUrl`` in ``apps/web/src/lib/sentry-scrub.ts`` and held there by
+#: ``sentry-scrub-parity.test.ts`` — one rule, two runtimes, and the guarantee
+#: is only ever as good as the weaker of them.
+URL_CUT_MARKERS = "?#"
+
+#: Breadcrumb ``data`` keys that hold a URL. Mirrored and parity-checked the
+#: same way. A breadcrumb's own ``message`` is cut too — a navigation crumb's
+#: message is very often just the URL.
+BREADCRUMB_URL_FIELDS = ("url", "to", "from")
+
+
+def _cut_url(url):
+    """Keep only a URL's path — everything from the first ``?`` OR ``#`` goes.
+
+    The query half has always been dropped: it can carry a signed-URL parameter.
+    The FRAGMENT half is Phase 22's (ADR 0026). A reference upload grant reaches
+    the customer's phone as ``/r#<secret>``, deliberately in the fragment because
+    browsers do not send fragments to servers — but "the server never receives
+    it" is not the same as "nothing on the server could ever hold it", and a
+    scrubber that cut only at ``?`` would sail straight past a URL with no query
+    string at all. Cutting at whichever marker comes first costs nothing and
+    makes the guarantee unconditional.
+
+    Non-strings pass through untouched, so a malformed event cannot raise inside
+    ``before_send`` and lose the whole report."""
+    if not isinstance(url, str):
+        return url
+    for index, character in enumerate(url):
+        if character in URL_CUT_MARKERS:
+            return url[:index]
+    return url
+
+
+def _scrub_breadcrumb_urls(breadcrumbs) -> None:
+    """Apply the same cut to every breadcrumb URL, in both shapes the SDK uses.
+
+    Breadcrumbs are a separate channel from ``request``, and one carrying a
+    navigation URL would otherwise be the one place a fragment could survive.
+    Field for field the same rule as the frontend's ``scrubBreadcrumb`` —
+    ``data.url``/``to``/``from`` plus the crumb's own ``message`` — because a
+    guarantee stated once about "the Sentry scrubber" (CLAUDE.md §13) is worth
+    only as much as its weaker implementation. The two sensitive-HEADER sets
+    deliberately differ: only the backend sees ``x-request-id``.
+
+    An unrecognised shape is left alone rather than raising, consistent with
+    every other guard in this module. That is a fail-open, so a ``sentry-sdk``
+    version bump must re-check the shape a breadcrumb actually has at
+    ``before_send`` time — a changed envelope would silently stop the scrubbing
+    with every test here still green, because these tests supply their own."""
+    if isinstance(breadcrumbs, dict):
+        breadcrumbs = breadcrumbs.get("values")
+    if not isinstance(breadcrumbs, list):
+        return
+    for crumb in breadcrumbs:
+        if not isinstance(crumb, dict):
+            continue
+        data = crumb.get("data")
+        if isinstance(data, dict):
+            for field in BREADCRUMB_URL_FIELDS:
+                if field in data:
+                    data[field] = _cut_url(data[field])
+        if "url" in crumb:
+            crumb["url"] = _cut_url(crumb["url"])
+        if "message" in crumb:
+            crumb["message"] = _cut_url(crumb["message"])
+
+
 def _scrub_exception_values(values) -> None:
     """Reduce every captured exception to its TYPE only — the message and any
     frame locals (both able to embed private data) are removed, mirroring the
@@ -56,7 +124,8 @@ def _scrub_exception_values(values) -> None:
 
 def scrub_event(event, _hint=None):
     """``before_send`` hook (also directly unit-tested). Removes request bodies,
-    cookies, sensitive headers, query strings and user identity; reduces any
+    cookies, sensitive headers, user identity, and everything in a URL from the
+    first ``?`` or ``#`` — in the request AND in every breadcrumb; reduces any
     exception payload to its type (no message, no frame locals); and attaches the
     current correlation ids as tags. Pure dict manipulation — no ``sentry_sdk``
     import needed."""
@@ -70,12 +139,11 @@ def scrub_event(event, _hint=None):
             for name in list(headers):
                 if name.lower() in _SENSITIVE_HEADERS:
                     headers.pop(name, None)
-        url = request.get("url")
-        if isinstance(url, str) and "?" in url:
-            # Drop a query string that could contain a signed-URL parameter.
-            request["url"] = url.split("?", 1)[0]
+        if "url" in request:
+            request["url"] = _cut_url(request["url"])
     # Never attach user identity (email/username/ip).
     event.pop("user", None)
+    _scrub_breadcrumb_urls(event.get("breadcrumbs"))
 
     # Exception message + stack-frame locals may carry secrets/input: strip both,
     # leaving only the exception type and stack location.
