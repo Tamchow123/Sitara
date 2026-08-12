@@ -134,6 +134,58 @@ class TestUploadSuccess:
         assert not decoded.getexif()
         assert b"a private description" not in stored
 
+    def test_a_camera_photograph_is_oriented_then_stripped_of_exif_and_gps(self):
+        """The camera case, asserted on the OUTPUT BYTES rather than on intent.
+
+        A phone photograph is the ordinary input since Phase 22, and it arrives
+        carrying two things that must be handled differently: an orientation
+        flag, which has to be APPLIED (a portrait photo stored as a rotated
+        landscape frame must come out portrait), and a GPS block, which has to
+        be GONE. Getting these the wrong way round would either rotate someone's
+        photograph or publish where they took it."""
+        client = csrf_client()
+        design_id = create_owned_design_id(client)
+
+        # Stored landscape (90 wide, 60 tall) with orientation 6 — "rotate 90°
+        # clockwise for display" — which is exactly what a phone held upright
+        # writes. Correct handling therefore yields a PORTRAIT derivative.
+        buffer = io.BytesIO()
+        image = Image.new("RGB", (90, 60), (120, 40, 70))
+        exif = image.getexif()
+        exif[0x0112] = 6
+        exif[0x010F] = "SomePhone"
+        gps = exif.get_ifd(0x8825)
+        gps[1] = "N"
+        gps[2] = (51.0, 30.0, 0.0)
+        gps[3] = "W"
+        gps[4] = (0.0, 7.0, 0.0)
+        image.save(buffer, format="JPEG", exif=exif.tobytes())
+        original = buffer.getvalue()
+        # Guard the fixture: a test that proves stripping needs the tags to
+        # have been there in the first place.
+        assert Image.open(io.BytesIO(original)).getexif().get_ifd(0x8825)
+
+        response = post_upload(client, design_id, data=original)
+
+        assert response.status_code == 201, response.content
+        payload = response.json()["upload"]
+        # Oriented: the derivative is taller than it is wide.
+        assert payload["height"] > payload["width"]
+
+        upload = DesignInspirationUpload.objects.get(pk=payload["id"])
+        with default_storage.open(upload.storage_key, "rb") as handle:
+            stored = handle.read()
+        decoded = Image.open(io.BytesIO(stored))
+        assert decoded.format == "WEBP"
+        assert decoded.size == (payload["width"], payload["height"])
+        # Stripped: no EXIF block at all, and no GPS sub-IFD inside one.
+        assert not decoded.getexif()
+        assert not decoded.getexif().get_ifd(0x8825)
+        assert decoded.info.get("exif") is None
+        assert decoded.info.get("icc_profile") is None
+        assert b"SomePhone" not in stored
+        assert b"GPS" not in stored
+
     def test_the_upload_appears_on_the_design_detail(self):
         client = csrf_client()
         design_id = create_owned_design_id(client)
@@ -205,6 +257,58 @@ class TestUploadRejection:
         response = post_upload(client, design_id, data=_png_bytes(size=(200, 200)))
         assert response.status_code == 400
         assert response.json()["error"]["code"] == "invalid_image"
+
+    def test_an_oversized_photograph_says_what_to_change(self):
+        """A phone photograph is the ordinary case since Phase 22, and a modern
+        sensor clears the pixel ceiling at its default setting. The refusal is
+        correct and stays; what it must not be is a bare technical no to
+        somebody standing in a shop holding the camera."""
+        settings_max = 40_000_000
+        client = csrf_client()
+        design_id = create_owned_design_id(client)
+        # Shaped like a real capture rather than a synthetic square: a 4:3 frame
+        # a hair over the ceiling, so it is the ceiling being met and not a
+        # decompression-bomb guard further down.
+        response = post_upload(client, design_id, data=_png_bytes(size=(7304, 5478)))
+
+        assert 7304 * 5478 > settings_max
+        assert response.status_code == 400
+        body = response.json()["error"]
+        assert body["code"] == "invalid_image"
+        message = body["message"]
+        assert "40 megapixels" in message
+        assert "lower it" in message.lower()
+        assert "take the photo again" in message.lower()
+        assert not DesignInspirationUpload.objects.exists()
+
+    def test_an_oversized_file_says_what_to_change(self):
+        settings_max_mb = 15
+        client = csrf_client()
+        design_id = create_owned_design_id(client)
+        # Just over the byte ceiling, declared honestly. Incompressible noise so
+        # the file really is that big rather than a run-length illusion.
+        import os
+
+        oversized = os.urandom(settings_max_mb * 1_000_000 + 1024)
+        response = post_upload(client, design_id, data=oversized)
+
+        assert response.status_code in (400, 413)
+        message = response.json()["error"]["message"]
+        assert f"{settings_max_mb} MB" in message
+        assert "smaller copy" in message.lower()
+        assert not DesignInspirationUpload.objects.exists()
+
+    def test_a_size_refusal_never_echoes_the_image_or_a_filename(self):
+        client = csrf_client()
+        design_id = create_owned_design_id(client)
+        response = post_upload(client, design_id, data=_png_bytes(size=(7304, 5478)))
+        body = response.content.decode()
+        # The two size messages are the only "helpful" ones in this pipeline;
+        # helpfulness must not have leaked anything about the image itself.
+        assert "7304" not in body
+        assert "5478" not in body
+        assert "reference.png" not in body
+        assert "storage" not in body.lower()
 
     def test_the_rights_affirmation_is_required(self):
         client = csrf_client()

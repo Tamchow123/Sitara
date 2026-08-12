@@ -57,6 +57,10 @@ function chooser(): HTMLInputElement {
   return screen.getByLabelText(/Choose a file/i) as HTMLInputElement;
 }
 
+function camera(): HTMLInputElement {
+  return screen.getByLabelText(/Take a photo/i) as HTMLInputElement;
+}
+
 function acknowledge(): void {
   fireEvent.click(screen.getByRole("checkbox"));
 }
@@ -217,6 +221,65 @@ describe("InspirationUpload — states", () => {
   });
 });
 
+describe("InspirationUpload — the camera", () => {
+  it("asks the device for its rear camera", () => {
+    renderUpload();
+    expect(camera()).toHaveAttribute("capture", "environment");
+  });
+
+  it("accepts the same narrow formats as the file picker, never image/*", () => {
+    // On iOS the accept list is what makes the camera hand back a JPEG rather
+    // than the HEIC the device stores natively — and HEIC is a format the
+    // server's sanitiser refuses. `image/*` here would turn "take a photo"
+    // into "take a photo and be told it is not an image".
+    renderUpload();
+    expect(camera()).toHaveAttribute("accept", "image/jpeg,image/png,image/webp");
+    expect(camera().getAttribute("accept")).not.toContain("*");
+    expect(camera().getAttribute("accept")).toBe(chooser().getAttribute("accept"));
+  });
+
+  it("uploads a captured photograph through exactly the same path as a chosen file", async () => {
+    // `capture` is a hint. A browser that ignores it opens an ordinary picker,
+    // so the control has to behave correctly for a file that did not come from
+    // a camera at all — which it does, because both inputs run one handler.
+    uploadImage.mockResolvedValue({ ok: true, upload: made("u1") });
+    const { onChange } = renderUpload();
+    acknowledge();
+
+    fireEvent.change(camera(), { target: { files: [file("IMG_0001.jpg")] } });
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith([made("u1")]));
+    expect(uploadImage).toHaveBeenCalledWith("design-1", expect.any(File), true);
+  });
+
+  it("is gated by the affirmation exactly like the file picker", () => {
+    renderUpload();
+    expect(camera()).toBeDisabled();
+    acknowledge();
+    expect(camera()).toBeEnabled();
+  });
+
+  it("surfaces a server refusal of an oversized photograph verbatim", async () => {
+    // The server's message names what to change; the client must not flatten
+    // it into a generic failure, because a customer holding a camera can act
+    // on the first and not the second.
+    uploadImage.mockResolvedValue({
+      ok: false,
+      message:
+        "That photograph is larger than 40 megapixels. Your camera is probably " +
+        "set to its highest resolution — lower it and take the photo again, or " +
+        "send a smaller copy of it.",
+    });
+    renderUpload();
+    acknowledge();
+
+    fireEvent.change(camera(), { target: { files: [file("huge.jpg")] } });
+
+    expect(await screen.findByText(/larger than 40 megapixels/i)).toBeInTheDocument();
+    expect(screen.getByText(/lower it and take the photo again/i)).toBeInTheDocument();
+  });
+});
+
 describe("InspirationUpload — the reference budget", () => {
   // The budget used to be SHARED with curated catalogue presets, so the count
   // was passed in already spent. ADR 0025 left uploads as the only thing
@@ -236,6 +299,7 @@ describe("InspirationUpload — the reference budget", () => {
     renderUpload({ uploads: [made("u1"), made("u2", 2), made("u3", 3)] });
     acknowledge();
     expect(chooser()).toBeDisabled();
+    expect(camera()).toBeDisabled();
     expect(screen.getByText(/used all of your reference slots/i)).toBeInTheDocument();
   });
 

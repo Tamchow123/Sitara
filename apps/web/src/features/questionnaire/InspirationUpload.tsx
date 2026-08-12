@@ -57,6 +57,7 @@ export function InspirationUpload({ designId, uploads, max, onChange }: Props) {
   const acknowledgeId = useId();
   const helpId = useId();
   const fileInputId = `${acknowledgeId}-file`;
+  const cameraInputId = `${acknowledgeId}-camera`;
 
   const slotsRemaining = Math.max(max - uploads.length, 0);
   const full = slotsRemaining <= 0;
@@ -184,6 +185,35 @@ export function InspirationUpload({ designId, uploads, max, onChange }: Props) {
         <h3 className="upload-ways-heading" id={`${helpId}-ways`}>
           Ways to add a photograph
         </h3>
+
+        {/* `capture` asks the device for its rear camera. It is a HINT: a
+            browser that does not honour it opens an ordinary file picker
+            instead, which is why the control is labelled by what the person
+            gets ("Take a photo") and why both inputs run the same handler —
+            whichever dialogue opens, the result is one chosen file.
+
+            The accept list is the same narrow one as the file picker rather
+            than `image/*`. On iOS that is what makes the camera hand back a
+            JPEG instead of the HEIC the device stores natively, and HEIC is a
+            format the sanitiser refuses. Widening this to `image/*` would turn
+            "take a photo" into "take a photo and be told it is not an
+            image". */}
+        <div className="upload-way">
+          <input
+            type="file"
+            accept={ACCEPTED}
+            capture="environment"
+            className="upload-input"
+            id={cameraInputId}
+            onChange={onSelect}
+            disabled={!canAdd}
+            aria-describedby={helpId}
+          />
+          <label className="upload-label" htmlFor={cameraInputId}>
+            Take a photo
+          </label>
+        </div>
+
         <div className="upload-way">
           <input
             type="file"
