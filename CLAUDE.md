@@ -235,14 +235,27 @@ Start with `git status --short`, `git log -5 --oneline`, `docker compose ps`. Ru
 **Backend**: `docker compose config`; `docker compose build api`; `docker compose up -d`; then inside `api`: `manage.py check`, `manage.py makemigrations --check --dry-run`, `pip check`, `pytest`, `ruff check .`, `ruff format --check .`.
 
 **Frontend**: `npm --prefix apps/web run lint`, `... run typecheck`, `... test -- --run`, `... run build`.
-Run these on the HOST, not inside the `web` container. A handful of tests deliberately read files
-outside the `apps/web` Docker build context — `design-tokens.test.ts` reads the vendored design
-system at `design_handoff_sitara_flow/`, and `features/annotations/render-parity.test.ts` reads
-`apps/api/sitara/media/annotation_render.py` — so `docker compose exec web npm test` reports a
-batch of failures (the design-token contrast assertions plus the palette-parity ones) that exist
-neither on the host nor in CI. Both throw rather than skip on purpose: a silently-passing
-transcription check is worse than a loud environment-specific failure. Lint covers `src`, `e2e`
-and `playwright.config.ts` at `--max-warnings 0`.
+Run these on the HOST, not inside the `web` container. Four tests deliberately read files outside
+the `apps/web` Docker build context, and none of the four is reachable from the `web` service's
+mounts (`apps/web/src`, `apps/web/public`, `apps/api/openapi`, `contracts`):
+
+| Test | Reads |
+| --- | --- |
+| `app/design-tokens.test.ts` | the vendored design system at `design_handoff_sitara_flow/` |
+| `features/annotations/render-parity.test.ts` | `apps/api/sitara/media/annotation_render.py` |
+| `features/questionnaire/screens.test.ts` | `apps/api/sitara/questionnaire/fixtures/questionnaire_v4.json` |
+| `lib/sentry-scrub-parity.test.ts` | `apps/api/config/sentry.py` |
+
+So `docker compose exec web npm test` reports a batch of failures — the design-token contrast
+assertions, the mark-palette parity ones, the v4 screen-plan ones and the Sentry-scrubber parity
+ones — that exist neither on the host nor in CI. All four fail LOUDLY rather than skipping, on
+purpose: a silently-passing transcription check is worse than a loud environment-specific failure.
+Adding a fifth such test means adding a row here.
+
+`features/questionnaire/validation.test.ts` also reads outside `apps/web`, but is **not** in that
+list: `contracts/` is bind-mounted into the container precisely so the shared Django/Vitest
+validation contract works on both sides. Lint covers `src`, `e2e` and `playwright.config.ts` at
+`--max-warnings 0`.
 
 **End-to-end (Phase 17, extended by Phase 19 — Phase 18 was skipped, so this is the
 whole E2E story)**: CI's `e2e` job runs the **functional** specs against the real
