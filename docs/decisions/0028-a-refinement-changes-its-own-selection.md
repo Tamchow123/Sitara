@@ -167,6 +167,30 @@ image. That is disclosed rather than hidden: the result carries
 brief but the pack had no closer image, and that live generation would produce a
 new one. Demo output is never presented as a fresh provider render.
 
+**Demo mode has to reconcile two vocabularies, not one, and the second is the
+same failure pattern in miniature.** A candidate value must be *legal* (the
+design's own questionnaire accepts it) **and** *describable* — the demo engine
+writes a human brief, and its phrase tables (`demo/refinement_engine.py`'s
+`_FIELD_PHRASES`, beside `demo/phrases.py`) are maintained separately from the
+questionnaire schema. Two individually-correct tables, and the same empty
+intersection waiting to happen: a questionnaire option added without a matching
+phrase would silently narrow what a demo refinement can say. Two lines of
+defence, both added by this phase after a real gap was found in exactly this way
+(`dupatta_colour`'s `match_fabric`, which is a relationship rather than a colour
+and has no phrase by design):
+
+- `_describable_alternatives` is the runtime backstop — a legal value with no
+  phrase is dropped from the candidate set rather than emitted as a raw machine
+  string in a customer-facing brief.
+- A structural test walks every legal candidate of every category against the
+  phrase tables and fails when one is undescribable, with a small
+  `UNDESCRIBABLE_BY_DESIGN` table naming each deliberate exception and its
+  reason. That table is itself guarded: an entry that stops being reachable is a
+  failure too, so the exceptions cannot go stale silently.
+
+Recording it here rather than only in code comments, because it is the same
+decision-drift this ADR exists to describe.
+
 ### 7. `PROMPT_BUILDER_VERSION` deliberately does not move
 
 The builder is unchanged. This phase changes what it is *given*, not how it
