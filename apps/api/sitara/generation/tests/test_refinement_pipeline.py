@@ -79,10 +79,14 @@ def _as_result(payload: dict) -> StructuredDesignResult:
 def _refined_result(spec_payload) -> StructuredDesignResult:
     """A legal ``colour_story`` refinement — the default category these tests
     enqueue. Use ``_as_result(apply_allowed_edit(spec, change_type))`` when the
-    category matters."""
-    refined = copy.deepcopy(spec_payload)
-    refined["colour_story"]["palette_summary"] = "An updated blush and champagne palette summary."
-    return _as_result(refined)
+    category matters.
+
+    Moves the canonical colour selection, not just the palette prose. A
+    narrative-only payload is now refused as no change at all, because the
+    prompt builder renders none of it — so a fixture that changed only prose
+    would make every pipeline test here fail for a reason that has nothing to
+    do with what it is testing."""
+    return _as_result(apply_allowed_edit(spec_payload, "colour_story"))
 
 
 def _generated_design(*, storage=None, image=None, seed_factory=None):
@@ -129,7 +133,7 @@ class TestHappyPath:
         version = DesignVersion.objects.get(pk=result.design_version_id)
         assert version.version_number == 2
         assert version.parent_version_id == v1.pk
-        assert version.design_spec_template_version == "refinement-2.0.0"
+        assert version.design_spec_template_version == "refinement-3.0.0"
         # The same deterministic prompt builder ran against the refined spec.
         assert version.prompt_builder_version == PROMPT_BUILDER_VERSION
         assert version.image_prompt != ""
@@ -380,11 +384,14 @@ class TestNoImageToImageInput:
 
         # NOT colour_story: that category is the one ADR 0028 suppresses
         # references for, and this test is about what happens when they ARE
-        # sent. `fabric_and_texture`'s narrative allowlist includes
-        # `colour_story`, so `_refined_result` is a legal output for it too.
+        # sent. The refined payload must therefore be built for THIS category —
+        # `_refined_result` moves the canonical colour selection, which
+        # `fabric_and_texture` may not touch.
         attempt = _enqueue_refinement(design, v1, change_type="fabric_and_texture")
         refined_provider = mock.Mock()
-        refined_provider.generate.return_value = _refined_result(v1.design_spec)
+        refined_provider.generate.return_value = _as_result(
+            apply_allowed_edit(v1.design_spec, "fabric_and_texture")
+        )
         image_provider = FakeImageProvider()
 
         result = _run(attempt, structured=refined_provider, image=image_provider, storage=storage)

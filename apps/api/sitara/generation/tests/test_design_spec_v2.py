@@ -26,6 +26,7 @@ from sitara.generation.refinement import COLOUR_STORY, NECKLINE
 from sitara.generation.refinement_service import (
     RefinementOutputCategory,
     RefinementOutputRejected,
+    _NoChangeInAttempt,
     _validate_refined_output,
 )
 from sitara.generation.services import generate_design_spec_for_design
@@ -183,12 +184,24 @@ class TestRefiningTheCanonicalNecklineOfAV2Spec:
         payload["coverage_and_drape"]["sleeves"] = "Full-length fitted sleeves reaching the wrists."
         return validate_design_spec(payload)
 
-    def test_allowed_narrative_refinement_of_a_v2_spec_passes(self):
+    def test_a_narrative_only_refinement_of_a_v2_spec_is_no_change_at_all(self):
+        # styling_notes IS inside colour_story's allowlist, so this is not an
+        # out-of-category rejection — the exception type is the whole point.
+        # The prompt builder renders no styling_notes, so the concept the
+        # customer is looking at would come back identical.
         source = self._v2_source_spec()
         refined = source.model_dump(mode="json")
         refined["styling_notes"] = ["A fresh, distinct styling suggestion for local review."]
+        with pytest.raises(_NoChangeInAttempt):
+            _validate_refined_output(refined, source, COLOUR_STORY)
+
+    def test_a_canonical_colour_refinement_of_a_v2_spec_passes(self):
+        source = self._v2_source_spec()
+        refined = source.model_dump(mode="json")
+        refined["source_selections"]["colour_palette"] = ["emerald", "gold"]
         spec = _validate_refined_output(refined, source, COLOUR_STORY)
         assert spec.schema_version == 2
+        # Untouched by a colour refinement, and still there afterwards.
         assert spec.source_selections.neckline_style == "high_neck"
 
     def test_the_neckline_category_may_change_it(self):

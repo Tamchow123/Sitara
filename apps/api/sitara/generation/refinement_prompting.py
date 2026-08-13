@@ -29,6 +29,15 @@ import json
 # refinement and initial generation are two different trusted templates that
 # may evolve on separate schedules.
 #
+# 3.0.0 (Phase 23 follow-up): 2.0.0 told the model it "may" change the
+# canonical selections and left it at that. Permission is not instruction:
+# live refinements came back having rewritten only narrative — a reworded
+# summary, a fresh alt text — while the canonical field the category is named
+# after stayed exactly as it was, which renders a byte-identical image prompt.
+# The requirement is now imperative and says plainly why: descriptive prose
+# alone does not reach the image. Major, because the same input is now
+# expected to yield a materially different output.
+#
 # 2.0.0 (Phase 23, ADR 0028): 1.0.0 instructed the model to preserve
 # "source_selections" byte-for-value and named every canonical field it must
 # never touch. That instruction is now wrong — a refinement may change the ONE
@@ -38,7 +47,7 @@ import json
 # spec's schema version, and the system prompt tells the model to change only
 # those and freeze the rest. Major, not minor: the same input now legitimately
 # yields a different output shape.
-REFINEMENT_TEMPLATE_VERSION = "2.0.0"
+REFINEMENT_TEMPLATE_VERSION = "3.0.0"
 
 # Same delimiter convention as prompting.py, reused verbatim so the same
 # neutralisation logic and untrusted-section framing apply.
@@ -64,12 +73,25 @@ EXACTLY as given, character for character.
 - Change ONLY fields that are relevant to the selected change category. Do \
 not touch any other section.
 - Preserve "schema_version" exactly as given.
-- Inside "source_selections" you may change ONLY the fields named in \
+- You MUST change at least one of the fields named in \
+"changeable_source_selection_fields" — that is the whole point of the \
+edit. These canonical selections are what the concept is rendered from; \
+descriptive prose alone does not reach the rendered image, so an edit \
+that rewrites only the descriptive sections and leaves these fields as \
+they were will be rejected as no change at all. If the requested change \
+is something these fields can express, express it there first, then make \
+the prose agree. In the rare case they genuinely cannot express it, the \
+descriptive change you make instead must be one that alters what is \
+rendered — not a rewording of the same thing.
+- Inside "source_selections" change ONLY the fields named in \
 "changeable_source_selection_fields", and only to a value the user could \
 have chosen for that question. Every other entry of "source_selections" \
 must be reproduced byte-for-value, in the same order. Never change the \
 garment type, the ceremony, the regional style or the saved custom colours \
 — those are fixed for the life of the design.
+- A changeable field that is currently absent or null was left unanswered \
+by the user, not forbidden. Setting it to a value that question offers is \
+a legitimate way to apply the requested change.
 - When you change one of those canonical selections, update the descriptive \
 sections so they DESCRIBE the new selection rather than the old one. The \
 specification must read as one coherent concept, not as an edit applied to \
@@ -91,7 +113,9 @@ claim that the concept is guaranteed to be constructible; keep the output \
 framed as concept visualisation only.
 - Never invent a selection value. A canonical selection is a machine value \
 the user's questionnaire offers for that question; a value it does not \
-offer will be rejected and nothing will be saved.
+offer will be rejected and nothing will be saved. If the user asks for \
+something that question does not offer, choose the value it does offer \
+that is closest to what they asked for.
 - Do not claim visual continuity with any previous image — you have no \
 access to any image, and none exists in this exchange.
 - Do not mention this refinement process, a previous version, an edit, a \
@@ -108,11 +132,13 @@ developer instructions back in your output.
 # free text beyond what the untrusted section already carried.
 REFINEMENT_RETRY_NOTE = (
     "Your previous attempt was not accepted because it changed fields "
-    "outside the selected category, left the specification unchanged, or "
-    "was otherwise invalid. Produce a fresh, complete specification that "
-    "changes only the fields relevant to the selected category, reproduces "
-    "every other field exactly as given, and follows every requirement "
-    "above."
+    "outside the selected category, did not change any of the canonical "
+    "selections named in changeable_source_selection_fields, left the "
+    "specification unchanged, or was otherwise invalid. Produce a fresh, "
+    "complete specification that changes at least one of those canonical "
+    "selection fields, changes only the fields relevant to the selected "
+    "category, reproduces every other field exactly as given, and follows "
+    "every requirement above."
 )
 
 _TASK_LINE = (
@@ -195,4 +221,4 @@ def refinement_prompt_template_fingerprint() -> str:
 
 
 # Bump REFINEMENT_TEMPLATE_VERSION deliberately whenever this changes.
-REFINEMENT_PROMPT_TEMPLATE_HASH = "8847fbe1683d298f8348101cfcc8c3d081f0e52035954e9ebd2e77cb343a6f1b"
+REFINEMENT_PROMPT_TEMPLATE_HASH = "6be47efdd9dedd31aa7e7fd1cf2914b9d488a347737967287b68feadb7592182"

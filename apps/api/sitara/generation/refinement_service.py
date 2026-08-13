@@ -42,6 +42,7 @@ from .design_spec import (
 )
 from .input_safety import GeneratedContentRejected, contains_phrase, iter_strings
 from .inspiration_context import InspirationContextSnapshot, inspiration_context_sha256
+from .prompt_builder import ImagePromptBuildError, build_image_prompt
 from .refinement import (
     REFINEMENT_IMMUTABLE_ROOTS,
     REFINEMENT_IMMUTABLE_SELECTION_FIELDS,
@@ -312,6 +313,48 @@ def _assert_no_refinement_process_leakage(spec: DesignSpec) -> None:
         raise RefinementOutputRejected(RefinementOutputCategory.PROCESS_MENTIONED)
 
 
+def _assert_the_image_prompt_actually_moved(source_spec: DesignSpec, spec: DesignSpec) -> None:
+    """Raise :class:`_NoChangeInAttempt` when the refined spec renders to the
+    SAME image prompt as the source.
+
+    The check that was missing, and the reason ADR 0028 did not land in the live
+    path. Everything above decides whether an edit was *permitted*; nothing made
+    it *effective*. A spec-level diff is satisfied by any narrative tweak — a
+    reworded ``concept_summary``, a fresh ``image_alt_text`` — and prompt builder
+    8.x deliberately renders almost none of that narrative, so an attempt could
+    pass every check above and still produce a byte-identical prompt. Observed
+    live: a neckline refinement that rewrote four narrative fields, left
+    ``source_selections.neckline_style`` at ``square_neck``, and rendered a
+    1423-character prompt identical to its source. The image differed only
+    because the provider is non-deterministic, which is exactly the "nothing
+    changed" the phase exists to end.
+
+    Compares RENDERED PROMPTS rather than requiring a canonical selection to
+    move, because the canonical field is not always the path that reaches the
+    image: builder 8.x drops ``fabrics_and_texture`` only *when canonical
+    fabrics exist*, so for a concept without them the narrative genuinely is
+    what renders. Requiring a canonical change would refuse those legitimately;
+    requiring the prompt to differ is the exact promise the product makes.
+
+    Both prompts are built from specs with the CURRENT builder — never compared
+    against the source version's persisted ``image_prompt``, which may have been
+    built by an earlier ``PROMPT_BUILDER_VERSION`` and would make an unchanged
+    render look changed.
+
+    Raises the retryable "no change" signal rather than a rejection, so the
+    model gets its one corrected attempt and an exhausted refinement fails with
+    the honest ``RefinementNoChangeProduced`` instead of charging for a concept
+    that looks identical.
+
+    May also raise :class:`~sitara.generation.prompt_builder.ImagePromptBuildError`
+    — a refined spec whose every field is individually clean can still assemble
+    into a prompt the final scan refuses. The caller treats that as one more
+    invalid attempt, deliberately: a spec that cannot be rendered must never be
+    persisted, and it must not cost the corrected attempt either."""
+    if build_image_prompt(spec) == build_image_prompt(source_spec):
+        raise _NoChangeInAttempt()
+
+
 def _validate_refined_output(
     payload: dict, source_spec: DesignSpec, change_type: str, design=None
 ) -> DesignSpec:
@@ -346,6 +389,7 @@ def _validate_refined_output(
     allowed_roots = refinement_allowed_paths(change_type, source_spec.schema_version)
     if any(not path_is_allowed(path, allowed_roots) for path in changed_paths):
         raise RefinementOutputRejected(RefinementOutputCategory.DISALLOWED_FIELD_CHANGED)
+    _assert_the_image_prompt_actually_moved(source_spec, spec)
     # The replacement for ADR 0015's exact-echo guarantee. Everything above
     # decides WHICH canonical field may move; this decides whether the value it
     # moved to is one the user could have chosen — under the design's own pinned
@@ -463,6 +507,16 @@ def _generate_valid_refined_spec(
                 # offered. Retryable like every other invalid output: the model
                 # gets one corrected attempt, then the whole refinement fails.
                 RefinedSelectionsInvalid,
+                # The refined spec cannot be RENDERED. Reachable only through
+                # the guard below, and only through the one check the earlier
+                # per-field scan structurally cannot make: `build_image_prompt`
+                # scans the ASSEMBLED prompt, so a denylisted phrase or URL
+                # formed across the join between two individually-clean fields
+                # is caught here and nowhere before. Retryable like every other
+                # invalid output — without this the attempt would escape as an
+                # unclassified error, skip the remaining retry, and lose the
+                # corrected attempt this guard exists to guarantee.
+                ImagePromptBuildError,
             ) as exc:
                 no_change_only = False
                 logger.warning(

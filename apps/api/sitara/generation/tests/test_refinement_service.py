@@ -11,9 +11,12 @@ from sitara.ai_gateway.structured_design import StructuredDesignResult
 from sitara.designs.models import DesignVersion, GenerationAttempt
 from sitara.generation import cost_control
 from sitara.generation.context import build_generation_context
+from sitara.generation.demo.design_spec_engine import build_demo_design_spec
 from sitara.generation.design_spec import (
     DESIGN_SPEC_SCHEMA_VERSION,
+    SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS,
     DesignSpec,
+    validate_design_spec,
 )
 from sitara.generation.fixture_provider import build_fixture_spec
 from sitara.generation.inspiration_context import (
@@ -23,6 +26,7 @@ from sitara.generation.inspiration_context import (
     InspirationProviderCues,
     inspiration_context_sha256,
 )
+from sitara.generation.prompt_builder import build_image_prompt
 from sitara.generation.refinement import (
     REFINEMENT_CHANGE_TYPES,
     canonical_refinement_fields,
@@ -41,7 +45,12 @@ from sitara.generation.refinement_service import (
     generate_refined_design_spec_for_design,
 )
 
-from .factory import make_complete_design, make_complete_v4_design, make_source_version
+from .factory import (
+    make_complete_design,
+    make_complete_v3_design,
+    make_complete_v4_design,
+    make_source_version,
+)
 from .fakes import SequenceProvider
 from .test_refinement_prompt_effect import SOURCE_SPEC, canonical_refinement
 
@@ -109,8 +118,15 @@ def refinement_request(change_type: str, note: str = ""):
     )
 
 
-# Exactly one allowed-field edit per category, matching REFINEMENT_ALLOWED_PATHS.
-_ALLOWED_EDITS = {
+# Exactly one NARRATIVE edit per category, matching REFINEMENT_ALLOWED_PATHS.
+#
+# On their own these are the shape of output that shipped the Phase 23 defect: a
+# spec-level diff is satisfied, every allowlist check passes, and prompt builder
+# 8.x renders none of it, so the image prompt comes out byte-identical. Kept as a
+# separate table precisely so a test can produce that output deliberately — see
+# TestTheRenderedPromptMustActuallyMove — and no longer used alone to stand for
+# "a successful refinement".
+_NARRATIVE_ONLY_EDITS = {
     "colour_story": lambda spec: spec["colour_story"].__setitem__(
         "palette_summary", "An updated blush and champagne palette summary."
     ),
@@ -134,10 +150,43 @@ _ALLOWED_EDITS = {
     ),
 }
 
+# The CANONICAL half: for each category, a real questionnaire-v1 option value
+# that differs from COMPLETE_ANSWERS and is legal for this design's garment
+# (a lehenga, so dupatta_style is asked and saree_drape is not). These are what
+# the deterministic prompt builder actually renders, so these are what make a
+# refinement visible. `neckline` is absent because a version-1 spec has no
+# neckline_style field at all (ADR 0028) — it is refused, not refined.
+_CANONICAL_EDITS = {
+    "colour_story": ("colour_palette", ["emerald", "gold"]),
+    "fabric_and_texture": ("fabrics", ["velvet", "organza"]),
+    "embellishment": ("embellishment_density", "heavy"),
+    "sleeves_and_coverage": ("coverage_preferences", ["elbow_sleeves", "high_neckline"]),
+    "dupatta_or_saree_drape": ("dupatta_style", "one_shoulder"),
+    "silhouette_detail": ("silhouette", "a_line_lehenga"),
+}
+
+
+def apply_narrative_only_edit(spec_payload: dict, change_type: str) -> dict:
+    """An in-category edit that touches ONLY fields the image prompt drops.
+
+    Valid by every rule the service enforced before this guard existed, and
+    inert in the thing the customer looks at."""
+    refined = copy.deepcopy(spec_payload)
+    _NARRATIVE_ONLY_EDITS[change_type](refined)
+    return refined
+
 
 def apply_allowed_edit(spec_payload: dict, change_type: str) -> dict:
-    refined = copy.deepcopy(spec_payload)
-    _ALLOWED_EDITS[change_type](refined)
+    """A realistic successful refinement: the canonical selection MOVES, and the
+    descriptive prose is updated to agree with it.
+
+    Until this phase's follow-up these fixtures changed narrative alone, which is
+    why "every category succeeds" passed while a live refinement changed nothing
+    — the tests were asserting the same inert output the provider was returning.
+    """
+    refined = apply_narrative_only_edit(spec_payload, change_type)
+    field, value = _CANONICAL_EDITS[change_type]
+    refined["source_selections"][field] = copy.deepcopy(value)
     return refined
 
 
@@ -181,8 +230,11 @@ class TestSuccessfulRefinementPerCategory:
 
     def test_multiple_allowed_changes_in_one_category_succeeds(self):
         design, source, spec_payload = make_ready_design()
-        refined = copy.deepcopy(spec_payload)
-        refined["colour_story"]["palette_summary"] = "An updated palette."
+        # The canonical move is what makes this a refinement at all; the three
+        # narrative edits ride along to prove several allowlisted paths may move
+        # together. Without the canonical one the prompt would not budge and the
+        # service would rightly call it no change.
+        refined = apply_allowed_edit(spec_payload, "colour_story")
         refined["colour_story"]["rationale"] = "An updated rationale for the palette."
         refined["styling_notes"] = ["A new styling note."]
         provider = SequenceProvider([_result(refined)])
@@ -194,6 +246,47 @@ class TestSuccessfulRefinementPerCategory:
             version.design_spec["colour_story"]["rationale"]
             == "An updated rationale for the palette."
         )
+        # Prose alone is what this test used to assert, and prose alone is the
+        # defect. Both halves are pinned now: the canonical selection really
+        # moved, and the concept really renders differently for it.
+        assert version.design_spec["source_selections"]["colour_palette"] == ["emerald", "gold"]
+        assert build_image_prompt(validate_design_spec(version.design_spec)) != build_image_prompt(
+            validate_design_spec(spec_payload)
+        )
+
+
+@pytest.mark.django_db
+class TestTheGuardCannotItselfBreakARefinement:
+    """The guard calls ``build_image_prompt`` inside output validation, so the
+    builder's totality over a validated spec is now load-bearing for refinement
+    and not only for initial generation."""
+
+    # One design factory per DesignSpec schema version, derived from the
+    # supported set rather than hand-listed, so a new version that nobody wires
+    # up here fails loudly instead of going unrendered and untested.
+    _DESIGN_FOR_VERSION = {
+        1: make_complete_design,
+        2: make_complete_v3_design,
+        3: make_complete_v4_design,
+    }
+
+    def test_every_supported_version_has_a_factory(self):
+        assert set(self._DESIGN_FOR_VERSION) == set(SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS)
+
+    @pytest.mark.parametrize("schema_version", sorted(SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS))
+    def test_the_builder_renders_every_supported_schema_version(self, schema_version):
+        # If a future schema version reached the guard unrenderable, a perfectly
+        # good refinement would die on an unclassified exception instead of a
+        # controlled code — a worse failure than the one the guard fixes.
+        # The DEMO spec engine, not build_fixture_spec: the fixture builder is
+        # version-1 shaped and rejects a v4 design's per-role colours outright,
+        # while the demo engine is the version-aware local builder every
+        # zero-cost path already uses.
+        design = self._DESIGN_FOR_VERSION[schema_version]()
+        payload = build_demo_design_spec(build_generation_context(design))
+        spec = validate_design_spec(payload)
+        assert spec.schema_version == schema_version
+        assert build_image_prompt(spec)
 
 
 class TestCanonicalSelectionRefinement:
@@ -325,6 +418,91 @@ class TestRejectedChanges:
                 design, source, refinement_request("colour_story"), provider=provider
             )
         assert not DesignVersion.objects.filter(design=design, version_number=2).exists()
+
+    def test_a_narrative_only_change_is_no_change_at_all(self):
+        # The exact output that shipped the defect. Every allowlist check
+        # passes; the prompt builder renders none of it; the prompt comes back
+        # byte-identical. Observed live on 2026-08-13 for a neckline request
+        # that rewrote four narrative fields and left neckline_style alone.
+        design, source, spec_payload = make_ready_design()
+        inert = apply_narrative_only_edit(spec_payload, "colour_story")
+        assert inert != spec_payload, "the fixture must really differ at spec level"
+        provider = SequenceProvider([_result(inert), _result(copy.deepcopy(inert))])
+
+        # NoChangeProduced, not GenerationFailed: the output was well-formed and
+        # in-category. It simply did nothing, and that is its own honest answer.
+        with pytest.raises(RefinementNoChangeProduced):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request("colour_story"), provider=provider
+            )
+        assert not DesignVersion.objects.filter(design=design, version_number=2).exists()
+
+    def test_an_inert_first_attempt_is_retried_and_a_real_change_accepted(self):
+        # The retry earns its place here: the model gets one corrected attempt
+        # to move the canonical selection instead of the refinement being lost.
+        design, source, spec_payload = make_ready_design()
+        provider = SequenceProvider(
+            [
+                _result(apply_narrative_only_edit(spec_payload, "colour_story")),
+                _result(apply_allowed_edit(spec_payload, "colour_story")),
+            ]
+        )
+
+        version = generate_refined_design_spec_for_design(
+            design, source, refinement_request("colour_story"), provider=provider
+        )
+
+        assert version.version_number == 2
+        # The whole point, asserted directly rather than inferred from the spec.
+        # Compared as RENDERED PROMPTS of the two specs, not against either row's
+        # image_prompt column: this service does not persist one (the pipeline's
+        # prompt stage does, later), so a column comparison here would pass
+        # against an empty string no matter what the model returned.
+        assert build_image_prompt(validate_design_spec(version.design_spec)) != build_image_prompt(
+            validate_design_spec(spec_payload)
+        )
+
+    def test_a_narrative_change_the_prompt_DOES_render_is_still_accepted(self):
+        # Guards against over-tightening into "a canonical selection must move".
+        # Builder 8.x drops fabrics_and_texture only WHEN canonical fabrics
+        # exist, so with none the narrative genuinely is what renders — and a
+        # refinement that moves it is a real change, not an inert one.
+        design, source, spec_payload = make_ready_design()
+        no_canonical_fabrics = copy.deepcopy(spec_payload)
+        no_canonical_fabrics["source_selections"]["fabrics"] = []
+        source.design_spec = no_canonical_fabrics
+        source.image_prompt = build_image_prompt(validate_design_spec(no_canonical_fabrics))
+        source.save(update_fields=["design_spec", "image_prompt"])
+
+        # The fabric NAME, not finish_and_movement: with no canonical fabrics the
+        # builder renders the narrative entries' names as the design's only
+        # fabric statement, so that is the narrative field that actually reaches
+        # the image.
+        refined = copy.deepcopy(no_canonical_fabrics)
+        refined["fabrics_and_texture"][0]["fabric"] = "velvet"
+        provider = SequenceProvider([_result(refined)])
+
+        version = generate_refined_design_spec_for_design(
+            design, source, refinement_request("fabric_and_texture"), provider=provider
+        )
+
+        assert version.version_number == 2
+        assert build_image_prompt(validate_design_spec(version.design_spec)) != build_image_prompt(
+            validate_design_spec(no_canonical_fabrics)
+        )
+
+        # And the converse, which is what makes the rule above necessary rather
+        # than merely true: give the SAME spec canonical fabrics and the SAME
+        # narrative edit stops reaching the prompt entirely. That asymmetry is
+        # the whole reason this guard compares rendered prompts instead of
+        # requiring a canonical field to move.
+        with_canonical = copy.deepcopy(no_canonical_fabrics)
+        with_canonical["source_selections"]["fabrics"] = ["silk"]
+        narrative_edit = copy.deepcopy(with_canonical)
+        narrative_edit["fabrics_and_texture"][0]["fabric"] = "velvet"
+        assert build_image_prompt(validate_design_spec(narrative_edit)) == build_image_prompt(
+            validate_design_spec(with_canonical)
+        )
 
     def test_no_op_output_is_rejected(self):
         design, source, spec_payload = make_ready_design()
