@@ -486,3 +486,16 @@ def test_end_to_end_demo_refinement_succeeds_via_eager_task(
     assert v2.is_demo is True
     assert v2.parent_version_id == v1.pk
     assert v2.has_permanent_image
+
+    # ADR 0028's claim, asserted end to end on what is actually PERSISTED rather
+    # than on the engine in isolation. Before this phase every layer of this test
+    # passed while the stored prompt was byte-identical to its parent's, because
+    # nothing anywhere compared the two. The canonical selection moved, so the
+    # deterministic prompt built from it moved, so the demo asset selected from
+    # it can move — that chain is the whole fix.
+    assert v2.image_prompt != v1.image_prompt
+    assert (
+        v2.design_spec["source_selections"]["colour_palette"]
+        != (v1.design_spec["source_selections"]["colour_palette"])
+    )
+    assert v2.prompt_builder_version == v1.prompt_builder_version

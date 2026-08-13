@@ -28,12 +28,24 @@ goes through the same
 :func:`~sitara.generation.refinement.diff_design_spec_paths` and questionnaire
 re-check as a live provider's output. This module never reimplements that
 policy.
+
+One thing it does do to its own output, and the distinction matters: it renders
+the candidate through the SAME :func:`build_image_prompt` the service will, and
+declines to return a candidate whose prompt is identical to the source's. That
+is not a second policy evaluator — it is the same single one, called early. It
+has to be called here because this engine is DETERMINISTIC: an inert candidate
+handed onward would be rejected by the service guard, reproduced byte-identically
+on the retry, and rejected again, so the refinement would fail permanently under
+an error that tells the customer nothing. Refusing here turns that into one
+honest answer.
 """
 
 import copy
 import hashlib
 import json
 
+from sitara.generation.design_spec import validate_design_spec
+from sitara.generation.prompt_builder import build_image_prompt
 from sitara.generation.refinement import (
     COLOUR_STORY,
     DUPATTA_OR_SAREE_DRAPE,
@@ -345,6 +357,30 @@ _EDITORS = {
 }
 
 
+class DemoRefinementInert(Exception):
+    """The demo engine cannot make this category change anything the image
+    prompt renders, for this particular concept.
+
+    Raised rather than returned so the caller cannot mistake it for a refined
+    spec. Carries the category only — never spec content, never the note."""
+
+    def __init__(self, change_type: str) -> None:
+        super().__init__("this change cannot be applied to this design")
+        self.change_type = change_type
+
+
+def _renders_the_same(candidate: dict, source_spec: dict) -> bool:
+    """Whether two demo specs produce a byte-identical image prompt.
+
+    Uses the same deterministic builder the pipeline will use, so this engine
+    judges its own output by exactly the standard it will be held to."""
+    if candidate == source_spec:
+        return True
+    return build_image_prompt(validate_design_spec(candidate)) == build_image_prompt(
+        validate_design_spec(source_spec)
+    )
+
+
 def build_demo_refined_spec(
     source_spec: dict, refinement_request, *, selection_alternatives=None
 ) -> dict:
@@ -388,7 +424,22 @@ def build_demo_refined_spec(
             phrase = _describe(field, value)
         return editor(spec, note, fingerprint + salt, phrase)
 
+    # Compared as RENDERED PROMPTS, not as specs — the same lesson the live
+    # path learned the hard way (ADR 0028 amendment). A spec-level difference is
+    # not enough: the narrative-only fallback below rewrites a descriptive field,
+    # and for six of the seven categories the builder renders the canonical
+    # selection instead and drops that narrative entirely. Comparing specs here
+    # would hand the pipeline an inert concept, which its own guard would then
+    # reject — twice, identically, because this engine is deterministic — and the
+    # refinement would fail permanently with a message that gives the customer
+    # nothing to act on.
     candidate = _build("")
-    if candidate == source_spec:
+    if _renders_the_same(candidate, source_spec):
         candidate = _build(":alternate")
+    if _renders_the_same(candidate, source_spec):
+        # Nothing this category owns can move for this concept: the design's own
+        # questionnaire offers no other legal value, and the descriptive field
+        # the fallback writes is one the builder does not render for this spec.
+        # An honest refusal, not two deterministic attempts at the same wall.
+        raise DemoRefinementInert(refinement_request.change_type)
     return candidate

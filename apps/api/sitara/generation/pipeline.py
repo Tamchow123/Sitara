@@ -82,6 +82,7 @@ from .demo.provider import (
     DemoRefinementStructuredDesignProvider,
     DemoStructuredDesignProvider,
 )
+from .demo.refinement_engine import DemoRefinementInert
 from .demo.selector import DemoAssetSelection, DemoAssetUnavailable, select_demo_asset
 from .design_spec import UnsupportedDesignSpecVersion, validate_design_spec
 from .image_download import MAX_REDIRECTS
@@ -1284,6 +1285,24 @@ def _run_refinement_text_stage(design, attempt, structured_provider, config) -> 
         raise _TerminalGenerationError(
             errors.REFINEMENT_CATEGORY_UNAVAILABLE, clear_text_marker=True
         ) from exc
+    except DemoRefinementInert as exc:
+        # The demo engine judged its own output by the same rendered-prompt
+        # standard the service applies and found it could move nothing for this
+        # concept: no other legal value for the category, and the descriptive
+        # field the fallback writes is one the builder does not render here.
+        #
+        # REFINEMENT_NO_CHANGE, not REFINEMENT_CATEGORY_UNAVAILABLE. The two
+        # sound interchangeable and are not. The category-unavailable code means
+        # a permanent, schema-version-level fact — this design's questionnaire
+        # version has no such question — and its customer copy says exactly
+        # that: "This concept was created from an earlier version of the
+        # questionnaire, which has no such choice to change." That statement
+        # would be FALSE here. This path is only reachable once the enqueue
+        # guard has already confirmed the category does own a field, so what
+        # failed is this attempt on this concept — which is precisely what the
+        # live path reports as REFINEMENT_NO_CHANGE. Same fact, same code, in
+        # both modes.
+        raise _TerminalGenerationError(errors.REFINEMENT_NO_CHANGE, clear_text_marker=True) from exc
     except RefinementLimitReached as exc:
         raise _TerminalGenerationError(
             errors.REFINEMENT_LIMIT_REACHED, clear_text_marker=True

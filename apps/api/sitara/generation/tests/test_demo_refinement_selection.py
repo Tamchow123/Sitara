@@ -22,7 +22,10 @@ import pathlib
 import pytest
 
 from sitara.generation.demo import phrases, refinement_engine
-from sitara.generation.demo.refinement_engine import build_demo_refined_spec
+from sitara.generation.demo.refinement_engine import (
+    DemoRefinementInert,
+    build_demo_refined_spec,
+)
 from sitara.generation.design_spec import (
     COLOUR_MATCH_FABRIC,
     SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS,
@@ -205,19 +208,25 @@ class TestTheEngineOnlyChoosesAmongThem:
         )
         assert first == second
 
-    def test_with_no_legal_alternative_it_changes_narrative_only(self):
-        # Honest rather than fabricated: if the questionnaire offers nothing
-        # else, the demo says something new about the same selection instead of
-        # inventing an option that was never on the screen.
+    def test_with_no_legal_alternative_an_inert_category_is_REFUSED(self):
+        # This test used to assert the opposite — that the engine falls back to
+        # narrative alone, "honest rather than fabricated". The honesty was real
+        # but the output was not usable: this concept HAS canonical fabrics, so
+        # builder 8.x renders those and drops `fabrics_and_texture` entirely, and
+        # the narrative-only spec produces a byte-identical image prompt. Handing
+        # that to the pipeline means its own no-change guard rejects it, twice,
+        # identically, because this engine is deterministic — a permanent failure
+        # with nothing for the customer to act on. Refusing here is the honest
+        # answer that is also actionable.
         design, spec = _v4_design_and_spec()
         payload = spec.model_dump(mode="json")
 
-        refined = build_demo_refined_spec(
-            payload, _request("fabric_and_texture"), selection_alternatives={}
-        )
+        with pytest.raises(DemoRefinementInert) as excinfo:
+            build_demo_refined_spec(
+                payload, _request("fabric_and_texture"), selection_alternatives={}
+            )
 
-        assert refined["source_selections"] == payload["source_selections"]
-        assert refined != payload
+        assert excinfo.value.change_type == "fabric_and_texture"
 
     def test_the_refined_spec_passes_the_guardrail_it_will_face(self):
         design, spec = _v4_design_and_spec()
@@ -330,15 +339,23 @@ class TestTheTwoVocabulariesStayInStep:
         # The runtime backstop, driven directly: with the phrase table emptied
         # for the only field this category owns, the engine must decline to
         # change the selection rather than change it and describe something
-        # else. Narrative-only is the honest degradation.
+        # else — a selection saying "velvet" under a brief still describing silk
+        # is the exact mismatch ADR 0028 exists to remove.
+        #
+        # What that degrades TO is the part this phase corrected. It used to be
+        # narrative-only, which for this concept renders no differently at all;
+        # it is now the honest refusal, so the caller learns the change could not
+        # be made instead of being handed an inert concept. Both halves are
+        # asserted: the selection is untouched, AND nothing usable is returned.
         design, spec = _v4_design_and_spec()
         payload = spec.model_dump(mode="json")
         alternatives = answerable_selection_alternatives(design, spec, "fabric_and_texture")
+        assert alternatives["fabrics"], "the backstop is only meaningful with a value to refuse"
         monkeypatch.setitem(refinement_engine._FIELD_PHRASES, "fabrics", {})
 
-        refined = build_demo_refined_spec(
-            payload, _request("fabric_and_texture"), selection_alternatives=alternatives
-        )
+        with pytest.raises(DemoRefinementInert):
+            build_demo_refined_spec(
+                payload, _request("fabric_and_texture"), selection_alternatives=alternatives
+            )
 
-        assert refined["source_selections"] == payload["source_selections"]
-        assert refined != payload
+        assert payload["source_selections"] == spec.model_dump(mode="json")["source_selections"]
