@@ -1,21 +1,26 @@
 """Constrained DesignSpec refinement orchestration fixture tests (Phase 14
 Part B) — injected fake providers, zero network calls."""
 
+import ast
 import copy
 import logging
+import pathlib
 
 import pytest
 from django.conf import settings
+from pydantic import ValidationError
 
 from sitara.ai_gateway.structured_design import StructuredDesignResult
+from sitara.content_safety import GeneratedContentRejected, RejectionCategory
 from sitara.designs.models import DesignVersion, GenerationAttempt
-from sitara.generation import cost_control
+from sitara.generation import cost_control, refinement_service
 from sitara.generation.context import build_generation_context
 from sitara.generation.demo.design_spec_engine import build_demo_design_spec
 from sitara.generation.design_spec import (
     DESIGN_SPEC_SCHEMA_VERSION,
     SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS,
     DesignSpec,
+    UnsupportedDesignSpecVersion,
     validate_design_spec,
 )
 from sitara.generation.fixture_provider import build_fixture_spec
@@ -26,12 +31,13 @@ from sitara.generation.inspiration_context import (
     InspirationProviderCues,
     inspiration_context_sha256,
 )
-from sitara.generation.prompt_builder import build_image_prompt
+from sitara.generation.prompt_builder import ImagePromptBuildError, build_image_prompt
 from sitara.generation.refinement import (
     REFINEMENT_CHANGE_TYPES,
     canonical_refinement_fields,
     normalise_refinement_request,
 )
+from sitara.generation.refinement_selections import RefinedSelectionsInvalid
 from sitara.generation.refinement_service import (
     REFINEMENT_DESIGN_SPEC_TEMPLATE_VERSION,
     DesignChangedDuringRefinement,
@@ -40,8 +46,11 @@ from sitara.generation.refinement_service import (
     RefinementGenerationFailed,
     RefinementLimitReached,
     RefinementNoChangeProduced,
+    RefinementOutputCategory,
+    RefinementOutputRejected,
     RefinementSourceUnavailable,
     _generate_valid_refined_spec,
+    _rejection_detail,
     generate_refined_design_spec_for_design,
 )
 
@@ -629,6 +638,43 @@ class TestNoteHandling:
         for record in caplog.records:
             assert secret_note not in record.getMessage()
 
+    def test_a_rejection_logs_WHY_and_still_never_logs_the_note(self, caplog):
+        # The success path is where the note test lived, which is the one path
+        # that writes no rejection line at all. A real incident produced two
+        # lines reading only `exception_type=RefinementOutputRejected` — four
+        # candidate causes, none distinguishable — while the discriminator was
+        # computed at the raise site and dropped on the floor.
+        design, source, spec_payload = make_ready_design()
+        outside = copy.deepcopy(spec_payload)
+        outside["coverage_and_drape"]["sleeves"] = "Now finished with elbow-length sleeves."
+        secret_note = "A very distinctive unlikely-to-collide note fragment 9f8e7d."
+        provider = SequenceProvider([_result(outside), _result(outside)])
+
+        with caplog.at_level(logging.DEBUG):
+            with pytest.raises(RefinementGenerationFailed):
+                generate_refined_design_spec_for_design(
+                    design,
+                    source,
+                    refinement_request("colour_story", secret_note),
+                    provider=provider,
+                )
+
+        messages = [r.getMessage() for r in caplog.records]
+        rejections = [m for m in messages if "refinement output rejected" in m]
+        assert len(rejections) == 2, messages
+        for message in rejections:
+            # The reason, read from the exception's ATTRIBUTE.
+            assert "reason=RefinementOutputRejected:disallowed_field_changed" in message
+            assert "change_type=colour_story" in message
+            # Not `attempt=`: pipeline.py logs the GenerationAttempt UUID under
+            # that key, so three different things used to share one name.
+            assert "provider_request=" in message
+            assert "attempt=" not in message
+        for message in messages:
+            assert secret_note not in message
+            # The offending VALUE never appears either — only the category does.
+            assert "elbow-length sleeves" not in message
+
 
 class TestInspirationSnapshotCopy:
     def test_exact_original_inspiration_snapshot_copied(self):
@@ -882,3 +928,122 @@ class TestRefinementPartialUsageRetainsReservation:
         # the conservative reservation, so nothing stays unresolved.
         assert attempt.cost_unresolved_micro_usd == 0
         assert attempt.cost_estimated_micro_usd < text_max
+
+
+class TestRejectionDetailIsSafeForEveryCaughtType:
+    """`_rejection_detail` reads `.category`/`.fields` by name, off exceptions
+    from five different modules plus pydantic. Every one of them is safe today —
+    both reviewers checked class by class — but nothing STRUCTURAL said so, and
+    an implicit protocol nobody declared is how a seventh type opts itself into
+    a log line by naming coincidence.
+
+    So the set is not hand-maintained here: it is read out of the production
+    `except` tuple with `ast`, the same technique this repository already uses to
+    confine `django.core.mail`. Add a type to that tuple without deciding what it
+    is safe to log, and this file fails."""
+
+    # What each currently-caught type must produce. A value here is a promise
+    # that the string is a source-controlled machine name — never model output,
+    # user text, a rejected value or a questionnaire label.
+    EXPECTED = {
+        "ValidationError": (
+            # Pydantic's. Carries the rejected INPUT in `.errors()`, which is
+            # exactly why nothing here may read a message or an error list.
+            lambda: _pydantic_validation_error(),
+            "ValidationError",
+        ),
+        "UnsupportedDesignSpecVersion": (
+            lambda: UnsupportedDesignSpecVersion("schema version 99 is not supported"),
+            "UnsupportedDesignSpecVersion",
+        ),
+        "GeneratedContentRejected": (
+            lambda: GeneratedContentRejected(RejectionCategory.DESIGNER_OR_BRAND),
+            "GeneratedContentRejected:designer_or_brand_reference",
+        ),
+        "RefinementOutputRejected": (
+            lambda: RefinementOutputRejected(RefinementOutputCategory.DISALLOWED_FIELD_CHANGED),
+            "RefinementOutputRejected:disallowed_field_changed",
+        ),
+        "RefinedSelectionsInvalid": (
+            lambda: RefinedSelectionsInvalid(["neckline_style", "fabrics"]),
+            # Sorted question ids. Machine names in the schema (CLAUDE.md §7),
+            # never the rejected value.
+            "RefinedSelectionsInvalid:fabrics,neckline_style",
+        ),
+        "ImagePromptBuildError": (
+            lambda: ImagePromptBuildError("the prompt could not be built"),
+            "ImagePromptBuildError",
+        ),
+    }
+
+    def _caught_type_names(self):
+        """Every exception type caught by a handler that calls
+        `_rejection_detail`, read out of the module's own source.
+
+        Deliberately scoped to the WHOLE module rather than to one named
+        function: the property under test is "nothing reaches
+        `_rejection_detail` without a decided rendering", and that is true
+        wherever the handler lives. Anchoring on the enclosing function name
+        instead would break on a rename or on extracting the retry-loop body
+        into a helper — refactors that change nothing about what is safe to
+        log — and would fail with a message pointing at the test rather than at
+        the code. It would also go quiet if a SECOND handler elsewhere started
+        calling `_rejection_detail`, which is the case most worth catching."""
+        source = pathlib.Path(refinement_service.__file__).read_text(encoding="utf-8")
+        found = set()
+        handlers = 0
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.ExceptHandler) or node.type is None:
+                continue
+            if not any(
+                isinstance(c, ast.Call)
+                and isinstance(c.func, ast.Name)
+                and c.func.id == "_rejection_detail"
+                for c in ast.walk(node)
+            ):
+                # Includes the sibling `_NoChangeInAttempt` handler, which logs
+                # its own line and must not be counted here.
+                continue
+            handlers += 1
+            caught = node.type.elts if isinstance(node.type, ast.Tuple) else [node.type]
+            found.update(n.id for n in caught if isinstance(n, ast.Name))
+        assert handlers, "no except handler calls _rejection_detail — has it been removed?"
+        return found
+
+    def test_every_caught_type_has_a_decided_safe_rendering(self):
+        assert self._caught_type_names() == set(self.EXPECTED), (
+            "A type was added to or removed from the except tuple that feeds "
+            "_rejection_detail. Decide what is safe to log for it and record "
+            "that decision in EXPECTED — do not let it inherit the duck-typed "
+            "behaviour unreviewed."
+        )
+
+    @pytest.mark.parametrize("name", sorted(EXPECTED))
+    def test_the_rendering_is_the_decided_one(self, name):
+        build, expected = self.EXPECTED[name]
+        exc = build()
+        assert type(exc).__name__ == name
+        assert _rejection_detail(exc) == expected
+
+    @pytest.mark.parametrize("name", sorted(EXPECTED))
+    def test_the_rendering_never_carries_the_exception_message(self, name):
+        # The one channel §15 forbids. `RefinementOutputRejected` and
+        # `GeneratedContentRejected` both park their category in the message too,
+        # so a message-reading implementation would pass the assertions above
+        # while being wrong for the other four.
+        build, _expected = self.EXPECTED[name]
+        exc = build()
+        message = str(exc)
+        rendered = _rejection_detail(exc)
+        assert message not in rendered
+        for word in ("could not", "not supported", "rejected:", "not valid"):
+            assert word not in rendered
+
+
+def _pydantic_validation_error():
+    """A real pydantic ValidationError, raised the way the service gets one."""
+    try:
+        validate_design_spec({"schema_version": 1})
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("expected a ValidationError")

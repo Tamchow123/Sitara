@@ -252,6 +252,32 @@ class RefinementOutputRejected(Exception):
         super().__init__(f"refinement output rejected: {category.value}")
 
 
+def _rejection_detail(exc: Exception) -> str:
+    """A safe machine-readable reason for a rejected refinement attempt.
+
+    Read from the exception's own structured ATTRIBUTE, never from ``str(exc)``.
+    The distinction is the whole point: `RefinementOutputRejected` and
+    `GeneratedContentRejected` both park their category in the exception
+    message as well, and a message is the one channel §15 forbids logging,
+    because a future exception in the same ``except`` tuple may carry model
+    output or user text in its own.
+
+    Every value returned here is a source-controlled machine name — an enum
+    value, or a sorted list of questionnaire question ids, which are machine
+    names in the schema and never anything the customer wrote. The rejected
+    VALUES are never carried by these exceptions and so cannot leak through.
+
+    Falls back to the exception type alone for anything with no structured
+    reason, which is what the whole handler used to do for all six types."""
+    category = getattr(exc, "category", None)
+    if category is not None:
+        return f"{type(exc).__name__}:{getattr(category, 'value', category)}"
+    fields = getattr(exc, "fields", None)
+    if fields:
+        return f"{type(exc).__name__}:{','.join(fields)}"
+    return type(exc).__name__
+
+
 class RefinementCategoryUnavailable(Exception):
     """This refinement category has nothing to change on this DesignSpec version.
 
@@ -489,14 +515,22 @@ def _generate_valid_refined_spec(
                 cost_accounting.retain(generation_attempt, stage, profile)
         responses.append(result)
         if result.refused:
-            logger.warning("design refinement refused design=%s attempt=%s", design_id, attempt)
+            logger.warning(
+                "design refinement refused design=%s provider_request=%s change_type=%s",
+                design_id,
+                attempt,
+                change_type,
+            )
             raise GenerationRefused("the provider refused to refine the specification")
         if result.payload is not None:
             try:
                 spec = _validate_refined_output(result.payload, source_spec, change_type, design)
             except _NoChangeInAttempt:
                 logger.warning(
-                    "refinement output unchanged design=%s attempt=%s", design_id, attempt
+                    "refinement output unchanged design=%s provider_request=%s change_type=%s",
+                    design_id,
+                    attempt,
+                    change_type,
                 )
             except (
                 ValidationError,
@@ -519,11 +553,23 @@ def _generate_valid_refined_spec(
                 ImagePromptBuildError,
             ) as exc:
                 no_change_only = False
+                # `provider_request`, not `attempt`: pipeline.py logs the
+                # GenerationAttempt UUID under that key and the correlation
+                # filter adds `attempt_id`, so three different things shared one
+                # name. This one is the ordinal within the retry budget.
+                #
+                # `reason` is the discriminator this handler already had and
+                # threw away. The bare type was not enough: a real incident
+                # logged `exception_type=RefinementOutputRejected` twice, and
+                # that type covers four distinct causes with four different
+                # fixes. Safe by construction — see :func:`_rejection_detail`.
                 logger.warning(
-                    "refinement output rejected design=%s attempt=%s exception_type=%s",
+                    "refinement output rejected design=%s provider_request=%s "
+                    "change_type=%s reason=%s",
                     design_id,
                     attempt,
-                    type(exc).__name__,
+                    change_type,
+                    _rejection_detail(exc),
                 )
             else:
                 return spec, aggregate_usage(responses), attempts

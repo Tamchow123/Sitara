@@ -3,6 +3,7 @@ resumability, seed reuse and duplicate-delivery guarantees. Zero network
 calls; fakes injected for every provider/downloader/storage."""
 
 import copy
+import logging
 import uuid
 from unittest import mock
 
@@ -345,6 +346,37 @@ class TestFailurePreservesVersionOne:
         assert result.error_code == errors.REFINEMENT_NO_CHANGE
         v1.refresh_from_db()
         assert v1.design_spec is not None
+
+    def test_terminalisation_logs_the_code_the_customer_was_told(self, caplog):
+        # `_finalise_failure` is the one place every terminal failure passes
+        # through, and it used to say nothing. Each stage logs why it gave up,
+        # but nothing recorded which of the eleven-odd codes actually reached
+        # the customer, so an incident meant guessing from whichever stage line
+        # happened to be last — and the codes that share a stage are precisely
+        # the ones worth telling apart.
+        design, v1, _initial = _generated_design()
+        attempt = _enqueue_refinement(design, v1)
+        no_op_result = StructuredDesignResult(
+            payload=copy.deepcopy(v1.design_spec),
+            provider="fake",
+            model="fake-model",
+            input_tokens=10,
+            output_tokens=10,
+            stop_reason="end_turn",
+        )
+        refined_provider = mock.Mock()
+        refined_provider.generate.return_value = no_op_result
+
+        with caplog.at_level(logging.DEBUG):
+            result = _run(attempt, structured=refined_provider)
+
+        assert result.error_code == errors.REFINEMENT_NO_CHANGE
+        terminal = [m for m in (r.getMessage() for r in caplog.records) if "attempt failed" in m]
+        assert len(terminal) == 1, terminal
+        assert f"code={errors.REFINEMENT_NO_CHANGE}" in terminal[0]
+        assert f"attempt={attempt.id}" in terminal[0]
+        assert "kind=refinement" in terminal[0]
+        assert "demo=False" in terminal[0]
 
 
 class TestNoImageToImageInput:

@@ -2061,6 +2061,18 @@ def _finalise_failure(attempt, code: str, *, clear_text_marker: bool = False) ->
         locked = GenerationAttempt.objects.select_for_update().get(pk=attempt.pk)
         if locked.status in (_Status.SUCCEEDED, _Status.FAILED):
             return
+        # The one place every terminal failure passes through, and until now the
+        # only one that said nothing. A stage logs why it gave up, but nothing
+        # recorded what the customer was finally told, so reconstructing an
+        # incident meant inferring the code from whichever stage line happened to
+        # be last. `code` is a source-controlled machine name from `errors`.
+        logger.warning(
+            "generation attempt failed attempt=%s kind=%s demo=%s code=%s",
+            locked.id,
+            locked.generation_kind,
+            locked.is_demo,
+            code,
+        )
         # A submission marker still set at terminalisation is possible unresolved
         # spend. Capture BEFORE optionally clearing the text marker below (a
         # cleared text marker means the provider definitively answered and the
