@@ -199,7 +199,10 @@ a builder that produces byte-identical output for byte-identical input, and woul
 break the comparability of persisted `prompt_builder_version` audit data. Two
 versions that do move: `REFINEMENT_TEMPLATE_VERSION` and
 `DEMO_REFINEMENT_TEMPLATE_VERSION`, both to `2.0.0`, because the instructions
-given to the structured-generation stage genuinely changed.
+given to the structured-generation stage genuinely changed. (The amendment below
+moves `REFINEMENT_TEMPLATE_VERSION` again, to `3.0.0`. The demo one stays at
+`2.0.0`: what the amendment changed there is the engine's refusal to return
+output it can see is inert, not the shape of the output it does return.)
 
 ## Consequences
 
@@ -304,13 +307,88 @@ those tests mean what their names always claimed, and the narrative-only table
 is kept as `_NARRATIVE_ONLY_EDITS` so a test can produce the defective output on
 purpose. Both new regression tests were confirmed to fail with the guard removed.
 
-The demo path was unaffected throughout, which is why CI never caught this: the
-demo engine applies the canonical edit itself, deterministically. Only the live
-round-trip depended on a model choosing to, and no test covered that round-trip.
+### The demo half, which the first version of this amendment got wrong
+
+This amendment originally said "the demo path was unaffected throughout, which
+is why CI never caught this". That was the comfortable answer and it was false.
+CI never caught it because no test compared two prompts — not because the demo
+engine was sound.
+
+It was not. `build_demo_refined_spec` falls back to a narrative-only edit
+whenever it is handed no legal canonical alternative, and measured against the
+demo fixture concept, **six of the seven categories** produce a byte-identical
+image prompt on that path. Only `colour_story` renders differently, and only
+because that concept's canonical colour roles are absent so the builder falls
+through to the narrative — the same edge that makes prompt comparison the right
+test rather than a canonical-field requirement.
+
+Left alone, that would have been worse in demo mode than in live mode. The live
+path retries and a model may answer differently the second time; this engine is
+**deterministic**, so the service guard would reject its candidate, the retry
+would reproduce the identical candidate, and the refinement would terminate
+under a generic "no change produced" — a permanent failure whose message gives
+the customer nothing to act on.
+
+So the engine now judges its own output by the standard it will be held to,
+using the same builder: if its candidate renders the same prompt as the source
+after both salts, it raises `DemoRefinementInert` rather than returning it. The
+exception carries the category and nothing else: never spec content, never the
+note.
+
+It does **not** invent a value to escape the refusal. A canonical value the
+design's own questionnaire never offered is exactly what
+`answerable_selection_alternatives` exists to prevent, and reaching past it to
+avoid an awkward outcome would trade a visible failure for an invisible one.
+
+### Three failures that sound alike and are not
+
+The first draft of this fix reported `DemoRefinementInert` as
+`refinement_category_unavailable`, reasoning that both mean "this change cannot
+be applied to this design". Checking the customer copy settled it against that:
+that code's message is *"This concept was created from an earlier version of the
+questionnaire, which has no such choice to change"* — and this handler is only
+reachable once the enqueue guard has already confirmed the category **does** own
+a field. It would have shipped a false statement, not merely an imprecise one.
+
+The three are genuinely distinct and now report distinctly:
+
+- **`refinement_category_unavailable`** — permanent and schema-level. The
+  design's pinned questionnaire version has no such question. Every design on
+  that version behaves the same way, forever. Decided at enqueue, before an
+  attempt exists.
+- **`refinement_no_change`** — this attempt, on this concept, could not move the
+  render. What `DemoRefinementInert` now reports, and exactly what the live path
+  already reports for the same fact, so the two modes agree.
+- **`StructuredDesignProviderError`** — the engine built something that will not
+  validate or render. That is a defect in *our* engine, not a fact about the
+  customer's concept, and dressing it up as either of the above would blame the
+  concept for our bug and send the customer off to pick a change that would fail
+  identically. `demo/provider.py` converts `ValidationError`,
+  `UnsupportedDesignSpecVersion` and `ImagePromptBuildError` at the adapter
+  boundary — narrowly, never a bare `except Exception`, so a genuinely
+  unexpected bug still surfaces as itself.
+
+That last one closes a real hole rather than a hypothetical: the self-check is
+the first thing that ever validates or renders a freshly built candidate, and it
+runs inside `provider.generate()`, whose only caller-side handler catches
+`StructuredDesignProviderError`. Unconverted, those three would have escaped
+every handler up to the Celery task boundary and surfaced as an unclassified
+internal error — the same class of gap this whole round exists to close, in the
+round's own new code.
+
+Fixing this exposed a second defect in the original commit, in the same family:
+`_canonical_choice` looked up a note's keyword hint in `_FIELD_PHRASES`, which
+maps machine value **to** phrase, using a helper that returns the mapped value.
+The hint could therefore never match a machine value — except for colours, where
+`COLOUR_PHRASES["emerald"] == "emerald"` makes key and value coincide, which is
+precisely why the mistake passed review and its test. A note naming a fabric,
+density, drape or silhouette silently lost its hint. `_note_machine_value` fixes
+it; the test that covers it now asserts the hint reached the **selection**, not
+just the prose.
 
 **The honest claim is unchanged and is now enforced rather than asserted:** a
 refinement that reaches a customer renders a different image prompt from the one
-it was refined from, or it does not reach them at all.
+it was refined from, or it does not reach them at all — in both modes.
 
 ## Alternatives considered
 
