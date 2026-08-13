@@ -61,12 +61,21 @@ from . import phrases
 
 DEMO_REFINEMENT_TEMPLATE_VERSION = "2.0.0"
 
-# Small, category-scoped keyword maps recognised in the refinement note. Only
-# used to bias which curated variant is selected — the raw note is never
-# copied into output. Unrecognised text still folds into the deterministic
-# variant fingerprint below.
-_COLOUR_KEYWORDS = phrases.COLOUR_PHRASES
-_FABRIC_KEYWORDS = phrases.FABRIC_PHRASES
+# Small, category-scoped KEYWORD maps recognised in the refinement note: an
+# English needle to the canonical machine value it names. Only used to bias
+# which curated variant is selected — the raw note is never copied into output.
+# Unrecognised text still folds into the deterministic variant fingerprint below.
+#
+# Everything here is needle -> MACHINE VALUE, and nothing else may be added that
+# is not. Three phrase tables used to be aliased into this block under
+# ``_KEYWORDS`` names — ``_COLOUR_KEYWORDS = phrases.COLOUR_PHRASES`` and its
+# fabric and drape siblings — and because a phrase table runs the other way,
+# machine value -> English, every editor that read a hint out of one got a
+# PHRASE back and then used it as a key. Mostly masked: `COLOUR_PHRASES["red"]
+# == "red"` for 40 of its 57 entries. Not masked for the other 17, where a note
+# saying "make it maroon" raised `KeyError: 'deep maroon'` from a customer's
+# perfectly ordinary sentence. Read a hint with `_note_machine_value`, which
+# takes the FIELD and searches the vocabulary's keys.
 _TONE_KEYWORDS = {"softer": "minimal", "deeper": "heavy", "lighter": "minimal", "richer": "heavy"}
 _SLEEVE_KEYWORDS = {
     "sleeveless": "sleeveless",
@@ -76,8 +85,26 @@ _SLEEVE_KEYWORDS = {
     "full": "full_sleeves",
     "long": "full_sleeves",
 }
+# Not canonical values: a version-1 spec has no `neckline_style`, so this
+# category picks between two hand-written sentences instead.
+NECKLINE_VARIANTS = ("high", "open")
 _NECKLINE_KEYWORDS = {"high": "high", "modest": "high", "low": "open"}
-_DRAPE_KEYWORDS = {**phrases.DUPATTA_PHRASES, **phrases.SAREE_DRAPE_PHRASES}
+
+# Every keyword map, with the closed set of values its needles may name.
+# Structural tests read this and assert (a) each map really does land inside its
+# declared set, and (b) the set of `_*_KEYWORDS` names in this module's globals
+# is exactly this registry's keys — so a vocabulary aliased under a `_KEYWORDS`
+# name fails loudly whether or not anyone remembers to register it. Registering
+# being a second step is how the last four instances got in.
+NOTE_KEYWORD_MAPS = {
+    "_TONE_KEYWORDS": (_TONE_KEYWORDS, frozenset(phrases.DENSITY_PHRASES)),
+    "_SLEEVE_KEYWORDS": (_SLEEVE_KEYWORDS, frozenset(phrases.COVERAGE_PHRASES)),
+    "_NECKLINE_KEYWORDS": (_NECKLINE_KEYWORDS, frozenset(NECKLINE_VARIANTS)),
+}
+
+# A VOCABULARY, not a keyword map: machine value -> English phrase, for the two
+# drape fields at once, since a design answers one or the other.
+_DRAPE_PHRASES = {**phrases.DUPATTA_PHRASES, **phrases.SAREE_DRAPE_PHRASES}
 
 # How to SAY a canonical value, per canonical field. One entry per field any
 # category owns on any DesignSpec version (see
@@ -116,6 +143,17 @@ def _fingerprint(source_spec: dict, change_type: str, note: str) -> str:
 
 
 def _note_keyword(note: str, keywords: dict[str, str]) -> str | None:
+    """The canonical machine value ``note`` names, via a KEYWORD map.
+
+    ``keywords`` must be needle -> machine value. Passing a phrase VOCABULARY
+    (machine value -> English) returns the English, and every caller then uses
+    the result as a key — which is how this quietly broke three editors, because
+    the names alone did not stop it happening. Use :func:`_note_machine_value`
+    for a vocabulary.
+
+    ``NOTE_KEYWORD_MAPS`` names every map that legitimately has this shape, and a
+    structural test asserts each one really does map to a machine value and that
+    no phrase vocabulary has crept in."""
     lowered = note.lower()
     for needle, canonical in keywords.items():
         if needle in lowered:
@@ -220,7 +258,7 @@ def _edit_colour_story(spec: dict, note: str, fingerprint: str, phrase: str | No
     # chosen.
     if phrase is None:
         used = set(ordered_colour_values(spec["source_selections"]))
-        hinted = _note_keyword(note, _COLOUR_KEYWORDS)
+        hinted = _note_machine_value(note, "colour_palette")
         candidates = [k for k in phrases.COLOUR_PHRASES if k not in used]
         colour_key = (
             hinted if hinted and hinted not in used else _pick(candidates, fingerprint, "colour")
@@ -242,7 +280,7 @@ def _edit_colour_story(spec: dict, note: str, fingerprint: str, phrase: str | No
 def _edit_fabric(spec: dict, note: str, fingerprint: str, phrase: str | None) -> dict:
     if phrase is None:
         used = {entry["fabric"].lower() for entry in spec["fabrics_and_texture"]}
-        hinted = _note_keyword(note, _FABRIC_KEYWORDS)
+        hinted = _note_machine_value(note, "fabrics")
         candidates = [k for k in phrases.FABRIC_PHRASES if phrases.FABRIC_PHRASES[k] not in used]
         fabric_key = (
             hinted
@@ -305,7 +343,7 @@ def _edit_sleeves(spec: dict, note: str, fingerprint: str, phrase: str | None) -
 def _edit_neckline(spec: dict, note: str, fingerprint: str, phrase: str | None) -> dict:
     if phrase is None:
         hinted = _note_keyword(note, _NECKLINE_KEYWORDS)
-        variant = hinted or _pick(["high", "open"], fingerprint, "neckline")
+        variant = hinted or _pick(list(NECKLINE_VARIANTS), fingerprint, "neckline")
         phrase = "a modest, higher neckline" if variant == "high" else "a more open neckline"
     spec = copy.deepcopy(spec)
     spec["coverage_and_drape"] = {
@@ -317,9 +355,13 @@ def _edit_neckline(spec: dict, note: str, fingerprint: str, phrase: str | None) 
 
 def _edit_drape(spec: dict, note: str, fingerprint: str, phrase: str | None) -> dict:
     if phrase is None:
-        hinted = _note_keyword(note, _DRAPE_KEYWORDS)
-        key = hinted or _pick(list(_DRAPE_KEYWORDS), fingerprint, "drape")
-        phrase = _DRAPE_KEYWORDS[key]
+        # Both fields, because a design answers one or the other and the note
+        # may name either.
+        hinted = _note_machine_value(note, "dupatta_style") or _note_machine_value(
+            note, "saree_drape"
+        )
+        key = hinted or _pick(list(_DRAPE_PHRASES), fingerprint, "drape")
+        phrase = _DRAPE_PHRASES[key]
     spec = copy.deepcopy(spec)
     spec["coverage_and_drape"] = {
         **spec["coverage_and_drape"],

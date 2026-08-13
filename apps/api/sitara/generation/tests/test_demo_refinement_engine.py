@@ -1,6 +1,8 @@
 """The deterministic demo refinement engine (Phase 15 Part B)."""
 
+import ast
 import copy
+import pathlib
 
 import pytest
 
@@ -68,6 +70,146 @@ class TestANoteNamesACanonicalValue:
 
     def test_an_unknown_field_returns_none_rather_than_raising(self):
         assert refinement_engine._note_machine_value("velvet", "not_a_field") is None
+
+
+class TestTheNarrativeEditorsReadTheirHintsTheSameWay:
+    """The same inversion, in three more places, found by the round-3 council.
+
+    Fixing `_canonical_choice` left `_edit_colour_story`, `_edit_fabric` and
+    `_edit_drape` reading their hints out of a phrase vocabulary aliased under a
+    `_KEYWORDS` name. Each got English back and then used it as a key.
+
+    Masked almost everywhere — `COLOUR_PHRASES["red"] == "red"` for 40 of its 57
+    entries — and a hard `KeyError` for the other 17, from sentences a customer
+    would obviously write. "please make it maroon" raised
+    `KeyError: 'deep maroon'`. Nothing in the demo path caught it: the provider
+    boundary's conversion tuple is narrow by design and does not list `KeyError`,
+    so it reached the Celery task as an unclassified internal error.
+
+    These call the editors directly with `phrase=None`, which is the
+    narrative-only branch — reachable exactly when the design's questionnaire
+    offers no legal canonical alternative.
+    """
+
+    @pytest.mark.parametrize(
+        "note",
+        [
+            "please make it maroon",  # COLOUR_PHRASES["maroon"] == "deep maroon"
+            "something in blush",  # -> "soft blush"
+            "a bit more orange",  # -> "warm orange"
+            "could we try multicolour",  # -> "a considered multicolour mix"
+            "emerald please",  # an identity entry: passed before the fix too
+            "nothing recognisable here",  # no hint at all
+        ],
+    )
+    def test_a_colour_note_never_raises(self, note):
+        source = _source_spec_dict()
+        refined = refinement_engine._edit_colour_story(source, note, "fp", None)
+        assert refined["colour_story"]["palette_summary"]
+
+    @pytest.mark.parametrize("note", ["raw_silk please", "cotton_silk", "silk please", "nothing"])
+    def test_a_fabric_note_never_raises(self, note):
+        source = _source_spec_dict()
+        refined = refinement_engine._edit_fabric(source, note, "fp", None)
+        assert refined["fabrics_and_texture"][0]["fabric"]
+
+    @pytest.mark.parametrize(
+        "note",
+        [
+            "try a front_drape",  # every DUPATTA_PHRASES entry is non-identity
+            "one_shoulder would be lovely",
+            "a nivi_drape would be nice",  # and every SAREE_DRAPE_PHRASES one
+            "seedha_pallu please",
+            "nothing recognisable here",
+        ],
+    )
+    def test_a_drape_note_never_raises(self, note):
+        source = _source_spec_dict()
+        refined = refinement_engine._edit_drape(source, note, "fp", None)
+        assert refined["coverage_and_drape"]["dupatta_or_saree_drape"]
+
+    def test_a_named_drape_is_actually_honoured_not_merely_survived(self):
+        # Not raising is the floor. The point of reading a hint is to use it.
+        source = _source_spec_dict()
+        refined = refinement_engine._edit_drape(source, "one_shoulder would be lovely", "fp", None)
+        assert (
+            phrases.DUPATTA_PHRASES["one_shoulder"]
+            in (refined["coverage_and_drape"]["dupatta_or_saree_drape"])
+        )
+
+    def test_a_named_colour_is_actually_honoured(self):
+        source = _source_spec_dict()
+        refined = refinement_engine._edit_colour_story(source, "please make it maroon", "fp", None)
+        assert phrases.COLOUR_PHRASES["maroon"] in refined["colour_story"]["palette_summary"]
+
+
+class TestTheTwoLookupShapesStayDistinct:
+    """`_note_keyword` takes needle -> machine value; `_note_machine_value` takes
+    a field and searches a machine-value -> phrase vocabulary. Passing the second
+    shape to the first is silent and wrong, and has now happened four times in
+    this module. This pins the shapes rather than trusting the names."""
+
+    def test_every_declared_keyword_map_lands_inside_its_declared_value_set(self):
+        for name, (keywords, legal) in refinement_engine.NOTE_KEYWORD_MAPS.items():
+            for needle, target in keywords.items():
+                assert target in legal, f"{name}: {needle!r} -> {target!r} is not a legal value"
+
+    def test_every_keyword_shaped_module_constant_is_registered(self):
+        # The registry is only a guard if nothing can sit outside it. Registering
+        # is a second step, and this bug's whole history is second steps nobody
+        # remembered — so this discovers `_*_KEYWORDS` from the module's own
+        # globals rather than trusting the registry to be complete. A new
+        # `_XYZ_KEYWORDS = phrases.SOMETHING` fails here immediately, which is
+        # the point: unregistered is exactly how the last four got through.
+        declared = {
+            name
+            for name in vars(refinement_engine)
+            if name.startswith("_") and name.endswith("_KEYWORDS")
+        }
+        assert declared == set(refinement_engine.NOTE_KEYWORD_MAPS), (
+            f"unregistered keyword maps: {declared - set(refinement_engine.NOTE_KEYWORD_MAPS)}; "
+            f"registered but gone: {set(refinement_engine.NOTE_KEYWORD_MAPS) - declared}"
+        )
+
+    def test_every_note_keyword_call_site_passes_a_registered_map(self):
+        # Anchored to USAGE, not to a naming convention. The globals scan above
+        # only sees the mistake when it takes the shape of a module constant
+        # named `_..._KEYWORDS`; an inline `_note_keyword(note,
+        # phrases.SOMETHING)` inside a future editor reproduces the identical
+        # KeyError while never appearing in `vars()` at all.
+        #
+        # Same technique the repository already uses to keep `django.core.mail`
+        # to one module: read the source, not the runtime.
+        source = pathlib.Path(refinement_engine.__file__).read_text(encoding="utf-8")
+        registered = set(refinement_engine.NOTE_KEYWORD_MAPS)
+        offenders = []
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Call):
+                continue
+            if not (isinstance(node.func, ast.Name) and node.func.id == "_note_keyword"):
+                continue
+            if len(node.args) < 2:
+                offenders.append(f"line {node.lineno}: fewer than two positional arguments")
+                continue
+            argument = node.args[1]
+            if not isinstance(argument, ast.Name) or argument.id not in registered:
+                offenders.append(f"line {node.lineno}: {ast.unparse(argument)}")
+        assert not offenders, (
+            "_note_keyword must be passed a map registered in NOTE_KEYWORD_MAPS, "
+            f"never an arbitrary dict or a phrase vocabulary: {offenders}"
+        )
+
+    def test_no_phrase_vocabulary_is_declared_as_a_keyword_map(self):
+        # The exact mistake: a vocabulary aliased under a _KEYWORDS name. A
+        # vocabulary maps a machine value to English, so its values are English
+        # and would already fail the test above. This states the intent directly
+        # by object identity, so the failure names the real cause.
+        vocabularies = [
+            *refinement_engine._FIELD_PHRASES.values(),
+            refinement_engine._DRAPE_PHRASES,
+        ]
+        for name, (keywords, _legal) in refinement_engine.NOTE_KEYWORD_MAPS.items():
+            assert not any(keywords is table for table in vocabularies), name
 
 
 def _source_spec_dict() -> dict:

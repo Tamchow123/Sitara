@@ -172,6 +172,37 @@ class TestWhenTheEngineItselfProducesSomethingUnusable:
         with pytest.raises(StructuredDesignProviderError):
             provider.generate(_a_request(source["source_selections"]))
 
+    @pytest.mark.parametrize(
+        "exception",
+        [
+            ValidationError.from_exception_data("DesignSpec", []),
+            UnsupportedDesignSpecVersion("schema_version 99 is not supported"),
+            ImagePromptBuildError("the assembled prompt failed its safety scan"),
+        ],
+        ids=["invalid-spec", "unsupported-version", "unrenderable-prompt"],
+    )
+    def test_the_failure_is_marked_definitively_spend_free(self, monkeypatch, exception):
+        # `ambiguous_acceptance` defaults to True so an unclassified raise fails
+        # closed and reads as "money may already have been spent". The pipeline
+        # then ends the attempt as STRUCTURED_SUBMISSION_AMBIGUOUS and
+        # deliberately LEAVES `text_submission_in_flight` set, which the enqueue
+        # guard reads as unresolved spend and refuses every later refinement of
+        # that design — permanently, with no reconciliation path, since stuck-job
+        # recovery only visits in-progress rows.
+        #
+        # Right for a network call that may have landed. Categorically wrong
+        # here: this engine is local and deterministic and sends nothing
+        # anywhere. Inheriting the default would let a zero-cost local defect
+        # permanently cost a design its one refinement, which is a worse outcome
+        # than the unclassified error this conversion was added to prevent.
+        def boom(candidate, source_spec):
+            raise exception
+
+        source, provider = self._a_provider(monkeypatch, boom)
+        with pytest.raises(StructuredDesignProviderError) as excinfo:
+            provider.generate(_a_request(source["source_selections"]))
+        assert excinfo.value.ambiguous_acceptance is False
+
     def test_the_provider_error_carries_no_spec_content(self, monkeypatch):
         marker = "xyzzy-unique-marker-should-never-appear-verbatim"
 

@@ -102,10 +102,24 @@ class DemoRefinementStructuredDesignProvider:
             )
         except _ENGINE_OUTPUT_UNUSABLE as exc:
             # Narrow on purpose, not `except Exception`: an unexpected bug should
-            # still surface as itself during development. The message names the
-            # operation only — never the candidate spec, never the note.
+            # still surface as itself during development. The category is a
+            # source-controlled machine name — never the candidate spec, never
+            # the note.
+            #
+            # `ambiguous_acceptance=False` is load-bearing, not decoration. That
+            # flag defaults to True so an unclassified raise fails closed and
+            # reads as "money may already have been spent"; the pipeline then
+            # terminates the attempt as STRUCTURED_SUBMISSION_AMBIGUOUS and
+            # deliberately LEAVES `text_submission_in_flight` set, which the
+            # enqueue guard reads as unresolved spend and refuses every later
+            # refinement of that design. Correct for a network call that may have
+            # landed. Categorically wrong here: this engine is local and
+            # deterministic and sends nothing anywhere, so the failure is
+            # provably before any request — exactly the case the flag's own
+            # docstring names — and inheriting the default would let a zero-cost
+            # local defect permanently strand a design's one refinement.
             raise StructuredDesignProviderError(
-                "the demo refinement engine produced an unusable specification"
+                "demo_engine_output_unusable", ambiguous_acceptance=False
             ) from exc
         return StructuredDesignResult(
             payload=payload,

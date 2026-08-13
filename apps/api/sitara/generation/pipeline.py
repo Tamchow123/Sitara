@@ -1002,7 +1002,24 @@ def run_generation_attempt(
                 attempt.id,
                 type(exc).__name__,
             )
-            _finalise_failure(attempt, errors.INTERNAL_GENERATION_ERROR)
+            # `clear_text_marker` defaults to False so an unclassified failure
+            # fails CLOSED: a submission marker still set at terminalisation is
+            # read as possibly-unresolved spend, and the enqueue guard then
+            # refuses to refine that design again rather than risk paying twice.
+            # Exactly right for a live attempt, where an exception genuinely
+            # cannot tell us whether the provider took the request.
+            #
+            # A DEMO attempt cannot have spent anything by any path — the same
+            # invariant `cost_accounting.cost_enabled()` already relies on — so
+            # presuming spend there converts a zero-cost local bug into the
+            # permanent loss of the design's one refinement, with no
+            # reconciliation to undo it (stuck-job recovery only visits
+            # in-progress rows). This phase hit that once through a named
+            # exception type and fixed it there; clearing the marker here closes
+            # the class instead of waiting to enumerate the next type.
+            _finalise_failure(
+                attempt, errors.INTERNAL_GENERATION_ERROR, clear_text_marker=attempt.is_demo
+            )
             return GenerationAttempt.objects.get(pk=attempt.pk)
 
 

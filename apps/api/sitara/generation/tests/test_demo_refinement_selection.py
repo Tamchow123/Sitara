@@ -45,11 +45,9 @@ from sitara.generation.selection_semantics import COLOUR_ROLE_FIELDS
 from sitara.questionnaire.rules import declared_option_values, questions_by_id
 
 from .factory import (
+    committed_questionnaire_schemas,
     make_complete_design,
     make_complete_v4_design,
-    v1_schema,
-    v3_schema,
-    v4_schema,
 )
 from .test_refinement_prompt_effect import SOURCE_SPEC
 
@@ -299,14 +297,15 @@ class TestTheTwoVocabulariesStayInStep:
                 fields.update(canonical_refinement_fields(change_type, schema_version))
         return fields
 
-    @pytest.mark.parametrize(
-        "name, schema_factory",
-        [("v1", v1_schema), ("v3", v3_schema), ("v4", v4_schema)],
-    )
-    def test_every_declared_option_of_every_canonical_field_can_be_described(
-        self, name, schema_factory
-    ):
-        questions = questions_by_id(schema_factory())
+    @pytest.mark.parametrize("name", sorted(committed_questionnaire_schemas()))
+    def test_every_declared_option_of_every_canonical_field_can_be_described(self, name):
+        # Parametrised over every questionnaire version committed to the
+        # repository, DISCOVERED rather than listed. It used to name v1/v3/v4 by
+        # hand while its own docstring promised it "fails LOUDLY on the next
+        # questionnaire version" — a promise only a future author's memory could
+        # keep, and one already broken: v2 was never covered, and neither was
+        # v5, which this very phase added.
+        questions = questions_by_id(committed_questionnaire_schemas()[name])
         missing = []
         for field in sorted(self._canonical_fields()):
             question = questions.get(field)

@@ -94,6 +94,25 @@ def v4_schema() -> dict:
         return json.load(handle)[0]["fields"]["schema"]
 
 
+def committed_questionnaire_schemas() -> dict[str, dict]:
+    """Every questionnaire version committed to the repository, by file stem.
+
+    Discovered from the fixtures directory rather than listed, because a test
+    that lists its own coverage stops covering whatever the next author forgets
+    to add to the list — and does so silently, staying green. That is the exact
+    shape of defect this phase has now hit twice. Adding
+    ``questionnaire_v6.json`` puts v6 into every caller of this function with no
+    further wiring; forgetting to write a phrase for one of its options fails
+    loudly, which is the whole point of the checks that read it."""
+    schemas = {}
+    for path in sorted(_FIXTURES.glob("questionnaire_v*.json")):
+        with path.open(encoding="utf-8") as handle:
+            schemas[path.stem.removeprefix("questionnaire_")] = json.load(handle)[0]["fields"][
+                "schema"
+            ]
+    return schemas
+
+
 def make_active_v1(version: int = 1, status: str = "active") -> QuestionnaireVersion:
     return QuestionnaireVersion.objects.create(version=version, status=status, schema=v1_schema())
 
