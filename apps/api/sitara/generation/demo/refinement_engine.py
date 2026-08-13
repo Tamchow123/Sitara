@@ -130,6 +130,27 @@ def _machine_value(value) -> str | None:
     return None
 
 
+def _note_machine_value(note: str, field: str) -> str | None:
+    """The canonical machine value ``note`` names for ``field``, if it names one.
+
+    Deliberately not :func:`_note_keyword`. That takes a KEYWORD map — needle to
+    machine value, like ``_TONE_KEYWORDS`` — and returns the mapped value.
+    ``_FIELD_PHRASES`` is the opposite shape, a vocabulary of machine value to
+    English phrase, so putting it through ``_note_keyword`` hands back a PHRASE,
+    which can then never equal a machine value except by coincidence.
+
+    It does coincide for most colours (``COLOUR_PHRASES["emerald"] ==
+    "emerald"``), which is exactly why the mistake looked like it worked: a note
+    naming a fabric, a density, a drape or a silhouette silently lost its hint
+    and fell through to the deterministic pick, and the one test covering this
+    used a colour."""
+    lowered = note.lower()
+    for machine in _FIELD_PHRASES.get(field, {}):
+        if machine in lowered:
+            return machine
+    return None
+
+
 def _describe(field: str, value) -> str | None:
     """The chosen value in plain words, or ``None`` when it cannot be named."""
     machine = _machine_value(value)
@@ -174,7 +195,7 @@ def _canonical_choice(alternatives: dict[str, tuple], note: str, fingerprint: st
         return None, None
     field = _pick(sorted(describable), fingerprint, "selection-field")
     values = describable[field]
-    hinted = _note_keyword(note, _FIELD_PHRASES.get(field, {}))
+    hinted = _note_machine_value(note, field)
     for value in values:
         if hinted is not None and _machine_value(value) == hinted:
             return field, copy.deepcopy(value)

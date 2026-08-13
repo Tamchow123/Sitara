@@ -4,6 +4,7 @@ import copy
 
 import pytest
 
+from sitara.generation.demo import refinement_engine
 from sitara.generation.demo.design_spec_engine import build_demo_design_spec
 from sitara.generation.demo.refinement_engine import (
     DEMO_REFINEMENT_TEMPLATE_VERSION,
@@ -21,6 +22,45 @@ from sitara.generation.refinement import (
 )
 
 from .demo_context_utils import a_context
+
+
+class TestANoteNamesACanonicalValue:
+    """`_note_machine_value` — the lookup that decides whether a customer's note
+    reaches the SELECTION, and which was wrong in both directions until now.
+
+    `_FIELD_PHRASES` maps machine value to English phrase. Reading a hint out of
+    it with `_note_keyword` returns the phrase, so the hint could never match a
+    machine value — except for most colours, where `COLOUR_PHRASES["emerald"]
+    == "emerald"` makes key and value identical. A colour was the only field the
+    old test covered, so the bug was invisible: a note naming a fabric, a
+    density, a drape or a silhouette silently lost its hint.
+
+    Every case below is a NON-colour field, deliberately, because the colour
+    case is the one that would pass either way.
+    """
+
+    @pytest.mark.parametrize(
+        ("note", "field", "expected"),
+        [
+            ("could it be velvet instead", "fabrics", "velvet"),
+            ("please keep it minimal", "embellishment_density", "minimal"),
+            ("I would like a boat_neck", "neckline_style", "boat_neck"),
+            ("try one_shoulder please", "dupatta_style", "one_shoulder"),
+            ("a mermaid_lehenga would suit her", "silhouette", "mermaid_lehenga"),
+        ],
+    )
+    def test_a_named_value_is_returned_as_its_MACHINE_value(self, note, field, expected):
+        assert refinement_engine._note_machine_value(note, field) == expected
+
+    def test_the_colour_case_that_hid_the_defect_still_works(self):
+        hinted = refinement_engine._note_machine_value("please make it emerald", "colour_palette")
+        assert hinted == "emerald"
+
+    def test_a_note_naming_nothing_returns_none(self):
+        assert refinement_engine._note_machine_value("just something prettier", "fabrics") is None
+
+    def test_an_unknown_field_returns_none_rather_than_raising(self):
+        assert refinement_engine._note_machine_value("velvet", "not_a_field") is None
 
 
 def _source_spec_dict() -> dict:
