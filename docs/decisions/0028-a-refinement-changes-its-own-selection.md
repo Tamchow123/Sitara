@@ -233,6 +233,85 @@ rendered again — the failure mode this ADR fixes is not a bug in either system
 but a drift between two, and the same drift can recur. The structural test that
 pins "every required question is a selection field" is the tripwire.
 
+## Amendment (2026-08-13) — permission was not enough
+
+The decision above was delivered and every check was green, and the first live
+refinements after it still changed nothing. Two of them, on the owner's own
+device:
+
+- **A neckline request** ("much higher, covering the whole neck"). The model
+  rewrote `concept_summary`, `coverage_and_drape.neckline`,
+  `garment_breakdown.garment_components[2]` and `image_alt_text`, and left
+  `source_selections.neckline_style` at `square_neck`. Builder 8.x renders the
+  neckline from the canonical selection, so the image prompt came back **byte
+  for byte identical** — 1423 characters before and after. The image differed
+  only because the provider is non-deterministic. The customer saw the model's
+  hands move.
+- **A colour request** ("change the dress colour to navy blue"). The model
+  rewrote `colour_story.palette_summary`, `.placement`, `.rationale` and
+  `image_alt_text` — every one of them a field the builder drops — and set no
+  canonical colour. The refined prompt was *shorter* than its source and said
+  nothing about navy.
+
+### What was actually wrong
+
+Everything in this ADR describes making a canonical edit **permitted** and
+checking it **when it happens**. Nothing made it **effective**. Two gaps, and
+they compounded:
+
+1. **The system prompt said "may".** The model was told which canonical fields
+   it was allowed to change, and never told it had to change one, nor that
+   prose alone does not reach the image.
+2. **The no-change guard compared specs, not prompts.**
+   `if not changed_paths: raise _NoChangeInAttempt()` fires only when the
+   *entire spec* is unchanged. Any narrative tweak satisfies it — and builder
+   8.x deliberately renders almost none of that narrative. So an attempt could
+   pass every check this ADR added and still render an identical concept.
+
+That is the original defect, in a new place: the intersection of "what a
+refinement is allowed to change" and "what the prompt renders" was widened
+correctly, and then nothing required the model to land inside it.
+
+### The enforcement
+
+`_assert_the_image_prompt_actually_moved` compares the **rendered prompts** of
+the source and refined specs, and raises the retryable no-change signal when
+they match. So the model gets its one corrected attempt, and a refinement that
+cannot move the concept fails with the honest `RefinementNoChangeProduced`
+instead of charging for something that looks the same.
+
+**Prompts, not canonical fields**, deliberately. Requiring a canonical selection
+to move would be wrong in a real case: builder 8.x drops `fabrics_and_texture`
+*only when canonical fabrics exist*, so a concept without them renders its
+narrative, and a narrative-only refinement of it is a genuine change. Comparing
+prompts is the exact promise the product makes; comparing fields is a proxy that
+is wrong at the edges. Both prompts are built from specs with the current
+builder — never against the source row's persisted `image_prompt`, which an
+older `PROMPT_BUILDER_VERSION` may have written.
+
+`REFINEMENT_TEMPLATE_VERSION` → **3.0.0**: the instruction is now imperative,
+says why prose alone is inert, and states that a changeable field which is
+currently null was left unanswered rather than forbidden — the navy case, where
+the model had to *set* a colour, not change one.
+
+### What this says about the tests
+
+They were green because they asserted the same inert output the provider was
+returning. Every per-category fixture in `_ALLOWED_EDITS` changed a narrative
+field and no canonical one, so "a refinement of every category succeeds" was
+true and meaningless. The fixtures now move the canonical selection, which makes
+those tests mean what their names always claimed, and the narrative-only table
+is kept as `_NARRATIVE_ONLY_EDITS` so a test can produce the defective output on
+purpose. Both new regression tests were confirmed to fail with the guard removed.
+
+The demo path was unaffected throughout, which is why CI never caught this: the
+demo engine applies the canonical edit itself, deterministically. Only the live
+round-trip depended on a model choosing to, and no test covered that round-trip.
+
+**The honest claim is unchanged and is now enforced rather than asserted:** a
+refinement that reaches a customer renders a different image prompt from the one
+it was refined from, or it does not reach them at all.
+
 ## Alternatives considered
 
 - **Widen the narrative allowlist and leave `source_selections` frozen.**
