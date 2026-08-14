@@ -1009,6 +1009,7 @@ export interface components {
             created_at: string;
             inspiration_acknowledgements: components["schemas"]["InspirationAcknowledgementResult"][];
             lineage: components["schemas"]["DesignVersionLineage"];
+            refinements_remaining: number;
             is_demo: boolean;
         };
         DesignResultResponse: {

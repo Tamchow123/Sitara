@@ -12,7 +12,7 @@ const CONFIG_DEMO = {
   demo_mode: true,
   generation_enabled: false,
   max_inspiration_images: 3,
-  max_refinements: 1,
+  max_refinements: 3,
 };
 const CONFIG_LIVE = { ...CONFIG_DEMO, demo_mode: false, generation_enabled: true };
 

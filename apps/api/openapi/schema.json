@@ -3536,6 +3536,10 @@
                     "lineage": {
                         "$ref": "#/components/schemas/DesignVersionLineage"
                     },
+                    "refinements_remaining": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
                     "is_demo": {
                         "type": "boolean"
                     }
@@ -3556,6 +3560,7 @@
                     "inspiration_acknowledgements",
                     "is_demo",
                     "lineage",
+                    "refinements_remaining",
                     "styling_notes",
                     "title",
                     "version_number"

@@ -107,6 +107,7 @@ from .refinement_service import (
     RefinementNoChangeProduced,
     RefinementSourceUnavailable,
     assert_category_refinable,
+    assert_refinement_budget_available,
     generate_refined_design_spec_for_design,
     validate_source_version,
 )
@@ -659,9 +660,12 @@ def enqueue_design_refinement(
     from an initial-generation failure — there is no version 1 to refine in
     that case, so the source-version lookup below fails closed), the source
     version must belong to this Design and pass
-    :func:`~sitara.generation.refinement_service.validate_source_version`,
-    no child version may already exist, and no other attempt for this Design
-    may be in progress or carry unresolved provider-spend evidence.
+    :func:`~sitara.generation.refinement_service.validate_source_version`
+    (which since ADR 0029 requires it to be the design's LATEST version, so a
+    second refinement carries on from the first one's output), the design must
+    have refinement budget left, no child version may already exist, and no
+    other attempt for this Design may be in progress or carry unresolved
+    provider-spend evidence.
 
     ``refinement_request`` must already be validated (Part A's
     ``normalise_refinement_request``) — this function performs no client-input
@@ -790,9 +794,18 @@ def enqueue_design_refinement(
         #    blocks a fresh initial generation (spec §20: "no ambiguous text/
         #    image submission marker exists; no recoverable staged or
         #    permanent output exists").
+        # Scoped to THIS SOURCE VERSION, not the whole design. A succeeded
+        # attempt is required by database constraint to keep a non-empty staged
+        # key, so a design-wide filter is True the moment any refinement has
+        # ever succeeded — which was harmless while a design got one refinement
+        # and silently refuses the second and third now that it gets three.
+        # The guarantee this exists for is "never regenerate paid output that
+        # already exists for this step", and a step is a source version.
         staged_elsewhere = (
             GenerationAttempt.objects.filter(
-                design=locked, generation_kind=GenerationAttempt.GenerationKind.REFINEMENT
+                design=locked,
+                generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
+                source_design_version=source_version,
             )
             .exclude(staged_image_storage_key="")
             .exclude(status=_Status.FAILED, error_code=errors.IMAGE_STAGING_FAILED)
@@ -812,8 +825,16 @@ def enqueue_design_refinement(
             )
             .exists()
         )
+        # `unresolved_spend` is deliberately NOT narrowed the same way: it spans
+        # every refinement attempt on the design, whichever version each one
+        # sourced. It means a provider may have been billed and we cannot tell —
+        # ADR 0017's fail-closed money rule, which §26 forbids relaxing — and
+        # "we already lost track of spend on this design" is a reason to stop
+        # spending on it whatever the remaining refinement budget says.
         if source_version.refined_versions.exists() or staged_elsewhere or unresolved_spend:
-            raise RefinementLimitReached("this design has already been refined")
+            raise RefinementLimitReached("this version has already been refined")
+        # The per-design budget, separate from the per-version guard above.
+        assert_refinement_budget_available(locked.id)
 
         # 6b. Global daily count (Phase 16 Part B) — a refinement is a new live
         #     billable attempt too. Reserved atomically after every rejection

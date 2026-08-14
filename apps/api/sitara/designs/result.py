@@ -32,6 +32,7 @@ are never included. Legacy (pre-Phase-13) versions with no snapshot yield an
 empty list — inspiration context is never a readiness requirement.
 """
 
+from django.conf import settings
 from pydantic import ValidationError
 
 from sitara.generation.design_spec import (
@@ -52,6 +53,7 @@ from sitara.generation.refinement import (
     RefinementRequest,
     refinement_request_sha256,
 )
+from sitara.generation.refinement_service import refinements_used
 from sitara.generation.services import scan_design_spec_or_raise
 
 from .jobs import _iso
@@ -172,6 +174,25 @@ def load_lineage(version: DesignVersion) -> dict:
     }
 
 
+def refinements_remaining(version: DesignVersion) -> int:
+    """How many refinements this design has left.
+
+    On the payload because the frontend used to derive "already refined" from
+    `lineage.kind` plus the latest job's status — an inference that was only
+    ever right while the answer was one. With three it would have to count
+    versions it cannot see. The server owns the budget, so the server says.
+
+    Counted by the SAME function the enqueue guard refuses on
+    (:func:`~sitara.generation.refinement_service.refinements_used`), never by a
+    second query written to agree with it. A payload that promised a round the
+    guard then refused would be worse than no number at all.
+
+    Never negative: a design that somehow exceeded the cap (an operator
+    lowering `MAX_REFINEMENTS` under a live design, which is allowed and must
+    not produce a nonsense number) reports zero left, not a negative."""
+    return max(0, settings.MAX_REFINEMENTS - refinements_used(version.design_id))
+
+
 def _demo_asset_unchanged(version: DesignVersion) -> bool:
     """True when a DEMO refinement resolved to the very same fixture image.
 
@@ -261,6 +282,12 @@ def design_result_payload(
             "created_at": _iso(version.design_spec_generated_at),
             "inspiration_acknowledgements": list(acknowledgements),
             "lineage": lineage,
+            # The remaining refinement budget for this DESIGN. A count, never a
+            # boolean: "may I refine?" is one question the UI asks and "how
+            # many left?" is another it now has to answer out loud, and one
+            # number serves both without the client counting versions it was
+            # never sent.
+            "refinements_remaining": refinements_remaining(version),
             # Since Phase 15: this VERSION's own frozen historical demo/live
             # mode — never inferred from the current public config, so a
             # demo version stays labelled demo even if the environment later

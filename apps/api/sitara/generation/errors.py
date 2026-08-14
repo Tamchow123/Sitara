@@ -85,11 +85,14 @@ REFINEMENT_NO_CHANGE = "refinement_no_change"
 # A technical structured-generation failure other than "no change" (invalid
 # output after retries, a disallowed field change, an unsafe output).
 REFINEMENT_GENERATION_FAILED = "refinement_generation_failed"
-# This design has already been refined once, or MAX_DESIGN_VERSIONS is
+# This design has spent its MAX_REFINEMENTS budget, this particular version has
+# already been refined (the concurrency guard), or MAX_DESIGN_VERSIONS is
 # already reached.
 REFINEMENT_LIMIT_REACHED = "refinement_limit_reached"
-# The source version is missing, not version 1, or its persisted provenance
-# (spec/prompt/image/inspiration-context) is incomplete or corrupt.
+# The source version is missing, is not the design's LATEST version (ADR 0029 —
+# a lineage is a chain, so refinements carry on from the most recent concept),
+# or its persisted provenance (spec/prompt/image/inspiration-context) is
+# incomplete or corrupt.
 REFINEMENT_SOURCE_UNAVAILABLE = "refinement_source_unavailable"
 # The requested category owns no canonical selection on this DesignSpec version
 # (Phase 23, ADR 0028) — a version-1 spec has no neckline_style, so a neckline

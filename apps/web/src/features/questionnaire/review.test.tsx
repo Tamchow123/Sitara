@@ -113,7 +113,7 @@ beforeEach(() => {
     generation_enabled: false,
     generation_mode: "demo",
     max_inspiration_images: 3,
-    max_refinements: 1,
+    max_refinements: 3,
   });
 });
 
@@ -302,7 +302,7 @@ describe("ReviewSummary", () => {
         generation_enabled: true,
         generation_mode: "live",
         max_inspiration_images: 3,
-        max_refinements: 1,
+        max_refinements: 3,
       });
       render(<ReviewSummary designId="d1" />);
       expect(await screen.findByRole("button", { name: /Generate my concept/i })).toBeEnabled();
@@ -316,7 +316,7 @@ describe("ReviewSummary", () => {
         generation_enabled: false,
         generation_mode: "unavailable",
         max_inspiration_images: 3,
-        max_refinements: 1,
+        max_refinements: 3,
       });
       render(<ReviewSummary designId="d1" />);
       const button = await screen.findByRole("button", { name: /Generate my concept/i });
@@ -341,7 +341,7 @@ describe("ReviewSummary", () => {
         generation_enabled: true,
         generation_mode: "live",
         max_inspiration_images: 3,
-        max_refinements: 1,
+        max_refinements: 3,
       });
       render(<ReviewSummary designId="d1" />);
       await screen.findByRole("button", { name: /Generate my concept/i });
@@ -354,7 +354,7 @@ describe("ReviewSummary", () => {
         generation_enabled: false,
         generation_mode: "unavailable",
         max_inspiration_images: 3,
-        max_refinements: 1,
+        max_refinements: 3,
       });
       render(<ReviewSummary designId="d1" />);
       const button = await screen.findByRole("button", { name: /Generate my concept/i });

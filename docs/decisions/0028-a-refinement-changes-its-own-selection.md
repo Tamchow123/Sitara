@@ -223,8 +223,11 @@ output it can see is inert, not the shape of the output it does return.)
   (the category owns nothing on this spec version) and the invalid-selection path
   (the model produced an answer the design's own questionnaire would refuse).
   Both fail closed and neither leaks the rejected value.
-- The single-round limit is untouched: `MAX_REFINEMENTS = 1`, still enforced via
-  `DesignVersion.parent_version`. Refinement is still a fresh text-to-image
+- The refinement limit is untouched by THIS decision: `MAX_REFINEMENTS = 1`,
+  still enforced via `DesignVersion.parent_version`. (**Superseded by ADR 0029**,
+  2026-08-14, which raised it to 3 and chained the rounds — precisely because
+  this decision made a refinement move the render, and one round then proved too
+  few. Nothing else in this bullet changed.) Refinement is still a fresh text-to-image
   generation through the same deterministic builder and the same selected model —
   never image-to-image, never sent the original image's bytes, URL or storage key.
 - Deferred: the seven categories still map to fixed field groups. A refinement
@@ -520,9 +523,12 @@ alongside the still-pending one that a refined image visibly differs.
   bump and a snapshot regeneration, and degrades every future generation to fix
   one round of refinement.
 - **Let a refinement change any selection, including `garment_type`.**
-  Rejected: that is a new design. The user has a single-round refinement, and
-  spending it on a garment change would silently discard the concept they were
-  looking at.
+  Rejected: that is a new design. The user has a bounded refinement budget —
+  one round when this was written, three since ADR 0029 — and spending one on a
+  garment change would silently discard the concept they were looking at. The
+  rejection does not depend on the number; it depends on the budget being
+  finite and on `garment_type` being the identity of the concept, which is why
+  it stays in `REFINEMENT_IMMUTABLE_SELECTION_FIELDS`.
 - **Trust the model's stated change instead of diffing.** Rejected outright, and
   it was already prohibited by ADR 0015. A model's claim about its own output is
   not evidence.

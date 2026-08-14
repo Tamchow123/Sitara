@@ -1995,7 +1995,7 @@ class DesignRefineView(APIView):
         except RefinementLimitReached:
             return _error(
                 "refinement_limit_reached",
-                "This design has already been refined.",
+                "This design has used all of its refinements.",
                 status.HTTP_409_CONFLICT,
             )
         except GenerationUnavailable:

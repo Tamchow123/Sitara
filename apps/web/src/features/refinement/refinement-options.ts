@@ -92,3 +92,11 @@ export function changeTypeLabel(changeType: ChangeType): string {
 export function isNoteWithinLimit(note: string): boolean {
   return note.length <= REFINEMENT_NOTE_MAX_LENGTH;
 }
+
+// The remaining-budget phrase, in one place because three separate surfaces
+// say it — the panel kicker, the comparison kicker and the note under the
+// previous version — and a count that reads "1 refinements left" on the last
+// round is the kind of detail a customer notices at the counter.
+export function refinementsLeftLabel(remaining: number): string {
+  return remaining === 1 ? "1 refinement left" : `${remaining} refinements left`;
+}

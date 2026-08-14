@@ -2,18 +2,22 @@
 Part B) — injected fake providers, zero network calls."""
 
 import ast
+import contextlib
 import copy
 import json
 import logging
 import pathlib
+from unittest import mock
 
 import pytest
 from django.conf import settings
+from django.utils import timezone
 from pydantic import ValidationError
 
 from sitara.ai_gateway.structured_design import StructuredDesignResult
 from sitara.content_safety import GeneratedContentRejected, RejectionCategory
 from sitara.designs.models import Design, DesignVersion, GenerationAttempt
+from sitara.designs.result import refinements_remaining
 from sitara.generation import cost_control, refinement_service
 from sitara.generation.context import build_generation_context
 from sitara.generation.demo.design_spec_engine import build_demo_design_spec
@@ -32,7 +36,11 @@ from sitara.generation.inspiration_context import (
     InspirationProviderCues,
     inspiration_context_sha256,
 )
-from sitara.generation.prompt_builder import ImagePromptBuildError, build_image_prompt
+from sitara.generation.prompt_builder import (
+    PROMPT_BUILDER_VERSION,
+    ImagePromptBuildError,
+    build_image_prompt,
+)
 from sitara.generation.refinement import (
     REFINEMENT_CHANGE_TYPES,
     canonical_refinement_fields,
@@ -67,7 +75,10 @@ from sitara.generation.refinement_service import (
     RefinementSourceUnavailable,
     _generate_valid_refined_spec,
     _rejection_detail,
+    assert_refinement_budget_available,
     generate_refined_design_spec_for_design,
+    refinements_used,
+    validate_source_version,
 )
 
 from .factory import (
@@ -123,8 +134,11 @@ def make_snapshot() -> InspirationContextSnapshot:
     return InspirationContextSnapshot(schema_version=1, items=[item])
 
 
-def make_ready_design(*, with_inspiration=False):
-    design = make_complete_design()
+def make_ready_design(*, with_inspiration=False, questionnaire=None):
+    # Pass a shared ``questionnaire`` when one test needs TWO designs:
+    # QuestionnaireVersion.version is globally unique and make_complete_design
+    # always mints version 1, so a second unqualified call collides.
+    design = make_complete_design(questionnaire=questionnaire)
     source_selections = build_generation_context(design).source_selections
     spec_payload = build_fixture_spec(source_selections)
     kwargs = {}
@@ -802,10 +816,14 @@ class TestSourceVersionUnchanged:
 
 
 class TestSourceValidation:
-    def test_source_must_be_version_one(self):
+    def test_an_older_version_is_refused_once_a_newer_one_exists(self):
+        # The rule that replaced "the source must be version 1". A lineage is a
+        # chain: refining v1 again after v2 exists would give one parent two
+        # children, and nothing in the version numbering, the result page or the
+        # `refined_versions` guard can say which of them is "the" concept.
         design, v1, spec_payload = make_ready_design()
         request = refinement_request("colour_story")
-        v2 = make_source_version(
+        make_source_version(
             design,
             spec_payload,
             version_number=2,
@@ -814,10 +832,44 @@ class TestSourceValidation:
             refinement_request_schema_version=1,
             refinement_request_sha256="e" * 64,
         )
+        provider = SequenceProvider([])
         with pytest.raises(RefinementSourceUnavailable):
             generate_refined_design_spec_for_design(
-                design, v2, refinement_request("colour_story"), provider=SequenceProvider([])
+                design, v1, refinement_request("colour_story"), provider=provider
             )
+        # Refused before the provider was reached — an out-of-date source costs
+        # nothing.
+        assert provider.calls == 0
+
+    def test_the_latest_version_is_refinable_even_though_it_is_itself_a_refinement(self):
+        # The converse of the test above, and the whole point of raising the
+        # limit: round two refines round one's OUTPUT, not the original concept.
+        design, v1, spec_payload = make_ready_design()
+        request = refinement_request("colour_story")
+        v2_payload = apply_allowed_edit(spec_payload, "colour_story")
+        v2 = make_source_version(
+            design,
+            v2_payload,
+            version_number=2,
+            parent_version=v1,
+            refinement_request=request.model_dump(mode="json"),
+            refinement_request_schema_version=1,
+            refinement_request_sha256="e" * 64,
+        )
+
+        refined = apply_allowed_edit(v2_payload, "fabric_and_texture")
+        version = generate_refined_design_spec_for_design(
+            design,
+            v2,
+            refinement_request("fabric_and_texture"),
+            provider=SequenceProvider([_result(refined)]),
+        )
+
+        assert version.version_number == 3
+        assert version.parent_version_id == v2.pk
+        # Round one's change survived round two: the chain accumulates rather
+        # than each round restarting from the original concept.
+        assert version.design_spec["source_selections"]["colour_palette"] == ["emerald", "gold"]
 
     def test_source_without_permanent_image_is_unavailable(self):
         design, source, spec_payload = make_ready_design()
@@ -848,23 +900,313 @@ class TestSourceValidation:
             )
 
 
-class TestRefinementLimit:
-    def test_second_refinement_is_rejected(self):
+def _give_permanent_image(version: DesignVersion) -> DesignVersion:
+    """Stand in for the pipeline's prompt and image stages, which this service
+    never runs.
+
+    ``generate_refined_design_spec_for_design`` persists a spec and nothing
+    else; the prompt is built and the permanent image ingested later by the
+    pipeline. A chained refinement therefore has to be handed the provenance its
+    predecessor would really have by the time a customer could ask to refine it
+    again — without it, round two refuses the source as having no complete
+    image, which would make the chain tests pass for entirely the wrong reason.
+
+    The prompt is the REAL one built from this version's own spec, not a
+    placeholder: a database constraint requires a permanent image to come with
+    one, and building it here also proves each round's spec still renders."""
+    version.image_prompt = build_image_prompt(validate_design_spec(version.design_spec))
+    version.prompt_builder_version = PROMPT_BUILDER_VERSION
+    version.image_storage_key = f"design-images/{version.design_id}/v{version.version_number}.webp"
+    version.image_sha256 = f"{version.version_number:064d}"
+    version.image_size_bytes = 100_000
+    version.image_width = 900
+    version.image_height = 1200
+    version.thumbnail_storage_key = (
+        f"design-images/{version.design_id}/v{version.version_number}-thumb.webp"
+    )
+    version.thumbnail_sha256 = f"{version.version_number + 500:064d}"
+    version.thumbnail_size_bytes = 5_000
+    version.thumbnail_width = 200
+    version.thumbnail_height = 260
+    version.image_processor_version = "1.0.0"
+    version.image_ingested_at = timezone.now()
+    version.save()
+    return version
+
+
+# One canonical move per round, each in a different category, so no round is
+# inert against the one before it. Three because that is MAX_REFINEMENTS.
+_CHAIN_CATEGORIES = ("colour_story", "fabric_and_texture", "embellishment")
+
+
+def _refine_once(design, source, source_payload, change_type):
+    refined_payload = apply_allowed_edit(source_payload, change_type)
+    version = generate_refined_design_spec_for_design(
+        design,
+        source,
+        refinement_request(change_type),
+        provider=SequenceProvider([_result(refined_payload)]),
+    )
+    return _give_permanent_image(version), version.design_spec
+
+
+class TestRefinementBudget:
+    def test_the_same_version_may_never_be_refined_twice(self):
+        # Still refused, and for a reason the budget has nothing to do with: a
+        # second child of one parent branches the lineage.
+        #
+        # Refused as an out-of-date SOURCE, not by the `refined_versions` guard.
+        # A version with a child is by construction not the design's latest
+        # (the child's number is higher), so the latest-version check — which
+        # runs first, before any provider is selected — always gets there
+        # first sequentially. `refined_versions` is not thereby dead: it is the
+        # guard for the ordering this test cannot express, two concurrent
+        # refinements of the same latest version whose pre-lock validation both
+        # ran before either child existed. See
+        # TestTwoConcurrentRefinementsOfOneVersion below.
         design, source, spec_payload = make_ready_design()
-        refined = apply_allowed_edit(spec_payload, "colour_story")
-        provider = SequenceProvider([_result(refined)])
-        generate_refined_design_spec_for_design(
-            design, source, refinement_request("colour_story"), provider=provider
+        provider = SequenceProvider(
+            [_result(apply_allowed_edit(spec_payload, "fabric_and_texture"))]
         )
+        _refine_once(design, source, spec_payload, "colour_story")
+        with pytest.raises(RefinementSourceUnavailable):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request("fabric_and_texture"), provider=provider
+            )
+        assert provider.calls == 0
+        assert DesignVersion.objects.filter(design=design).count() == 2
+
+    def test_three_refinements_succeed_and_the_fourth_is_refused(self, settings):
+        assert settings.MAX_REFINEMENTS == 3
+        design, source, spec_payload = make_ready_design()
+
+        version, payload = source, spec_payload
+        for round_number, change_type in enumerate(_CHAIN_CATEGORIES, start=1):
+            version, payload = _refine_once(design, version, payload, change_type)
+            assert version.version_number == round_number + 1
+
+        # The budget, not the per-version guard: this source has no child of its
+        # own, and the request is in a category it has never been refined in.
+        provider = SequenceProvider([_result(apply_allowed_edit(payload, "silhouette_detail"))])
+        with pytest.raises(RefinementLimitReached):
+            generate_refined_design_spec_for_design(
+                design, version, refinement_request("silhouette_detail"), provider=provider
+            )
+        # Refused before spending. A customer who has used her three rounds must
+        # not be billed for discovering that.
+        assert provider.calls == 0
+        assert DesignVersion.objects.filter(design=design).count() == 4
+
+    def test_the_budget_counts_refinements_not_versions(self, settings):
+        # `refinements_used` counts rows WITH A PARENT, deliberately rather than
+        # `version_number - 1`. They agree on every lineage this code can build,
+        # so the distinction is only visible on a design whose numbering skipped
+        # — which is exactly when a tally derived from numbering would silently
+        # cost a customer a round she never used.
+        design, source, spec_payload = make_ready_design()
+        DesignVersion.objects.filter(pk=source.pk).update(version_number=3)
+        source.refresh_from_db()
+        assert refinements_used(design.id) == 0
+        assert_refinement_budget_available(design.id)
+
+    def test_the_budget_follows_the_setting(self, settings):
+        settings.MAX_REFINEMENTS = 1
+        design, source, spec_payload = make_ready_design()
+        version, payload = _refine_once(design, source, spec_payload, "colour_story")
         with pytest.raises(RefinementLimitReached):
             generate_refined_design_spec_for_design(
                 design,
-                source,
-                refinement_request("colour_story"),
+                version,
+                refinement_request("fabric_and_texture"),
                 provider=SequenceProvider(
-                    [_result(apply_allowed_edit(spec_payload, "colour_story"))]
+                    [_result(apply_allowed_edit(payload, "fabric_and_texture"))]
                 ),
             )
+
+    def test_the_same_category_may_be_chained(self):
+        # The three-round test above walks three DIFFERENT categories, which
+        # dodges the question a customer asks constantly: "make it emerald" and
+        # then, looking at it, "actually make it ruby". Nothing in the code
+        # forbids repeating a category — `refinement_allowed_paths` is keyed on
+        # category and schema version, with no per-design history — so the only
+        # thing standing between a repeat and a saved concept is the rendered
+        # prompt actually moving again. Asserted here rather than assumed.
+        design, source, spec_payload = make_ready_design()
+        version, payload = source, spec_payload
+        prompts = [build_image_prompt(validate_design_spec(spec_payload))]
+
+        # Taken from the production helper that computes what the questionnaire
+        # would actually accept, rather than hand-picked: a hand-picked palette
+        # that happens to be illegal in context fails as an invalid selection
+        # and would look exactly like the defect this test is about.
+        legal = answerable_selection_alternatives(
+            design, validate_design_spec(spec_payload), "colour_story"
+        )["colour_palette"]
+        assert len(legal) >= 3, "not enough legal palettes to chain three rounds"
+
+        for palette in legal[:3]:
+            refined = apply_narrative_only_edit(payload, "colour_story")
+            refined["source_selections"]["colour_palette"] = list(palette)
+            version = generate_refined_design_spec_for_design(
+                design,
+                version,
+                refinement_request("colour_story"),
+                provider=SequenceProvider([_result(refined)]),
+            )
+            payload = version.design_spec
+            prompts.append(build_image_prompt(validate_design_spec(payload)))
+            _give_permanent_image(version)
+
+        assert version.version_number == 4
+        # Every round moved the prompt, and none of them landed back on an
+        # earlier one — a repeated category accumulates like any other.
+        assert len(set(prompts)) == len(prompts)
+        assert payload["source_selections"]["colour_palette"] == list(legal[2])
+
+    def test_repeating_a_category_with_nothing_new_to_say_is_refused(self):
+        # The other half, and the reason the test above is not merely decorative:
+        # a second colour refinement that lands on the SAME palette renders the
+        # same prompt, and is refused rather than spending a round on a concept
+        # the customer cannot tell apart from the one she already has.
+        design, source, spec_payload = make_ready_design()
+        first, payload = _refine_once(design, source, spec_payload, "colour_story")
+
+        # Both attempts return the palette the previous round already set.
+        unchanged = copy.deepcopy(payload)
+        provider = SequenceProvider([_result(unchanged), _result(copy.deepcopy(unchanged))])
+        with pytest.raises(RefinementNoChangeProduced):
+            generate_refined_design_spec_for_design(
+                design, first, refinement_request("colour_story"), provider=provider
+            )
+        # The round was NOT spent: no third version exists, so the budget is
+        # still what it was before the refused attempt.
+        assert DesignVersion.objects.filter(design=design).count() == 2
+        assert refinements_remaining(first) == settings.MAX_REFINEMENTS - 1
+
+    def test_the_payload_never_promises_a_round_the_guard_would_refuse(self):
+        # The result payload's `refinements_remaining` and the enqueue guard's
+        # refusal must not be able to disagree — a customer told she has a round
+        # left, who then gets a 409 for asking, is the worst outcome available
+        # here. Held closed by both reading the same counter, asserted end to
+        # end across a full chain rather than trusted from the shared call.
+        design, source, spec_payload = make_ready_design()
+        version, payload = source, spec_payload
+        for spent in range(settings.MAX_REFINEMENTS):
+            assert refinements_remaining(version) == settings.MAX_REFINEMENTS - spent
+            assert_refinement_budget_available(design.id)  # does not raise
+            version, payload = _refine_once(design, version, payload, _CHAIN_CATEGORIES[spent])
+
+        assert refinements_remaining(version) == 0
+        with pytest.raises(RefinementLimitReached):
+            assert_refinement_budget_available(design.id)
+
+    def test_a_child_whose_image_stage_failed_strands_the_design_KNOWN_DEBT(self):
+        """A refinement whose TEXT stage succeeded and whose IMAGE stage then
+        failed leaves a child version with no permanent image — and nothing on
+        the design is refinable afterwards.
+
+        The parent is refused because a newer version exists; the child is
+        refused because it has no complete image. This is **pre-existing**: on
+        the one-refinement rule the parent was refused by
+        `refined_versions.exists()` and the child by `version_number != 1`, so
+        the design was equally stuck. What this phase changes is the REPORTING —
+        `refinements_remaining` now says rounds are left while none can be used.
+
+        Recorded rather than fixed, deliberately. The obvious repairs are all
+        unsafe here: ignoring an imageless child in the branching guard cannot
+        distinguish "the image stage failed" from "the image stage is running
+        right now", and treating it as not-a-refinement would let a concurrent
+        second refinement of the parent branch the lineage — the one thing
+        `refined_versions` exists to prevent. Recovering a half-finished
+        refinement needs the attempt's own state, which is its own slice.
+
+        Pinned so the behaviour cannot drift unnoticed and so the fix, when it
+        comes, has a test to invert."""
+        design, source, spec_payload = make_ready_design()
+        child, _ = _refine_once(design, source, spec_payload, "colour_story")
+        # Undo what _give_permanent_image did: model the image stage failing
+        # after the text stage had already persisted the child.
+        DesignVersion.objects.filter(pk=child.pk).update(
+            image_storage_key="",
+            image_sha256="",
+            image_size_bytes=None,
+            image_width=None,
+            image_height=None,
+            thumbnail_storage_key="",
+            thumbnail_sha256="",
+            thumbnail_size_bytes=None,
+            thumbnail_width=None,
+            thumbnail_height=None,
+            image_processor_version="",
+            image_ingested_at=None,
+        )
+        child.refresh_from_db()
+        source.refresh_from_db()
+
+        # The round WAS spent — the child row has a parent — and two are left.
+        assert refinements_remaining(child) == settings.MAX_REFINEMENTS - 1
+
+        # And yet neither version can be refined.
+        with pytest.raises(RefinementSourceUnavailable):
+            validate_source_version(source)  # a newer version exists
+        with pytest.raises(RefinementSourceUnavailable):
+            validate_source_version(child)  # no complete image
+
+    def test_the_budget_is_per_design(self):
+        first, first_source, first_payload = make_ready_design()
+        second, second_source, second_payload = make_ready_design(
+            questionnaire=first.questionnaire_version
+        )
+        version, payload = first_source, first_payload
+        for change_type in _CHAIN_CATEGORIES:
+            version, payload = _refine_once(first, version, payload, change_type)
+
+        # A neighbouring design's exhausted budget never touches this one's.
+        refined, _ = _refine_once(second, second_source, second_payload, "colour_story")
+        assert refined.version_number == 2
+        assert refinements_used(second.id) == 1
+
+
+class TestACompetingRefinementLandingBeforeTheLock:
+    def test_the_in_lock_recheck_catches_it(self):
+        """Why the `refined_versions` re-check inside the lock is not dead code
+        now that the latest-version rule refuses an already-refined source first.
+
+        The window is real and narrow: this caller's PRE-lock checks all pass
+        (no child exists yet, and the source is still the latest version), a
+        competing refinement then commits, and only afterwards does this caller
+        acquire the lock. Threads cannot express it — the advisory lock is
+        non-blocking, so a genuinely simultaneous loser is turned away with
+        GenerationLocked long before reaching the re-check. So the competitor is
+        landed at exactly that point instead, through the real lock, which is
+        the one thing about the ordering a test gets to choose.
+
+        Without the re-check the design ends with two version 2s: a branched
+        lineage, and a second refinement the customer was charged for."""
+        design, source, spec_payload = make_ready_design()
+        provider = SequenceProvider(
+            [_result(apply_allowed_edit(spec_payload, "fabric_and_texture"))]
+        )
+        real_lock = refinement_service.advisory_lock
+        landed: list[bool] = []
+
+        @contextlib.contextmanager
+        def lock_after_a_competitor_lands(design_id):
+            if not landed:
+                landed.append(True)
+                _refine_once(design, source, spec_payload, "colour_story")
+            with real_lock(design_id):
+                yield
+
+        with mock.patch.object(refinement_service, "advisory_lock", lock_after_a_competitor_lands):
+            with pytest.raises(RefinementLimitReached):
+                generate_refined_design_spec_for_design(
+                    design, source, refinement_request("fabric_and_texture"), provider=provider
+                )
+
+        # Refused before the provider was selected, and the competitor's child
+        # is the only one.
+        assert provider.calls == 0
         assert DesignVersion.objects.filter(design=design).count() == 2
 
 

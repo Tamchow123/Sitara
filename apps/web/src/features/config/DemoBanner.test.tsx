@@ -40,7 +40,7 @@ describe("DemoBanner", () => {
       generation_enabled: false,
       generation_mode: "demo",
       max_inspiration_images: 3,
-      max_refinements: 1,
+      max_refinements: 3,
     });
     renderBanner();
     const banner = await screen.findByRole("status");
@@ -54,7 +54,7 @@ describe("DemoBanner", () => {
       generation_enabled: true,
       generation_mode: "live",
       max_inspiration_images: 3,
-      max_refinements: 1,
+      max_refinements: 3,
     });
     renderBanner();
     await waitFor(() => expect(mocks.fetchPublicConfig).toHaveBeenCalled());
@@ -68,7 +68,7 @@ describe("DemoBanner", () => {
       generation_enabled: false,
       generation_mode: "unavailable",
       max_inspiration_images: 3,
-      max_refinements: 1,
+      max_refinements: 3,
     });
     renderBanner();
     await waitFor(() => expect(mocks.fetchPublicConfig).toHaveBeenCalled());

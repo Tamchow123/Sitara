@@ -1,4 +1,9 @@
-"""Strict, versioned single-round refinement request contract (Phase 14).
+"""Strict, versioned refinement request contract — one constrained edit per
+request (Phase 14).
+
+"One edit" is a property of a REQUEST, not of a design: since ADR 0029 a design
+gets `MAX_REFINEMENTS` of them, chained. This module owns the shape of a single
+request and knows nothing about how many a design may make.
 
 A user may request exactly one constrained edit to an existing, validated
 DesignSpec: one allowlisted ``change_type`` plus a short optional free-text

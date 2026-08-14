@@ -168,13 +168,17 @@ const GENERATION_ERROR_MESSAGES = {
     editable: false,
   },
   refinement_limit_reached: {
-    heading: "This design has already been refined",
-    message: "Only one refinement is available per concept.",
+    heading: "No refinements left",
+    message: "You have used every refinement available for this concept.",
     editable: false,
   },
+  // Distinct from the limit above, and the distinction matters: the design may
+  // well have rounds left, and this concept simply is not the one they carry on
+  // from. Refinements continue from the most recent version.
   refinement_source_unavailable: {
     heading: "This concept can't be refined right now",
-    message: "The original concept is not available for refinement. Please try again shortly.",
+    message:
+      "Refinements continue from your most recent concept. Open that one to make another change.",
     editable: false,
   },
   // Since Phase 23 (ADR 0028): the change exists but this concept's own

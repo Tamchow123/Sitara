@@ -103,6 +103,7 @@ function result(overrides: Partial<DesignResultType> = {}): DesignResultType {
     created_at: "2026-07-19T12:00:00Z",
     inspiration_acknowledgements: [],
     lineage: { kind: "initial", parent_version_id: null, refinement: null },
+    refinements_remaining: 3,
     is_demo: false,
     ...overrides,
   };
@@ -150,7 +151,7 @@ function publicConfig(offered: boolean) {
     generation_enabled: false,
     generation_mode: offered ? "demo" : "unavailable",
     max_inspiration_images: 3,
-    max_refinements: 1,
+    max_refinements: 3,
   };
 }
 
@@ -644,13 +645,19 @@ describe("DesignResult — refinement (Phase 14)", () => {
     ).toBeInTheDocument();
   });
 
-  it("hides the refinement panel and shows the comparison when viewing version 2", async () => {
+  it("offers another refinement below the comparison when viewing a refined version", async () => {
+    // The behaviour that changed with the budget. A refined version used to be
+    // a dead end: the comparison rendered and nothing else, because there was
+    // nothing else to offer. Round two now starts from round one's OUTPUT, so
+    // the form belongs here too — below the two concepts, since the next change
+    // is decided after reading them.
     mocks.fetchDesignResult.mockResolvedValue({
       ok: true,
       result: result({
         design_version_id: "v2",
         version_number: 2,
         title: "Refined version",
+        refinements_remaining: 2,
         lineage: {
           kind: "refinement",
           parent_version_id: "v1",
@@ -659,15 +666,84 @@ describe("DesignResult — refinement (Phase 14)", () => {
       }),
     });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchDesign.mockResolvedValue(
+      design({
+        status: "generated",
+        latest_job: {
+          id: "j1",
+          design_id: "d1",
+          // The succeeded refinement produced THIS version, so it is the latest
+          // — the fact the eligibility rule now reads instead of inferring
+          // "already refined" from the lineage kind.
+          design_version_id: "v2",
+          status: "succeeded",
+          error_code: null,
+          generation_kind: "refinement",
+          is_demo: false,
+          created_at: "t",
+          updated_at: "t",
+          started_at: "t",
+          completed_at: "t",
+        },
+      }),
+    );
     renderResult("d1", "v2");
-    expect(await screen.findByRole("heading", { name: /compare your concepts/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /compare your concepts/i }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /what would you change/i }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/2 refinements left/i).length).toBeGreaterThan(0);
+  });
+
+  it("does not offer a refinement on a version a newer one has superseded", async () => {
+    // Version 1's own page, after version 2 exists. The server refuses this —
+    // refining it would branch the lineage — so the page must not offer it, and
+    // must say why rather than leaving a hole where the form was.
+    mocks.fetchDesignResult.mockResolvedValue({
+      ok: true,
+      result: result({ design_version_id: "v1", refinements_remaining: 2 }),
+    });
+    mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+    mocks.fetchDesign.mockResolvedValue(
+      design({
+        status: "generated",
+        latest_job: {
+          id: "j1",
+          design_id: "d1",
+          design_version_id: "v2",
+          status: "succeeded",
+          error_code: null,
+          generation_kind: "refinement",
+          is_demo: false,
+          created_at: "t",
+          updated_at: "t",
+          started_at: "t",
+          completed_at: "t",
+        },
+      }),
+    );
+    renderResult("d1", "v1");
+    expect(await screen.findByRole("heading", { name: /^Refinement$/ })).toBeInTheDocument();
+    expect(screen.getByText(/earlier version of your design/i)).toBeInTheDocument();
+    // And it is not described as used up: two rounds remain, on the latest
+    // version, which this links to.
+    expect(screen.queryByText(/used every refinement/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /view your most recent concept/i })).toHaveAttribute(
+      "href",
+      "/design/d1/result/v2",
+    );
     expect(
       screen.queryByRole("heading", { name: /what would you change/i }),
     ).not.toBeInTheDocument();
   });
 
-  it("hides the refinement panel once the limit has been reached (a completed refinement exists)", async () => {
-    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+  it("hides the refinement panel once the limit has been reached (the budget is spent)", async () => {
+    mocks.fetchDesignResult.mockResolvedValue({
+      ok: true,
+      result: result({ refinements_remaining: 0 }),
+    });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     mocks.fetchDesign.mockResolvedValue(
       design({
@@ -767,8 +843,14 @@ describe("DesignResult — refinement (Phase 14)", () => {
       await screen.findByRole("heading", { name: /what would you change/i }),
     ).toBeInTheDocument();
   });
-  it("says the one refinement has been used, and links to the refined concept", async () => {
-    mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+  it("says every refinement has been used once the budget is spent", async () => {
+    // The budget is the SERVER's count, not an inference from a succeeded job:
+    // that job here produced this very version, so the old rule would have
+    // called it eligible. Zero left is what closes it.
+    mocks.fetchDesignResult.mockResolvedValue({
+      ok: true,
+      result: result({ design_version_id: "v1", refinements_remaining: 0 }),
+    });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     mocks.fetchDesign.mockResolvedValue(
       design({
@@ -776,7 +858,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
         latest_job: {
           id: "j1",
           design_id: "d1",
-          design_version_id: "v2",
+          design_version_id: "v1",
           status: "succeeded",
           error_code: null,
           generation_kind: "refinement",
@@ -790,13 +872,12 @@ describe("DesignResult — refinement (Phase 14)", () => {
     );
     renderResult();
     // A missing form is not an explanation. The locked state says which of the
-    // two reasons applies, and never implies more refinements could be bought.
+    // reasons applies, and never implies more refinements could be bought.
     expect(await screen.findByRole("heading", { name: /^Refinement$/ })).toBeInTheDocument();
-    expect(screen.getByText(/used your one refinement/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /view your refined concept/i })).toHaveAttribute(
-      "href",
-      "/design/d1/result/v2",
-    );
+    expect(screen.getByText(/used every refinement/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /what would you change/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("gives the unavailable reason, not the used-up one, when generation is disabled", async () => {
@@ -806,7 +887,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
     renderResult();
     expect(await screen.findByRole("heading", { name: /^Refinement$/ })).toBeInTheDocument();
     expect(screen.getByText(/not currently available/i)).toBeInTheDocument();
-    expect(screen.queryByText(/used your one refinement/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/used every refinement/i)).not.toBeInTheDocument();
   });
 
   it("offers no refinement wording at all while the design's own state is unknown", async () => {
@@ -816,7 +897,7 @@ describe("DesignResult — refinement (Phase 14)", () => {
     renderResult();
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     // Neither the form nor a lock claim: an unresolved fetch must not be
-    // reported to the user as "you have used your refinement".
+    // reported to the user as "you have used every refinement".
     expect(
       screen.queryByRole("heading", { name: /what would you change/i }),
     ).not.toBeInTheDocument();

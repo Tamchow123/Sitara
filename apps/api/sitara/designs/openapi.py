@@ -564,6 +564,11 @@ class DesignResultSerializer(serializers.Serializer):
     inspiration_acknowledgements = InspirationAcknowledgementResultSerializer(many=True)
     # Since Phase 14: additive parent-child lineage.
     lineage = DesignVersionLineageSerializer()
+    # How many refinements this DESIGN has left, server-owned. A count rather
+    # than a boolean, because the client now has to say the number out loud
+    # and must not derive it by counting versions it was never sent. Zero is
+    # the honest answer for an exhausted design.
+    refinements_remaining = serializers.IntegerField(min_value=0)
     # Since Phase 15: this version's own frozen historical demo/live mode.
     is_demo = serializers.BooleanField()
 

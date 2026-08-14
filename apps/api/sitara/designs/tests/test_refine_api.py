@@ -109,6 +109,80 @@ def _post_refine(
         )
 
 
+def _complete_one_round(client, token, design_id, source: DesignVersion) -> DesignVersion:
+    """Post one refinement and finish it the way the async pipeline would.
+
+    Without the terminal SUCCEEDED attempt and the linked child version the
+    round still reads as in progress, and the next request would be refused for
+    that reason instead of the one under test."""
+    from django.utils import timezone
+
+    from sitara.designs.models import GenerationAttempt
+
+    posted = _post_refine(client, design_id, token=token, source_version_id=source.pk)
+    assert posted.status_code == 202, posted.content
+    job_id = posted.json()["job"]["id"]
+
+    design = Design.objects.get(pk=design_id)
+    number = source.version_number + 1
+    child = DesignVersion.objects.create(
+        design=design,
+        version_number=number,
+        parent_version=source,
+        refinement_request={"schema_version": 1, "change_type": "colour_story", "note": ""},
+        refinement_request_schema_version=1,
+        refinement_request_sha256="e" * 64,
+    )
+    _make_version_ready(child)
+    GenerationAttempt.objects.filter(pk=job_id).update(
+        status=GenerationAttempt.Status.SUCCEEDED,
+        design_version=child,
+        completed_at=timezone.now(),
+        staged_image_storage_key=f"generation-staging/test/raw-v{number}.webp",
+        staged_image_sha256=f"{number:064d}",
+        staged_image_size_bytes=1000,
+        staged_image_width=800,
+        staged_image_height=1000,
+    )
+    design.status = Design.Status.GENERATED
+    design.save(update_fields=["status"])
+    return child
+
+
+def _make_version_ready(version: DesignVersion) -> None:
+    """The spec, prompt and permanent-image provenance a refinable source needs.
+
+    Copied onto the child so the NEXT round can use it as its source — the real
+    pipeline's prompt and image stages leave exactly this behind."""
+    from django.utils import timezone
+
+    from sitara.generation.design_spec import DESIGN_SPEC_SCHEMA_VERSION, SPEC_TEMPLATE_VERSION
+    from sitara.generation.prompt_builder import PROMPT_BUILDER_VERSION
+
+    number = version.version_number
+    version.design_spec = _load_valid_spec()
+    version.design_spec_schema_version = DESIGN_SPEC_SCHEMA_VERSION
+    version.design_spec_template_version = SPEC_TEMPLATE_VERSION
+    version.design_spec_provider = "fixture"
+    version.design_spec_model = "fixture-model"
+    version.design_spec_generated_at = timezone.now()
+    version.image_prompt = f"A deterministic placeholder prompt for v{number}."
+    version.prompt_builder_version = PROMPT_BUILDER_VERSION
+    version.image_storage_key = f"design-images/{version.design_id}/v{number}/original.webp"
+    version.image_sha256 = f"{number:064d}"
+    version.image_size_bytes = 100_000
+    version.image_width = 900
+    version.image_height = 1200
+    version.thumbnail_storage_key = f"design-images/{version.design_id}/v{number}/thumbnail.webp"
+    version.thumbnail_sha256 = f"{number + 500:064d}"
+    version.thumbnail_size_bytes = 5_000
+    version.thumbnail_width = 200
+    version.thumbnail_height = 260
+    version.image_processor_version = "1.0.0"
+    version.image_ingested_at = timezone.now()
+    version.save()
+
+
 class TestRefineSuccess:
     def test_first_request_returns_202_with_refinement_job_and_location(self):
         client, token = signed_in_client()
@@ -288,43 +362,40 @@ class TestRefineConflicts:
         assert response.status_code == 409, response.content
         assert response.json()["error"]["code"] == "refinement_source_unavailable"
 
-    def test_second_refinement_is_limit_reached(self):
+    def test_refining_the_same_version_again_is_source_unavailable(self):
         client, token = signed_in_client()
         design_id, version = _generated_design(client, token)
-        first = _post_refine(client, design_id, token=token, source_version_id=version.pk)
-        assert first.status_code == 202, first.content
-        job_id = first.json()["job"]["id"]
-        # Simulate the async pipeline completing the refinement: the first
-        # attempt reaches a terminal SUCCEEDED state and links the new child
-        # version — otherwise it would still read as "in progress".
-        from django.utils import timezone
+        _complete_one_round(client, token, design_id, version)
 
-        from sitara.designs.models import GenerationAttempt
+        # The reported reason is that the source is out of date, not that the
+        # budget is spent — the design has two of its three rounds left, and
+        # saying "already refined" here would be a false statement about it.
+        again = _post_refine(client, design_id, token=token, source_version_id=version.pk)
+        assert again.status_code == 409, again.content
+        assert again.json()["error"]["code"] == "refinement_source_unavailable"
 
-        design = Design.objects.get(pk=design_id)
-        version_2 = DesignVersion.objects.create(
-            design=design,
-            version_number=2,
-            parent_version=version,
-            refinement_request={"schema_version": 1, "change_type": "colour_story", "note": ""},
-            refinement_request_schema_version=1,
-            refinement_request_sha256="e" * 64,
-        )
-        GenerationAttempt.objects.filter(pk=job_id).update(
-            status=GenerationAttempt.Status.SUCCEEDED,
-            design_version=version_2,
-            completed_at=timezone.now(),
-            staged_image_storage_key="generation-staging/test/raw.webp",
-            staged_image_sha256="c" * 64,
-            staged_image_size_bytes=1000,
-            staged_image_width=800,
-            staged_image_height=1000,
-        )
-        design.status = Design.Status.GENERATED
-        design.save(update_fields=["status"])
-        second = _post_refine(client, design_id, token=token, source_version_id=version.pk)
-        assert second.status_code == 409, second.content
-        assert second.json()["error"]["code"] == "refinement_limit_reached"
+    def test_a_second_refinement_from_the_new_version_is_accepted(self):
+        client, token = signed_in_client()
+        design_id, version = _generated_design(client, token)
+        version_2 = _complete_one_round(client, token, design_id, version)
+
+        second = _post_refine(client, design_id, token=token, source_version_id=version_2.pk)
+        assert second.status_code == 202, second.content
+
+    def test_the_fourth_refinement_is_limit_reached(self, settings):
+        assert settings.MAX_REFINEMENTS == 3
+        client, token = signed_in_client()
+        design_id, version = _generated_design(client, token)
+        for _ in range(settings.MAX_REFINEMENTS):
+            version = _complete_one_round(client, token, design_id, version)
+
+        fourth = _post_refine(client, design_id, token=token, source_version_id=version.pk)
+        assert fourth.status_code == 409, fourth.content
+        assert fourth.json()["error"]["code"] == "refinement_limit_reached"
+        # The customer-facing wording has to match the fact. "Already refined"
+        # was true when the budget was one and is a lie about a design that has
+        # been refined three times.
+        assert fourth.json()["error"]["message"] == "This design has used all of its refinements."
 
     def test_availability_gate_closed_returns_503(self):
         client, token = signed_in_client()

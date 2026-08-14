@@ -2,6 +2,7 @@
 preconditions and concurrency. No Celery task actually runs — a recorder is
 injected as ``enqueue_task``."""
 
+import copy
 import threading
 import uuid
 from unittest import mock
@@ -92,6 +93,75 @@ def _generated_design_with_v1(
     design.status = Design.Status.GENERATED
     design.save(update_fields=["status"])
     return design, version
+
+
+def _complete_refinement(design: Design, source: DesignVersion) -> DesignVersion:
+    """One finished refinement round: the child version plus the SUCCEEDED
+    attempt that produced it, in the shape the real pipeline leaves behind.
+
+    The succeeded attempt is the point. A database constraint requires it to
+    carry a non-empty ``staged_image_storage_key``, so any guard that asks
+    "does this design have a staged image anywhere?" is true from the first
+    completed round onward — which is how the design-wide form of that filter
+    silently refused rounds two and three."""
+    from django.utils import timezone
+
+    from sitara.designs.services import create_next_design_version
+    from sitara.generation.design_spec import DESIGN_SPEC_SCHEMA_VERSION, SPEC_TEMPLATE_VERSION
+    from sitara.generation.prompt_builder import PROMPT_BUILDER_VERSION
+
+    number = source.version_number + 1
+    child = create_next_design_version(
+        design,
+        parent_version=source,
+        refinement_request={"schema_version": 1, "change_type": "colour_story", "note": ""},
+        refinement_request_schema_version=1,
+        refinement_request_sha256="e" * 64,
+    )
+    child.design_spec = copy.deepcopy(source.design_spec)
+    child.design_spec_schema_version = DESIGN_SPEC_SCHEMA_VERSION
+    child.design_spec_template_version = SPEC_TEMPLATE_VERSION
+    child.design_spec_provider = "fixture"
+    child.design_spec_model = "fixture-model"
+    child.design_spec_generated_at = timezone.now()
+    child.image_prompt = f"A deterministic placeholder prompt for v{number}."
+    child.prompt_builder_version = PROMPT_BUILDER_VERSION
+    child.image_storage_key = f"design-images/{design.id}/v{number}/original.webp"
+    child.image_sha256 = f"{number:064d}"
+    child.image_size_bytes = 100_000
+    child.image_width = 900
+    child.image_height = 1200
+    child.thumbnail_storage_key = f"design-images/{design.id}/v{number}/thumbnail.webp"
+    child.thumbnail_sha256 = f"{number + 500:064d}"
+    child.thumbnail_size_bytes = 5_000
+    child.thumbnail_width = 200
+    child.thumbnail_height = 260
+    child.image_processor_version = "1.0.0"
+    child.image_ingested_at = timezone.now()
+    child.is_demo = source.is_demo
+    child.save()
+
+    GenerationAttempt.objects.create(
+        design=design,
+        design_version=child,
+        idempotency_key=uuid.uuid4(),
+        status=_Status.SUCCEEDED,
+        completed_at=timezone.now(),
+        generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
+        source_design_version=source,
+        is_demo=source.is_demo,
+        refinement_request={"schema_version": 1, "change_type": "colour_story", "note": ""},
+        refinement_request_schema_version=1,
+        refinement_request_sha256="e" * 64,
+        staged_image_storage_key=f"staging/{design.id}/v{number}.webp",
+        staged_image_sha256=f"{number + 900:064d}",
+        staged_image_size_bytes=100_000,
+        staged_image_width=900,
+        staged_image_height=1200,
+    )
+    design.status = Design.Status.GENERATED
+    design.save(update_fields=["status"])
+    return child
 
 
 class TestAvailabilityAndStatus:
@@ -381,29 +451,98 @@ class TestInProgressAndLimit:
                 )
         assert GenerationAttempt.objects.filter(design=design).count() == 1
 
-    def test_second_refinement_after_a_successful_one_is_rejected(self):
+    def test_refining_the_same_version_twice_is_rejected(self):
+        # Reported as an out-of-date SOURCE rather than as a limit: a version
+        # with a child is never the design's latest, and step 5's
+        # validate_source_version runs before step 6's `refined_versions`
+        # check. Both refuse; the first one to see it names the reason.
         design, v1 = _generated_design_with_v1()
-        v2 = DesignVersion.objects.create(
-            design=design,
-            version_number=2,
-            parent_version=v1,
-            refinement_request={"schema_version": 1, "change_type": "colour_story", "note": ""},
-            refinement_request_schema_version=1,
-            refinement_request_sha256="e" * 64,
-        )
-        design.status = Design.Status.GENERATED
-        design.save(update_fields=["status"])
+        v2 = _complete_refinement(design, v1)
+        recorder = _Recorder()
         with mock.patch(_AVAILABLE, return_value=True):
-            with pytest.raises(RefinementLimitReached):
+            with pytest.raises(RefinementSourceUnavailable):
                 enqueue_design_refinement(
                     design,
                     source_version_id=v1.pk,
                     refinement_request=_request(),
                     idempotency_key=uuid.uuid4(),
-                    enqueue_task=_Recorder(),
+                    enqueue_task=recorder,
                 )
+        assert recorder.calls == []
         assert DesignVersion.objects.filter(design=design).count() == 2
         assert v2.pk  # sanity: the existing child is untouched
+
+    def test_a_second_refinement_from_the_new_version_is_allowed(
+        self, django_capture_on_commit_callbacks
+    ):
+        # The regression this guard nearly shipped: a SUCCEEDED attempt is
+        # required by database constraint to carry a non-empty staged image key,
+        # so a design-wide "anything staged?" filter becomes true the moment the
+        # FIRST refinement succeeds — harmless while a design got one round, and
+        # a silent refusal of rounds two and three. The filter is scoped to the
+        # source version instead, which is what "never regenerate paid output
+        # that already exists" actually meant.
+        design, v1 = _generated_design_with_v1()
+        v2 = _complete_refinement(design, v1)
+        assert (
+            GenerationAttempt.objects.filter(design=design)
+            .exclude(staged_image_storage_key="")
+            .exists()
+        )
+
+        recorder = _Recorder()
+        with mock.patch(_AVAILABLE, return_value=True):
+            with django_capture_on_commit_callbacks(execute=True):
+                attempt, created = enqueue_design_refinement(
+                    design,
+                    source_version_id=v2.pk,
+                    refinement_request=_request("fabric_and_texture"),
+                    idempotency_key=uuid.uuid4(),
+                    enqueue_task=recorder,
+                )
+
+        assert created is True
+        assert attempt.source_design_version_id == v2.pk
+        assert recorder.calls == [attempt.id]
+
+    def test_the_fourth_refinement_is_refused_by_the_budget(self, settings):
+        assert settings.MAX_REFINEMENTS == 3
+        design, version = _generated_design_with_v1()
+        for _ in range(settings.MAX_REFINEMENTS):
+            version = _complete_refinement(design, version)
+
+        recorder = _Recorder()
+        with mock.patch(_AVAILABLE, return_value=True):
+            with pytest.raises(RefinementLimitReached):
+                enqueue_design_refinement(
+                    design,
+                    source_version_id=version.pk,
+                    refinement_request=_request(),
+                    idempotency_key=uuid.uuid4(),
+                    enqueue_task=recorder,
+                )
+        # Nothing queued and nothing charged: the budget is checked before the
+        # attempt row and before the daily count reservation.
+        assert recorder.calls == []
+        assert not GenerationAttempt.objects.filter(design=design, status=_Status.QUEUED).exists()
+
+    def test_a_middle_version_is_refused_once_a_newer_one_exists(self):
+        # v2 is neither the latest version nor childless, so both guards apply.
+        # `validate_source_version` runs first (step 5, before the child check in
+        # step 6), so the reported reason is the source being out of date —
+        # asserted so a future reordering of those steps is visible here.
+        design, v1 = _generated_design_with_v1()
+        v2 = _complete_refinement(design, v1)
+        _complete_refinement(design, v2)
+        with mock.patch(_AVAILABLE, return_value=True):
+            with pytest.raises(RefinementSourceUnavailable):
+                enqueue_design_refinement(
+                    design,
+                    source_version_id=v2.pk,
+                    refinement_request=_request(),
+                    idempotency_key=uuid.uuid4(),
+                    enqueue_task=_Recorder(),
+                )
 
     def test_broker_failure_marks_attempt_failed_and_design_failed(
         self, django_capture_on_commit_callbacks

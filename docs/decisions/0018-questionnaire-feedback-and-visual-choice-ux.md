@@ -327,8 +327,10 @@ bumped 5.0.0 → 6.0.0) renders the canonical neckline early in the high-priorit
 coverage directive and restates it in the closing reinforcement, and suppresses
 the model-authored neckline narrative when a canonical neckline is chosen so it
 can never contradict it. Because `source_selections` is an immutable refinement
-root, `neckline_style` is automatically protected across the single-round
-refinement (ADR 0015); the refined output's schema version must match the
+root, `neckline_style` is automatically protected across
+refinement (ADR 0015; the immutable-root protection is per refinement, so it
+holds for each of the three rounds ADR 0029 later allowed — and ADR 0028 then
+made `neckline_style` deliberately changeable by the `neckline` category alone); the refined output's schema version must match the
 source's.
 
 ### No preference = null/absence

@@ -86,7 +86,7 @@ test.describe("generation, result, refinement and history", () => {
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-    // --- Journey 9: exactly one refinement --------------------------------
+    // --- Journey 9: refinement, three rounds per concept -------------------
     const refineHeading = page.getByRole("heading", { name: /what would you change/i });
     await expect(
       refineHeading,
@@ -120,15 +120,28 @@ test.describe("generation, result, refinement and history", () => {
       timeout: 30_000,
     });
 
-    // --- Journey 9 continued: the one refinement is now locked ------------
+    // --- Journey 9 continued: the chain carries on from the NEW version ---
+    // The refined concept is refinable in turn (ADR 0029), and the offer is
+    // below the comparison rather than absent.
+    await expect(
+      page.getByRole("heading", { name: /what would you change/i }),
+      "a refined concept must itself be refinable while rounds remain",
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/2 refinements left/i).first()).toBeVisible();
+
+    // --- Journey 9 continued: the ORIGINAL version is now read-only -------
+    // Not because the budget is spent — two rounds remain — but because a
+    // newer version exists and a lineage is a chain, never a tree.
     await page.goto(originalResultUrl);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByRole("heading", { name: /what would you change/i })).toHaveCount(0);
-    await expect(page.getByText(/already been refined|one refinement/i).first()).toBeVisible({
+    await expect(page.getByText(/earlier version of your design/i).first()).toBeVisible({
       timeout: 30_000,
     });
+    // It says where to carry on from, rather than leaving a dead end.
+    await expect(page.getByRole("link", { name: /most recent concept/i })).toBeVisible();
 
-    // A second refinement is not reachable by any control on the page.
+    // Refining THIS version is not reachable by any control on the page.
     await expect(page.getByRole("button", { name: /request refinement/i })).toHaveCount(0);
 
     // Nothing private leaked into a visible label anywhere in this journey.

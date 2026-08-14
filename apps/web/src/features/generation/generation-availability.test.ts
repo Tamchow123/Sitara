@@ -15,7 +15,7 @@ function config(overrides: Partial<PublicConfig> = {}): PublicConfig {
     generation_enabled: false,
     generation_mode: "demo",
     max_inspiration_images: 3,
-    max_refinements: 1,
+    max_refinements: 3,
     ...overrides,
   } as PublicConfig;
 }

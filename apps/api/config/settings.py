@@ -928,15 +928,38 @@ if not DEFAULT_IMAGE_MODEL or len(DEFAULT_IMAGE_MODEL) > 100:
 
 # Product limits surfaced via /api/v1/config/public.
 MAX_INSPIRATION_IMAGES = 3
-MAX_REFINEMENTS = 1
+# Refinements per CONCEPT, counted across the whole design, not per version.
+# Raised from 1 by the project owner's decision: one round was too few to work
+# a concept into shape, and the customer is standing at the counter.
+MAX_REFINEMENTS = 3
 
-# Application-level cap on DesignVersions per design (initial concept + one
-# refinement). Deliberately NOT a database constraint (future multi-round
-# refinement must not need a migration) and deliberately NOT in the public
-# config endpoint — max_refinements already communicates the user-facing
-# limit. Strict parsing: an invalid value refuses startup in EVERY
-# environment, production included.
-MAX_DESIGN_VERSIONS = env_positive_int("MAX_DESIGN_VERSIONS", 2)
+# Application-level cap on DesignVersions per design (the initial concept plus
+# MAX_REFINEMENTS). Deliberately NOT a database constraint — this is exactly
+# the "future multi-round refinement" the original comment anticipated, and it
+# needed no migration — and deliberately NOT in the public config endpoint,
+# since max_refinements already communicates the user-facing limit. Strict
+# parsing: an invalid value refuses startup in EVERY environment, production
+# included.
+#
+# Kept as its own setting rather than derived, because it is the backstop for a
+# DIFFERENT failure: MAX_REFINEMENTS bounds what a customer may ask for,
+# this bounds how many rows any path may create. An operator who raises one
+# without the other gets a refusal, not a silently deeper lineage.
+MAX_DESIGN_VERSIONS = env_positive_int("MAX_DESIGN_VERSIONS", MAX_REFINEMENTS + 1)
+
+# The two must stay in step, and the failure when they do not is nasty enough to
+# be worth refusing startup over: a design would be told it has a refinement
+# left, accept the request, spend on the provider, and only then fail at row
+# creation with a version-limit error the customer's screen has no wording for.
+# Checked here rather than by deriving MAX_DESIGN_VERSIONS, because it is the
+# backstop for a different failure (how many rows any path may create) and an
+# operator raising it FURTHER — extra headroom — stays legal. Names the settings
+# and the relationship, never the rejected value.
+if MAX_DESIGN_VERSIONS < MAX_REFINEMENTS + 1:
+    raise ImproperlyConfigured(
+        "MAX_DESIGN_VERSIONS must leave room for the initial concept plus every refinement "
+        "(at least MAX_REFINEMENTS + 1)"
+    )
 
 # ---------------------------------------------------------------------------
 # Live-generation cost controls (Phase 16, Part A). Integer micro-US-dollars

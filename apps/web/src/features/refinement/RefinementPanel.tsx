@@ -1,6 +1,7 @@
 "use client";
 
-// The single-round refinement request form (Phase 14 §26-28). Mirrors
+// The constrained refinement request form — one edit per request, and since
+// ADR 0029 up to three requests per concept (Phase 14 §26-28). Mirrors
 // ReviewSummary's idempotency discipline exactly: one crypto.randomUUID() key
 // minted on the first deliberate submit, retained in a ref (never browser
 // storage) across a transport-failure retry, reset only on a definitive
@@ -14,6 +15,7 @@ import {
   REFINEMENT_CHANGE_TYPE_OPTIONS,
   REFINEMENT_NOTE_MAX_LENGTH,
   isNoteWithinLimit,
+  refinementsLeftLabel,
 } from "./refinement-options";
 import {
   REFINEMENT_SUBMIT_CODES_REQUIRING_RECHECK,
@@ -27,6 +29,9 @@ type Props = {
   designId: string;
   sourceVersionId: string;
   isDemo?: boolean;
+  /** The DESIGN's remaining budget, from the server. Always at least 1 here —
+   *  the section only mounts this form when a round is left. */
+  refinementsRemaining: number;
   onRequiresRecheck?: () => void;
 };
 
@@ -53,6 +58,7 @@ export function RefinementPanel({
   designId,
   sourceVersionId,
   isDemo = false,
+  refinementsRemaining,
   onRequiresRecheck,
 }: Props) {
   const router = useRouter();
@@ -122,14 +128,17 @@ export function RefinementPanel({
 
   return (
     <section className="refinement-panel" id="refine-concept" aria-labelledby="refinement-heading">
-      {/* The Amendments screen's kicker counts refinements. It says "one",
-          because one is the number — the prototype's "3 of 3 left" describes a
-          product Sitara is not. */}
-      <p className="kicker">Refine this concept · one refinement</p>
+      {/* The Amendments screen's kicker counts refinements, and now it counts a
+          real number: the server's own remaining budget, not a constant
+          restated here. The count is the design's, not this version's — three
+          rounds are shared across the whole chain. */}
+      <p className="kicker">
+        Refine this concept · {refinementsLeftLabel(refinementsRemaining)}
+      </p>
       <h2 id="refinement-heading">What would you change?</h2>
       <p className="refinement-lede">
-        You may request exactly one change to your design brief, then generate a fresh concept.
-        Sitara holds everything you have not asked to change as steady as it can.
+        You may request one change to your design brief, then generate a fresh concept. Sitara
+        holds everything you have not asked to change as steady as it can.
       </p>
 
       <fieldset className="refinement-chip-group">

@@ -8,6 +8,7 @@
 // exactly, never sharing a query key, so one side's failure never touches
 // the other.
 
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { DesignBrief } from "@/features/results/DesignBrief";
@@ -19,7 +20,7 @@ import {
   resultErrorCopy,
 } from "@/features/results/result-errors";
 import { imageRefetchIntervalMs, useImageFocusRefresh } from "@/features/results/image-refresh";
-import { changeTypeLabel } from "./refinement-options";
+import { changeTypeLabel, refinementsLeftLabel } from "./refinement-options";
 import { fetchDesignImageUrls, fetchDesignResult } from "@/lib/api";
 import type { DesignImages, DesignResult as DesignResultType } from "@/lib/api";
 
@@ -35,7 +36,16 @@ type SideProps = {
 type Props = {
   designId: string;
   parentVersionId: string;
+  /** The DESIGN's remaining budget, for the note under the previous version. */
+  refinementsRemaining: number;
   refined: SideProps;
+  /**
+   * The refinement offer for the version being viewed. Passed in rather than
+   * built here because it needs the design/config queries DesignResult already
+   * owns — and it appears at all only because a refined concept can now be
+   * refined again.
+   */
+  children?: ReactNode;
 };
 
 function VersionCard({
@@ -84,7 +94,13 @@ function VersionCard({
   );
 }
 
-export function VersionComparison({ designId, parentVersionId, refined }: Props) {
+export function VersionComparison({
+  designId,
+  parentVersionId,
+  refinementsRemaining,
+  refined,
+  children,
+}: Props) {
   const parentResultQuery = useQuery({
     queryKey: ["design-result", designId, parentVersionId],
     queryFn: async () => {
@@ -128,11 +144,13 @@ export function VersionComparison({ designId, parentVersionId, refined }: Props)
 
   return (
     <div className="version-comparison">
-      {/* `Sitara History.dc.html`'s hierarchy, with its wording corrected to
-          the number of versions that can actually exist: the prototype's
-          "Every version of your vision" and "3 refinements left" describe an
-          unlimited history, and Sitara has exactly two versions at most. */}
-      <p className="kicker">Design history</p>
+      {/* `Sitara History.dc.html`'s hierarchy. Its "3 refinements left" kicker
+          described an unlimited history when this was written and the budget
+          was one; the budget is now three, so the count is real — read from the
+          server rather than restated as a constant here. */}
+      <p className="kicker">
+        Design history · {refinementsLeftLabel(refinementsRemaining)}
+      </p>
       <h1 id="comparison-heading">Compare your concepts</h1>
       <p className="lede">
         Your current design alongside the concept it was refined from. Both stay private to you.
@@ -207,11 +225,19 @@ export function VersionComparison({ designId, parentVersionId, refined }: Props)
             />
           )}
           <p className="version-limit-note">
-            You have used your one refinement. To take the design somewhere else, edit your answers
-            and start a new concept.
+            {refinementsRemaining > 0
+              ? `You have ${refinementsLeftLabel(refinementsRemaining)} for this design. To take it somewhere else entirely, edit your answers and start a new concept.`
+              : "You have used every refinement for this design. To take it somewhere else, edit your answers and start a new concept."}
           </p>
         </div>
       </div>
+
+      {/* The refinement offer for the version being viewed — the form when a
+          round is left, the locked panel with its reason when not. Below the
+          comparison rather than above it: the two concepts are what the
+          customer came here to look at, and the next change is decided after
+          reading them. */}
+      {children}
     </div>
   );
 }

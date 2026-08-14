@@ -61,6 +61,7 @@ function result(overrides: Partial<DesignResultType> = {}): DesignResultType {
     created_at: "2026-07-19T12:00:00Z",
     inspiration_acknowledgements: [],
     lineage: { kind: "initial", parent_version_id: null, refinement: null },
+    refinements_remaining: 3,
     is_demo: false,
     ...overrides,
   };
@@ -104,6 +105,7 @@ function renderComparison(refinedOverrides: Partial<DesignResultType> = {}) {
       <VersionComparison
         designId="d1"
         parentVersionId="v1"
+        refinementsRemaining={2}
         refined={{
           result: refined,
           images: images(),

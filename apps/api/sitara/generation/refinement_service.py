@@ -119,14 +119,39 @@ _REFINEMENT_PROCESS_PHRASES = (
 
 
 class RefinementSourceUnavailable(Exception):
-    """The source DesignVersion is not a valid, complete, refinable version 1.
+    """The source DesignVersion is not a valid, complete, refinable version.
+
+    A refinement is now refinable in turn, so "the source is the latest version
+    of its design" replaced "the source is version 1" — the chain still may not
+    branch, but it may be longer than two.
 
     Safe message; never reveals the specific structural defect."""
 
 
 class RefinementLimitReached(Exception):
-    """This design already has a refined (version 2) DesignVersion, or the
-    application-level MAX_DESIGN_VERSIONS ceiling is already reached."""
+    """This design has already used its ``MAX_REFINEMENTS`` refinements, this
+    particular version has already been refined, or the application-level
+    MAX_DESIGN_VERSIONS ceiling is already reached."""
+
+
+def refinements_used(design_id) -> int:
+    """How many refinements this design has spent.
+
+    Counted from the durable lineage — a version with a parent IS a refinement —
+    rather than from an attempt count or a stored tally. A failed attempt
+    persists no version and so costs the customer nothing, which is the
+    behaviour a failed refinement must have: this phase has already made her pay
+    for two attempts that saved nothing.
+
+    Deliberately NOT `version_number - 1`: those agree today only because a
+    lineage is a chain, and this counts the thing the rule is actually about."""
+    return DesignVersion.objects.filter(design_id=design_id, parent_version__isnull=False).count()
+
+
+def assert_refinement_budget_available(design_id) -> None:
+    """Refuse once the design has spent every refinement it is allowed."""
+    if refinements_used(design_id) >= settings.MAX_REFINEMENTS:
+        raise RefinementLimitReached("this design has used all of its refinements")
 
 
 class RefinementGenerationFailed(Exception):
@@ -175,16 +200,31 @@ def validate_source_version(source_version: DesignVersion) -> _SourceContext:
     """Every pre-spend validation for the refinement SOURCE, strictly before
     any provider is selected.
 
-    Raises :class:`RefinementSourceUnavailable` when the source is not
-    exactly a complete, valid version-1 DesignVersion: wrong version number,
+    Raises :class:`RefinementSourceUnavailable` when the source is not a
+    complete, valid, refinable DesignVersion: not the design's latest version,
     missing/invalid DesignSpec, unsupported schema version, a failed safety
     scan, incomplete permanent-image provenance, or corrupt/unsupported
     persisted inspiration-context provenance. Never rebuilds inspiration
     metadata from the live catalogue — the persisted historical snapshot (or
     its absence, for a legacy version) is authoritative and is only
-    integrity-checked here, never refreshed."""
-    if source_version.version_number != 1:
-        raise RefinementSourceUnavailable("only a version 1 design may be refined")
+    integrity-checked here, never refreshed.
+
+    This used to demand ``version_number == 1``, which was the whole of the
+    one-refinement rule. With three, a refinement's own output must be
+    refinable in turn, so the check becomes "the LATEST version" instead: a
+    lineage is a chain, never a tree. Refining an older version would branch it,
+    and two children of one parent have equal claim to being "the" next
+    concept — a question the version numbering, the result page and the
+    `refined_versions` guard all have no answer for. The per-design budget is
+    counted separately, in :func:`refinements_used`."""
+    latest = (
+        DesignVersion.objects.filter(design_id=source_version.design_id)
+        .order_by("-version_number")
+        .values_list("version_number", flat=True)
+        .first()
+    )
+    if latest is not None and source_version.version_number != latest:
+        raise RefinementSourceUnavailable("only the latest version of a design may be refined")
     if source_version.design_spec is None or source_version.design_spec_schema_version is None:
         raise RefinementSourceUnavailable("the source design has no generated specification")
     if source_version.design_spec_schema_version not in SUPPORTED_DESIGN_SPEC_SCHEMA_VERSIONS:
@@ -781,7 +821,10 @@ def generate_refined_design_spec_for_design(
     provider=None,
     attempt: GenerationAttempt | None = None,
 ) -> DesignVersion:
-    """Generate, validate and persist one refined (version 2) DesignVersion.
+    """Generate, validate and persist one refined DesignVersion.
+
+    The source is the design's current latest version, so a second refinement
+    refines the first one's output rather than the original concept.
 
     ``provider`` may be injected (fixtures/fakes in tests); when omitted the
     gated live Anthropic provider is selected — only after every gate
@@ -799,8 +842,12 @@ def generate_refined_design_spec_for_design(
     # bypassed it. Refuse before spending rather than produce a concept the user
     # asked to change and did not.
     assert_category_refinable(source_context.spec.schema_version, refinement_request.change_type)
+    # Two different limits, both enforced. `refined_versions` stops THIS version
+    # being refined twice (which would branch the lineage); the budget stops the
+    # DESIGN exceeding MAX_REFINEMENTS however the chain is walked.
     if source_version.refined_versions.exists():
-        raise RefinementLimitReached("this design has already been refined")
+        raise RefinementLimitReached("this version has already been refined")
+    assert_refinement_budget_available(design.id)
 
     refinement_request_hash = refinement_request_sha256(refinement_request)
 
@@ -808,7 +855,8 @@ def generate_refined_design_spec_for_design(
         # Close the race: another holder may have refined between the
         # pre-check and acquiring the lock.
         if source_version.refined_versions.exists():
-            raise RefinementLimitReached("this design has already been refined")
+            raise RefinementLimitReached("this version has already been refined")
+        assert_refinement_budget_available(design.id)
         selected = provider if provider is not None else get_structured_design_generation_provider()
         try:
             spec, usage, refine_attempts = _generate_valid_refined_spec(
@@ -864,6 +912,8 @@ __all__ = [
     "RefinementOutputRejected",
     "RefinementSourceUnavailable",
     "assert_category_refinable",
+    "assert_refinement_budget_available",
     "generate_refined_design_spec_for_design",
+    "refinements_used",
     "validate_source_version",
 ]

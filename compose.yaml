@@ -57,9 +57,12 @@ x-api-environment: &api-environment
   REPLICATE_POLL_TIMEOUT_SECONDS: ${REPLICATE_POLL_TIMEOUT_SECONDS:-180}
   GENERATION_RAW_MAX_BYTES: ${GENERATION_RAW_MAX_BYTES:-20000000}
   GENERATION_RAW_MAX_PIXELS: ${GENERATION_RAW_MAX_PIXELS:-40000000}
-  # Application-level cap on versions per design (initial concept + one
-  # refinement). Strict positive integer; invalid values refuse startup.
-  MAX_DESIGN_VERSIONS: ${MAX_DESIGN_VERSIONS:-2}
+  # Application-level cap on versions per design (the initial concept plus
+  # MAX_REFINEMENTS, so 1 + 3). Strict positive integer; invalid values refuse
+  # startup. This overrides the settings default, so it has to be raised in
+  # step with MAX_REFINEMENTS or the fourth version is refused while the
+  # refinement budget still says one round is left.
+  MAX_DESIGN_VERSIONS: ${MAX_DESIGN_VERSIONS:-4}
   # Deterministic zero-cost demo pipeline (Phase 15). A modest local-dev
   # default (milliseconds) keeps demo progress stages visible for a manual
   # walkthrough; strictly bounded (0-5000) and applies only to demo attempts.

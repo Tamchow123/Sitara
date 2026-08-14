@@ -92,6 +92,7 @@ _RESULT_SECTION_KEYS = {
     "created_at",
     "inspiration_acknowledgements",
     "lineage",
+    "refinements_remaining",
     "is_demo",
 }
 
@@ -155,6 +156,10 @@ class TestAuthorisedAccess:
             "parent_version_id": None,
             "refinement": None,
         }
+        # An untouched concept has its whole budget. Asserted as the literal so
+        # a change to MAX_REFINEMENTS surfaces in the payload contract rather
+        # than only in the setting.
+        assert result["refinements_remaining"] == 3
 
     def test_authenticated_owner_receives_it(self):
         client = csrf_client()
