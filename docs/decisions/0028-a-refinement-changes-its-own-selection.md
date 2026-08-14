@@ -458,6 +458,45 @@ collapsing the two would send a corrected attempt out with no correction at all
 `REFINEMENT_TEMPLATE_VERSION` → **4.0.0**. `PROMPT_BUILDER_VERSION` still does
 not move: this changes what the builder is given, not how it renders.
 
+### Then the round-4 council found the same defect one field further in
+
+The reviewer's question was whether the *class* of defect was closed or only
+this instance. It was only this instance.
+
+4.0.0 tells the model which canonical selections it may change. It does not tell
+it what they may be changed **to** — while warning, in the same prompt:
+
+> Never invent a selection value... a value it does not offer will be rejected
+> and nothing will be saved.
+
+An instruction to consult a list the model has never seen. And the list existed:
+`answerable_selection_alternatives` has handed exactly it to the **demo** engine
+since this ADR shipped, each candidate proved by substitution through the
+validator that judges the result. Its own docstring stated the asymmetry as a
+design choice — "a live provider is *told* which fields it may move and its
+answer is then checked" — which was true about fields and silently untrue about
+values.
+
+Declared options are not enough, and a test refuses them: an option can be a
+real declared value and still illegal in context, because `restrict_options` and
+the garment-dependent restrictions depend on the design's other answers. Only
+proof by substitution is safe, which is what the demo path already used.
+
+Measured before shipping, because a prompt addition is not free: 53–272
+characters and about a millisecond per request, computed once, against a paid
+provider round-trip.
+
+`REFINEMENT_TEMPLATE_VERSION` → **5.0.0**. `PROMPT_BUILDER_VERSION` still does
+not move.
+
+One thing this work found by being wrong: the first version of it caught
+`RefinementQuestionnaireUnavailable` and transmitted an empty mapping instead.
+The test written to cover that failed, because `validate_source_version` already
+refuses a design with no usable pinned questionnaire **before a provider is
+selected**. The defensive branch was unreachable, and swallowing that exception
+would have hidden a real defect behind a quietly emptier prompt. Both are gone,
+and the test now records the reachable fact — no provider call happens at all.
+
 ### What is claimed, and what is not
 
 The transmitted allowlist is asserted to be **the graded one**, per category,

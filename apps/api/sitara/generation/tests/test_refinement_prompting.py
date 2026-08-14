@@ -21,6 +21,7 @@ from sitara.generation.refinement_prompting import (
 
 _SPEC = {"schema_version": 1, "title": "A concept"}
 _PATHS = ("colour_story", "source_selections.colour_palette", "title")
+_VALUES = {"colour_palette": (["emerald"], ["ivory"])}
 
 
 def _message(*args, **kwargs) -> str:
@@ -30,6 +31,7 @@ def _message(*args, **kwargs) -> str:
     production — a default would silently transmit "you may change nothing" —
     so every call site here has to name one."""
     kwargs.setdefault("editable_paths", _PATHS)
+    kwargs.setdefault("changeable_selection_values", _VALUES)
     return build_refinement_user_message(*args, **kwargs)
 
 
@@ -57,6 +59,7 @@ class TestFingerprintIntegrity:
                 "change_type",
                 "editable_design_spec_paths",
                 "changeable_source_selection_fields",
+                "changeable_selection_values",
                 "current_design_spec",
             ]
         )

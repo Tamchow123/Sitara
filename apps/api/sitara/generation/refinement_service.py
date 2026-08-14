@@ -70,6 +70,7 @@ from .refinement_prompting import (
 from .refinement_selections import (
     RefinedSelectionsInvalid,
     RefinementQuestionnaireUnavailable,
+    answerable_selection_alternatives,
     assert_refined_selections_are_answerable,
 )
 from .services import (
@@ -497,6 +498,22 @@ def _generate_valid_refined_spec(
     # instruction. `None` on the first attempt, so nothing is appended. Only ever
     # a source-controlled machine name — never a field, a value or the note.
     retry_reason: str | None = None
+    # Computed ONCE, before the loop: it depends only on the source spec and the
+    # design's pinned questionnaire, neither of which the loop can change, and it
+    # reads the schema from the database. An empty mapping is an honest answer —
+    # genuinely no legal alternative — and is what the model was effectively
+    # given before this existed.
+    #
+    # `RefinementQuestionnaireUnavailable` is deliberately NOT caught. It cannot
+    # reach here through the public entry point: `validate_source_version`
+    # refuses a design with no usable pinned questionnaire before a provider is
+    # even selected. If it ever did, `pipeline.py` already maps it to a
+    # controlled code, and swallowing it would hide a real defect behind a
+    # silently emptier prompt. `design` is still guarded because the parameter is
+    # optional for callers that bypass that entry point.
+    changeable_values: dict[str, tuple] = {}
+    if design is not None:
+        changeable_values = answerable_selection_alternatives(design, source_spec, change_type)
     cost_on = cost_accounting.cost_enabled(generation_attempt)
     profile = cost_control.active_pricing_profile()
     for attempt in range(1, MAX_REFINEMENT_PROVIDER_REQUESTS + 1):
@@ -525,6 +542,12 @@ def _generate_valid_refined_spec(
                 changeable_selection_fields=canonical_refinement_fields(
                     change_type, source_spec.schema_version
                 ),
+                # And what those fields may be set TO, from the design's own
+                # pinned questionnaire, each candidate proved by substitution
+                # through the validator that will judge the answer. The demo
+                # engine has been handed this since ADR 0028; the live path was
+                # told "never invent a selection value" and shown no values.
+                changeable_selection_values=changeable_values,
                 retry_reason=retry_reason,
             ),
             source_selections=source_spec.source_selections.model_dump(),

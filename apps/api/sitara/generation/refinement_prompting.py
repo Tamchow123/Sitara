@@ -12,8 +12,10 @@ DesignSpec, the validated refinement category, the server-computed list of
 DesignSpec paths this category may change (:data:`_EDITABLE_PATHS_KEY` — the
 SAME allowlist the output is graded against), the server-computed list of
 canonical selection fields that category may change on this spec's schema
-version (ADR 0028 — never a client input, and never trusted back from the
-model's output either), the short optional note inside an explicitly delimited
+version (ADR 0028) and the legal values each of those fields may be set to
+(:data:`_CHANGEABLE_VALUES_KEY`, computed by the SAME validator that will judge
+the answer — never a client input, and none of it trusted back from the model's
+output either), the short optional note inside an explicitly delimited
 untrusted section, and these source-controlled edit instructions. What it
 NEVER contains: the original generated image, image
 bytes, signed image URLs, storage keys, image hashes, provider prediction
@@ -30,6 +32,18 @@ import json
 # initial generation. Deliberately independent of SPEC_TEMPLATE_VERSION —
 # refinement and initial generation are two different trusted templates that
 # may evolve on separate schedules.
+#
+# 5.0.0 (Phase 23 follow-up): the same defect, one field further in. 4.0.0 told
+# the model WHICH canonical selections it may change and still not what they may
+# be changed TO — while warning it that "a value it does not offer will be
+# rejected and nothing will be saved", an instruction to consult a list it had
+# never seen. The demo engine has been handed exactly that list since ADR 0028
+# (`answerable_selection_alternatives`, each candidate proved by substitution
+# through the validator that judges the result); the live path was not, which is
+# the asymmetry that function's own docstring already described. It is now sent
+# as "changeable_selection_values" — measured at 53–272 characters and about a
+# millisecond, against a paid provider round-trip. Major: the same input is
+# expected to yield a materially different output.
 #
 # 4.0.0 (Phase 23 follow-up): the model was GRADED against
 # `refinement_allowed_paths(change_type, schema_version)` and never TOLD it. It
@@ -63,7 +77,7 @@ import json
 # spec's schema version, and the system prompt tells the model to change only
 # those and freeze the rest. Major, not minor: the same input now legitimately
 # yields a different output shape.
-REFINEMENT_TEMPLATE_VERSION = "4.0.0"
+REFINEMENT_TEMPLATE_VERSION = "5.0.0"
 
 # Same delimiter convention as prompting.py, reused verbatim so the same
 # neutralisation logic and untrusted-section framing apply.
@@ -77,7 +91,8 @@ bridalwear CONCEPT specification.
 You will receive the complete CURRENT structured specification as trusted \
 JSON, the single allowlisted change category the user selected, the exact \
 list of specification paths that category may change, the exact list of \
-canonical selection fields that category may change, and, optionally, a \
+canonical selection fields that category may change, the legal values each \
+of those fields may be set to, and, optionally, a \
 delimited section of untrusted free-text preference notes. Return the \
 COMPLETE UPDATED specification in the exact output format requested by the \
 tooling — never a partial object, a diff or a patch.
@@ -137,11 +152,13 @@ of" or similar imitation phrasing.
 - Do not provide sewing instructions, measurements, cutting patterns or any \
 claim that the concept is guaranteed to be constructible; keep the output \
 framed as concept visualisation only.
-- Never invent a selection value. A canonical selection is a machine value \
-the user's questionnaire offers for that question; a value it does not \
-offer will be rejected and nothing will be saved. If the user asks for \
-something that question does not offer, choose the value it does offer \
-that is closest to what they asked for.
+- Never invent a selection value. "changeable_selection_values" lists, for \
+each changeable field, every value that field may legally be set to for \
+this design — exhaustive and already checked against the rest of the \
+user's answers. Choose only from it. Anything else is rejected and nothing \
+is saved. If the user asks for something the list does not contain, choose \
+the entry closest to what they asked for. A field absent from that list has \
+no legal alternative on this design; leave it exactly as it is.
 - Do not claim visual continuity with any previous image — you have no \
 access to any image, and none exists in this exchange.
 - Do not mention this refinement process, a previous version, an edit, a \
@@ -238,11 +255,12 @@ REFINEMENT_RETRY_NOTES: dict[str, str] = {
         "every requirement above."
     ),
     RETRY_INVALID_SELECTION_VALUE: (
-        "Your previous attempt set a canonical selection to a value the user's "
-        "questionnaire does not offer for that question. Choose only from the "
-        "values that question offers; if none is exactly what was asked for, "
-        "choose the closest one it does offer. Produce a fresh, complete "
-        "specification that follows every requirement above."
+        "Your previous attempt set a canonical selection to a value that is not "
+        "legal for this design. Use only the values listed under that field in "
+        "changeable_selection_values — that list is exhaustive; if none is "
+        "exactly what was asked for, choose the closest entry it does contain. "
+        "Produce a fresh, complete specification that follows every requirement "
+        "above."
     ),
 }
 
@@ -270,6 +288,7 @@ _CHANGE_TYPE_KEY = "change_type"
 _CURRENT_SPEC_KEY = "current_design_spec"
 _CHANGEABLE_SELECTIONS_KEY = "changeable_source_selection_fields"
 _EDITABLE_PATHS_KEY = "editable_design_spec_paths"
+_CHANGEABLE_VALUES_KEY = "changeable_selection_values"
 
 
 def _neutralise_delimiters(text: str) -> str:
@@ -284,6 +303,7 @@ def build_refinement_user_message(
     note: str,
     *,
     editable_paths: tuple[str, ...],
+    changeable_selection_values: dict[str, tuple],
     changeable_selection_fields: tuple[str, ...] = (),
     retry_reason: str | None = None,
 ) -> str:
@@ -303,8 +323,19 @@ def build_refinement_user_message(
 
     ``changeable_selection_fields`` is the server-computed, version-dispatched
     list of ``source_selections`` fields this category may change (ADR 0028).
-    Both lists are trusted context, never a client input, and the exact-diff
-    validation re-checks the output regardless of what the model does with them.
+
+    ``changeable_selection_values`` is what each of those fields may legally be
+    set TO, computed by the same validator that will judge the answer. Also
+    required, for a different reason than ``editable_paths``: an empty mapping
+    here is an honest statement (a design can genuinely have no legal
+    alternative), not a lie — but a caller that simply forgot it would withhold
+    help the server had already computed, and the model would be told to "choose
+    a value the question offers" while never being shown one. The demo engine
+    has been handed exactly this since ADR 0028; the live path was not.
+
+    All three are trusted context, never a client input, and the exact-diff
+    validation and questionnaire revalidation re-check the output regardless of
+    what the model does with them.
 
     ``note`` is the already safety-scanned, canonicalised refinement note (empty
     string when absent), placed in a delimited untrusted section exactly like
@@ -315,6 +346,9 @@ def build_refinement_user_message(
         _CHANGE_TYPE_KEY: change_type,
         _EDITABLE_PATHS_KEY: sorted(editable_paths),
         _CHANGEABLE_SELECTIONS_KEY: list(changeable_selection_fields),
+        _CHANGEABLE_VALUES_KEY: {
+            field: list(values) for field, values in sorted(changeable_selection_values.items())
+        },
         _CURRENT_SPEC_KEY: current_spec,
     }
     parts = [
@@ -351,6 +385,7 @@ def refinement_prompt_template_fingerprint() -> str:
             _CHANGE_TYPE_KEY,
             _EDITABLE_PATHS_KEY,
             _CHANGEABLE_SELECTIONS_KEY,
+            _CHANGEABLE_VALUES_KEY,
             _CURRENT_SPEC_KEY,
         ]
     )
@@ -358,4 +393,4 @@ def refinement_prompt_template_fingerprint() -> str:
 
 
 # Bump REFINEMENT_TEMPLATE_VERSION deliberately whenever this changes.
-REFINEMENT_PROMPT_TEMPLATE_HASH = "b38ffef1fbf361b2eefdf2ed0d256ba4f8b33a0e7a411caed15620aee699b9f7"
+REFINEMENT_PROMPT_TEMPLATE_HASH = "b905ee859d145a1b759693abe0535e5540d1220db68261aafd65ae4cf7a05b16"

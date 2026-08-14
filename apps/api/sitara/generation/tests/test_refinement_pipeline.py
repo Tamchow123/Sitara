@@ -134,7 +134,7 @@ class TestHappyPath:
         version = DesignVersion.objects.get(pk=result.design_version_id)
         assert version.version_number == 2
         assert version.parent_version_id == v1.pk
-        assert version.design_spec_template_version == "refinement-4.0.0"
+        assert version.design_spec_template_version == "refinement-5.0.0"
         # The same deterministic prompt builder ran against the refined spec.
         assert version.prompt_builder_version == PROMPT_BUILDER_VERSION
         assert version.image_prompt != ""

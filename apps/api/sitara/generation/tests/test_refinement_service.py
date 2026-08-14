@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from sitara.ai_gateway.structured_design import StructuredDesignResult
 from sitara.content_safety import GeneratedContentRejected, RejectionCategory
-from sitara.designs.models import DesignVersion, GenerationAttempt
+from sitara.designs.models import Design, DesignVersion, GenerationAttempt
 from sitara.generation import cost_control, refinement_service
 from sitara.generation.context import build_generation_context
 from sitara.generation.demo.design_spec_engine import build_demo_design_spec
@@ -36,7 +36,9 @@ from sitara.generation.prompt_builder import ImagePromptBuildError, build_image_
 from sitara.generation.refinement import (
     REFINEMENT_CHANGE_TYPES,
     canonical_refinement_fields,
+    diff_design_spec_paths,
     normalise_refinement_request,
+    path_is_allowed,
     refinement_allowed_paths,
 )
 from sitara.generation.refinement_prompting import (
@@ -46,7 +48,11 @@ from sitara.generation.refinement_prompting import (
     RETRY_DISALLOWED_FIELD,
     RETRY_NO_CHANGE,
 )
-from sitara.generation.refinement_selections import RefinedSelectionsInvalid
+from sitara.generation.refinement_selections import (
+    RefinedSelectionsInvalid,
+    answerable_selection_alternatives,
+    assert_refined_selections_are_answerable,
+)
 from sitara.generation.refinement_service import (
     _REJECTION_RETRY_REASONS,
     REFINEMENT_DESIGN_SPEC_TEMPLATE_VERSION,
@@ -1304,3 +1310,143 @@ class TestAResponseWithNoPayload:
         assert provider.calls == 2
         assert version.version_number == 2
         assert version.design_spec["source_selections"]["colour_palette"] == ["emerald", "gold"]
+
+
+class TestTheFixturesAgreeWithTheAllowlist:
+    """The fixtures every success test in this module relies on are themselves
+    unverified against the rule they claim to satisfy.
+
+    This phase's recurring defect is a rule enforced on one side of a boundary
+    and unstated on the other. `_NARRATIVE_ONLY_EDITS` and `_CANONICAL_EDITS` are
+    hand-written per category, and nothing checked that the paths they touch are
+    the ones that category may actually change. If one drifted, the success tests
+    would fail — but for a reason no message would explain, and a reader would go
+    looking at the service rather than the fixture.
+
+    It also ties the two halves of the round-4 fix together: the transmitted
+    allowlist is asserted elsewhere to equal `refinement_allowed_paths(...)`, and
+    the GRADER is exercised against these same fixtures by the success and
+    rejection tests. Pinning the fixtures to that function closes the loop —
+    transmitted, graded and exercised are the same set."""
+
+    @pytest.mark.parametrize("change_type", V1_REFINABLE_CHANGE_TYPES)
+    def test_every_allowed_fixture_stays_inside_its_own_allowlist(self, change_type):
+        _design, _source, spec_payload = make_ready_design()
+        refined = apply_allowed_edit(spec_payload, change_type)
+        changed = diff_design_spec_paths(spec_payload, refined)
+        assert changed, "a fixture that changes nothing cannot test anything"
+        allowed = refinement_allowed_paths(change_type, DESIGN_SPEC_SCHEMA_VERSION)
+        outside = [path for path in changed if not path_is_allowed(path, allowed)]
+        assert not outside, (
+            f"{change_type}'s fixture touches {outside}, which that category may "
+            f"not change. The fixture is wrong, not the service."
+        )
+
+    @pytest.mark.parametrize("change_type", V1_REFINABLE_CHANGE_TYPES)
+    def test_every_narrative_fixture_stays_inside_its_own_allowlist(self, change_type):
+        # The narrative half is used on its own to produce deliberately INERT
+        # output. It still has to be in-category, or that test would be proving
+        # the wrong rejection.
+        _design, _source, spec_payload = make_ready_design()
+        refined = apply_narrative_only_edit(spec_payload, change_type)
+        changed = diff_design_spec_paths(spec_payload, refined)
+        allowed = refinement_allowed_paths(change_type, DESIGN_SPEC_SCHEMA_VERSION)
+        assert all(path_is_allowed(path, allowed) for path in changed), changed
+
+    def test_the_out_of_category_fixture_really_is_out_of_category(self):
+        # `coverage_and_drape.sleeves` under `colour_story` is the shape of the
+        # customer's real failure, and several tests here depend on it being
+        # refused. Stated rather than assumed: if the allowlist ever grew to
+        # include it, those tests would start passing for the wrong reason.
+        allowed = refinement_allowed_paths("colour_story", DESIGN_SPEC_SCHEMA_VERSION)
+        assert not path_is_allowed("coverage_and_drape.sleeves", allowed)
+        # And it is legitimate somewhere — otherwise it would be testing a path
+        # no category owns, which is a weaker fact than the one we want.
+        assert path_is_allowed(
+            "coverage_and_drape.sleeves",
+            refinement_allowed_paths("sleeves_and_coverage", DESIGN_SPEC_SCHEMA_VERSION),
+        )
+
+
+class TestTheModelIsToldWhatValuesAreLegal:
+    """The fourth instance of this phase's defect, found by the round-4 council.
+
+    The prompt warned "never invent a selection value... a value it does not
+    offer will be rejected and nothing will be saved" — and never showed the
+    model a single value. Meanwhile `answerable_selection_alternatives` had been
+    handing exactly that list to the DEMO engine since ADR 0028, and its own
+    docstring described the asymmetry as deliberate: "a live provider is *told*
+    which fields it may move and its answer is then checked". Told which fields.
+    Not which values.
+
+    Measured before shipping: 53–272 characters and about a millisecond, against
+    a paid provider round-trip."""
+
+    def _sent(self, provider, index=0) -> dict:
+        message = provider.requests[index].user_message
+        trusted, _end = json.JSONDecoder().raw_decode(message, message.index("{"))
+        return trusted
+
+    def _run(self, design, source, spec_payload, change_type):
+        provider = SequenceProvider(
+            [_result(copy.deepcopy(spec_payload)), _result(copy.deepcopy(spec_payload))]
+        )
+        with pytest.raises(RefinementNoChangeProduced):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request(change_type), provider=provider
+            )
+        return provider
+
+    @pytest.mark.parametrize("change_type", V1_REFINABLE_CHANGE_TYPES)
+    def test_the_transmitted_values_are_the_ones_the_validator_would_accept(self, change_type):
+        design, source, spec_payload = make_ready_design()
+        provider = self._run(design, source, spec_payload, change_type)
+        sent = self._sent(provider)["changeable_selection_values"]
+        expected = answerable_selection_alternatives(
+            design, validate_design_spec(spec_payload), change_type
+        )
+        # Same call, same arguments, as the authority that judges the answer —
+        # compared against the function, never a copy of its output.
+        assert set(sent) == set(expected)
+        for field, values in expected.items():
+            assert sent[field] == [list(v) if isinstance(v, list) else v for v in values]
+
+    @pytest.mark.parametrize("change_type", V1_REFINABLE_CHANGE_TYPES)
+    def test_every_transmitted_value_is_actually_legal(self, change_type):
+        # Not just "the two calls agree" — the values must survive the real
+        # questionnaire revalidation when substituted in. A list both sides
+        # computed wrongly would satisfy the test above and nothing else.
+        design, source, spec_payload = make_ready_design()
+        provider = self._run(design, source, spec_payload, change_type)
+        for field, values in self._sent(provider)["changeable_selection_values"].items():
+            for value in values:
+                candidate = copy.deepcopy(spec_payload)
+                candidate["source_selections"][field] = copy.deepcopy(value)
+                # Raises RefinedSelectionsInvalid if the value is not answerable.
+                assert_refined_selections_are_answerable(design, validate_design_spec(candidate))
+
+    @pytest.mark.parametrize("change_type", V1_REFINABLE_CHANGE_TYPES)
+    def test_the_current_value_is_never_offered_back(self, change_type):
+        # Offering the value already in place would be offering a no-op, and the
+        # rendered-prompt guard would then refuse the very edit we suggested.
+        design, source, spec_payload = make_ready_design()
+        provider = self._run(design, source, spec_payload, change_type)
+        selections = spec_payload["source_selections"]
+        for field, values in self._sent(provider)["changeable_selection_values"].items():
+            assert selections.get(field) not in values
+
+    def test_a_design_with_no_pinned_questionnaire_never_reaches_the_provider(self):
+        # I first wrote this expecting an empty mapping to be transmitted. It is
+        # not reachable: `validate_source_version` refuses such a design BEFORE a
+        # provider is selected, so the honest fact — and the better one, because
+        # it spends nothing — is that no call happens at all. Recorded as a test
+        # so the next person does not add a defensive branch for it either.
+        design, source, spec_payload = make_ready_design()
+        Design.objects.filter(pk=design.pk).update(questionnaire_version=None)
+        design.refresh_from_db()
+        provider = SequenceProvider([_result(copy.deepcopy(spec_payload))])
+        with pytest.raises(RefinementSourceUnavailable):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request("colour_story"), provider=provider
+            )
+        assert provider.calls == 0
