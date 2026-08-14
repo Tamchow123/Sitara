@@ -633,6 +633,30 @@ def _generate_valid_refined_spec(
                 )
             else:
                 return spec, aggregate_usage(responses), attempts
+        else:
+            # A response that parsed to nothing usable — not a refusal (handled
+            # above and aborted), just no payload. It used to fall through
+            # silently, leaving `no_change_only` True, so two payload-less
+            # responses reported `refinement_no_change` — "your request produced
+            # no change" — when the model had produced no OUTPUT. Two different
+            # facts, two different operator actions, and two billed calls with
+            # nothing in the log to tell them apart.
+            no_change_only = False
+            retry_reason = RETRY_REASON_UNSPECIFIED
+            # `stop_reason` because the whole point of this branch is that a
+            # billed call produced nothing, and it is the only field that says
+            # WHY — `max_tokens` (raise the output budget) reads nothing like a
+            # parse failure. It is enumerated provenance on
+            # `StructuredDesignResult`, which documents itself as carrying ONLY
+            # that: never the prompt, the response body, headers or a key.
+            logger.warning(
+                "refinement output missing design=%s provider_request=%s "
+                "change_type=%s stop_reason=%s",
+                design_id,
+                attempt,
+                change_type,
+                result.stop_reason,
+            )
     if no_change_only:
         raise RefinementNoChangeProduced(attempts)
     raise RefinementGenerationFailed(attempts)

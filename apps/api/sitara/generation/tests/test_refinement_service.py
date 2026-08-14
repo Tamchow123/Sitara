@@ -1230,3 +1230,77 @@ class TestTheModelIsToldWhatItIsGradedAgainst:
         correction = retry[retry.index(REFINEMENT_UNTRUSTED_END) :]
         assert secret not in correction
         assert "elbow-length sleeves" not in correction
+
+
+class TestAResponseWithNoPayload:
+    """A provider response that parsed to nothing usable.
+
+    Not a refusal — that aborts immediately, above. Just no output. It used to
+    fall through the `if result.payload is not None` with no `else`, so
+    `no_change_only` stayed True and two payload-less responses reported
+    `refinement_no_change`: "your request produced no change". The model had
+    produced no OUTPUT. Different fact, different fix, and two billed calls with
+    nothing in the log to separate them."""
+
+    def _empty(self):
+        return StructuredDesignResult(
+            payload=None,
+            provider=_TEST_PROVIDER,
+            model=_TEST_MODEL,
+            input_tokens=_USAGE["input_tokens"],
+            output_tokens=_USAGE["output_tokens"],
+            stop_reason="parse_error",
+        )
+
+    def test_no_payload_is_not_reported_as_no_change(self):
+        design, source, _spec = make_ready_design()
+        provider = SequenceProvider([self._empty(), self._empty()])
+        with pytest.raises(RefinementGenerationFailed):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request("colour_story"), provider=provider
+            )
+        assert provider.calls == 2
+
+    def test_no_payload_is_logged_for_every_billed_call(self, caplog):
+        design, source, _spec = make_ready_design()
+        provider = SequenceProvider([self._empty(), self._empty()])
+        with caplog.at_level(logging.DEBUG):
+            with pytest.raises(RefinementGenerationFailed):
+                generate_refined_design_spec_for_design(
+                    design, source, refinement_request("colour_story"), provider=provider
+                )
+        missing = [m for m in (r.getMessage() for r in caplog.records) if "output missing" in m]
+        assert len(missing) == 2, "one line per billed call, or an incident is unreadable"
+        for message in missing:
+            assert "change_type=colour_story" in message
+            assert "provider_request=" in message
+            # The one field that says WHY nothing came back. `max_tokens` means
+            # raise the output budget; a parse failure means something else
+            # entirely, and an operator reading a spike needs to tell them apart.
+            assert "stop_reason=parse_error" in message
+
+    def test_the_retry_still_carries_a_correction(self):
+        # The retry is paid for either way. A response with no payload tells us
+        # nothing about WHY, so it gets the generic correction — but it must get
+        # one, which is exactly the `None`-means-two-things trap.
+        design, source, _spec = make_ready_design()
+        provider = SequenceProvider([self._empty(), self._empty()])
+        with pytest.raises(RefinementGenerationFailed):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request("colour_story"), provider=provider
+            )
+        assert REFINEMENT_RETRY_NOTE in provider.requests[1].user_message
+        assert REFINEMENT_RETRY_NOTE not in provider.requests[0].user_message
+
+    def test_a_first_empty_response_does_not_stop_a_good_second_one(self):
+        # The empty case must stay RETRYABLE. Marking it terminal would throw
+        # away a refinement the model was about to produce correctly.
+        design, source, spec_payload = make_ready_design()
+        good = apply_allowed_edit(spec_payload, "colour_story")
+        provider = SequenceProvider([self._empty(), _result(good)])
+        version = generate_refined_design_spec_for_design(
+            design, source, refinement_request("colour_story"), provider=provider
+        )
+        assert provider.calls == 2
+        assert version.version_number == 2
+        assert version.design_spec["source_selections"]["colour_palette"] == ["emerald", "gold"]
