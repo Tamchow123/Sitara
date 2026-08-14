@@ -390,6 +390,85 @@ just the prose.
 refinement that reaches a customer renders a different image prompt from the one
 it was refined from, or it does not reach them at all — in both modes.
 
+## Second amendment (2026-08-14) — instruction was not enough either
+
+The enforcement above worked. The next live refinement did not fail by producing
+something inert; it failed by producing nothing at all:
+
+> We couldn't refine your concept. Something went wrong while updating your
+> design brief.
+
+`refinement_generation_failed`, both attempts, nothing saved, both calls billed.
+
+### What was actually wrong
+
+The output is graded against `refinement_allowed_paths(change_type,
+schema_version)`. **That allowlist was never transmitted.** The message carried
+`change_type`, `changeable_source_selection_fields` and `current_design_spec`,
+and the system prompt said:
+
+> Change ONLY fields that are relevant to the selected change category.
+
+That asks the model to reproduce, by inference from a category name, a
+source-controlled table it cannot see. It is the same shape of defect as the
+first amendment's — a rule enforced on one side of a boundary and unstated on
+the other — one level further out.
+
+The customer's note asked for two things at once: a higher neckline **and** a
+covered midriff. Category `neckline`. `coverage_and_drape.back_and_midriff`
+belongs to `sleeves_and_coverage`. The model applied the whole note, faithfully,
+and was refused for it — twice, because the retry note listed four possible
+causes joined by "or" and the model had no way to tell which applied.
+
+Nothing here was the customer's fault, and the failure was not hers to
+understand. Refinement categories are our decomposition of a garment; nobody
+writing "make the neckline higher and cover the midriff" has agreed to it.
+
+### The fix
+
+**Transmit the allowlist.** `editable_design_spec_paths` carries the exact
+result of `refinement_allowed_paths` — the same call, with the same arguments,
+that grades the output. `editable_paths` is a REQUIRED keyword argument on
+`build_refinement_user_message`: a default of `()` would silently tell the model
+it may change nothing, which is both false and invisible from the call site.
+
+**Say that a note may exceed its category.** The system prompt now states that
+the note is in the user's own words, may ask for more than the category covers,
+that only the covered part may be applied, and — explicitly, so it cannot be
+read as licence to do nothing — that ignoring the rest is not a reason to leave
+the canonical selections alone. The untrusted-section framing loses its false
+claim that the note is category-scoped; the injection-defence sentence is
+unchanged.
+
+**Name the reason on the retry.** `REFINEMENT_RETRY_NOTES` is a closed table of
+fixed strings, one per reason, none of which interpolates anything — no field
+name, no rejected value, and never the note. `_REJECTION_RETRY_REASONS` is total
+over `RefinementOutputCategory`, so a new category must choose an instruction
+rather than inherit one silently.
+
+Four failures deliberately keep the **generic** note: a failed safety scan, an
+invalid shape, an unsupported schema version, an unrenderable prompt. Telling a
+model "your text was refused by a safety check" invites it to word its way
+around the denylist on the one retry available, which is worse than asking for a
+fresh compliant specification. `RETRY_REASON_UNSPECIFIED` is therefore a
+distinct value from `None`: `None` means "first attempt, append nothing", and
+collapsing the two would send a corrected attempt out with no correction at all
+— a regression the tests caught during this work, not after it.
+
+`REFINEMENT_TEMPLATE_VERSION` → **4.0.0**. `PROMPT_BUILDER_VERSION` still does
+not move: this changes what the builder is given, not how it renders.
+
+### What is claimed, and what is not
+
+The transmitted allowlist is asserted to be **the graded one**, per category,
+against the same function call rather than a copy of its output — so the two
+cannot drift. The retry is asserted to carry the correction for its own reason
+and no other, and never the note.
+
+That a live refinement now succeeds where that one failed is **not** claimed. No
+provider call was made in this work. It remains an operator-run checkpoint,
+alongside the still-pending one that a refined image visibly differs.
+
 ## Alternatives considered
 
 - **Widen the narrative allowlist and leave `source_selections` frozen.**

@@ -3,6 +3,7 @@ Part B) — injected fake providers, zero network calls."""
 
 import ast
 import copy
+import json
 import logging
 import pathlib
 
@@ -36,9 +37,18 @@ from sitara.generation.refinement import (
     REFINEMENT_CHANGE_TYPES,
     canonical_refinement_fields,
     normalise_refinement_request,
+    refinement_allowed_paths,
+)
+from sitara.generation.refinement_prompting import (
+    REFINEMENT_RETRY_NOTE,
+    REFINEMENT_RETRY_NOTES,
+    REFINEMENT_UNTRUSTED_END,
+    RETRY_DISALLOWED_FIELD,
+    RETRY_NO_CHANGE,
 )
 from sitara.generation.refinement_selections import RefinedSelectionsInvalid
 from sitara.generation.refinement_service import (
+    _REJECTION_RETRY_REASONS,
     REFINEMENT_DESIGN_SPEC_TEMPLATE_VERSION,
     DesignChangedDuringRefinement,
     GenerationRefused,
@@ -1047,3 +1057,176 @@ def _pydantic_validation_error():
     except ValidationError as exc:
         return exc
     raise AssertionError("expected a ValidationError")
+
+
+# The categories a version-1 spec can actually be refined in. Derived from the
+# production dispatch, never hand-listed: `neckline` names no canonical field on
+# version 1, so it is refused before any provider request is built and there is
+# no transmitted message to assert about.
+_V1_REFINABLE = tuple(
+    change_type
+    for change_type in REFINEMENT_CHANGE_TYPES
+    if canonical_refinement_fields(change_type, DESIGN_SPEC_SCHEMA_VERSION)
+)
+
+
+class TestTheModelIsToldWhatItIsGradedAgainst:
+    """The defect a live refinement hit twice.
+
+    The output was checked against `refinement_allowed_paths(change_type,
+    schema_version)` and the model was never shown it — asked instead to judge
+    which fields were "relevant to the selected category" against a table only
+    the server could see. A note that asked for two things at once, only one of
+    them inside the chosen category, was applied in full and refused in full.
+    Both attempts. Nothing saved.
+
+    These assertions compare the message against the SAME call the grader makes,
+    not against a copy of the list, so the two cannot drift apart."""
+
+    def _sent(self, provider, index=0) -> dict:
+        """The TRUSTED JSON block out of a built message.
+
+        `raw_decode` from the first brace, not `index("{")` to `rindex("}")`:
+        a note is appended after this block in its own JSON object, so a note
+        containing a brace would move the last `}` into the untrusted section
+        and this helper would parse the wrong span — or nothing at all.
+        `test_a_note_containing_braces_does_not_confuse_the_reader` holds that
+        down."""
+        message = provider.requests[index].user_message
+        trusted, _end = json.JSONDecoder().raw_decode(message, message.index("{"))
+        return trusted
+
+    @pytest.mark.parametrize("change_type", _V1_REFINABLE)
+    def test_the_transmitted_allowlist_is_the_graded_one(self, change_type):
+        design, source, spec_payload = make_ready_design()
+        # An identical spec back, twice: the message is built, both attempts are
+        # refused as no change, and the named exception is the ONLY one this may
+        # raise. A bare `suppress(Exception)` here would hide a genuine error in
+        # message assembly behind a request that had already been recorded.
+        provider = SequenceProvider(
+            [_result(copy.deepcopy(spec_payload)), _result(copy.deepcopy(spec_payload))]
+        )
+        with pytest.raises(RefinementNoChangeProduced):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request(change_type), provider=provider
+            )
+        sent = self._sent(provider)["editable_design_spec_paths"]
+        graded = refinement_allowed_paths(change_type, DESIGN_SPEC_SCHEMA_VERSION)
+        assert set(sent) == set(graded)
+        assert sent == sorted(sent), "transmitted unsorted — the message is not deterministic"
+
+    def test_the_allowlist_is_never_empty(self):
+        # An empty list reads as "you may change nothing", which is why the
+        # argument is required rather than defaulted to ().
+        design, source, spec_payload = make_ready_design()
+        provider = SequenceProvider(
+            [_result(copy.deepcopy(spec_payload)), _result(copy.deepcopy(spec_payload))]
+        )
+        with pytest.raises(RefinementNoChangeProduced):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request("colour_story"), provider=provider
+            )
+        assert self._sent(provider)["editable_design_spec_paths"]
+
+    def test_a_note_containing_braces_does_not_confuse_the_reader(self):
+        # The note is appended in its own JSON object after the trusted block, so
+        # a brace in it moves the message's LAST `}` out of the block these
+        # assertions read. A real customer writes "make it {like this}".
+        design, source, spec_payload = make_ready_design()
+        provider = SequenceProvider(
+            [_result(copy.deepcopy(spec_payload)), _result(copy.deepcopy(spec_payload))]
+        )
+        with pytest.raises(RefinementNoChangeProduced):
+            generate_refined_design_spec_for_design(
+                design,
+                source,
+                refinement_request("colour_story", "make it {like this} please"),
+                provider=provider,
+            )
+        trusted = self._sent(provider)
+        assert trusted["change_type"] == "colour_story"
+        assert set(trusted["editable_design_spec_paths"]) == set(
+            refinement_allowed_paths("colour_story", DESIGN_SPEC_SCHEMA_VERSION)
+        )
+        # And the note is still where it belongs — outside the trusted block.
+        assert "like this" not in json.dumps(trusted)
+
+    def test_a_rejection_retries_with_the_correction_for_that_reason(self):
+        # The customer's own failure: an out-of-category path changed. The retry
+        # used to name four possible causes at once; it now names the one.
+        design, source, spec_payload = make_ready_design()
+        outside = copy.deepcopy(spec_payload)
+        outside["coverage_and_drape"]["sleeves"] = "Now finished with elbow-length sleeves."
+        provider = SequenceProvider([_result(outside), _result(outside)])
+
+        with pytest.raises(RefinementGenerationFailed):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request("colour_story"), provider=provider
+            )
+
+        assert len(provider.requests) == 2
+        first = provider.requests[0].user_message
+        retry = provider.requests[1].user_message
+        for note in REFINEMENT_RETRY_NOTES.values():
+            assert note not in first, "a first attempt must carry no correction"
+        assert REFINEMENT_RETRY_NOTES[RETRY_DISALLOWED_FIELD] in retry
+        assert REFINEMENT_RETRY_NOTE not in retry
+        assert REFINEMENT_RETRY_NOTES[RETRY_NO_CHANGE] not in retry
+
+    def test_an_inert_attempt_retries_with_the_no_change_correction(self):
+        design, source, spec_payload = make_ready_design()
+        inert = apply_narrative_only_edit(spec_payload, "colour_story")
+        provider = SequenceProvider([_result(inert), _result(copy.deepcopy(inert))])
+
+        with pytest.raises(RefinementNoChangeProduced):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request("colour_story"), provider=provider
+            )
+
+        retry = provider.requests[1].user_message
+        assert REFINEMENT_RETRY_NOTES[RETRY_NO_CHANGE] in retry
+        assert REFINEMENT_RETRY_NOTES[RETRY_DISALLOWED_FIELD] not in retry
+
+    def test_a_safety_rejection_gets_the_generic_correction(self):
+        # Deliberate: naming the safety check invites the model to word its way
+        # around the denylist on the one retry it has.
+        design, source, spec_payload = make_ready_design()
+        blocked = copy.deepcopy(spec_payload)
+        blocked["colour_story"]["palette_summary"] = "Style it the way Sabyasachi would."
+        provider = SequenceProvider([_result(blocked), _result(copy.deepcopy(blocked))])
+
+        with pytest.raises(RefinementGenerationFailed):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request("colour_story"), provider=provider
+            )
+
+        retry = provider.requests[1].user_message
+        assert REFINEMENT_RETRY_NOTE in retry
+        for note in REFINEMENT_RETRY_NOTES.values():
+            assert note not in retry
+
+    def test_every_rejection_category_has_a_decided_correction(self):
+        # Total by construction, so a fifth category must choose an instruction
+        # rather than silently inherit the generic one.
+        assert set(_REJECTION_RETRY_REASONS) == set(RefinementOutputCategory)
+        for reason in _REJECTION_RETRY_REASONS.values():
+            assert reason in REFINEMENT_RETRY_NOTES
+
+    def test_a_correction_never_carries_the_note(self):
+        design, source, spec_payload = make_ready_design()
+        outside = copy.deepcopy(spec_payload)
+        outside["coverage_and_drape"]["sleeves"] = "Now finished with elbow-length sleeves."
+        secret = "an unmistakable fragment 4b2c1a"
+        provider = SequenceProvider([_result(outside), _result(outside)])
+
+        with pytest.raises(RefinementGenerationFailed):
+            generate_refined_design_spec_for_design(
+                design, source, refinement_request("colour_story", secret), provider=provider
+            )
+
+        # The note belongs in the delimited untrusted section and nowhere else —
+        # least of all inside a source-controlled correction instruction.
+        retry = provider.requests[1].user_message
+        correction = retry[retry.index(REFINEMENT_UNTRUSTED_END) :]
+        assert secret not in correction
+        assert "elbow-length sleeves" not in correction

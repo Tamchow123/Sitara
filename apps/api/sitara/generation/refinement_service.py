@@ -58,6 +58,13 @@ from .refinement import (
 from .refinement_prompting import (
     REFINEMENT_SYSTEM_PROMPT,
     REFINEMENT_TEMPLATE_VERSION,
+    RETRY_DISALLOWED_FIELD,
+    RETRY_IMMUTABLE_FIELD,
+    RETRY_INVALID_SELECTION_VALUE,
+    RETRY_NO_CHANGE,
+    RETRY_PROCESS_MENTIONED,
+    RETRY_REASON_UNSPECIFIED,
+    RETRY_SELECTION_OUT_OF_CATEGORY,
     build_refinement_user_message,
 )
 from .refinement_selections import (
@@ -252,6 +259,18 @@ class RefinementOutputRejected(Exception):
         super().__init__(f"refinement output rejected: {category.value}")
 
 
+# Every rejection category, mapped to the correction the retry carries. Total by
+# construction — a KeyError here would be a missing decision, not a fallback, so
+# a new category must choose its instruction rather than silently inherit the
+# generic one. A test asserts the table stays total.
+_REJECTION_RETRY_REASONS = {
+    RefinementOutputCategory.SOURCE_SELECTIONS_CHANGED: RETRY_SELECTION_OUT_OF_CATEGORY,
+    RefinementOutputCategory.IMMUTABLE_FIELD_CHANGED: RETRY_IMMUTABLE_FIELD,
+    RefinementOutputCategory.DISALLOWED_FIELD_CHANGED: RETRY_DISALLOWED_FIELD,
+    RefinementOutputCategory.PROCESS_MENTIONED: RETRY_PROCESS_MENTIONED,
+}
+
+
 def _rejection_detail(exc: Exception) -> str:
     """A safe machine-readable reason for a rejected refinement attempt.
 
@@ -276,6 +295,31 @@ def _rejection_detail(exc: Exception) -> str:
     if fields:
         return f"{type(exc).__name__}:{','.join(fields)}"
     return type(exc).__name__
+
+
+def _retry_reason(exc: Exception) -> str:
+    """Which correction instruction the single retry should carry.
+
+    Never ``None``: that value means "first attempt, append nothing", and a
+    rejection whose reason we choose not to name must still get the generic
+    correction rather than silently going out uncorrected.
+
+    An EXPLICIT table, deliberately not the duck-typed probe above: this value is
+    sent TO THE PROVIDER, so an exception type opting itself in by having an
+    attribute named ``category`` would be putting words in a paid request. Only
+    the two types whose categories are our own closed enums are mapped.
+
+    The four content-dependent failures — a failed safety scan
+    (`GeneratedContentRejected`), an invalid shape, an unsupported schema
+    version, an unrenderable prompt — get the unspecified reason on purpose.
+    Telling a model "your text was refused by a safety check" invites it to word
+    its way around the denylist on the one retry available, which is worse than a
+    generic instruction to produce a fresh, compliant specification."""
+    if isinstance(exc, RefinementOutputRejected):
+        return _REJECTION_RETRY_REASONS[exc.category]
+    if isinstance(exc, RefinedSelectionsInvalid):
+        return RETRY_INVALID_SELECTION_VALUE
+    return RETRY_REASON_UNSPECIFIED
 
 
 class RefinementCategoryUnavailable(Exception):
@@ -449,6 +493,10 @@ def _generate_valid_refined_spec(
     responses: list = []
     attempts = 0
     no_change_only = True
+    # Why the PREVIOUS attempt was refused, carried into the retry's correction
+    # instruction. `None` on the first attempt, so nothing is appended. Only ever
+    # a source-controlled machine name — never a field, a value or the note.
+    retry_reason: str | None = None
     cost_on = cost_accounting.cost_enabled(generation_attempt)
     profile = cost_control.active_pricing_profile()
     for attempt in range(1, MAX_REFINEMENT_PROVIDER_REQUESTS + 1):
@@ -459,6 +507,16 @@ def _generate_valid_refined_spec(
                 source_spec.model_dump(mode="json"),
                 change_type,
                 note,
+                # The SAME call, with the same arguments, that grades the output
+                # at `_validate_refined_output`. It has to be: the model was
+                # previously graded against this allowlist and never shown it,
+                # left to infer from the category name which fields were "in
+                # scope" — and a live refinement failed both attempts because the
+                # customer's note asked for two things at once and only one of
+                # them belonged to the category she picked.
+                editable_paths=tuple(
+                    refinement_allowed_paths(change_type, source_spec.schema_version)
+                ),
                 # Which canonical selections this category may change is decided
                 # HERE, from the source spec's own schema version, and told to
                 # the model explicitly — never inferred by the model from the
@@ -467,7 +525,7 @@ def _generate_valid_refined_spec(
                 changeable_selection_fields=canonical_refinement_fields(
                     change_type, source_spec.schema_version
                 ),
-                retry=attempt > 1,
+                retry_reason=retry_reason,
             ),
             source_selections=source_spec.source_selections.model_dump(),
             max_output_tokens=settings.DESIGN_SPEC_MAX_OUTPUT_TOKENS,
@@ -526,6 +584,7 @@ def _generate_valid_refined_spec(
             try:
                 spec = _validate_refined_output(result.payload, source_spec, change_type, design)
             except _NoChangeInAttempt:
+                retry_reason = RETRY_NO_CHANGE
                 logger.warning(
                     "refinement output unchanged design=%s provider_request=%s change_type=%s",
                     design_id,
@@ -553,6 +612,7 @@ def _generate_valid_refined_spec(
                 ImagePromptBuildError,
             ) as exc:
                 no_change_only = False
+                retry_reason = _retry_reason(exc)
                 # `provider_request`, not `attempt`: pipeline.py logs the
                 # GenerationAttempt UUID under that key and the correlation
                 # filter adds `attempt_id`, so three different things shared one
