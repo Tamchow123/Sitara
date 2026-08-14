@@ -522,17 +522,18 @@
   color: var(--color-accent-700);
 }
 
-/* The Amendments grid: two across on a phone, four on a wide screen. */
+/* The Amendments grid sizes itself to the COLUMN it sits in, not to the
+   window. It used to be two columns with a `min-width: 700px` media query
+   promoting it to four — but that query reads the viewport, and this panel
+   lives in a ~547px column, so on any desktop it laid four chips into a space
+   that fits three. The text track collapsed to ~62px, and "Embellishment" —
+   the one label that is a single unbreakable 94px word — pushed straight out
+   of its box. `auto-fit` asks the container instead, so the count follows the
+   space that actually exists. */
 .refinement-chips {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: var(--space-3);
-}
-
-@media (min-width: 700px) {
-  .refinement-chips {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
 }
 
 /* A grid, not a row, since Phase 23: each chip now carries a second line
@@ -566,6 +567,23 @@
   accent-color: var(--color-accent-700);
   width: 18px;
   height: 18px;
+}
+
+/* The belt to the grid's braces. A grid item's automatic minimum size is its
+   min-content — the longest unbreakable word — so a track narrower than that
+   does not clip the text, it lets it escape the box. `min-width: 0` lets the
+   item shrink with its track and `overflow-wrap` gives the word somewhere to
+   go, which is what makes this safe at ANY width rather than only at the ones
+   that happen to fit today. Neither of these existed: `.refinement-chip-label`
+   had no rule at all. */
+.refinement-chip-label,
+.refinement-chip-effect {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.refinement-chip-label {
+  grid-column: 2;
 }
 
 /* Lighter than the label and never the only thing carrying meaning: the
