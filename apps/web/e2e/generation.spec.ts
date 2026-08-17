@@ -103,7 +103,7 @@ test.describe("generation, result, refinement and history", () => {
 
     await expect(page).toHaveURL(/\/generation\/[0-9a-f-]{36}/, { timeout: 30_000 });
     // The progress URL carries the source version, which is what makes the
-    // "back to your original concept" link render while the job runs.
+    // "back to the concept you are refining" link render while the job runs.
     //
     // The link itself is asserted in GenerationProgress.test.tsx rather than
     // here: a refinement reuses the existing DesignSpec, so it has no text

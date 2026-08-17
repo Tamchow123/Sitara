@@ -44,8 +44,8 @@ const DRIFT_WARNING =
 const DEMO_DRIFT_WARNING =
   "In demo mode, refinement updates your deterministic design brief within the selected " +
   "category only. Another curated image may be selected to match the updated brief — the " +
-  "image itself is not edited, and your original image is never sent anywhere. Visual " +
-  "differences from your original concept may still be substantial.";
+  "image itself is not edited, and the image you are refining is never sent anywhere. Visual " +
+  "differences from the concept you are refining may still be substantial.";
 
 type SubmitState =
   | { status: "idle" }

@@ -30,10 +30,14 @@ describe("refinementProgressExplanation", () => {
 });
 
 describe("REFINEMENT_PROGRESS_NOTES", () => {
-  it("discloses that only the selected change is applied, the image is fresh, and the original stays available", () => {
+  it("discloses that only the selected change is applied, the image is fresh, and the source stays available", () => {
     const joined = REFINEMENT_PROGRESS_NOTES.join(" ").toLowerCase();
     expect(joined).toMatch(/selected change/);
     expect(joined).toMatch(/fresh/);
-    expect(joined).toMatch(/original/);
+    // "the concept you are refining", not "the original": from round two the
+    // source of a refinement is itself a refinement (ADR 0029), so a promise
+    // about "your original concept" is a promise about the wrong version.
+    expect(joined).toMatch(/you are refining/);
+    expect(joined).not.toMatch(/original/);
   });
 });

@@ -59,9 +59,9 @@ export default function ConceptsPage() {
           another, and you refine the most recent concept each time.
         </p>
         <p>
-          Refinement generates a completely new image. It is not an edit of the first one: your
-          original image is never sent anywhere or altered, and the refined concept may differ from
-          it in pose, framing, face and the placement of embroidery, even where you asked for no
+          Refinement generates a completely new image. It is not an edit of the one before it: no
+          concept image is ever sent anywhere or altered, and the refined concept may differ from it
+          in pose, framing, face and the placement of embroidery, even where you asked for no
           change. Sitara keeps as much continuity as it can, but continuity is an aim, not a
           promise.
         </p>

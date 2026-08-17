@@ -46,11 +46,15 @@ describe("concepts page", () => {
     expect(text).toMatch(/most recent concept/i);
   });
 
-  it("never presents refinement as editing the original image", () => {
+  it("never presents refinement as editing the image it came from", () => {
     render(<ConceptsPage />);
     const text = pageText();
-    expect(text).toMatch(/not an edit of the first one/i);
-    expect(text).toMatch(/never sent anywhere or altered/i);
+    // "the one before it", not "the first one": from round two the image a
+    // refinement starts from is itself a refinement (ADR 0029).
+    expect(text).toMatch(/not an edit of the one before it/i);
+    expect(text).not.toMatch(/not an edit of the first one/i);
+    // The safety claim is unchanged in strength and now covers every version.
+    expect(text).toMatch(/no concept image is ever sent anywhere or altered/i);
     expect(text).toMatch(/continuity is an aim, not a promise/i);
   });
 
