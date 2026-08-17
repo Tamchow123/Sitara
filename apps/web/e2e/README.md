@@ -39,10 +39,10 @@ them; only its generation/result test is signed in.
 
 The session lands in `e2e/.auth/` (gitignored) as a storage-state file — the
 session cookie, which is what a browser holds. No password is written to disk.
-It is kept out of the image by `apps/web/.dockerignore` and out of the `web`
-container by a `tmpfs` shadow in `compose.yaml`, because that directory is now
-bind-mounted (for the prose guard described below) and a bind mount ignores
-`.dockerignore` entirely.
+It is kept out of the image by `apps/web/.dockerignore`. It was briefly also
+kept out of the `web` container by a `tmpfs` shadow, when `e2e/` was bind-mounted
+for the prose guard described below; that mount is reverted, so `.dockerignore`
+is once again the only rule that has to hold.
 
 **The axe engine lives in `helpers/axe.ts`, not in `accessibility.spec.ts`.**
 `generation.spec.ts` points the same engine, with the same one disabled rule, at
@@ -52,11 +52,17 @@ checked from `accessibility.spec.ts` because reaching it there would mean paying
 for a second full generation to see a screen `generation.spec.ts` is already
 standing on.
 
-**`e2e/` is bind-mounted into the `web` service** (read-only), which no other
-spec directory is. `src/app/refinement-budget-copy.test.ts` scans these specs'
-prose for superseded claims about the refinement budget; without the mount it
-would read whatever the last `docker compose build web` baked in and report
-green on a claim added afterwards.
+**`src/app/refinement-budget-copy.test.ts` scans these specs' prose** for
+superseded claims about the refinement budget, and `e2e/` is NOT bind-mounted
+into the `web` service — so in that container it would read whatever the last
+`docker compose build web` baked in and report green on a claim added afterwards.
+Mounting `e2e/` was tried and reverted: `.dockerignore` governs COPY and not bind
+mounts, so the mount reopened `e2e/.auth`'s live session cookie inside the
+container, and the `tmpfs` that shadowed it could not create its mountpoint under
+a read-only bind on any checkout where `.auth` does not already exist — which is
+every CI run, and it took the `web` container down with it. The guard now refuses
+to run when its root is the container's `/app`, and has a row in CLAUDE.md §20's
+table.
 
 **One account holding many concepts is why `gallery.spec.ts` never counts cards.**
 Every generating spec adds to the same gallery, and the desktop and mobile

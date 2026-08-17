@@ -16,11 +16,11 @@ npm-debug.log*
 # to forget. Baselines under e2e/*-snapshots/ are deliberately NOT excluded —
 # they are committed reference images, not run output.
 #
-# There is now a FOURTH path, and this file cannot reach it: compose.yaml
-# bind-mounts ./apps/web/e2e into the `web` service so a prose guard reads live
-# specs, and a bind mount ignores .dockerignore entirely. That one is closed
-# there, by a tmpfs shadowing /app/e2e/.auth. Adding a bind mount that touches
-# e2e/ means checking that shadow is still over it.
+# A bind mount would be a FOURTH path this file cannot reach — .dockerignore
+# governs COPY, not mounts. compose.yaml briefly mounted ./apps/web/e2e for a
+# prose guard and had to shadow this directory with a tmpfs to compensate; that
+# mount is gone (see the comment there). If one is ever added back, this rule
+# does NOT cover it and the shadow has to come back with it.
 e2e/.auth
 test-results
 playwright-report

@@ -23,15 +23,23 @@
 // CLAUDE.md §20's table of tests that deliberately do). The backend has its own
 // equivalent in apps/api/sitara/generation/tests/test_refinement_budget_copy.py.
 //
-// That scoping is necessary but was not sufficient: e2e/ IS inside the build
-// context, and was still only a snapshot taken at the last `docker compose
+// That scoping is necessary but not sufficient. e2e/ IS inside the build
+// context and is still only the snapshot taken at the last `docker compose
 // build web`, because the web service bind-mounts src/ and public/ and nothing
-// else. A stale claim added to a spec afterwards would have been invisible to
-// this guard under `docker compose exec web npm test` — green, on bytes from a
-// previous build. compose.yaml now mounts e2e/ read-only for exactly this scan.
-// The four tests in §20's table fail LOUDLY in that container by design; this
-// one would have passed quietly, which is the failure mode the whole file is
-// about, so it is fixed rather than documented.
+// else. A stale claim added to a spec afterwards is invisible to this guard
+// under `docker compose exec web npm test` — green, on bytes from a previous
+// build. That is the one failure mode this whole file exists to rule out.
+//
+// Mounting e2e/ to make it live was tried and reverted: .dockerignore governs
+// COPY and not bind mounts, so the mount reopened e2e/.auth — a live Django
+// session cookie — inside the container, and the tmpfs shadowing it could not
+// create its mountpoint under a read-only bind on any checkout where .auth does
+// not already exist, which is every CI run. The cure was worse than the disease
+// for a directory nothing in `next dev` even reads.
+//
+// So the guard refuses to run there instead. The four tests in CLAUDE.md §20's
+// table fail LOUDLY in that container by design; this one now joins them rather
+// than passing quietly, and §20's table carries a row for it.
 //
 // PEER GUARD: apps/api/sitara/generation/tests/test_refinement_budget_copy.py.
 // The two pattern lists are deliberately NOT shared. Sharing them would mean a
@@ -80,6 +88,23 @@ const ALLOWED_FILES = new Set([
   "src/app/concepts/page.test.tsx",
 ]);
 
+// The container's WORKDIR. Inside the `web` service the repository lives at
+// /app with only src/ and public/ bind-mounted, so anything this guard reads
+// outside those two is build-time bytes rather than the working tree. Frontend
+// tests are meant to run on the HOST (CLAUDE.md §20); this makes running them
+// elsewhere say so, instead of quietly reporting on a stale tree.
+const CONTAINER_WORKDIR = "/app";
+
+function refuseIfNotReadingTheWorkingTree(): void {
+  if (WEB_ROOT !== CONTAINER_WORKDIR) return;
+  throw new Error(
+    "refinement-budget-copy scans apps/web/e2e, which is NOT bind-mounted into " +
+      "the web container — it would report on whatever the last `docker compose " +
+      "build web` baked in, and pass while a stale claim sat in a spec file. Run " +
+      "the frontend tests on the host (CLAUDE.md §20), where CI runs them too.",
+  );
+}
+
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     if (entry === "node_modules" || entry === ".next" || entry.startsWith(".")) continue;
@@ -94,7 +119,15 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 describe("refinement-budget copy", () => {
+  it("refuses to report at all from inside the web container", () => {
+    // Asserted rather than assumed: a guard whose own liveness check is untested
+    // is the same shape of defect as a guard whose patterns never fire.
+    expect(() => refuseIfNotReadingTheWorkingTree()).not.toThrow();
+    expect(WEB_ROOT).not.toBe(CONTAINER_WORKDIR);
+  });
+
   it("scans a non-trivial number of files, so a broken walk cannot pass vacuously", () => {
+    refuseIfNotReadingTheWorkingTree();
     const files = SCANNED_DIRS.flatMap((d) => walk(join(WEB_ROOT, d)));
     // An empty or tiny result would make every assertion below meaningless —
     // exactly how the previous sweeps failed.
@@ -117,6 +150,7 @@ describe("refinement-budget copy", () => {
   });
 
   it("states no superseded claim about how many refinements a design gets", () => {
+    refuseIfNotReadingTheWorkingTree();
     const offences: string[] = [];
 
     for (const dir of SCANNED_DIRS) {
