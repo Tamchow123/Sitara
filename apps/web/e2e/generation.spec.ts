@@ -4,8 +4,9 @@ import { STYLIST_STATE_PATH } from "./helpers/account";
 import { completeQuestionnaire, waitForDesignQuiescent } from "./helpers/wizard";
 
 // Phase 17 §25 journeys 6-10: a real generation driven by real server state,
-// then resume, then a failed image with the brief intact, then the one
-// refinement, then the two-version history.
+// then resume, then a failed image with the brief intact, then a refinement,
+// then the version history it produces (a chain of up to MAX_REFINEMENTS + 1
+// versions since ADR 0029, not a pair).
 //
 // Nothing here fakes a stage. The demo pipeline is a genuine Celery job moving
 // through queued → running_text → running_image → succeeded, and these tests

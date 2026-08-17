@@ -47,10 +47,16 @@ export default function ConceptsPage() {
       </section>
 
       <section className="panel" aria-labelledby="concepts-refine">
-        <h2 id="concepts-refine">One refinement, and what it changes</h2>
+        <h2 id="concepts-refine">Refinement, and what it changes</h2>
         <p>
-          Each design may be refined once. You choose one area to change — colour, fabric,
-          embellishment, coverage or drape — and Sitara applies your request within that area only.
+          Each design may be refined up to three times. Every round changes one area — colour,
+          fabric, embellishment, coverage or drape — and Sitara applies your request within that
+          area only.
+        </p>
+        <p>
+          The rounds build on each other: a second refinement starts from the concept the first one
+          produced, not from the original. So the changes accumulate rather than replacing one
+          another, and you refine the most recent concept each time.
         </p>
         <p>
           Refinement generates a completely new image. It is not an edit of the first one: your
@@ -60,11 +66,13 @@ export default function ConceptsPage() {
           promise.
         </p>
         <p>
-          Your original concept is kept. After a refinement you can see both versions side by side.
+          Every earlier concept is kept. After a refinement you can see the new version beside the
+          one it came from, and each version keeps its own private notes.
         </p>
         <p>
-          If neither version is right, editing your answers and generating again is the way forward
-          — that starts a new concept rather than a second refinement.
+          If no version is right, or the three rounds are used up, editing your answers and
+          generating again is the way forward — that starts a new concept rather than a further
+          refinement of this one.
         </p>
       </section>
 

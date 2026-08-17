@@ -9,7 +9,7 @@ assertions are written against the terminal state the server actually produces.
 | --- | --- |
 | `safety.spec.ts` | The stack reports demo mode; no browser request reaches a provider host; the questionnaire stores nothing in browser storage |
 | `journeys.spec.ts` | §25 journeys 1–5 — draft persistence, keyboard-only wizard (choose, Back, Skip), the information drawer, the custom colour picker, and the reference step: no catalogue and no way in from this device, the QR handoff at the iPad end, a photograph sent from a separate browser context arriving and being removed, and the phone page with no code |
-| `generation.spec.ts` | §25 journeys 6–10 — generate, resume mid-flight, a failed image with the brief intact, the one refinement, the two-version history |
+| `generation.spec.ts` | §25 journeys 6–10 — generate, resume mid-flight, a failed image with the brief intact, refinement and the version history |
 | `annotations.spec.ts` | Phase 19, extended in 21 — the private annotation workspace: draw a pin and a rectangle with real pointer gestures, note them, prove persistence across a reload, prove hiding is not deleting, prove nothing reaches browser storage, a stranger's indistinguishable 404, the original render left untouched, and the naming prompt: its pre-fill, its stated exposure, the allowance stated before it is spent, and a refused name answered in the dialog |
 | `gallery.spec.ts` | Phase 21 — the account gallery: a concept made through the real pipeline is findable afterwards under the same name, its card's links resolve to that concept and its workspace, its thumbnail actually decodes, and the list payload itself carries no bearer URL, storage key or spec description |
 | `visual.spec.ts` | §26 visual regression, 15 baselines per viewport |

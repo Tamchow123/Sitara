@@ -117,7 +117,7 @@ class DemoRefinementStructuredDesignProvider:
             # deterministic and sends nothing anywhere, so the failure is
             # provably before any request — exactly the case the flag's own
             # docstring names — and inheriting the default would let a zero-cost
-            # local defect permanently strand a design's one refinement.
+            # local defect permanently strand a design's remaining refinements.
             raise StructuredDesignProviderError(
                 "demo_engine_output_unusable", ambiguous_acceptance=False
             ) from exc

@@ -249,7 +249,8 @@ class DesignInspirationUpload(models.Model):
 
 
 class DesignVersion(models.Model):
-    """One generated concept iteration (initial concept + one refinement).
+    """One generated concept iteration (the initial concept, plus one row per
+    refinement — up to MAX_REFINEMENTS of them since ADR 0029).
 
     ``MAX_DESIGN_VERSIONS`` is an application-level rule enforced by
     ``services.create_next_design_version``; the database constraints below

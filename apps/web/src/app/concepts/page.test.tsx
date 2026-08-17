@@ -17,15 +17,33 @@ describe("concepts page", () => {
     expect(text).toMatch(/impossible to realise/i);
   });
 
-  it("describes exactly one refinement, constrained to one area", () => {
+  it("describes three refinements, each constrained to one area", () => {
+    // This test used to assert /refined once/ AND not.toMatch(/3 refinements/i),
+    // which is why it stayed green when ADR 0029 raised the budget to three: it
+    // was enforcing the very claim that had become false. The page is the
+    // canonical explanation of what a concept is, linked from the footer of
+    // every screen, so a stale count here is a promise broken on the shop floor.
     render(<ConceptsPage />);
     const text = pageText();
-    expect(text).toMatch(/refined once/i);
+    expect(text).toMatch(/refined up to three times/i);
     expect(text).toMatch(/one area/i);
-    // The prototype's "as many changes as you like" must not survive anywhere.
+    // Still bounded, and still one area per round — the two things that were
+    // true before and remain true.
     expect(text).not.toMatch(/as many (changes|refinements)/i);
     expect(text).not.toMatch(/unlimited/i);
-    expect(text).not.toMatch(/3 refinements/i);
+    // And the superseded claim must not come back.
+    expect(text).not.toMatch(/refined once/i);
+    expect(text).not.toMatch(/may be refined only/i);
+  });
+
+  it("says the rounds chain rather than each starting from the original", () => {
+    // The behaviour a customer is most likely to be surprised by: round two
+    // refines round one's OUTPUT. If the page omitted this, someone would
+    // reasonably expect three independent variations of the first concept.
+    render(<ConceptsPage />);
+    const text = pageText();
+    expect(text).toMatch(/starts from the concept the first one produced/i);
+    expect(text).toMatch(/most recent concept/i);
   });
 
   it("never presents refinement as editing the original image", () => {

@@ -270,11 +270,34 @@ services:
     # The shared Django/Vitest cross-language validation contract (see the
     # api service's mount above) is consumed the same way here by
     # src/features/questionnaire/validation.test.ts.
+    #
+    # e2e/ is mounted for a different reason from the two above: nothing in
+    # `next dev` reads it. src/app/refinement-budget-copy.test.ts scans the
+    # e2e specs' prose as well as src/'s, and `COPY . .` alone would give that
+    # scan the snapshot taken at the last `docker compose build web` — so a
+    # stale claim added to a spec afterwards would be invisible and the guard
+    # would report green. Every other environment-specific gap in the frontend
+    # tests fails LOUDLY (CLAUDE.md §20's table); a guard that passes on stale
+    # bytes is the one failure mode that table exists to rule out, so the
+    # directory is made live rather than documented around. Read-only: the
+    # container never runs Playwright.
+    #
+    # `.auth` is shadowed by an empty tmpfs mounted over it. apps/web/.dockerignore
+    # already keeps `e2e/.auth` — which holds a LIVE Django session cookie — out
+    # of the image, but .dockerignore governs `COPY`, not a bind mount, so
+    # mounting the directory whole would reopen exactly that file by the one path
+    # that rule cannot reach. The guard reads .ts/.tsx/.css/.md and never .json,
+    # so nothing it does needs `.auth` visible. tmpfs rather than an anonymous
+    # volume: it holds nothing, persists nothing, and leaves no dangling volume
+    # behind when the container goes.
     volumes:
       - ./apps/web/src:/app/src
       - ./apps/web/public:/app/public
+      - ./apps/web/e2e:/app/e2e:ro
       - ./apps/api/openapi:/api/openapi:ro
       - ./contracts:/contracts:ro
+    tmpfs:
+      - /app/e2e/.auth
     depends_on:
       api:
         condition: service_healthy

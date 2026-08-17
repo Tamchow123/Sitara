@@ -468,7 +468,7 @@ class TestRefineRequiresAnAccount:
         assert response.status_code == 403
 
     def test_the_refusal_costs_nothing_the_signed_in_retry_needs(self):
-        """Neither the idempotency key nor the design's one refinement allowance
+        """Neither the idempotency key nor the design's refinement allowance
         may be spent by a request that was refused before it reached either."""
         client = csrf_client()
         token = bootstrap_csrf(client)

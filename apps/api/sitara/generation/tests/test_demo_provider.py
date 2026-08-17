@@ -193,7 +193,7 @@ class TestWhenTheEngineItselfProducesSomethingUnusable:
         # Right for a network call that may have landed. Categorically wrong
         # here: this engine is local and deterministic and sends nothing
         # anywhere. Inheriting the default would let a zero-cost local defect
-        # permanently cost a design its one refinement, which is a worse outcome
+        # permanently cost a design every remaining refinement, which is a worse outcome
         # than the unclassified error this conversion was added to prevent.
         def boom(candidate, source_spec):
             raise exception

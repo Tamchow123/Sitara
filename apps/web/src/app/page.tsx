@@ -39,8 +39,8 @@ const HOW_IT_WORKS = [
   },
   {
     n: "3",
-    title: "Refine it once",
-    body: "Ask for one focused change — colour, cloth, coverage or drape — and arrive at a concept you can take to a tailor.",
+    title: "Refine it",
+    body: "Ask for one focused change at a time — colour, cloth, coverage or drape — up to three times, each building on the last, until you have a concept you can take to a tailor.",
   },
 ];
 
