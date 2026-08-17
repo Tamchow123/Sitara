@@ -1,11 +1,13 @@
 import { expect, test } from "@playwright/test";
 
 import { STYLIST_STATE_PATH } from "./helpers/account";
+import { expectNoSeriousViolations } from "./helpers/axe";
 import { completeQuestionnaire, waitForDesignQuiescent } from "./helpers/wizard";
 
 // Phase 17 §25 journeys 6-10: a real generation driven by real server state,
-// then resume, then a failed image with the brief intact, then the one
-// refinement, then the two-version history.
+// then resume, then a failed image with the brief intact, then a refinement,
+// then the version history it produces (a chain of up to MAX_REFINEMENTS + 1
+// versions since ADR 0029, not a pair).
 //
 // Nothing here fakes a stage. The demo pipeline is a genuine Celery job moving
 // through queued → running_text → running_image → succeeded, and these tests
@@ -86,7 +88,7 @@ test.describe("generation, result, refinement and history", () => {
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-    // --- Journey 9: exactly one refinement --------------------------------
+    // --- Journey 9: refinement, three rounds per concept -------------------
     const refineHeading = page.getByRole("heading", { name: /what would you change/i });
     await expect(
       refineHeading,
@@ -101,7 +103,7 @@ test.describe("generation, result, refinement and history", () => {
 
     await expect(page).toHaveURL(/\/generation\/[0-9a-f-]{36}/, { timeout: 30_000 });
     // The progress URL carries the source version, which is what makes the
-    // "back to your original concept" link render while the job runs.
+    // "back to the concept you are refining" link render while the job runs.
     //
     // The link itself is asserted in GenerationProgress.test.tsx rather than
     // here: a refinement reuses the existing DesignSpec, so it has no text
@@ -120,15 +122,50 @@ test.describe("generation, result, refinement and history", () => {
       timeout: 30_000,
     });
 
-    // --- Journey 9 continued: the one refinement is now locked ------------
+    // --- Journey 10 continued: both concepts carry their own actions ------
+    // Before ADR 0029 this screen was a farewell look at a finished pair, and
+    // ResultImage gated Annotate and Send behind ids the comparison never
+    // passed. It is now where a customer stands between rounds, so the concept
+    // she is looking at is the one she can annotate and email — either of them.
+    const annotateLinks = page.getByRole("link", { name: /^annotate\b/i });
+    await expect(annotateLinks).toHaveCount(2);
+    await expect(page.getByRole("button", { name: /send to account/i })).toHaveCount(2);
+    // Each points at its OWN version, not twice at the page's.
+    const hrefs = await annotateLinks.evaluateAll((links) =>
+      links.map((link) => link.getAttribute("href")),
+    );
+    expect(new Set(hrefs).size).toBe(2);
+    // ADR 0021's accepted-exposure sentence is stated once for the screen,
+    // however many send controls stand on it.
+    await expect(page.getByText(/may keep a copy outside/i)).toHaveCount(1);
+
+    // Two of every action on one screen is exactly where a name/role/value or
+    // duplicate-id problem appears, and it is the one screen the accessibility
+    // spec cannot reach without paying for a second full generation.
+    await expectNoSeriousViolations(page, "comparison view (two concepts, two action sets)");
+
+    // --- Journey 9 continued: the chain carries on from the NEW version ---
+    // The refined concept is refinable in turn (ADR 0029), and the offer is
+    // below the comparison rather than absent.
+    await expect(
+      page.getByRole("heading", { name: /what would you change/i }),
+      "a refined concept must itself be refinable while rounds remain",
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/2 refinements left/i).first()).toBeVisible();
+
+    // --- Journey 9 continued: the ORIGINAL version is now read-only -------
+    // Not because the budget is spent — two rounds remain — but because a
+    // newer version exists and a lineage is a chain, never a tree.
     await page.goto(originalResultUrl);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByRole("heading", { name: /what would you change/i })).toHaveCount(0);
-    await expect(page.getByText(/already been refined|one refinement/i).first()).toBeVisible({
+    await expect(page.getByText(/earlier version of your design/i).first()).toBeVisible({
       timeout: 30_000,
     });
+    // It says where to carry on from, rather than leaving a dead end.
+    await expect(page.getByRole("link", { name: /most recent concept/i })).toBeVisible();
 
-    // A second refinement is not reachable by any control on the page.
+    // Refining THIS version is not reachable by any control on the page.
     await expect(page.getByRole("button", { name: /request refinement/i })).toHaveCount(0);
 
     // Nothing private leaked into a visible label anywhere in this journey.

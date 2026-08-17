@@ -19,17 +19,14 @@ import {
   resultErrorCopy,
 } from "./result-errors";
 import { imageRefetchIntervalMs, useImageFocusRefresh } from "./image-refresh";
-import { RefinementPanel } from "@/features/refinement/RefinementPanel";
+import { RefinementSection } from "@/features/refinement/RefinementSection";
 import { VersionComparison } from "@/features/refinement/VersionComparison";
 import {
   isRefinementEligible,
   isRefinementFailed,
   isRefinementRunning,
-  isRefinementUsed,
-  refinedVersionId,
 } from "@/features/refinement/refinement-eligibility";
 import { generationIsOffered } from "@/features/generation/generation-availability";
-import { friendlyGenerationError } from "@/features/generation/generation-errors";
 import { fetchDesign, fetchDesignImageUrls, fetchDesignResult, fetchPublicConfig } from "@/lib/api";
 
 type Props = { designId: string; versionId: string };
@@ -143,28 +140,6 @@ export function DesignResult({ designId, versionId }: Props) {
 
   const result = resultQuery.data;
 
-  // Viewing the refined output (version 2): render the side-by-side
-  // comparison instead of a single-version view. A DB constraint enforces
-  // parent_version_id non-null for any "refinement" lineage kind, so the
-  // `&&` below is defensive only, against a malformed or stale-cached payload
-  // — not a condition expected to actually be false in practice.
-  if (result.lineage.kind === "refinement" && result.lineage.parent_version_id) {
-    return (
-      <VersionComparison
-        designId={designId}
-        parentVersionId={result.lineage.parent_version_id}
-        refined={{
-          result,
-          images: imageQuery.data,
-          imagesPending: imageQuery.isPending,
-          imagesFetching: imageQuery.isFetching,
-          imagesError: imageQuery.error,
-          onRetryImages: () => void imageQuery.refetch(),
-        }}
-      />
-    );
-  }
-
   const design = designQuery.data;
   // Not config.generation_enabled — that is the LIVE capability flag and is
   // false in demo mode by design, which withheld refinement from every demo
@@ -181,11 +156,47 @@ export function DesignResult({ designId, versionId }: Props) {
   const eligible = answered && isRefinementEligible(result, design, generationOffered);
   const running = designQuery.isSuccess && isRefinementRunning(design);
   const failed = designQuery.isSuccess && isRefinementFailed(design);
-  // Locked, not merely absent: once both are known and the form is not on
-  // offer, the page says which of the two reasons applies.
-  const locked = answered && !eligible && !running && !failed;
-  const used = isRefinementUsed(design);
-  const refinedId = refinedVersionId(design);
+
+  // Computed ABOVE the comparison branch below, because a refined version can
+  // now be refined again: the same section has to be handed to the comparison
+  // view, not just rendered on the single-version page.
+  const refinementSection = (
+    <RefinementSection
+      designId={designId}
+      result={result}
+      design={design}
+      answered={answered}
+      generationOffered={generationOffered}
+      running={running}
+      failed={failed}
+      onRequiresRecheck={handleRequiresRecheck}
+    />
+  );
+
+  // Viewing a refined output: render the side-by-side comparison instead of a
+  // single-version view. A DB constraint enforces parent_version_id non-null
+  // for any "refinement" lineage kind, so the `&&` below is defensive only,
+  // against a malformed or stale-cached payload — not a condition expected to
+  // actually be false in practice.
+  if (result.lineage.kind === "refinement" && result.lineage.parent_version_id) {
+    return (
+      <VersionComparison
+        designId={designId}
+        parentVersionId={result.lineage.parent_version_id}
+        refinementsRemaining={result.refinements_remaining}
+        refined={{
+          result,
+          images: imageQuery.data,
+          imagesPending: imageQuery.isPending,
+          imagesFetching: imageQuery.isFetching,
+          imagesError: imageQuery.error,
+          onRetryImages: () => void imageQuery.refetch(),
+        }}
+      >
+        {refinementSection}
+      </VersionComparison>
+    );
+  }
 
   return (
     <div className="design-result">
@@ -232,72 +243,17 @@ export function DesignResult({ designId, versionId }: Props) {
             onRetry={() => void imageQuery.refetch()}
             designId={designId}
             versionId={versionId}
+            versionLabel={`version ${result.version_number}`}
           />
         </div>
 
         <div className="concept-detail">
-          <DesignBrief result={result} />
+          {/* "brief", so the ids on this screen are exactly what they have
+              always been. The comparison view passes something else because it
+              renders two of these. */}
+          <DesignBrief result={result} idPrefix="brief" />
 
-          {running && design?.latest_job && (
-            <div role="status" aria-live="polite" className="refinement-running-notice">
-              <p>
-                A refinement is currently running.{" "}
-                <a href={`/design/${designId}/generation/${design.latest_job.id}`}>
-                  View refinement progress
-                </a>
-              </p>
-            </div>
-          )}
-
-          {failed && design?.latest_job && (
-            <div role="alert" className="refinement-failed-notice">
-              <h2>{friendlyGenerationError(design.latest_job.error_code).heading}</h2>
-              <p>{friendlyGenerationError(design.latest_job.error_code).message}</p>
-            </div>
-          )}
-
-          {eligible && (
-            <RefinementPanel
-              designId={designId}
-              sourceVersionId={versionId}
-              isDemo={result.is_demo}
-              onRequiresRecheck={handleRequiresRecheck}
-            />
-          )}
-
-          {locked && (
-            <section
-              className="refinement-panel refinement-locked"
-              aria-labelledby="refinement-locked-heading"
-            >
-              <h2 id="refinement-locked-heading">Refinement</h2>
-              {used ? (
-                <>
-                  <p>
-                    You have used your one refinement for this design. Sitara allows a single
-                    constrained change, so there is nothing further to request here.
-                  </p>
-                  {refinedId && (
-                    <p>
-                      <a href={`/design/${designId}/result/${refinedId}`}>
-                        View your refined concept
-                      </a>
-                    </p>
-                  )}
-                </>
-              ) : (
-                <p>
-                  Concept generation is not currently available, so this concept cannot be refined.
-                </p>
-              )}
-              <p>To take the design somewhere else, edit your answers and start a new concept.</p>
-              <div className="refinement-actions">
-                <a className="btn btn-secondary" href={`/design/${designId}`}>
-                  Edit answers
-                </a>
-              </div>
-            </section>
-          )}
+          {refinementSection}
         </div>
       </div>
     </div>

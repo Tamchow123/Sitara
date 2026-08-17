@@ -168,13 +168,27 @@ const GENERATION_ERROR_MESSAGES = {
     editable: false,
   },
   refinement_limit_reached: {
-    heading: "This design has already been refined",
-    message: "Only one refinement is available per concept.",
+    heading: "No refinements left",
+    message: "You have used every refinement available for this concept.",
     editable: false,
   },
+  // Distinct from the limit above, and the distinction matters: the design may
+  // well have rounds left, and this concept simply is not the one they carry on
+  // from. Refinements continue from the most recent version.
   refinement_source_unavailable: {
     heading: "This concept can't be refined right now",
-    message: "The original concept is not available for refinement. Please try again shortly.",
+    message:
+      "Refinements continue from your most recent concept. Open that one to make another change.",
+    editable: false,
+  },
+  // Since Phase 23 (ADR 0028): the change exists but this concept's own
+  // questionnaire version has no such choice to move, so the refinement could
+  // only ever return the same design back. Retrying will not help; choosing a
+  // different change will, so the copy says so rather than inviting a retry.
+  refinement_category_unavailable: {
+    heading: "That change isn't available for this concept",
+    message:
+      "This concept was created from an earlier version of the questionnaire, which has no such choice to change. Please choose a different change.",
     editable: false,
   },
   // Since Phase 16: the daily limit for generating new concepts has been

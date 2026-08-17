@@ -486,3 +486,142 @@ def test_end_to_end_demo_refinement_succeeds_via_eager_task(
     assert v2.is_demo is True
     assert v2.parent_version_id == v1.pk
     assert v2.has_permanent_image
+
+    # ADR 0028's claim, asserted end to end on what is actually PERSISTED rather
+    # than on the engine in isolation. Before this phase every layer of this test
+    # passed while the stored prompt was byte-identical to its parent's, because
+    # nothing anywhere compared the two. The canonical selection moved, so the
+    # deterministic prompt built from it moved, so the demo asset selected from
+    # it can move — that chain is the whole fix.
+    assert v2.image_prompt != v1.image_prompt
+    assert (
+        v2.design_spec["source_selections"]["colour_palette"]
+        != (v1.design_spec["source_selections"]["colour_palette"])
+    )
+    assert v2.prompt_builder_version == v1.prompt_builder_version
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_demo_engine_defect_does_not_cost_the_design_its_refinement(
+    settings, monkeypatch, inmemory_storage
+):
+    """A local demo engine failure must not strand the design permanently.
+
+    The demo provider converts an unrenderable candidate into
+    ``StructuredDesignProviderError``. That exception's ``ambiguous_acceptance``
+    defaults to **True** — correct for a network call that may already have been
+    accepted and billed — and on that branch the pipeline ends the attempt as
+    ``structured_submission_ambiguous`` and deliberately LEAVES
+    ``text_submission_in_flight`` set. The enqueue guard reads that as unresolved
+    spend and refuses every later refinement of the design, and stuck-job
+    reconciliation only visits in-progress rows, so nothing ever clears it.
+
+    For this engine that would be nonsense: it is local and deterministic and
+    sends nothing anywhere, so nothing can have been billed. This asserts the
+    consequence rather than the flag — the design must still be refinable.
+    """
+    from sitara.generation.demo import refinement_engine
+    from sitara.generation.pipeline import enqueue_design_refinement
+    from sitara.generation.prompt_builder import ImagePromptBuildError
+    from sitara.generation.refinement import normalise_refinement_request
+
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.DEMO_MODE = True
+    call_command("install_demo_asset_pack", "--dev-synthetic")
+    monkeypatch.setattr("sitara.ai_gateway.policy.get_structured_design_generation_provider", _boom)
+    monkeypatch.setattr("sitara.generation.pipeline._live_image_provider", _boom)
+    monkeypatch.setattr("sitara.generation.pipeline._live_image_downloader", _boom)
+
+    design = make_complete_design()
+    enqueue_design_generation(design, idempotency_key=uuid.uuid4())
+    v1 = DesignVersion.objects.get(design=design)
+
+    def unrenderable(candidate, source_spec):
+        raise ImagePromptBuildError("the assembled prompt failed its safety scan")
+
+    monkeypatch.setattr(refinement_engine, "_renders_the_same", unrenderable)
+
+    failed, _created = enqueue_design_refinement(
+        design,
+        source_version_id=v1.pk,
+        refinement_request=normalise_refinement_request(
+            {"schema_version": 1, "change_type": "colour_story", "note": ""}
+        ),
+        idempotency_key=uuid.uuid4(),
+    )
+    failed.refresh_from_db()
+    assert failed.status == _Status.FAILED
+    # Definitively spend-free, so the marker is cleared with the terminal write.
+    assert failed.error_code == "refinement_generation_failed"
+    assert failed.text_submission_in_flight is False
+
+    # The real point: the design is not stranded. With the engine working again,
+    # a fresh refinement still succeeds.
+    monkeypatch.undo()
+    monkeypatch.setattr("sitara.ai_gateway.policy.get_structured_design_generation_provider", _boom)
+    monkeypatch.setattr("sitara.generation.pipeline._live_image_provider", _boom)
+    monkeypatch.setattr("sitara.generation.pipeline._live_image_downloader", _boom)
+    retry, _created = enqueue_design_refinement(
+        design,
+        source_version_id=v1.pk,
+        refinement_request=normalise_refinement_request(
+            {"schema_version": 1, "change_type": "colour_story", "note": ""}
+        ),
+        idempotency_key=uuid.uuid4(),
+    )
+    retry.refresh_from_db()
+    assert retry.status == _Status.SUCCEEDED
+
+
+@pytest.mark.django_db(transaction=True)
+def test_an_unenumerated_demo_failure_also_leaves_the_design_refinable(
+    settings, monkeypatch, inmemory_storage
+):
+    """The same guarantee for an exception type nobody has thought of.
+
+    The provider boundary converts three known engine failures. Anything else —
+    a future `KeyError` from a phrase table, an `IndexError`, an `AttributeError`
+    from a refactor — falls past every specific handler to the Celery task
+    boundary's catch-all, which fails CLOSED and leaves the submission marker
+    set, stranding the design exactly as a named type used to.
+
+    Failing closed is right when a provider may have been paid. A demo attempt
+    cannot have paid anyone, which is the invariant `cost_enabled()` already
+    rests on, so the catch-all clears the marker for one. This drives a bare
+    `RuntimeError` — deliberately a type no conversion tuple lists — and asserts
+    the design survives it.
+    """
+    from sitara.generation.demo import refinement_engine
+    from sitara.generation.pipeline import enqueue_design_refinement
+    from sitara.generation.refinement import normalise_refinement_request
+
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.DEMO_MODE = True
+    call_command("install_demo_asset_pack", "--dev-synthetic")
+    monkeypatch.setattr("sitara.ai_gateway.policy.get_structured_design_generation_provider", _boom)
+    monkeypatch.setattr("sitara.generation.pipeline._live_image_provider", _boom)
+    monkeypatch.setattr("sitara.generation.pipeline._live_image_downloader", _boom)
+
+    design = make_complete_design()
+    enqueue_design_generation(design, idempotency_key=uuid.uuid4())
+    v1 = DesignVersion.objects.get(design=design)
+
+    def unexpected(candidate, source_spec):
+        raise RuntimeError("a defect nobody enumerated")
+
+    monkeypatch.setattr(refinement_engine, "_renders_the_same", unexpected)
+
+    failed, _created = enqueue_design_refinement(
+        design,
+        source_version_id=v1.pk,
+        refinement_request=normalise_refinement_request(
+            {"schema_version": 1, "change_type": "colour_story", "note": ""}
+        ),
+        idempotency_key=uuid.uuid4(),
+    )
+    failed.refresh_from_db()
+    assert failed.status == _Status.FAILED
+    assert failed.error_code == "internal_generation_error"
+    # The point: an unclassified DEMO failure resolves the spend question,
+    # because there was never a spend question to resolve.
+    assert failed.text_submission_in_flight is False

@@ -40,20 +40,20 @@ def schema_invalid_result(source_selections: dict) -> StructuredDesignResult:
     # Valid JSON object but not a valid DesignSpec (title too short).
     payload = build_fixture_spec(source_selections)
     payload["title"] = "x"
-    return _with_payload(payload)
+    return payload_result(payload)
 
 
 def source_mismatch_result(source_selections: dict) -> StructuredDesignResult:
     payload = build_fixture_spec(source_selections)
     payload["source_selections"] = copy.deepcopy(source_selections)
     payload["source_selections"]["garment_type"] = "sharara"  # no longer matches
-    return _with_payload(payload)
+    return payload_result(payload)
 
 
 def blocked_designer_result(source_selections: dict) -> StructuredDesignResult:
     payload = build_fixture_spec(source_selections)
     payload["styling_notes"] = ["Style it the way Sabyasachi would."]
-    return _with_payload(payload)
+    return payload_result(payload)
 
 
 def semantic_invalid_result(source_selections: dict) -> StructuredDesignResult:
@@ -61,7 +61,7 @@ def semantic_invalid_result(source_selections: dict) -> StructuredDesignResult:
     # absent → the DesignSpec model_validator rejects it (retryable).
     payload = build_fixture_spec(source_selections)
     payload["construction_caveats"] = ["Please review this idea with a tailor before proceeding."]
-    return _with_payload(payload)
+    return payload_result(payload)
 
 
 def result_with_usage(
@@ -95,7 +95,8 @@ def refusal_result() -> StructuredDesignResult:
     )
 
 
-def _with_payload(payload) -> StructuredDesignResult:
+def payload_result(payload) -> StructuredDesignResult:
+    """One valid provider result carrying an explicit DesignSpec payload."""
     return StructuredDesignResult(
         payload=payload,
         provider="fake",

@@ -78,9 +78,11 @@
 /* Versions inside a card                                              */
 /*                                                                     */
 /* Grouped visually so it reads as "these were made together" — the     */
-/* original and the one refinement made from it. The version number is  */
-/* also repeated into each link's accessible name at the call site, so   */
-/* the grouping survives for a reader who never sees the indent.         */
+/* original concept and the chain of refinements made from it (up to     */
+/* MAX_REFINEMENTS of them since ADR 0029, so this list is not a pair).  */
+/* The version number is also repeated into each link's accessible name  */
+/* at the call site, so the grouping survives for a reader who never     */
+/* sees the indent.                                                      */
 /* ------------------------------------------------------------------ */
 .gallery-versions {
   display: flex;

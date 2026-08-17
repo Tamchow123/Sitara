@@ -19,18 +19,23 @@ const REFINEMENT_SUBMIT_MESSAGES: Record<string, string> = {
   refinement_invalid: "Please choose one change and check your note, then try again.",
   design_not_refinable: "This design cannot be refined right now.",
   refinement_source_unavailable:
-    "The original concept is not available for refinement. Please try again shortly.",
+    "Refinements continue from your most recent concept. Open that one to make another change.",
   refinement_in_progress: "A refinement is already in progress for this design.",
-  refinement_limit_reached: "This design has already been refined.",
+  refinement_limit_reached: "You have used every refinement available for this concept.",
 };
 
 // Codes after which the panel should stop offering itself for this design —
-// the refinement has already run to a conclusion (in progress or already
-// used), so retrying with the same source version cannot succeed.
+// the refinement has already run to a conclusion (in progress, budget spent,
+// or this version superseded), so retrying with the same source version cannot
+// succeed. `refinement_source_unavailable` joins them since the budget rose:
+// it now most often means "a newer version exists", and re-offering the form on
+// a superseded concept would put the customer in a loop the server will keep
+// refusing.
 export const REFINEMENT_SUBMIT_CODES_REQUIRING_RECHECK: ReadonlySet<string> = new Set([
   "design_not_refinable",
   "refinement_in_progress",
   "refinement_limit_reached",
+  "refinement_source_unavailable",
 ]);
 
 // Codes after which an immediate "Try again" cannot succeed, so the panel must

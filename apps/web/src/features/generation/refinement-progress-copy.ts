@@ -38,6 +38,6 @@ export function refinementProgressExplanation(status: GenerationJob["status"]): 
 
 export const REFINEMENT_PROGRESS_NOTES: readonly string[] = [
   "Only your selected change is being requested.",
-  "The result is still a fresh generation, not an edit of your original image.",
-  "Your original concept remains private and available.",
+  "The result is still a fresh generation, not an edit of the image you are refining.",
+  "The concept you are refining remains private and available.",
 ];

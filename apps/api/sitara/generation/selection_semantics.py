@@ -53,6 +53,79 @@ _LEGACY_HEAD_COVER_VALUE = "head_drape_preferred"
 _LEGACY_FULL_MIDRIFF_VALUE = "full_midriff"
 
 
+# --- Which canonical selections a refinement category owns (Phase 23) ------
+#
+# ADR 0028 lets a refinement change the one canonical selection its category is
+# named after. WHICH field that is depends on the DesignSpec version — versions
+# 1 and 2 record colour as one palette and coverage as one multi-select, version
+# 3 records both per role and per area — so this is the same shape as the
+# accessors above: a short explicit table over KNOWN versions, never a mapping
+# framework, and never derived from whatever fields a model happens to declare.
+#
+# An EMPTY tuple is meaningful and is NOT the same as a missing version key. It
+# says the category has no canonical field on that version at all — a version-1
+# spec has no ``neckline_style``, because the questionnaire that produced it had
+# no neckline question — so a refinement of that category has nothing to change
+# and must be refused with a controlled code rather than accepted as a no-op.
+#
+# Which category owns which group is :mod:`sitara.generation.refinement`'s
+# decision; this module only answers what each group IS on a given version.
+COLOUR_SELECTION_FIELDS: dict[int, tuple[str, ...]] = {
+    1: ("colour_palette",),
+    2: ("colour_palette",),
+    3: COLOUR_ROLE_FIELDS,
+}
+FABRIC_SELECTION_FIELDS: dict[int, tuple[str, ...]] = {
+    1: ("fabrics",),
+    2: ("fabrics",),
+    3: ("fabrics",),
+}
+EMBELLISHMENT_SELECTION_FIELDS: dict[int, tuple[str, ...]] = {
+    1: ("embellishment_styles", "embellishment_density"),
+    2: ("embellishment_styles", "embellishment_density"),
+    3: ("embellishment_styles", "embellishment_density"),
+}
+# Head covering is deliberately absent from version 3's coverage group and sits
+# with the drape group below instead: under questionnaire v4 it is answered by
+# the dupatta, and its compatibility rules tie it to ``dupatta_style``. Versions
+# 1 and 2 have no such split — their single ``coverage_preferences`` list
+# carries the head-drape preference too — so there the whole list moves together.
+COVERAGE_SELECTION_FIELDS: dict[int, tuple[str, ...]] = {
+    1: ("coverage_preferences",),
+    2: ("coverage_preferences",),
+    3: ("sleeves", "back_coverage", "midriff"),
+}
+NECKLINE_SELECTION_FIELDS: dict[int, tuple[str, ...]] = {
+    1: (),
+    2: ("neckline_style",),
+    3: ("neckline_style",),
+}
+DRAPE_SELECTION_FIELDS: dict[int, tuple[str, ...]] = {
+    1: ("dupatta_style", "saree_drape"),
+    2: ("dupatta_style", "saree_drape"),
+    3: ("dupatta_style", "saree_drape", "head_covering"),
+}
+SILHOUETTE_SELECTION_FIELDS: dict[int, tuple[str, ...]] = {
+    1: ("silhouette",),
+    2: ("silhouette",),
+    3: ("silhouette",),
+}
+
+# Canonical selections NO refinement category may ever change, on any version.
+# Not an oversight in the groups above — each is excluded for its own reason:
+#
+# - ``garment_type`` / ``ceremony``: changing either is a new design, not a
+#   refinement of this one.
+# - ``regional_style``: a cultural direction is not a styling tweak (CLAUDE.md
+#   §12 — regional influences stay optional and non-prescriptive).
+# - ``custom_colours``: the bride's saved palette is the set a colour question
+#   may be answered FROM, not a selection of its own, so there is nothing here
+#   for a refinement to mean.
+IMMUTABLE_SELECTION_FIELDS = frozenset(
+    {"garment_type", "ceremony", "regional_style", "custom_colours"}
+)
+
+
 def _field(selections, name: str):
     """One field of a SourceSelections model instance or an equivalent mapping."""
     if isinstance(selections, Mapping):

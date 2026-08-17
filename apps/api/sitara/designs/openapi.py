@@ -11,7 +11,7 @@ from drf_spectacular.utils import PolymorphicProxySerializer, extend_schema_fiel
 from rest_framework import serializers
 
 from sitara.generation.errors import GENERATION_ERROR_CODES
-from sitara.generation.refinement import REFINEMENT_CHANGE_TYPES
+from sitara.generation.refinement import PERSISTED_REFINEMENT_CHANGE_TYPES
 from sitara.questionnaire.openapi import QuestionnaireSchemaSerializer
 
 from .annotation_schema import (
@@ -506,7 +506,18 @@ class RefinementLineageSerializer(serializers.Serializer):
     optional note, the refinement-request hash, its schema version, the
     refinement template version, a seed and the source attempt."""
 
-    change_type = serializers.ChoiceField(choices=sorted(REFINEMENT_CHANGE_TYPES))
+    # The PERSISTED set, not the requestable one. This describes what a result
+    # payload may CONTAIN, and a design refined before ADR 0028 retired
+    # ``styling_details`` still returns it — for ever, because a historical row
+    # is audit data that is read and never rewritten. Narrowing this to the
+    # seven categories a client may request today would make the published
+    # contract a lie about designs that already exist.
+    change_type = serializers.ChoiceField(choices=sorted(PERSISTED_REFINEMENT_CHANGE_TYPES))
+    # ADR 0028 §8. True only for a DEMO refinement that resolved to the same
+    # fixture image as its source — a legitimate outcome of a small reviewed
+    # pack, disclosed rather than passed off as a fresh render (ADR 0016).
+    # Always false for a live version.
+    demo_asset_unchanged = serializers.BooleanField()
 
 
 class DesignVersionLineageSerializer(serializers.Serializer):
@@ -553,6 +564,11 @@ class DesignResultSerializer(serializers.Serializer):
     inspiration_acknowledgements = InspirationAcknowledgementResultSerializer(many=True)
     # Since Phase 14: additive parent-child lineage.
     lineage = DesignVersionLineageSerializer()
+    # How many refinements this DESIGN has left, server-owned. A count rather
+    # than a boolean, because the client now has to say the number out loud
+    # and must not derive it by counting versions it was never sent. Zero is
+    # the honest answer for an exhausted design.
+    refinements_remaining = serializers.IntegerField(min_value=0)
     # Since Phase 15: this version's own frozen historical demo/live mode.
     is_demo = serializers.BooleanField()
 

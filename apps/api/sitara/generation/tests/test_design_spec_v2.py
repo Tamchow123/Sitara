@@ -22,10 +22,11 @@ from sitara.generation.design_spec import (
 )
 from sitara.generation.fixture_provider import FixtureStructuredDesignProvider
 from sitara.generation.prompt_builder import build_image_prompt
-from sitara.generation.refinement import STYLING_DETAILS
+from sitara.generation.refinement import COLOUR_STORY, NECKLINE
 from sitara.generation.refinement_service import (
     RefinementOutputCategory,
     RefinementOutputRejected,
+    _NoChangeInAttempt,
     _validate_refined_output,
 )
 from sitara.generation.services import generate_design_spec_for_design
@@ -165,10 +166,14 @@ class TestCanonicalNecklinePrompt:
         assert "Sleeves:" not in prompt
 
 
-class TestRefinementCannotContradictCanonicalNeckline:
-    """A refinement of a v2 spec can never change the canonical neckline: it
-    lives in ``source_selections``, which is immutable across every refinement
-    category, and the structure version itself is pinned."""
+class TestRefiningTheCanonicalNecklineOfAV2Spec:
+    """Who may move ``source_selections.neckline_style`` on a v2 spec.
+
+    Until ADR 0028 the answer was nobody: the whole of ``source_selections`` was
+    frozen, so the dedicated canonical neckline Phase 16B added could never be
+    refined — and since prompt builder 8.0.0 suppresses the neckline NARRATIVE
+    whenever a canonical neckline exists, a v2 neckline refinement changed
+    nothing at all. Now exactly one category may move it, and only that one."""
 
     def _v2_source_spec(self):
         # A clean v2 source: the prompt-builder fixture narrative contains
@@ -179,21 +184,48 @@ class TestRefinementCannotContradictCanonicalNeckline:
         payload["coverage_and_drape"]["sleeves"] = "Full-length fitted sleeves reaching the wrists."
         return validate_design_spec(payload)
 
-    def test_allowed_narrative_refinement_of_a_v2_spec_passes(self):
+    def test_a_narrative_only_refinement_of_a_v2_spec_is_no_change_at_all(self):
+        # styling_notes IS inside colour_story's allowlist, so this is not an
+        # out-of-category rejection — the exception type is the whole point.
+        # The prompt builder renders no styling_notes, so the concept the
+        # customer is looking at would come back identical.
         source = self._v2_source_spec()
         refined = source.model_dump(mode="json")
         refined["styling_notes"] = ["A fresh, distinct styling suggestion for local review."]
-        spec = _validate_refined_output(refined, source, STYLING_DETAILS)
+        with pytest.raises(_NoChangeInAttempt):
+            _validate_refined_output(refined, source, COLOUR_STORY)
+
+    def test_a_canonical_colour_refinement_of_a_v2_spec_passes(self):
+        source = self._v2_source_spec()
+        refined = source.model_dump(mode="json")
+        refined["source_selections"]["colour_palette"] = ["emerald", "gold"]
+        spec = _validate_refined_output(refined, source, COLOUR_STORY)
         assert spec.schema_version == 2
+        # Untouched by a colour refinement, and still there afterwards.
         assert spec.source_selections.neckline_style == "high_neck"
 
-    def test_changing_the_canonical_neckline_is_rejected(self):
+    def test_the_neckline_category_may_change_it(self):
+        source = self._v2_source_spec()
+        refined = source.model_dump(mode="json")
+        refined["source_selections"]["neckline_style"] = "deep_v_neck"
+        spec = _validate_refined_output(refined, source, NECKLINE)
+        assert spec.source_selections.neckline_style == "deep_v_neck"
+
+    def test_another_category_may_not_change_it(self):
         source = self._v2_source_spec()
         refined = source.model_dump(mode="json")
         refined["source_selections"]["neckline_style"] = "deep_v_neck"
         with pytest.raises(RefinementOutputRejected) as excinfo:
-            _validate_refined_output(refined, source, STYLING_DETAILS)
+            _validate_refined_output(refined, source, COLOUR_STORY)
         assert excinfo.value.category == RefinementOutputCategory.SOURCE_SELECTIONS_CHANGED
+
+    def test_the_permanently_immutable_selections_stay_frozen_for_it_too(self):
+        source = self._v2_source_spec()
+        refined = source.model_dump(mode="json")
+        refined["source_selections"]["ceremony"] = "walima"
+        with pytest.raises(RefinementOutputRejected) as excinfo:
+            _validate_refined_output(refined, source, NECKLINE)
+        assert excinfo.value.category == RefinementOutputCategory.IMMUTABLE_FIELD_CHANGED
 
     def test_downgrading_the_schema_version_is_rejected(self):
         source = self._v2_source_spec()
@@ -201,7 +233,7 @@ class TestRefinementCannotContradictCanonicalNeckline:
         refined["schema_version"] = 1
         del refined["source_selections"]["neckline_style"]
         with pytest.raises(RefinementOutputRejected) as excinfo:
-            _validate_refined_output(refined, source, STYLING_DETAILS)
+            _validate_refined_output(refined, source, NECKLINE)
         assert excinfo.value.category == RefinementOutputCategory.IMMUTABLE_FIELD_CHANGED
 
 

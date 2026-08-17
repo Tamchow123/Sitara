@@ -105,7 +105,7 @@ function DesignCard({ design }: { design: DesignListItem }) {
   const headingId = `gallery-card-${design.id}`;
   const cover = newestViewable(design);
   // Versions come back ordered by version number; rendered in that order so
-  // the original reads above the refinement made from it.
+  // the original reads above the refinements made from it.
   const versions = design.versions;
 
   return (

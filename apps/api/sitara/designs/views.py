@@ -62,12 +62,17 @@ from sitara.generation.pipeline import (
     enqueue_design_refinement,
 )
 from sitara.generation.refinement import (
+    REFINEMENT_CHANGE_TYPES,
     REFINEMENT_REQUEST_SCHEMA_VERSION,
     RefinementNoteUnsafe,
     RefinementRequestInvalid,
     normalise_refinement_request,
 )
-from sitara.generation.refinement_service import RefinementLimitReached, RefinementSourceUnavailable
+from sitara.generation.refinement_service import (
+    RefinementCategoryUnavailable,
+    RefinementLimitReached,
+    RefinementSourceUnavailable,
+)
 from sitara.media.account_delivery import (
     AccountEmailDisabled,
     AccountEmailRecipientUnavailable,
@@ -1195,7 +1200,14 @@ class DesignVersionResultView(APIView):
         design = accessible_designs(request).filter(pk=design_id).first()
         if design is None:
             return _not_found()
-        version = DesignVersion.objects.filter(design=design, pk=version_id).first()
+        # ``parent_version`` is joined because a refinement's lineage compares
+        # this version's permanent image against its parent's (ADR 0028's demo
+        # disclosure); an initial version simply has none to join.
+        version = (
+            DesignVersion.objects.select_related("parent_version")
+            .filter(design=design, pk=version_id)
+            .first()
+        )
         if version is None:
             return _not_found()
         try:
@@ -1850,7 +1862,8 @@ class DesignRefineView(APIView):
                 ErrorEnvelopeSerializer,
                 description=(
                     "refinement_limit_reached / refinement_in_progress / "
-                    "refinement_source_unavailable / design_not_refinable."
+                    "refinement_source_unavailable / refinement_category_unavailable / "
+                    "design_not_refinable."
                 ),
             ),
             429: OpenApiResponse(
@@ -1874,7 +1887,12 @@ class DesignRefineView(APIView):
             "and queues no extra work. The body names the source version, one "
             "allowlisted change_type and an optional bounded note — the note "
             "is untrusted preference data, safety-scanned before any provider "
-            "call, and never echoed back. " + _OWNERSHIP_NOTE
+            "call, and never echoed back. The requestable change_type values "
+            "are " + ", ".join(sorted(REFINEMENT_CHANGE_TYPES)) + "; each "
+            "changes the one canonical selection it is named after, plus the "
+            "descriptive text around it. A category the design's own "
+            "questionnaire version cannot express is refused with "
+            "refinement_category_unavailable. " + _OWNERSHIP_NOTE
         ),
     )
     def post(self, request, design_id: str):
@@ -1958,6 +1976,16 @@ class DesignRefineView(APIView):
                 "The source version is not available for refinement.",
                 status.HTTP_409_CONFLICT,
             )
+        except RefinementCategoryUnavailable:
+            # ADR 0028. The category exists but owns nothing this design's
+            # questionnaire version can express, so it could only ever return an
+            # unchanged concept. 409 rather than 400: the request is well formed,
+            # it is this design that cannot accept it.
+            return _error(
+                "refinement_category_unavailable",
+                "This change cannot be applied to this design.",
+                status.HTTP_409_CONFLICT,
+            )
         except GenerationInProgress:
             return _error(
                 "refinement_in_progress",
@@ -1967,7 +1995,7 @@ class DesignRefineView(APIView):
         except RefinementLimitReached:
             return _error(
                 "refinement_limit_reached",
-                "This design has already been refined.",
+                "This design has used all of its refinements.",
                 status.HTTP_409_CONFLICT,
             )
         except GenerationUnavailable:

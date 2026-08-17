@@ -9,7 +9,7 @@ assertions are written against the terminal state the server actually produces.
 | --- | --- |
 | `safety.spec.ts` | The stack reports demo mode; no browser request reaches a provider host; the questionnaire stores nothing in browser storage |
 | `journeys.spec.ts` | §25 journeys 1–5 — draft persistence, keyboard-only wizard (choose, Back, Skip), the information drawer, the custom colour picker, and the reference step: no catalogue and no way in from this device, the QR handoff at the iPad end, a photograph sent from a separate browser context arriving and being removed, and the phone page with no code |
-| `generation.spec.ts` | §25 journeys 6–10 — generate, resume mid-flight, a failed image with the brief intact, the one refinement, the two-version history |
+| `generation.spec.ts` | §25 journeys 6–10 — generate, resume mid-flight, a failed image with the brief intact, refinement and the version history |
 | `annotations.spec.ts` | Phase 19, extended in 21 — the private annotation workspace: draw a pin and a rectangle with real pointer gestures, note them, prove persistence across a reload, prove hiding is not deleting, prove nothing reaches browser storage, a stranger's indistinguishable 404, the original render left untouched, and the naming prompt: its pre-fill, its stated exposure, the allowance stated before it is spent, and a refused name answered in the dialog |
 | `gallery.spec.ts` | Phase 21 — the account gallery: a concept made through the real pipeline is findable afterwards under the same name, its card's links resolve to that concept and its workspace, its thumbnail actually decodes, and the list payload itself carries no bearer URL, storage key or spec description |
 | `visual.spec.ts` | §26 visual regression, 15 baselines per viewport |
@@ -39,6 +39,30 @@ them; only its generation/result test is signed in.
 
 The session lands in `e2e/.auth/` (gitignored) as a storage-state file — the
 session cookie, which is what a browser holds. No password is written to disk.
+It is kept out of the image by `apps/web/.dockerignore`. It was briefly also
+kept out of the `web` container by a `tmpfs` shadow, when `e2e/` was bind-mounted
+for the prose guard described below; that mount is reverted, so `.dockerignore`
+is once again the only rule that has to hold.
+
+**The axe engine lives in `helpers/axe.ts`, not in `accessibility.spec.ts`.**
+`generation.spec.ts` points the same engine, with the same one disabled rule, at
+the comparison view — the screen that carries two of every action and is
+therefore where a name/role/value or duplicate-id problem shows up. It is not
+checked from `accessibility.spec.ts` because reaching it there would mean paying
+for a second full generation to see a screen `generation.spec.ts` is already
+standing on.
+
+**`src/app/refinement-budget-copy.test.ts` scans these specs' prose** for
+superseded claims about the refinement budget, and `e2e/` is NOT bind-mounted
+into the `web` service — so in that container it would read whatever the last
+`docker compose build web` baked in and report green on a claim added afterwards.
+Mounting `e2e/` was tried and reverted: `.dockerignore` governs COPY and not bind
+mounts, so the mount reopened `e2e/.auth`'s live session cookie inside the
+container, and the `tmpfs` that shadowed it could not create its mountpoint under
+a read-only bind on any checkout where `.auth` does not already exist — which is
+every CI run, and it took the `web` container down with it. The guard now refuses
+to run when its root is the container's `/app`, and has a row in CLAUDE.md §20's
+table.
 
 **One account holding many concepts is why `gallery.spec.ts` never counts cards.**
 Every generating spec adds to the same gallery, and the desktop and mobile
@@ -194,6 +218,41 @@ The 30 committed baselines are ~11 MB, because they are full-page shots of
 photo-heavy questionnaire screens. That is a deliberate, and not free, trade-off:
 a re-record after an intended design change adds roughly that much again to
 history. Re-record only when a change is intended, never to make a red run green.
+
+## The committed baselines are stale, and have been since Phase 19
+
+**Measured on 2026-08-17, on the Phase 23 branch: 7 of 14 fail.** `landing`,
+`concepts`, `result` and mobile `questionnaire-ceremony`; the generation spec
+aborts at `result`, so `refinement` and `history` are simply unreached and their
+state is unknown rather than good.
+
+Only `landing` and `concepts` are recent — the Phase 23 refinement-budget copy
+correction moved them. The rest predate this phase by three. `git log` puts the
+last full re-record at `2471175` (Phase 17), and the committed
+`result-desktop-win32.png` still shows:
+
+- a **Download image** link under the render, which Phase 19 (ADR 0020) replaced
+  with Annotate and Send to account;
+- the kicker **"REFINE THIS CONCEPT · ONE REFINEMENT"** and the sentence "You may
+  request exactly one change", which ADR 0029 superseded;
+- a **Styling details** refinement category, which ADR 0028 retired;
+- a signed-out **Sign in / Create account** header, on a screen ADR 0023 now
+  requires an account to reach;
+- refinement category cards with no option descriptions, which the ADR 0018
+  Phase 23 addendum added.
+
+This is the same defect class the two refinement-budget prose guards were written
+for — a check that CI does not run drifted quietly, and its "expected" image is
+now a museum of superseded claims, including the literal words "ONE REFINEMENT"
+that every other surface was corrected away from. The guards scan `.ts/.tsx/
+.css/.md`; nothing scans a PNG, and nothing can.
+
+**Do not re-record these as a side effect of an unrelated change.** Approving a
+baseline asserts the screen is right, and re-recording all of them in one pass
+would bless four phases of UI nobody has looked at. It wants its own commit, with
+each new image actually reviewed. The instruction two paragraphs above — "never
+to make a red run green" — is exactly the rule that applies here, and it points
+at reviewing the drift rather than at hiding it.
 
 Baselines live in `visual.spec.ts-snapshots/` and are **platform-specific** —
 Playwright suffixes them with the OS (`-win32`, `-linux`). The committed set was

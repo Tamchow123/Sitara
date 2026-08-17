@@ -36,6 +36,12 @@ that has not been demonstrated.
 
 ### Exactly one refinement, enforced in the database and the pipeline
 
+> **Amended by ADR 0029 (2026-08-14):** the budget is now `MAX_REFINEMENTS = 3`,
+> counted per design across a CHAIN — each round refines the previous round's
+> output, and only a design's latest version may be refined. The rest of this
+> section still binds; only the number and the "version 1 only" source rule
+> changed.
+
 A `Design` may be refined at most once. `MAX_DESIGN_VERSIONS` (default `2`)
 and the fixed `MAX_REFINEMENTS = 1` bound this at the application layer, and
 `DesignVersion.parent_version`/`refined_versions` plus

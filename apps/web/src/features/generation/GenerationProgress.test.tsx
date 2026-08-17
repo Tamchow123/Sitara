@@ -366,7 +366,9 @@ describe("GenerationProgress", () => {
       renderProgress();
       expect(await screen.findByText("Creating your refined visual concept")).toBeInTheDocument();
       expect(screen.queryByText(/%/)).not.toBeInTheDocument();
-      expect(screen.getByText(/original concept remains private and available/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/concept you are refining remains private and available/i),
+      ).toBeInTheDocument();
     });
 
     it("still redirects to the output version result on success", async () => {
@@ -377,7 +379,7 @@ describe("GenerationProgress", () => {
       await vi.waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/design/d1/result/v2"));
     });
 
-    it("links back to the original concept on failure when the source version id is known", async () => {
+    it("links back to the SOURCE concept on failure when its version id is known", async () => {
       mocks.fetchGenerationJob.mockResolvedValue(
         job({
           status: "failed",
@@ -387,7 +389,7 @@ describe("GenerationProgress", () => {
       );
       mocks.searchParams = new URLSearchParams("from=v1");
       renderProgress();
-      const link = await screen.findByRole("link", { name: /original concept/i });
+      const link = await screen.findByRole("link", { name: /concept you are refining/i });
       expect(link).toHaveAttribute("href", "/design/d1/result/v1");
     });
 
@@ -401,7 +403,9 @@ describe("GenerationProgress", () => {
       );
       renderProgress();
       await screen.findByRole("alert");
-      expect(screen.queryByRole("link", { name: /original concept/i })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: /concept you are refining/i }),
+      ).not.toBeInTheDocument();
     });
   });
 

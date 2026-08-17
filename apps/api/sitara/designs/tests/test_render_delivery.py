@@ -77,7 +77,7 @@ def owned_version(*, email: str | None = None, with_image: bool = True) -> Desig
 
 
 def refined_version(original: DesignVersion) -> DesignVersion:
-    """The one refinement a design may have, with its image actually stored.
+    """A refinement of a design, with its image actually stored.
 
     Built here rather than through ``create_ready_design_version`` because a
     version 2 row must satisfy ``designs_designversion_v2_requires_parent`` and
@@ -1164,9 +1164,13 @@ def test_the_two_kinds_have_independent_allowances(settings):
 
 def test_a_refined_version_has_its_own_allowance(settings):
     """A refinement is a separate DesignVersion, so exhausting the original's
-    allowance must not deny the refinement its own. With one refinement and two
-    kinds this is a ceiling of four times the setting per design, which is worth
-    seeing a test state."""
+    allowance must not deny the refinement its own.
+
+    The per-DESIGN ceiling is therefore versions x kinds x the setting. With
+    MAX_REFINEMENTS = 3 (ADR 0029) that is 4 versions x 2 kinds = 8 times the
+    setting, not the 4 it was when a design got one refinement — worth a test
+    stating it, because the per-hour and per-day account limits are a separate,
+    much lower budget and that arithmetic is what tells an operator so."""
     settings.ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER = 1
     original = owned_version()
     refinement = refined_version(original)

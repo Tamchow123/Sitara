@@ -3,6 +3,7 @@ resumability, seed reuse and duplicate-delivery guarantees. Zero network
 calls; fakes injected for every provider/downloader/storage."""
 
 import copy
+import logging
 import uuid
 from unittest import mock
 
@@ -27,6 +28,7 @@ from sitara.generation.prompt_builder import PROMPT_BUILDER_VERSION
 from sitara.generation.refinement import normalise_refinement_request
 
 from .factory import make_complete_design
+from .test_refinement_service import apply_allowed_edit
 
 pytestmark = pytest.mark.django_db
 
@@ -64,17 +66,28 @@ def _request(change_type="colour_story", note=""):
     )
 
 
-def _refined_result(spec_payload) -> StructuredDesignResult:
-    refined = copy.deepcopy(spec_payload)
-    refined["colour_story"]["palette_summary"] = "An updated blush and champagne palette summary."
+def _as_result(payload: dict) -> StructuredDesignResult:
     return StructuredDesignResult(
-        payload=refined,
+        payload=payload,
         provider="fake",
         model="fake-model",
         input_tokens=100,
         output_tokens=200,
         stop_reason="end_turn",
     )
+
+
+def _refined_result(spec_payload) -> StructuredDesignResult:
+    """A legal ``colour_story`` refinement — the default category these tests
+    enqueue. Use ``_as_result(apply_allowed_edit(spec, change_type))`` when the
+    category matters.
+
+    Moves the canonical colour selection, not just the palette prose. A
+    narrative-only payload is now refused as no change at all, because the
+    prompt builder renders none of it — so a fixture that changed only prose
+    would make every pipeline test here fail for a reason that has nothing to
+    do with what it is testing."""
+    return _as_result(apply_allowed_edit(spec_payload, "colour_story"))
 
 
 def _generated_design(*, storage=None, image=None, seed_factory=None):
@@ -121,7 +134,7 @@ class TestHappyPath:
         version = DesignVersion.objects.get(pk=result.design_version_id)
         assert version.version_number == 2
         assert version.parent_version_id == v1.pk
-        assert version.design_spec_template_version == "refinement-1.0.0"
+        assert version.design_spec_template_version == "refinement-5.0.0"
         # The same deterministic prompt builder ran against the refined spec.
         assert version.prompt_builder_version == PROMPT_BUILDER_VERSION
         assert version.image_prompt != ""
@@ -334,6 +347,37 @@ class TestFailurePreservesVersionOne:
         v1.refresh_from_db()
         assert v1.design_spec is not None
 
+    def test_terminalisation_logs_the_code_the_customer_was_told(self, caplog):
+        # `_finalise_failure` is the one place every terminal failure passes
+        # through, and it used to say nothing. Each stage logs why it gave up,
+        # but nothing recorded which of the eleven-odd codes actually reached
+        # the customer, so an incident meant guessing from whichever stage line
+        # happened to be last — and the codes that share a stage are precisely
+        # the ones worth telling apart.
+        design, v1, _initial = _generated_design()
+        attempt = _enqueue_refinement(design, v1)
+        no_op_result = StructuredDesignResult(
+            payload=copy.deepcopy(v1.design_spec),
+            provider="fake",
+            model="fake-model",
+            input_tokens=10,
+            output_tokens=10,
+            stop_reason="end_turn",
+        )
+        refined_provider = mock.Mock()
+        refined_provider.generate.return_value = no_op_result
+
+        with caplog.at_level(logging.DEBUG):
+            result = _run(attempt, structured=refined_provider)
+
+        assert result.error_code == errors.REFINEMENT_NO_CHANGE
+        terminal = [m for m in (r.getMessage() for r in caplog.records) if "attempt failed" in m]
+        assert len(terminal) == 1, terminal
+        assert f"code={errors.REFINEMENT_NO_CHANGE}" in terminal[0]
+        assert f"attempt={attempt.id}" in terminal[0]
+        assert "kind=refinement" in terminal[0]
+        assert "demo=False" in terminal[0]
+
 
 class TestNoImageToImageInput:
     """Refinement is always a FRESH text-to-image generation. ADR 0019 lets the
@@ -370,9 +414,16 @@ class TestNoImageToImageInput:
         asset = make_eligible_asset()
         DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
 
-        attempt = _enqueue_refinement(design, v1)
+        # NOT colour_story: that category is the one ADR 0028 suppresses
+        # references for, and this test is about what happens when they ARE
+        # sent. The refined payload must therefore be built for THIS category —
+        # `_refined_result` moves the canonical colour selection, which
+        # `fabric_and_texture` may not touch.
+        attempt = _enqueue_refinement(design, v1, change_type="fabric_and_texture")
         refined_provider = mock.Mock()
-        refined_provider.generate.return_value = _refined_result(v1.design_spec)
+        refined_provider.generate.return_value = _as_result(
+            apply_allowed_edit(v1.design_spec, "fabric_and_texture")
+        )
         image_provider = FakeImageProvider()
 
         result = _run(attempt, structured=refined_provider, image=image_provider, storage=storage)
@@ -387,3 +438,107 @@ class TestNoImageToImageInput:
         for url in urls:
             assert v1.image_storage_key not in url
             assert v1.thumbnail_storage_key not in url
+
+
+class TestReferencesPerRefinementCategory:
+    """ADR 0028, §7: a colour refinement is sent NO reference images, and every
+    other category keeps exactly the set its source attempt was sent.
+
+    A reference photograph is a far stronger colour signal than a text clause,
+    so "make it green" against a red reference kept losing to the reference —
+    the reported defect. This is the narrowest change that addresses it, and it
+    is the one place in this phase that touches the live provider path, so both
+    halves are pinned by asserting what ``ImageGenerationRequest`` was actually
+    constructed with rather than that some intermediate function was called.
+
+    Every test here requests the ``inmemory_storage`` fixture for its SETTINGS
+    side-effect rather than for a value: it points the ``default`` storage alias
+    at in-memory storage, which is what lets ``make_eligible_asset`` ingest and
+    what lets a reference URL be signed at all — without it the conftest network
+    guard fires. The separate ``InMemoryStorage()`` each test builds is the
+    pipeline's own injected staging storage, a different thing entirely."""
+
+    @staticmethod
+    def _design_with_one_reference(settings, storage):
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        settings.S3_SIGNED_URL_ENDPOINT_URL = "https://storage.example.test"
+        image_provider = FakeImageProvider()
+        design, v1, _initial = _generated_design(storage=storage, image=image_provider)
+        asset = make_eligible_asset()
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        return design, v1, asset
+
+    def _refine(self, design, v1, storage, change_type):
+        attempt = _enqueue_refinement(design, v1, change_type=change_type)
+        refined_provider = mock.Mock()
+        # Each category gets an edit inside its OWN allowlist, reusing the
+        # service tests' single table rather than a second copy of that policy.
+        refined_provider.generate.return_value = _as_result(
+            apply_allowed_edit(v1.design_spec, change_type)
+        )
+        image_provider = FakeImageProvider()
+        result = _run(attempt, structured=refined_provider, image=image_provider, storage=storage)
+        assert result.status == _Status.SUCCEEDED
+        return image_provider.last_request
+
+    def test_a_colour_refinement_is_handed_no_references_at_all(self, settings, inmemory_storage):
+        storage = InMemoryStorage()
+        design, v1, asset = self._design_with_one_reference(settings, storage)
+
+        request = self._refine(design, v1, storage, "colour_story")
+
+        # Not "fewer", not "reordered" — none. And the suppression is about the
+        # provider call only: the design's own reference selection is untouched,
+        # so a later category still gets it.
+        assert request.reference_image_urls == ()
+        assert asset.image_storage_key not in request.prompt
+        assert design.inspiration_selections.count() == 1
+
+    @pytest.mark.parametrize(
+        "change_type",
+        ["fabric_and_texture", "embellishment", "sleeves_and_coverage", "silhouette_detail"],
+    )
+    def test_every_other_category_still_gets_its_references(
+        self, settings, inmemory_storage, change_type
+    ):
+        storage = InMemoryStorage()
+        design, v1, asset = self._design_with_one_reference(settings, storage)
+
+        request = self._refine(design, v1, storage, change_type)
+
+        # Compared by storage key, not by URL string: a signed URL carries a
+        # fresh expiry and signature every time it is minted, so two mintings of
+        # the SAME object are never byte-equal. The key is what identifies the
+        # reference; the signature is the part that must not be reused.
+        assert len(request.reference_image_urls) == 1
+        assert asset.image_storage_key in request.reference_image_urls[0]
+
+    def test_the_suppression_never_applies_to_an_initial_generation(
+        self, settings, inmemory_storage
+    ):
+        # The branch reads the attempt's own refinement request, and an initial
+        # attempt has none. Asserted rather than assumed, because a change that
+        # made this branch fire on `None` would silently strip references from
+        # every first generation in the product.
+        from sitara.catalogue.tests.utils import make_eligible_asset
+        from sitara.designs.models import DesignInspiration
+
+        settings.S3_SIGNED_URL_ENDPOINT_URL = "https://storage.example.test"
+        storage = InMemoryStorage()
+        design = make_complete_design()
+        asset = make_eligible_asset()
+        DesignInspiration.objects.create(design=design, inspiration_asset=asset, position=1)
+        image_provider = FakeImageProvider()
+        with mock.patch(_AVAILABLE, return_value=True):
+            attempt, _created = enqueue_design_generation(
+                design, idempotency_key=uuid.uuid4(), enqueue_task=lambda a: None
+            )
+
+        result = _run(attempt, storage=storage, image=image_provider)
+
+        assert result.status == _Status.SUCCEEDED
+        urls = image_provider.last_request.reference_image_urls
+        assert len(urls) == 1
+        assert asset.image_storage_key in urls[0]

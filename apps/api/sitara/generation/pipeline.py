@@ -82,6 +82,7 @@ from .demo.provider import (
     DemoRefinementStructuredDesignProvider,
     DemoStructuredDesignProvider,
 )
+from .demo.refinement_engine import DemoRefinementInert
 from .demo.selector import DemoAssetSelection, DemoAssetUnavailable, select_demo_asset
 from .design_spec import UnsupportedDesignSpecVersion, validate_design_spec
 from .image_download import MAX_REDIRECTS
@@ -91,14 +92,22 @@ from .reference_images import reference_image_urls
 from .refinement import (
     REFINEMENT_REQUEST_SCHEMA_VERSION,
     RefinementRequest,
+    references_suppressed_for_request,
     refinement_request_sha256,
+)
+from .refinement_selections import (
+    RefinementQuestionnaireUnavailable,
+    answerable_selection_alternatives,
 )
 from .refinement_service import (
     DesignChangedDuringRefinement,
+    RefinementCategoryUnavailable,
     RefinementGenerationFailed,
     RefinementLimitReached,
     RefinementNoChangeProduced,
     RefinementSourceUnavailable,
+    assert_category_refinable,
+    assert_refinement_budget_available,
     generate_refined_design_spec_for_design,
     validate_source_version,
 )
@@ -651,9 +660,12 @@ def enqueue_design_refinement(
     from an initial-generation failure — there is no version 1 to refine in
     that case, so the source-version lookup below fails closed), the source
     version must belong to this Design and pass
-    :func:`~sitara.generation.refinement_service.validate_source_version`,
-    no child version may already exist, and no other attempt for this Design
-    may be in progress or carry unresolved provider-spend evidence.
+    :func:`~sitara.generation.refinement_service.validate_source_version`
+    (which since ADR 0029 requires it to be the design's LATEST version, so a
+    second refinement carries on from the first one's output), the design must
+    have refinement budget left, no child version may already exist, and no
+    other attempt for this Design may be in progress or carry unresolved
+    provider-spend evidence.
 
     ``refinement_request`` must already be validated (Part A's
     ``normalise_refinement_request``) — this function performs no client-input
@@ -753,6 +765,15 @@ def enqueue_design_refinement(
             raise RefinementSourceUnavailable("the source version is not available")
         validate_source_version(source_version)  # raises RefinementSourceUnavailable
 
+        # 5a. The category must own a canonical selection on THIS spec's schema
+        #     version (ADR 0028). A version-1 spec has no neckline_style at all,
+        #     so a neckline refinement of one can only ever return an unchanged
+        #     concept — refused here, before an attempt row exists and before any
+        #     provider is selected, rather than spent on and then disappointed.
+        assert_category_refinable(
+            source_version.design_spec_schema_version, refinement_request.change_type
+        )
+
         # 5b. A refinement's mode is INHERITED from its source version — a
         #     demo source can never be refined through the live path and a
         #     live source can never be refined through the demo path,
@@ -773,9 +794,18 @@ def enqueue_design_refinement(
         #    blocks a fresh initial generation (spec §20: "no ambiguous text/
         #    image submission marker exists; no recoverable staged or
         #    permanent output exists").
+        # Scoped to THIS SOURCE VERSION, not the whole design. A succeeded
+        # attempt is required by database constraint to keep a non-empty staged
+        # key, so a design-wide filter is True the moment any refinement has
+        # ever succeeded — which was harmless while a design got one refinement
+        # and silently refuses the second and third now that it gets three.
+        # The guarantee this exists for is "never regenerate paid output that
+        # already exists for this step", and a step is a source version.
         staged_elsewhere = (
             GenerationAttempt.objects.filter(
-                design=locked, generation_kind=GenerationAttempt.GenerationKind.REFINEMENT
+                design=locked,
+                generation_kind=GenerationAttempt.GenerationKind.REFINEMENT,
+                source_design_version=source_version,
             )
             .exclude(staged_image_storage_key="")
             .exclude(status=_Status.FAILED, error_code=errors.IMAGE_STAGING_FAILED)
@@ -795,8 +825,16 @@ def enqueue_design_refinement(
             )
             .exists()
         )
+        # `unresolved_spend` is deliberately NOT narrowed the same way: it spans
+        # every refinement attempt on the design, whichever version each one
+        # sourced. It means a provider may have been billed and we cannot tell —
+        # ADR 0017's fail-closed money rule, which §26 forbids relaxing — and
+        # "we already lost track of spend on this design" is a reason to stop
+        # spending on it whatever the remaining refinement budget says.
         if source_version.refined_versions.exists() or staged_elsewhere or unresolved_spend:
-            raise RefinementLimitReached("this design has already been refined")
+            raise RefinementLimitReached("this version has already been refined")
+        # The per-design budget, separate from the per-version guard above.
+        assert_refinement_budget_available(locked.id)
 
         # 6b. Global daily count (Phase 16 Part B) — a refinement is a new live
         #     billable attempt too. Reserved atomically after every rejection
@@ -985,7 +1023,24 @@ def run_generation_attempt(
                 attempt.id,
                 type(exc).__name__,
             )
-            _finalise_failure(attempt, errors.INTERNAL_GENERATION_ERROR)
+            # `clear_text_marker` defaults to False so an unclassified failure
+            # fails CLOSED: a submission marker still set at terminalisation is
+            # read as possibly-unresolved spend, and the enqueue guard then
+            # refuses to refine that design again rather than risk paying twice.
+            # Exactly right for a live attempt, where an exception genuinely
+            # cannot tell us whether the provider took the request.
+            #
+            # A DEMO attempt cannot have spent anything by any path — the same
+            # invariant `cost_accounting.cost_enabled()` already relies on — so
+            # presuming spend there converts a zero-cost local bug into the
+            # permanent loss of the design's one refinement, with no
+            # reconciliation to undo it (stuck-job recovery only visits
+            # in-progress rows). This phase hit that once through a named
+            # exception type and fixed it there; clearing the marker here closes
+            # the class instead of waiting to enumerate the next type.
+            _finalise_failure(
+                attempt, errors.INTERNAL_GENERATION_ERROR, clear_text_marker=attempt.is_demo
+            )
             return GenerationAttempt.objects.get(pk=attempt.pk)
 
 
@@ -1170,6 +1225,35 @@ def _run_text_stage(design, attempt, structured_provider, config) -> DesignVersi
     return version
 
 
+def _demo_selection_alternatives(source_version, refinement_request) -> dict:
+    """The canonical values a DEMO refinement of this design may choose from.
+
+    Computed here, from the design's own PINNED questionnaire, and handed to the
+    engine — the engine must never pick a canonical value itself, because its
+    phrase vocabularies are supersets of any one questionnaire (ADR 0028 §8).
+    Demo-only: the live path tells the model which fields it may move and checks
+    its answer instead.
+
+    Reached only inside the demo branch of
+    :func:`_resolve_structured_provider_impl`, so a live attempt never pays for
+    it. Both failure modes end where the live path's equivalent would: a design
+    with no usable pinned questionnaire raises
+    :class:`RefinementQuestionnaireUnavailable`, and a corrupt or
+    no-longer-supported stored spec is converted here to
+    :class:`RefinementSourceUnavailable` — the same exception
+    ``validate_source_version`` raises for it — because this runs BEFORE that
+    function does and an uncaught validation error would terminalise the demo
+    run as a generic internal error while the live run reported the real
+    reason."""
+    try:
+        spec = validate_design_spec(source_version.design_spec)
+    except (ValidationError, UnsupportedDesignSpecVersion):
+        raise RefinementSourceUnavailable("the source specification failed validation") from None
+    return answerable_selection_alternatives(
+        source_version.design, spec, refinement_request.change_type
+    )
+
+
 def _resolve_refinement_structured_provider(source_version, refinement_request, attempt):
     """The refinement structured-design provider: the local deterministic
     demo adapter (built from the persisted source spec — never a parsed
@@ -1178,7 +1262,9 @@ def _resolve_refinement_structured_provider(source_version, refinement_request, 
     return _resolve_structured_provider_impl(
         attempt,
         lambda: DemoRefinementStructuredDesignProvider(
-            source_spec=source_version.design_spec, refinement_request=refinement_request
+            source_spec=source_version.design_spec,
+            refinement_request=refinement_request,
+            selection_alternatives=_demo_selection_alternatives(source_version, refinement_request),
         ),
     )
 
@@ -1222,10 +1308,39 @@ def _run_refinement_text_stage(design, attempt, structured_provider, config) -> 
         ) from exc
     except DesignChangedDuringRefinement as exc:
         raise _TerminalGenerationError(errors.DESIGN_CHANGED, clear_text_marker=True) from exc
-    except RefinementSourceUnavailable as exc:
+    except (RefinementSourceUnavailable, RefinementQuestionnaireUnavailable) as exc:
+        # The demo path can raise the second one a step earlier than the live
+        # path raises the first — it needs the pinned questionnaire to choose a
+        # canonical value at all — so both end on the same stable code rather
+        # than the demo run failing differently from the live one.
         raise _TerminalGenerationError(
             errors.REFINEMENT_SOURCE_UNAVAILABLE, clear_text_marker=True
         ) from exc
+    except RefinementCategoryUnavailable as exc:
+        # Unreachable through the API — the enqueue guard refuses this before an
+        # attempt exists. Kept so a future caller that bypasses the guard fails
+        # with the same stable code rather than an unclassified internal error.
+        raise _TerminalGenerationError(
+            errors.REFINEMENT_CATEGORY_UNAVAILABLE, clear_text_marker=True
+        ) from exc
+    except DemoRefinementInert as exc:
+        # The demo engine judged its own output by the same rendered-prompt
+        # standard the service applies and found it could move nothing for this
+        # concept: no other legal value for the category, and the descriptive
+        # field the fallback writes is one the builder does not render here.
+        #
+        # REFINEMENT_NO_CHANGE, not REFINEMENT_CATEGORY_UNAVAILABLE. The two
+        # sound interchangeable and are not. The category-unavailable code means
+        # a permanent, schema-version-level fact — this design's questionnaire
+        # version has no such question — and its customer copy says exactly
+        # that: "This concept was created from an earlier version of the
+        # questionnaire, which has no such choice to change." That statement
+        # would be FALSE here. This path is only reachable once the enqueue
+        # guard has already confirmed the category does own a field, so what
+        # failed is this attempt on this concept — which is precisely what the
+        # live path reports as REFINEMENT_NO_CHANGE. Same fact, same code, in
+        # both modes.
+        raise _TerminalGenerationError(errors.REFINEMENT_NO_CHANGE, clear_text_marker=True) from exc
     except RefinementLimitReached as exc:
         raise _TerminalGenerationError(
             errors.REFINEMENT_LIMIT_REACHED, clear_text_marker=True
@@ -1565,7 +1680,7 @@ def _ensure_prediction(attempt, version, provider, seed_factory, config) -> str:
     # Demo attempts never reach this: the branch is on the FROZEN is_demo flag,
     # so a demo run constructs no URL at all and the zero-cost guarantee holds.
     references: tuple[str, ...] = ()
-    if not attempt.is_demo:
+    if not attempt.is_demo and not _references_suppressed(attempt):
         try:
             references = reference_image_urls(version.design)
         except SoftTimeLimitExceeded:
@@ -1967,6 +2082,18 @@ def _finalise_failure(attempt, code: str, *, clear_text_marker: bool = False) ->
         locked = GenerationAttempt.objects.select_for_update().get(pk=attempt.pk)
         if locked.status in (_Status.SUCCEEDED, _Status.FAILED):
             return
+        # The one place every terminal failure passes through, and until now the
+        # only one that said nothing. A stage logs why it gave up, but nothing
+        # recorded what the customer was finally told, so reconstructing an
+        # incident meant inferring the code from whichever stage line happened to
+        # be last. `code` is a source-controlled machine name from `errors`.
+        logger.warning(
+            "generation attempt failed attempt=%s kind=%s demo=%s code=%s",
+            locked.id,
+            locked.generation_kind,
+            locked.is_demo,
+            code,
+        )
         # A submission marker still set at terminalisation is possible unresolved
         # spend. Capture BEFORE optionally clearing the text marker below (a
         # cleared text marker means the provider definitively answered and the
@@ -2074,6 +2201,16 @@ def _provably_no_provider_call(attempt) -> bool:
 def _generate_seed() -> int:
     """A cryptographically-generated non-negative 32-bit seed (zero allowed)."""
     return secrets.randbelow(2**32)
+
+
+def _references_suppressed(attempt: GenerationAttempt) -> bool:
+    """True when this attempt must be sent NO reference images (ADR 0028).
+
+    The per-category FACT lives in ``refinement.py`` beside the other category
+    tables; this only unwraps the attempt's own durable copy of the validated
+    refinement request, so a redelivery decides identically to the first run
+    and this module stays the one that knows about rows."""
+    return references_suppressed_for_request(attempt.refinement_request)
 
 
 def _find_source_attempt_seed(attempt: GenerationAttempt) -> int | None:

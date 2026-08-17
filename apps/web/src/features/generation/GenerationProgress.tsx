@@ -58,9 +58,9 @@ export function GenerationProgress({ designId, jobId }: Props) {
   const searchParams = useSearchParams();
   // Since Phase 14: RefinementPanel appends the source version id so a
   // refinement's progress/failure screens can link back to the still-private,
-  // still-readable original concept. Purely a navigation convenience — never
+  // still-readable source concept. Purely a navigation convenience — never
   // trusted for anything security-sensitive, never persisted anywhere.
-  const originalVersionId = searchParams.get("from");
+  const sourceVersionId = searchParams.get("from");
 
   const query = useQuery({
     queryKey: ["generation-job", jobId],
@@ -168,10 +168,10 @@ export function GenerationProgress({ designId, jobId }: Props) {
               <a href={`/design/${designId}`}>Return to the questionnaire</a>
             </p>
           )}
-          {isRefinement && originalVersionId && (
+          {isRefinement && sourceVersionId && (
             <p>
-              <a href={`/design/${designId}/result/${originalVersionId}`}>
-                Return to your original concept
+              <a href={`/design/${designId}/result/${sourceVersionId}`}>
+                Return to the concept you are refining
               </a>
             </p>
           )}

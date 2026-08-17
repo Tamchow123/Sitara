@@ -1233,7 +1233,7 @@
         "/api/v1/designs/{design_id}/refine/": {
             "post": {
                 "operationId": "designs_refine",
-                "description": "Enqueues one asynchronous refinement job editing the design's existing version-1 concept and returns 202 with the public job payload and a same-origin Location header. Requires an Idempotency-Key UUID header; a repeated key returns the same job and queues no extra work. The body names the source version, one allowlisted change_type and an optional bounded note — the note is untrusted preference data, safety-scanned before any provider call, and never echoed back. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
+                "description": "Enqueues one asynchronous refinement job editing the design's existing version-1 concept and returns 202 with the public job payload and a same-origin Location header. Requires an Idempotency-Key UUID header; a repeated key returns the same job and queues no extra work. The body names the source version, one allowlisted change_type and an optional bounded note — the note is untrusted preference data, safety-scanned before any provider call, and never echoed back. The requestable change_type values are colour_story, dupatta_or_saree_drape, embellishment, fabric_and_texture, neckline, silhouette_detail, sleeves_and_coverage; each changes the one canonical selection it is named after, plus the descriptive text around it. A category the design's own questionnaire version cannot express is refused with refinement_category_unavailable. Ownership is by Django session (anonymous workspace) OR authenticated account — never by knowing a UUID. Anything inaccessible returns an indistinguishable 404.",
                 "summary": "Start a single constrained refinement job",
                 "parameters": [
                     {
@@ -1342,7 +1342,7 @@
                                 }
                             }
                         },
-                        "description": "refinement_limit_reached / refinement_in_progress / refinement_source_unavailable / design_not_refinable."
+                        "description": "refinement_limit_reached / refinement_in_progress / refinement_source_unavailable / refinement_category_unavailable / design_not_refinable."
                     },
                     "429": {
                         "content": {
@@ -3536,6 +3536,10 @@
                     "lineage": {
                         "$ref": "#/components/schemas/DesignVersionLineage"
                     },
+                    "refinements_remaining": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
                     "is_demo": {
                         "type": "boolean"
                     }
@@ -3556,6 +3560,7 @@
                     "inspiration_acknowledgements",
                     "is_demo",
                     "lineage",
+                    "refinements_remaining",
                     "styling_notes",
                     "title",
                     "version_number"
@@ -3694,6 +3699,7 @@
                     "live_generation_budget_exhausted",
                     "prompt_build_failed",
                     "queue_unavailable",
+                    "refinement_category_unavailable",
                     "refinement_generation_failed",
                     "refinement_invalid",
                     "refinement_limit_reached",
@@ -3704,7 +3710,7 @@
                     "structured_submission_ambiguous"
                 ],
                 "type": "string",
-                "description": "* `demo_assets_unavailable` - demo_assets_unavailable\n* `design_changed` - design_changed\n* `design_incomplete` - design_incomplete\n* `generation_stuck` - generation_stuck\n* `generation_unavailable` - generation_unavailable\n* `image_download_failed` - image_download_failed\n* `image_ingest_failed` - image_ingest_failed\n* `image_ingest_unverified` - image_ingest_unverified\n* `image_output_invalid` - image_output_invalid\n* `image_poll_timeout` - image_poll_timeout\n* `image_prediction_aborted` - image_prediction_aborted\n* `image_prediction_canceled` - image_prediction_canceled\n* `image_prediction_failed` - image_prediction_failed\n* `image_provider_unavailable` - image_provider_unavailable\n* `image_staging_failed` - image_staging_failed\n* `image_staging_unverified` - image_staging_unverified\n* `image_submission_ambiguous` - image_submission_ambiguous\n* `internal_generation_error` - internal_generation_error\n* `live_generation_budget_exhausted` - live_generation_budget_exhausted\n* `prompt_build_failed` - prompt_build_failed\n* `queue_unavailable` - queue_unavailable\n* `refinement_generation_failed` - refinement_generation_failed\n* `refinement_invalid` - refinement_invalid\n* `refinement_limit_reached` - refinement_limit_reached\n* `refinement_no_change` - refinement_no_change\n* `refinement_source_unavailable` - refinement_source_unavailable\n* `structured_generation_failed` - structured_generation_failed\n* `structured_provider_refused` - structured_provider_refused\n* `structured_submission_ambiguous` - structured_submission_ambiguous"
+                "description": "* `demo_assets_unavailable` - demo_assets_unavailable\n* `design_changed` - design_changed\n* `design_incomplete` - design_incomplete\n* `generation_stuck` - generation_stuck\n* `generation_unavailable` - generation_unavailable\n* `image_download_failed` - image_download_failed\n* `image_ingest_failed` - image_ingest_failed\n* `image_ingest_unverified` - image_ingest_unverified\n* `image_output_invalid` - image_output_invalid\n* `image_poll_timeout` - image_poll_timeout\n* `image_prediction_aborted` - image_prediction_aborted\n* `image_prediction_canceled` - image_prediction_canceled\n* `image_prediction_failed` - image_prediction_failed\n* `image_provider_unavailable` - image_provider_unavailable\n* `image_staging_failed` - image_staging_failed\n* `image_staging_unverified` - image_staging_unverified\n* `image_submission_ambiguous` - image_submission_ambiguous\n* `internal_generation_error` - internal_generation_error\n* `live_generation_budget_exhausted` - live_generation_budget_exhausted\n* `prompt_build_failed` - prompt_build_failed\n* `queue_unavailable` - queue_unavailable\n* `refinement_category_unavailable` - refinement_category_unavailable\n* `refinement_generation_failed` - refinement_generation_failed\n* `refinement_invalid` - refinement_invalid\n* `refinement_limit_reached` - refinement_limit_reached\n* `refinement_no_change` - refinement_no_change\n* `refinement_source_unavailable` - refinement_source_unavailable\n* `structured_generation_failed` - structured_generation_failed\n* `structured_provider_refused` - structured_provider_refused\n* `structured_submission_ambiguous` - structured_submission_ambiguous"
             },
             "ErrorDetail": {
                 "type": "object",
@@ -4456,10 +4462,14 @@
                 "properties": {
                     "change_type": {
                         "$ref": "#/components/schemas/ChangeTypeEnum"
+                    },
+                    "demo_asset_unchanged": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
-                    "change_type"
+                    "change_type",
+                    "demo_asset_unchanged"
                 ]
             },
             "RefinementWriteRequest": {

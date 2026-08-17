@@ -1,8 +1,7 @@
-import { join } from "node:path";
-
 import { expect, test, type Page } from "@playwright/test";
 
 import { STYLIST_STATE_PATH } from "./helpers/account";
+import { expectNoSeriousViolations } from "./helpers/axe";
 import { advanceUntilQuestion, completeQuestionnaire, waitForDesignQuiescent } from "./helpers/wizard";
 
 // Phase 17 §31 and §32, executed rather than asserted by hand.
@@ -13,55 +12,9 @@ import { advanceUntilQuestion, completeQuestionnaire, waitForDesignQuiescent } f
 // machine-checkable, so they are checked by machine and the evidence is a test
 // result rather than a claim in a report.
 //
-// axe-core is injected from node_modules — it is already present as a
-// transitive dependency of jest-axe, which the Vitest component tests use, so
-// this adds no dependency. Injecting the same engine keeps the component-level
-// and page-level accessibility checks honest with each other.
-const AXE_PATH = join(__dirname, "..", "node_modules", "axe-core", "axe.min.js");
-
-// Contrast is checked separately by the design-token tests and by manual
-// inspection against the handoff palette: axe cannot evaluate contrast through
-// a background image, and the landing hero and every option card sit on one,
-// which produces false positives rather than findings. Nothing else is
-// disabled — in particular every name/role/value, landmark and label rule runs.
-const DISABLED_RULES = ["color-contrast"];
-
-type AxeViolation = {
-  id: string;
-  impact: string | null;
-  help: string;
-  nodes: { target: string[] }[];
-};
-
-/** Run axe against the whole page and return only serious/critical findings. */
-async function seriousViolations(page: Page): Promise<AxeViolation[]> {
-  await page.addScriptTag({ path: AXE_PATH });
-  return page.evaluate(async (disabled) => {
-    const rules = Object.fromEntries(disabled.map((id) => [id, { enabled: false }]));
-    // @ts-expect-error injected at runtime by addScriptTag
-    const results = await window.axe.run(document, { rules });
-    return results.violations
-      .filter((v: AxeViolation) => v.impact === "serious" || v.impact === "critical")
-      .map((v: AxeViolation) => ({
-        id: v.id,
-        impact: v.impact,
-        help: v.help,
-        nodes: v.nodes.map((n) => ({ target: n.target })),
-      }));
-  }, DISABLED_RULES);
-}
-
-/** A readable failure message — an id alone does not tell you what to fix. */
-function describe(violations: AxeViolation[]): string {
-  return violations
-    .map((v) => `${v.impact}: ${v.id} — ${v.help}\n    ${v.nodes.map((n) => n.target.join(" ")).join("\n    ")}`)
-    .join("\n  ");
-}
-
-async function expectNoSeriousViolations(page: Page, route: string): Promise<void> {
-  const violations = await seriousViolations(page);
-  expect(violations, `serious/critical axe violations on ${route}:\n  ${describe(violations)}`).toEqual([]);
-}
+// The axe engine itself, and the one rule that is disabled and why, live in
+// ./helpers/axe.ts — shared with generation.spec.ts, which points the same
+// engine at the comparison view rather than driving a second generation here.
 
 /**
  * The page must not scroll sideways. This is the single assertion behind both

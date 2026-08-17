@@ -334,16 +334,30 @@
   font-weight: 600;
 }
 
-/* §8.5's send disclosure. Its own full-width row rather than a third flex item:
-   it is a sentence, not a control, and it must be readable before the button
-   beside it is pressed. */
-.result-image-send-note {
-  flex-basis: 100%;
+/* §8.5's send disclosure, wherever it is stated. One rule for how the sentence
+   READS, so a change to its size or colour cannot land on one surface and miss
+   the other; the two rules below carry only what differs about where it SITS. */
+.result-image-send-note,
+.comparison-send-note {
   margin: 0;
-  max-width: 52ch;
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--color-neutral-700);
+}
+
+/* On a card: its own full-width row rather than a third flex item, because it is
+   a sentence and not a control, and it must be readable before the button beside
+   it is pressed. */
+.result-image-send-note {
+  flex-basis: 100%;
+  max-width: 52ch;
+}
+
+/* On the comparison screen: the same sentence, but owned by the screen rather
+   than by either card, so it sits below the grid instead of in a figcaption and
+   has the full width to run to. */
+.comparison-send-note {
+  max-width: 62ch;
 }
 
 .result-image-state {
@@ -522,23 +536,29 @@
   color: var(--color-accent-700);
 }
 
-/* The Amendments grid: two across on a phone, four on a wide screen. */
+/* The Amendments grid sizes itself to the COLUMN it sits in, not to the
+   window. It used to be two columns with a `min-width: 700px` media query
+   promoting it to four — but that query reads the viewport, and this panel
+   lives in a ~547px column, so on any desktop it laid four chips into a space
+   that fits three. The text track collapsed to ~62px, and "Embellishment" —
+   the one label that is a single unbreakable 94px word — pushed straight out
+   of its box. `auto-fit` asks the container instead, so the count follows the
+   space that actually exists. */
 .refinement-chips {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: var(--space-3);
 }
 
-@media (min-width: 700px) {
-  .refinement-chips {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
+/* A grid, not a row, since Phase 23: each chip now carries a second line
+   saying which answer it will change, and that line belongs under the label
+   rather than beside the radio. The radio keeps its own column and spans both
+   rows, so it stays centred against the pair. */
 .refinement-chip {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: var(--space-2);
+  gap: 0 var(--space-2);
   min-height: 44px;
   padding: var(--space-3);
   border: 2px solid transparent;
@@ -557,10 +577,41 @@
    the label around it, not a replacement for it. Selection is therefore
    never signalled by the accent fill alone. */
 .refinement-chip input {
-  flex: none;
+  grid-row: 1 / span 2;
   accent-color: var(--color-accent-700);
   width: 18px;
   height: 18px;
+}
+
+/* The belt to the grid's braces. A grid item's automatic minimum size is its
+   min-content — the longest unbreakable word — so a track narrower than that
+   does not clip the text, it lets it escape the box. `min-width: 0` lets the
+   item shrink with its track and `overflow-wrap` gives the word somewhere to
+   go, which is what makes this safe at ANY width rather than only at the ones
+   that happen to fit today. Neither of these existed: `.refinement-chip-label`
+   had no rule at all. */
+.refinement-chip-label,
+.refinement-chip-effect {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.refinement-chip-label {
+  grid-column: 2;
+}
+
+/* Lighter than the label and never the only thing carrying meaning: the
+   category name still stands on its own, this only says what it will move. */
+.refinement-chip-effect {
+  grid-column: 2;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--color-neutral-700);
+}
+
+.refinement-chip-selected .refinement-chip-effect {
+  color: var(--color-accent-900);
 }
 
 .refinement-chip:focus-within {

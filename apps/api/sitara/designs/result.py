@@ -32,6 +32,7 @@ are never included. Legacy (pre-Phase-13) versions with no snapshot yield an
 empty list — inspiration context is never a readiness requirement.
 """
 
+from django.conf import settings
 from pydantic import ValidationError
 
 from sitara.generation.design_spec import (
@@ -52,6 +53,7 @@ from sitara.generation.refinement import (
     RefinementRequest,
     refinement_request_sha256,
 )
+from sitara.generation.refinement_service import refinements_used
 from sitara.generation.services import scan_design_spec_or_raise
 
 from .jobs import _iso
@@ -165,8 +167,60 @@ def load_lineage(version: DesignVersion) -> dict:
     return {
         "kind": "refinement",
         "parent_version_id": str(version.parent_version_id),
-        "refinement": {"change_type": request.change_type},
+        "refinement": {
+            "change_type": request.change_type,
+            "demo_asset_unchanged": _demo_asset_unchanged(version),
+        },
     }
+
+
+def refinements_remaining(version: DesignVersion) -> int:
+    """How many refinements this design has left.
+
+    On the payload because the frontend used to derive "already refined" from
+    `lineage.kind` plus the latest job's status — an inference that was only
+    ever right while the answer was one. With three it would have to count
+    versions it cannot see. The server owns the budget, so the server says.
+
+    Counted by the SAME function the enqueue guard refuses on
+    (:func:`~sitara.generation.refinement_service.refinements_used`), never by a
+    second query written to agree with it. A payload that promised a round the
+    guard then refused would be worse than no number at all.
+
+    Never negative: a design that somehow exceeded the cap (an operator
+    lowering `MAX_REFINEMENTS` under a live design, which is allowed and must
+    not produce a nonsense number) reports zero left, not a negative."""
+    return max(0, settings.MAX_REFINEMENTS - refinements_used(version.design_id))
+
+
+def _demo_asset_unchanged(version: DesignVersion) -> bool:
+    """True when a DEMO refinement resolved to the very same fixture image.
+
+    A legitimate outcome — the reviewed fixture pack is small, and it may hold
+    nothing closer to the refined concept than what it already returned. What is
+    not legitimate is saying nothing: ADR 0016's honesty rule is that demo
+    output is never presented as something it is not, and "your refinement
+    produced this identical image" is exactly the case that needs a sentence.
+    Silently returning the same picture is what produced this phase's bug
+    report (ADR 0028 §8).
+
+    Compared by the version's own permanent image SHA-256 — durable audit data
+    already on the row, and exact: the image processor is deterministic and
+    version-pinned, so the same fixture asset always yields the same bytes and a
+    different one never does.
+
+    Always ``False`` for a LIVE version. Two independent provider calls do not
+    return byte-identical images, so the flag would only ever be noise there —
+    and a live concept that did somehow repeat itself is not a fixture-pack
+    limitation and must not be described as one. Also ``False`` while the
+    refined image is still being produced, since there is nothing to compare
+    yet; the result endpoint refuses an incomplete version before this anyway."""
+    if not version.is_demo:
+        return False
+    parent = version.parent_version
+    if parent is None:
+        return False
+    return bool(version.image_sha256) and version.image_sha256 == parent.image_sha256
 
 
 def design_result_payload(
@@ -228,6 +282,12 @@ def design_result_payload(
             "created_at": _iso(version.design_spec_generated_at),
             "inspiration_acknowledgements": list(acknowledgements),
             "lineage": lineage,
+            # The remaining refinement budget for this DESIGN. A count, never a
+            # boolean: "may I refine?" is one question the UI asks and "how
+            # many left?" is another it now has to answer out loud, and one
+            # number serves both without the client counting versions it was
+            # never sent.
+            "refinements_remaining": refinements_remaining(version),
             # Since Phase 15: this VERSION's own frozen historical demo/live
             # mode — never inferred from the current public config, so a
             # demo version stays labelled demo even if the environment later

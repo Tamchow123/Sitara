@@ -327,8 +327,10 @@ bumped 5.0.0 → 6.0.0) renders the canonical neckline early in the high-priorit
 coverage directive and restates it in the closing reinforcement, and suppresses
 the model-authored neckline narrative when a canonical neckline is chosen so it
 can never contradict it. Because `source_selections` is an immutable refinement
-root, `neckline_style` is automatically protected across the single-round
-refinement (ADR 0015); the refined output's schema version must match the
+root, `neckline_style` is automatically protected across
+refinement (ADR 0015; the immutable-root protection is per refinement, so it
+holds for each of the three rounds ADR 0029 later allowed — and ADR 0028 then
+made `neckline_style` deliberately changeable by the `neckline` category alone); the refined output's schema version must match the
 source's.
 
 ### No preference = null/absence
@@ -559,3 +561,76 @@ stands.
 - **Soft-scoring Anand Karaj / covered-head / full-midriff in the demo.**
   Rejected: a culturally-distinct ceremony or a mandatory coverage requirement
   must fail closed rather than show a misleading nearest image.
+
+---
+
+## Addendum (2026-08-13, Phase 23) — every filled option explains itself
+
+Recorded here rather than as a new ADR because it continues this record's
+option-presentation metadata decision rather than changing anything about it.
+See ADR 0028 for the rest of Phase 23.
+
+### The defect
+
+`ChoiceOptionCard` mounts its info trigger only for an option that carries a
+`description`. So a question where **one** option has one and eleven do not
+renders a single unexplained "i" beside eleven bare cards. That is exactly what
+happened to `fabrics`: satin arrived with this record's Phase 16B work carrying a
+description, alongside eleven options inherited from v1 that never had one.
+
+> **Owner report:** "on the materials only one of them has the info button either
+> none of them should or all of them should."
+
+The instinct is right for a reason past tidiness. A per-option info affordance is
+read as *"this one needs explaining"* — so a lone trigger does not say "here is
+help", it says "this option is the unusual one". All-or-none is the only
+presentation that carries no accidental meaning.
+
+### The decision
+
+**Questionnaire v5**, a new draft: v4 verbatim plus option descriptions for three
+questions, and nothing else.
+
+| Question | v4 | v5 |
+| --- | --- | --- |
+| `fabrics` | 1 / 12 | 12 / 12 |
+| `embellishment_styles` | 0 / 13 | 13 / 13 |
+| `embellishment_density` | 0 / 3 | 3 / 3 |
+| `regional_style` | 0 / 9 | **0 / 9, deliberately** |
+
+**A new version, not an edit to v4.** Published versions are immutable
+(ADR 0005), and a description lives inside the frozen `schema` JSON, so the rule
+applies whole even though no validator reads the text. `QuestionnaireVersion`'s
+immutability guard is database-enforced, so an edited v4 fixture would be
+*rejected* in any environment where v4 has been activated — and Phase 9 already
+paid for this lesson once, when v1 was edited in place and had to be restored
+byte for byte. A fixture is data, not schema: no migration is involved, and the
+cost of a fifth version is one more JSON row.
+
+**`regional_style` stays undescribed, on purpose.** A one-line description of a
+living regional tradition is a claim about a community, not a UI affordance. §12
+requires regional influences to stay optional and non-prescriptive, and the
+honest options were nine careful sentences someone qualified has reviewed, or
+none. Zero of nine is also internally consistent — the question renders exactly
+as it does today, with no info triggers anywhere, rather than half-explained. The
+gap is guarded by a named comment block in the build script and a test that fails
+the moment someone "finishes" it without that review.
+
+> **Owner decision (2026-08-11):** "Nobody — leave that question without
+> descriptions."
+
+**No colour-swatch descriptions.** A swatch is its own explanation. The one
+legitimate exception is `match_fabric`, which is a relationship rather than a
+colour and keeps the description it already has.
+
+### What this does not change
+
+A description is presentation metadata and nothing else. It never reaches
+`source_selections`, a DesignSpec, an image prompt, a refinement payload or any
+provider request — asserted as a negative against the real generation chain, for
+whole sentences and for distinctive clause fragments. A design pinned to v4 keeps
+its exact historical semantics: its DesignSpec and image prompt are byte-identical
+whether or not v5 exists.
+
+v5 ships as a **draft**. Activation is a separate operator step; `loaddata` never
+activates.

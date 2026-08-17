@@ -46,8 +46,17 @@ class TestVersionNumbering:
         v1 = create_next_design_version(design)
         assert create_next_design_version(design, **_refinement_stub(v1)).version_number == 2
 
-    def test_third_version_is_refused_under_the_default_maximum(self, settings):
-        assert settings.MAX_DESIGN_VERSIONS == 2
+    def test_the_default_maximum_is_one_concept_plus_every_refinement(self, settings):
+        # The two settings must stay in step: a customer allowed three
+        # refinements needs room for four versions, and an operator who raises
+        # one without the other gets a refusal rather than a silently deeper
+        # lineage. Asserted as the literal so raising MAX_REFINEMENTS without
+        # revisiting this trips here rather than at a customer's fourth request.
+        assert settings.MAX_REFINEMENTS == 3
+        assert settings.MAX_DESIGN_VERSIONS == 4
+
+    def test_the_version_after_the_maximum_is_refused(self, settings):
+        settings.MAX_DESIGN_VERSIONS = 2
         design = make_design()
         v1 = create_next_design_version(design)
         create_next_design_version(design, **_refinement_stub(v1))
@@ -111,11 +120,16 @@ class TestVersionNumbering:
 
 @pytest.mark.django_db(transaction=True)
 class TestVersionConcurrency:
-    def test_concurrent_attempts_cannot_duplicate_version_numbers(self):
+    def test_concurrent_attempts_cannot_duplicate_version_numbers(self, settings):
         """Two simultaneous refinement-style callers, both targeting version 2
         of an existing version 1 under MAX_DESIGN_VERSIONS=2, must produce
         exactly one version 2 and exactly one limit refusal — the row lock
-        serialises them; no duplicates, no overshoot."""
+        serialises them; no duplicates, no overshoot.
+
+        The cap is pinned here rather than inherited from the default, which is
+        now 4: this test is about the lock at the boundary, so it needs a
+        boundary two callers can actually reach."""
+        settings.MAX_DESIGN_VERSIONS = 2
         design = make_design()
         v1 = create_next_design_version(design)
         created: list[int] = []
