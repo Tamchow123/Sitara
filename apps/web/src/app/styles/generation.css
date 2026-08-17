@@ -334,16 +334,30 @@
   font-weight: 600;
 }
 
-/* §8.5's send disclosure. Its own full-width row rather than a third flex item:
-   it is a sentence, not a control, and it must be readable before the button
-   beside it is pressed. */
-.result-image-send-note {
-  flex-basis: 100%;
+/* §8.5's send disclosure, wherever it is stated. One rule for how the sentence
+   READS, so a change to its size or colour cannot land on one surface and miss
+   the other; the two rules below carry only what differs about where it SITS. */
+.result-image-send-note,
+.comparison-send-note {
   margin: 0;
-  max-width: 52ch;
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--color-neutral-700);
+}
+
+/* On a card: its own full-width row rather than a third flex item, because it is
+   a sentence and not a control, and it must be readable before the button beside
+   it is pressed. */
+.result-image-send-note {
+  flex-basis: 100%;
+  max-width: 52ch;
+}
+
+/* On the comparison screen: the same sentence, but owned by the screen rather
+   than by either card, so it sits below the grid instead of in a figcaption and
+   has the full width to run to. */
+.comparison-send-note {
+  max-width: 62ch;
 }
 
 .result-image-state {

@@ -213,6 +213,12 @@ test.describe("visual regression: generation, result, refinement and history", (
     await expect(page.getByRole("heading", { name: /previous design/i })).toBeVisible({
       timeout: 30_000,
     });
+    // Both cards' ACTION rows, not just the heading. The previous card's image
+    // query only starts once its result query has succeeded, so a shot taken on
+    // the heading alone can catch that card with its title and without its
+    // Annotate/Send row — the same class of flapping baseline the generation
+    // stage wait above exists to prevent.
+    await expect(page.getByRole("link", { name: /^annotate\b/i })).toHaveCount(2);
     await shoot(page, "history");
   });
 });

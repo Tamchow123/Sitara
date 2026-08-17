@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { STYLIST_STATE_PATH } from "./helpers/account";
+import { expectNoSeriousViolations } from "./helpers/axe";
 import { completeQuestionnaire, waitForDesignQuiescent } from "./helpers/wizard";
 
 // Phase 17 §25 journeys 6-10: a real generation driven by real server state,
@@ -120,6 +121,28 @@ test.describe("generation, result, refinement and history", () => {
     await expect(page.getByRole("heading", { name: /previous design/i })).toBeVisible({
       timeout: 30_000,
     });
+
+    // --- Journey 10 continued: both concepts carry their own actions ------
+    // Before ADR 0029 this screen was a farewell look at a finished pair, and
+    // ResultImage gated Annotate and Send behind ids the comparison never
+    // passed. It is now where a customer stands between rounds, so the concept
+    // she is looking at is the one she can annotate and email — either of them.
+    const annotateLinks = page.getByRole("link", { name: /^annotate\b/i });
+    await expect(annotateLinks).toHaveCount(2);
+    await expect(page.getByRole("button", { name: /send to account/i })).toHaveCount(2);
+    // Each points at its OWN version, not twice at the page's.
+    const hrefs = await annotateLinks.evaluateAll((links) =>
+      links.map((link) => link.getAttribute("href")),
+    );
+    expect(new Set(hrefs).size).toBe(2);
+    // ADR 0021's accepted-exposure sentence is stated once for the screen,
+    // however many send controls stand on it.
+    await expect(page.getByText(/may keep a copy outside/i)).toHaveCount(1);
+
+    // Two of every action on one screen is exactly where a name/role/value or
+    // duplicate-id problem appears, and it is the one screen the accessibility
+    // spec cannot reach without paying for a second full generation.
+    await expectNoSeriousViolations(page, "comparison view (two concepts, two action sets)");
 
     // --- Journey 9 continued: the chain carries on from the NEW version ---
     // The refined concept is refinable in turn (ADR 0029), and the offer is

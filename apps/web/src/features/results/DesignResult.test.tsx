@@ -12,6 +12,11 @@ const mocks = vi.hoisted(() => ({
   fetchDesignImageUrls: vi.fn(),
   fetchDesign: vi.fn(),
   fetchPublicConfig: vi.fn(),
+  // The concept's Send to account control reaches these. Stubbed so the
+  // allowance sentence and the naming prompt are asserted against a known
+  // state rather than against whatever a failed transport read leaves behind.
+  fetchRenderSendState: vi.fn(),
+  sendRenderToAccount: vi.fn(),
   // Captures every useQuery(...) options object this test file's render
   // passes through, keyed by call order, so assertions can find the image
   // query specifically by its queryKey.
@@ -26,8 +31,16 @@ vi.mock("@/lib/api", async () => {
     fetchDesignImageUrls: mocks.fetchDesignImageUrls,
     fetchDesign: mocks.fetchDesign,
     fetchPublicConfig: mocks.fetchPublicConfig,
+    fetchRenderSendState: mocks.fetchRenderSendState,
+    sendRenderToAccount: mocks.sendRenderToAccount,
   };
 });
+
+// Signed in. ADR 0023 requires an account to have reached a result at all, and
+// `useAuth`'s context default is anonymous — left alone, every send control here
+// would render its signed-out branch and prove nothing about the real one.
+const auth = vi.hoisted(() => ({ user: null as unknown }));
+vi.mock("@/lib/auth", () => ({ useAuth: () => auth }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -172,6 +185,13 @@ beforeEach(() => {
   sessionStorage.clear();
   mocks.fetchDesign.mockResolvedValue(design());
   mocks.fetchPublicConfig.mockResolvedValue(publicConfig(true));
+  auth.user = { id: "u1", email: "stylist@example.com" };
+  mocks.fetchRenderSendState.mockResolvedValue({
+    used: 0,
+    limit: 3,
+    suggestedFilename: "Ivory and gold",
+  });
+  mocks.sendRenderToAccount.mockResolvedValue({ ok: true });
 });
 
 afterEach(() => {
@@ -586,7 +606,11 @@ describe("DesignResult — copy and download actions", () => {
     expect(await screen.findByText(/could not copy/i)).toBeInTheDocument();
   });
 
-  it("downloads the brief with the fixed filename and revokes the object URL", async () => {
+  it("downloads the brief under a version-numbered filename and revokes the object URL", async () => {
+    // Version-numbered since the comparison screen offers two of these at once.
+    // One fixed name would have the browser silently rename the second to
+    // "…(1).txt", leaving a customer two files and no way to tell which concept
+    // either one describes.
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const createObjectURL = vi.fn().mockReturnValue("blob:fake-url");
@@ -601,7 +625,7 @@ describe("DesignResult — copy and download actions", () => {
     await screen.findByRole("heading", { name: /Ivory and gold/i });
     fireEvent.click(screen.getByRole("button", { name: /download brief/i }));
     expect(createObjectURL).toHaveBeenCalledTimes(1);
-    expect(downloadedFilename).toBe("sitara-design-brief.txt");
+    expect(downloadedFilename).toBe("sitara-design-brief-v1.txt");
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:fake-url");
     HTMLAnchorElement.prototype.click = originalClick;
   });

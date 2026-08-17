@@ -61,6 +61,9 @@ describe("ResultImage", () => {
         error={null}
         altText="alt"
         onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     expect(screen.getByRole("status")).toHaveTextContent(/loading your image/i);
@@ -76,6 +79,9 @@ describe("ResultImage", () => {
         error={new DesignImageQueryError(409, "design_image_not_ready", "not ready")}
         altText="alt"
         onRetry={onRetry}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent(/not ready/i);
@@ -92,6 +98,9 @@ describe("ResultImage", () => {
         error={new DesignImageQueryError(404, "not_found", "not found")}
         altText="alt"
         onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent(/not available/i);
@@ -106,6 +115,9 @@ describe("ResultImage", () => {
         error={new DesignImageQueryError(0, "unavailable", "The service could not be reached.")}
         altText="alt"
         onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent(/could not be reached/i);
@@ -120,6 +132,9 @@ describe("ResultImage", () => {
         error={null}
         altText="A model in a lehenga."
         onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     const img = screen.getByRole("img", { name: "A model in a lehenga." });
@@ -144,6 +159,7 @@ describe("ResultImage", () => {
         onRetry={vi.fn()}
         designId="design-1"
         versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     expect(screen.getByRole("link", { name: /annotate/i })).toHaveAttribute(
@@ -170,6 +186,7 @@ describe("ResultImage", () => {
         onRetry={vi.fn()}
         designId="design-1"
         versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     const note = screen.getByText(/may keep a copy outside sitara/i);
@@ -177,9 +194,17 @@ describe("ResultImage", () => {
     expect(note.textContent).toMatch(/your mail provider and your inbox/i);
   });
 
-  it("omits both actions when it is not given a design and version", () => {
-    // The comparison view renders two renders read-only; neither is the one the
-    // page is "about", so neither gets an Annotate or Send action.
+  it("carries both actions on every rendered concept image, with no opt-out", () => {
+    // This replaces a test that asserted the OPPOSITE — "omits both actions when
+    // it is not given a design and version" — on the stated grounds that "the
+    // comparison view renders two renders read-only". It never was read-only:
+    // the full-size signed-URL anchor sits above that gate and each card's brief
+    // carries Copy and Download. What the gate actually did was leave a customer
+    // looking at her refined concept with no way to annotate or email it, on the
+    // one screen a refinement takes her to.
+    //
+    // `designId` and `versionId` are now REQUIRED, so the omission is not
+    // expressible; the test that remains is that a rendered image always has both.
     render(
       <ResultImage
         images={images()}
@@ -188,10 +213,79 @@ describe("ResultImage", () => {
         error={null}
         altText="alt"
         onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
-    expect(screen.queryByRole("link", { name: /annotate/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /send to account/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /annotate/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send to account/i })).toBeInTheDocument();
+  });
+
+  it("qualifies both actions with the version, for a flat screen-reader list", () => {
+    // The comparison screen renders two of these. A rotor shows a flat list of
+    // links and buttons and does not show the <article> grouping them, so two
+    // bare "Annotate"s are indistinguishable. The text is visually hidden —
+    // nothing changes for a sighted reader who has the card heading above it.
+    render(
+      <ResultImage
+        images={images()}
+        isPending={false}
+        isFetching={false}
+        error={null}
+        altText="alt"
+        onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="Previous concept, version 1"
+      />,
+    );
+    expect(
+      screen.getByRole("link", { name: /annotate — previous concept, version 1/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /send to account — previous concept, version 1/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the send disclosure only when the screen asks it to", () => {
+    // Exactly one instance per screen states the accepted exposure. It stays in
+    // this component rather than being hoisted, because it belongs in the same
+    // branch as the button it describes — hoisted, it would print while the
+    // image is pending, errored or expired and no send control exists at all.
+    const { unmount } = render(
+      <ResultImage
+        images={images()}
+        isPending={false}
+        isFetching={false}
+        error={null}
+        altText="alt"
+        onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 2"
+        showSendDisclosure={false}
+      />,
+    );
+    expect(screen.queryByText(/your mail provider and your inbox/i)).not.toBeInTheDocument();
+    // Suppressing the sentence must not suppress the control it describes.
+    expect(screen.getByRole("button", { name: /send to account/i })).toBeInTheDocument();
+    unmount();
+
+    render(
+      <ResultImage
+        images={images()}
+        isPending={false}
+        isFetching={false}
+        error={null}
+        altText="alt"
+        onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 2"
+      />,
+    );
+    expect(screen.getByText(/your mail provider and your inbox/i)).toBeInTheDocument();
   });
 
   it("disables Send to account for an anonymous owner and says why", () => {
@@ -207,6 +301,7 @@ describe("ResultImage", () => {
         onRetry={vi.fn()}
         designId="design-1"
         versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     expect(screen.getByRole("button", { name: /send to account/i })).toBeDisabled();
@@ -229,6 +324,7 @@ describe("ResultImage", () => {
         onRetry={vi.fn()}
         designId="design-1"
         versionId="version-1"
+        versionLabel="version 1"
       />,
     );
 
@@ -269,6 +365,7 @@ describe("ResultImage", () => {
         onRetry={vi.fn()}
         designId="design-1"
         versionId="version-1"
+        versionLabel="version 1"
       />,
     );
 
@@ -298,6 +395,7 @@ describe("ResultImage", () => {
         onRetry={vi.fn()}
         designId="design-1"
         versionId="version-1"
+        versionLabel="version 1"
       />,
     );
 
@@ -318,6 +416,9 @@ describe("ResultImage", () => {
         error={null}
         altText="alt"
         onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     const anchor = screen.getByRole("img", { name: "alt" }).closest("a");
@@ -336,6 +437,7 @@ describe("ResultImage", () => {
         onRetry={vi.fn()}
         designId="design-1"
         versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
@@ -353,6 +455,9 @@ describe("ResultImage", () => {
         error={null}
         altText="alt"
         onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     expect(screen.getByRole("status")).toHaveTextContent(/refreshing/i);
@@ -369,6 +474,9 @@ describe("ResultImage", () => {
         error={null}
         altText="alt"
         onRetry={onRetry}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     const img = screen.getByRole("img", { name: "alt" });
@@ -386,6 +494,9 @@ describe("ResultImage", () => {
         error={null}
         altText="alt"
         onRetry={onRetry}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     const img = screen.getByRole("img", { name: "alt" });
@@ -400,6 +511,9 @@ describe("ResultImage", () => {
         error={null}
         altText="alt"
         onRetry={onRetry}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     fireEvent.error(screen.getByRole("img", { name: "alt" }));
@@ -416,6 +530,9 @@ describe("ResultImage", () => {
         error={null}
         altText="alt"
         onRetry={onRetry}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     const img = screen.getByRole("img", { name: "alt" });
@@ -442,6 +559,9 @@ describe("ResultImage", () => {
         error={null}
         altText="alt"
         onRetry={onRetry}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     fireEvent.error(screen.getByRole("img", { name: "alt" }));
@@ -458,6 +578,9 @@ describe("ResultImage", () => {
           error={null}
           altText="alt"
           onRetry={onRetry}
+          designId="design-1"
+          versionId="version-1"
+          versionLabel="version 1"
         />,
       );
       fireEvent.error(screen.getByRole("img", { name: "alt" }));
@@ -474,6 +597,9 @@ describe("ResultImage", () => {
         error={null}
         altText="alt"
         onRetry={vi.fn()}
+        designId="design-1"
+        versionId="version-1"
+        versionLabel="version 1"
       />,
     );
     expect(screen.queryByText(/minio\.local/i)).not.toBeInTheDocument();

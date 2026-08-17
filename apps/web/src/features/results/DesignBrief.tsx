@@ -12,7 +12,20 @@ import { DEMO_REFINEMENT_SAME_ASSET_DISCLOSURE, DEMO_RESULT_DISCLOSURE } from ".
 import { formatDesignBrief } from "./result-brief";
 import type { DesignResult } from "@/lib/api";
 
-type Props = { result: DesignResult };
+type Props = {
+  result: DesignResult;
+  /**
+   * Prefix for every DOM id this brief mints. REQUIRED, because the comparison
+   * view renders TWO briefs on one screen and BriefSection wires each id into
+   * `aria-controls` and `aria-labelledby` — duplicated, an assistive technology
+   * following either reference lands on whichever copy the document happens to
+   * hold first, which on that screen is the other concept's card.
+   *
+   * `"brief"` on the single-brief result screen, so the ids there are exactly
+   * what they have always been.
+   */
+  idPrefix: string;
+};
 
 type CopyStatus = "idle" | "success" | "error";
 
@@ -41,7 +54,7 @@ function firstSentence(text: string, fallback: string): string {
   return sentence.length > 90 ? `${sentence.slice(0, 87).trimEnd()}…` : sentence;
 }
 
-export function DesignBrief({ result }: Props) {
+export function DesignBrief({ result, idPrefix }: Props) {
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
   // Which cards are open, and whether "Expand all" is in force. Both are view
   // state only — nothing here is persisted or sent anywhere.
@@ -71,7 +84,11 @@ export function DesignBrief({ result }: Props) {
     try {
       const link = document.createElement("a");
       link.href = url;
-      link.download = "sitara-design-brief.txt";
+      // Version-numbered because the comparison screen offers two of these at
+      // once: one fixed name would have the browser silently rename the second
+      // to "…(1).txt", leaving the customer two files and no way to tell which
+      // concept either describes.
+      link.download = `sitara-design-brief-v${result.version_number}.txt`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -103,7 +120,7 @@ export function DesignBrief({ result }: Props) {
       )}
 
       <div className="brief-toolbar">
-        <h2 className="kicker" id="brief-specification">
+        <h2 className="kicker" id={`${idPrefix}-specification`}>
           Design specification
         </h2>
         <button
@@ -119,11 +136,11 @@ export function DesignBrief({ result }: Props) {
       </div>
 
       <BriefSection
-        id="brief-garment"
+        id={`${idPrefix}-garment`}
         title="Garment breakdown"
         summary={firstSentence(result.garment_breakdown.overall_form, "The shape of the outfit")}
-        open={isOpen("brief-garment")}
-        onToggle={() => toggle("brief-garment")}
+        open={isOpen(`${idPrefix}-garment`)}
+        onToggle={() => toggle(`${idPrefix}-garment`)}
       >
         <dl>
           <dt>Overall form</dt>
@@ -142,11 +159,11 @@ export function DesignBrief({ result }: Props) {
       </BriefSection>
 
       <BriefSection
-        id="brief-colour"
+        id={`${idPrefix}-colour`}
         title="Colour story"
         summary={firstSentence(result.colour_story.palette_summary, "The palette")}
-        open={isOpen("brief-colour")}
-        onToggle={() => toggle("brief-colour")}
+        open={isOpen(`${idPrefix}-colour`)}
+        onToggle={() => toggle(`${idPrefix}-colour`)}
       >
         <dl>
           <dt>Palette</dt>
@@ -159,13 +176,13 @@ export function DesignBrief({ result }: Props) {
       </BriefSection>
 
       <BriefSection
-        id="brief-fabrics"
+        id={`${idPrefix}-fabrics`}
         title="Fabrics and texture"
         summary={
           result.fabrics_and_texture.map((fabric) => fabric.fabric).join(", ") || "The cloth"
         }
-        open={isOpen("brief-fabrics")}
-        onToggle={() => toggle("brief-fabrics")}
+        open={isOpen(`${idPrefix}-fabrics`)}
+        onToggle={() => toggle(`${idPrefix}-fabrics`)}
       >
         <ul className="fabrics-list">
           {result.fabrics_and_texture.map((fabric, index) => (
@@ -178,11 +195,11 @@ export function DesignBrief({ result }: Props) {
       </BriefSection>
 
       <BriefSection
-        id="brief-embellishment"
+        id={`${idPrefix}-embellishment`}
         title="Embellishment plan"
         summary={firstSentence(result.embellishment_plan.density, "The handwork")}
-        open={isOpen("brief-embellishment")}
-        onToggle={() => toggle("brief-embellishment")}
+        open={isOpen(`${idPrefix}-embellishment`)}
+        onToggle={() => toggle(`${idPrefix}-embellishment`)}
       >
         <dl>
           <dt>Techniques</dt>
@@ -205,11 +222,11 @@ export function DesignBrief({ result }: Props) {
       </BriefSection>
 
       <BriefSection
-        id="brief-coverage"
+        id={`${idPrefix}-coverage`}
         title="Coverage and drape"
         summary={firstSentence(result.coverage_and_drape.sleeves, "Coverage")}
-        open={isOpen("brief-coverage")}
-        onToggle={() => toggle("brief-coverage")}
+        open={isOpen(`${idPrefix}-coverage`)}
+        onToggle={() => toggle(`${idPrefix}-coverage`)}
       >
         <dl>
           <dt>Sleeves</dt>
@@ -226,7 +243,7 @@ export function DesignBrief({ result }: Props) {
       </BriefSection>
 
       <BriefSection
-        id="brief-cultural"
+        id={`${idPrefix}-cultural`}
         title="Cultural context"
         summary={
           result.cultural_context.regional_direction ||
@@ -235,8 +252,8 @@ export function DesignBrief({ result }: Props) {
             "How the traditions were read",
           )
         }
-        open={isOpen("brief-cultural")}
-        onToggle={() => toggle("brief-cultural")}
+        open={isOpen(`${idPrefix}-cultural`)}
+        onToggle={() => toggle(`${idPrefix}-cultural`)}
       >
         {result.cultural_context.regional_direction && (
           <p>
@@ -250,32 +267,32 @@ export function DesignBrief({ result }: Props) {
       </BriefSection>
 
       <BriefSection
-        id="brief-styling"
+        id={`${idPrefix}-styling`}
         title="Styling notes"
         summary={firstSentence(result.styling_notes[0] ?? "", "How to wear it")}
-        open={isOpen("brief-styling")}
-        onToggle={() => toggle("brief-styling")}
+        open={isOpen(`${idPrefix}-styling`)}
+        onToggle={() => toggle(`${idPrefix}-styling`)}
       >
         <NarrativeList items={result.styling_notes} className="styling-list" />
       </BriefSection>
 
       <BriefSection
-        id="brief-caveats"
+        id={`${idPrefix}-caveats`}
         title="Construction caveats"
         summary="A concept, not a sewing pattern — for a tailor to assess"
-        open={isOpen("brief-caveats")}
-        onToggle={() => toggle("brief-caveats")}
+        open={isOpen(`${idPrefix}-caveats`)}
+        onToggle={() => toggle(`${idPrefix}-caveats`)}
       >
         <NarrativeList items={result.construction_caveats} />
       </BriefSection>
 
       {result.inspiration_acknowledgements.length > 0 && (
         <BriefSection
-          id="brief-inspiration"
+          id={`${idPrefix}-inspiration`}
           title="Inspiration acknowledgements"
           summary={result.inspiration_acknowledgements.map((a) => a.title).join(", ")}
-          open={isOpen("brief-inspiration")}
-          onToggle={() => toggle("brief-inspiration")}
+          open={isOpen(`${idPrefix}-inspiration`)}
+          onToggle={() => toggle(`${idPrefix}-inspiration`)}
         >
           {/* This paragraph used to say the source images "were not sent to the
               generation models". ADR 0019 reversed that for the references a

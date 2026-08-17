@@ -243,11 +243,15 @@ export function DesignResult({ designId, versionId }: Props) {
             onRetry={() => void imageQuery.refetch()}
             designId={designId}
             versionId={versionId}
+            versionLabel={`version ${result.version_number}`}
           />
         </div>
 
         <div className="concept-detail">
-          <DesignBrief result={result} />
+          {/* "brief", so the ids on this screen are exactly what they have
+              always been. The comparison view passes something else because it
+              renders two of these. */}
+          <DesignBrief result={result} idPrefix="brief" />
 
           {refinementSection}
         </div>

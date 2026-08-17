@@ -80,7 +80,7 @@ test.describe("the private annotation workspace", () => {
     const resultUrl = page.url();
 
     // The concept screen offers Annotate and Send, and no longer a download.
-    await expect(page.getByRole("link", { name: /^annotate$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^annotate\b/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /download image/i })).toHaveCount(0);
 
     // The image the workspace will be drawn over, recorded so it can be proved
@@ -88,7 +88,7 @@ test.describe("the private annotation workspace", () => {
     const originalSrc = await page.locator(".result-image").getAttribute("src");
 
     // --- Open the workspace ----------------------------------------------
-    await page.getByRole("link", { name: /^annotate$/i }).click();
+    await page.getByRole("link", { name: /^annotate\b/i }).click();
     await expect(page).toHaveURL(/\/annotate$/);
     await expect(page.getByRole("heading", { name: "Annotate this concept" })).toBeVisible();
     await expect(page.getByText("Private — only you")).toBeVisible();
@@ -214,7 +214,7 @@ test.describe("the private annotation workspace", () => {
     await page.getByRole("button", { name: /generate my concept/i }).click();
     await page.waitForURL(/\/result\/[0-9a-f-]{36}/, { timeout: 180_000 });
 
-    await page.getByRole("link", { name: /^annotate$/i }).click();
+    await page.getByRole("link", { name: /^annotate\b/i }).click();
     await expect(page.getByRole("heading", { name: "Annotate this concept" })).toBeVisible();
 
     await page.getByRole("button", { name: /^pin \(P\)$/i }).click();
@@ -289,7 +289,7 @@ test.describe("the private annotation workspace", () => {
     await page.getByRole("button", { name: /generate my concept/i }).click();
     await page.waitForURL(/\/result\/[0-9a-f-]{36}/, { timeout: 180_000 });
 
-    await page.getByRole("link", { name: /^annotate$/i }).click();
+    await page.getByRole("link", { name: /^annotate\b/i }).click();
     await expect(page.getByRole("heading", { name: "Annotate this concept" })).toBeVisible();
 
     await page.getByRole("button", { name: /send to account/i }).click();

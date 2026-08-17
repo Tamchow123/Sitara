@@ -62,19 +62,19 @@ function result(overrides: Partial<DesignResult> = {}): DesignResult {
 
 describe("DesignBrief — demo disclosure", () => {
   it("shows the demo disclaimer when the result is_demo", () => {
-    render(<DesignBrief result={result({ is_demo: true })} />);
+    render(<DesignBrief result={result({ is_demo: true })} idPrefix="brief" />);
     const disclaimer = screen.getByRole("note", { name: /demo disclaimer/i });
     expect(disclaimer).toHaveTextContent(/curated demo pack/i);
     expect(disclaimer).toHaveTextContent(/not newly generated/i);
   });
 
   it("does not show the demo disclaimer for a live result", () => {
-    render(<DesignBrief result={result({ is_demo: false })} />);
+    render(<DesignBrief result={result({ is_demo: false })} idPrefix="brief" />);
     expect(screen.queryByRole("note", { name: /demo disclaimer/i })).not.toBeInTheDocument();
   });
 
   it("keeps the concept disclaimer alongside the demo disclaimer", () => {
-    render(<DesignBrief result={result({ is_demo: true })} />);
+    render(<DesignBrief result={result({ is_demo: true })} idPrefix="brief" />);
     expect(screen.getByRole("note", { name: /concept disclaimer/i })).toBeInTheDocument();
     expect(screen.getByRole("note", { name: /demo disclaimer/i })).toBeInTheDocument();
   });
@@ -89,7 +89,7 @@ describe("DesignBrief — demo disclosure", () => {
   };
 
   it("says so when a demo refinement resolved to the same pack image", () => {
-    render(<DesignBrief result={result({ is_demo: true, lineage: sameAssetRefinement })} />);
+    render(<DesignBrief result={result({ is_demo: true, lineage: sameAssetRefinement })} idPrefix="brief" />);
     const disclaimer = screen.getByRole("note", { name: /demo disclaimer/i });
     expect(disclaimer).toHaveTextContent(/no closer image/i);
     expect(disclaimer).toHaveTextContent(/did change the design brief/i);
@@ -102,7 +102,7 @@ describe("DesignBrief — demo disclosure", () => {
       ...sameAssetRefinement,
       refinement: { ...sameAssetRefinement.refinement, demo_asset_unchanged: false },
     };
-    render(<DesignBrief result={result({ is_demo: true, lineage: changed })} />);
+    render(<DesignBrief result={result({ is_demo: true, lineage: changed })} idPrefix="brief" />);
     expect(screen.getByRole("note", { name: /demo disclaimer/i })).not.toHaveTextContent(
       /no closer image/i,
     );
@@ -111,7 +111,7 @@ describe("DesignBrief — demo disclosure", () => {
   it("never claims a same-asset outcome on an initial concept", () => {
     // `lineage.refinement` is null for an initial version, so the optional
     // chain must not resolve to anything renderable.
-    render(<DesignBrief result={result({ is_demo: true })} />);
+    render(<DesignBrief result={result({ is_demo: true })} idPrefix="brief" />);
     expect(screen.getByRole("note", { name: /demo disclaimer/i })).not.toHaveTextContent(
       /no closer image/i,
     );
@@ -128,7 +128,7 @@ function openCard(name: RegExp | string) {
 
 describe("DesignBrief — inspiration acknowledgements", () => {
   it("renders no acknowledgement section when the list is empty", () => {
-    render(<DesignBrief result={result()} />);
+    render(<DesignBrief result={result()} idPrefix="brief" />);
     expect(screen.queryByText("Inspiration acknowledgements")).not.toBeInTheDocument();
   });
 
@@ -140,7 +140,7 @@ describe("DesignBrief — inspiration acknowledgements", () => {
             { position: 1, title: "Emerald look", attribution: "Studio A" },
           ],
         })}
-      />,
+      idPrefix="brief" />,
     );
     expect(screen.getByText("Inspiration acknowledgements")).toBeInTheDocument();
     openCard(/Inspiration acknowledgements/i);
@@ -158,7 +158,7 @@ describe("DesignBrief — inspiration acknowledgements", () => {
             { position: 3, title: "Third look", attribution: "" },
           ],
         })}
-      />,
+      idPrefix="brief" />,
     );
     openCard(/Inspiration acknowledgements/i);
     const items = screen.getAllByRole("listitem").filter((li) =>
@@ -181,7 +181,7 @@ describe("DesignBrief — inspiration acknowledgements", () => {
             { position: 1, title: "Unattributed look", attribution: "" },
           ],
         })}
-      />,
+      idPrefix="brief" />,
     );
     openCard(/Inspiration acknowledgements/i);
     const item = screen.getByText("Unattributed look").closest("li");
@@ -196,6 +196,7 @@ describe("DesignBrief — inspiration acknowledgements", () => {
             { position: 1, title: "A look", attribution: "<script>alert(1)</script>" },
           ],
         })}
+        idPrefix="brief"
       />,
     );
     openCard(/Inspiration acknowledgements/i);
@@ -211,7 +212,7 @@ describe("DesignBrief — inspiration acknowledgements", () => {
             { position: 1, title: "Emerald look", attribution: "Studio A" },
           ],
         })}
-      />,
+      idPrefix="brief" />,
     );
     openCard(/Inspiration acknowledgements/i);
     const text = document.body.textContent ?? "";
@@ -233,7 +234,7 @@ describe("DesignBrief — inspiration acknowledgements", () => {
             { position: 1, title: "Emerald look", attribution: "Studio A" },
           ],
         })}
-      />,
+      idPrefix="brief" />,
     );
     openCard(/Inspiration acknowledgements/i);
     expect(screen.getByText(/sent to the AI image provider/i)).toBeInTheDocument();
@@ -247,7 +248,7 @@ describe("DesignBrief — inspiration acknowledgements", () => {
           is_demo: true,
           inspiration_acknowledgements: [{ position: 1, title: "Emerald look", attribution: "" }],
         })}
-      />,
+      idPrefix="brief" />,
     );
     openCard(/Inspiration acknowledgements/i);
     expect(screen.getByText(/no image .* was sent to an AI provider/i)).toBeInTheDocument();

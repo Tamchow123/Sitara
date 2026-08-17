@@ -39,6 +39,24 @@ them; only its generation/result test is signed in.
 
 The session lands in `e2e/.auth/` (gitignored) as a storage-state file — the
 session cookie, which is what a browser holds. No password is written to disk.
+It is kept out of the image by `apps/web/.dockerignore` and out of the `web`
+container by a `tmpfs` shadow in `compose.yaml`, because that directory is now
+bind-mounted (for the prose guard described below) and a bind mount ignores
+`.dockerignore` entirely.
+
+**The axe engine lives in `helpers/axe.ts`, not in `accessibility.spec.ts`.**
+`generation.spec.ts` points the same engine, with the same one disabled rule, at
+the comparison view — the screen that carries two of every action and is
+therefore where a name/role/value or duplicate-id problem shows up. It is not
+checked from `accessibility.spec.ts` because reaching it there would mean paying
+for a second full generation to see a screen `generation.spec.ts` is already
+standing on.
+
+**`e2e/` is bind-mounted into the `web` service** (read-only), which no other
+spec directory is. `src/app/refinement-budget-copy.test.ts` scans these specs'
+prose for superseded claims about the refinement budget; without the mount it
+would read whatever the last `docker compose build web` baked in and report
+green on a claim added afterwards.
 
 **One account holding many concepts is why `gallery.spec.ts` never counts cards.**
 Every generating spec adds to the same gallery, and the desktop and mobile
@@ -194,6 +212,41 @@ The 30 committed baselines are ~11 MB, because they are full-page shots of
 photo-heavy questionnaire screens. That is a deliberate, and not free, trade-off:
 a re-record after an intended design change adds roughly that much again to
 history. Re-record only when a change is intended, never to make a red run green.
+
+## The committed baselines are stale, and have been since Phase 19
+
+**Measured on 2026-08-17, on the Phase 23 branch: 7 of 14 fail.** `landing`,
+`concepts`, `result` and mobile `questionnaire-ceremony`; the generation spec
+aborts at `result`, so `refinement` and `history` are simply unreached and their
+state is unknown rather than good.
+
+Only `landing` and `concepts` are recent — the Phase 23 refinement-budget copy
+correction moved them. The rest predate this phase by three. `git log` puts the
+last full re-record at `2471175` (Phase 17), and the committed
+`result-desktop-win32.png` still shows:
+
+- a **Download image** link under the render, which Phase 19 (ADR 0020) replaced
+  with Annotate and Send to account;
+- the kicker **"REFINE THIS CONCEPT · ONE REFINEMENT"** and the sentence "You may
+  request exactly one change", which ADR 0029 superseded;
+- a **Styling details** refinement category, which ADR 0028 retired;
+- a signed-out **Sign in / Create account** header, on a screen ADR 0023 now
+  requires an account to reach;
+- refinement category cards with no option descriptions, which the ADR 0018
+  Phase 23 addendum added.
+
+This is the same defect class the two refinement-budget prose guards were written
+for — a check that CI does not run drifted quietly, and its "expected" image is
+now a museum of superseded claims, including the literal words "ONE REFINEMENT"
+that every other surface was corrected away from. The guards scan `.ts/.tsx/
+.css/.md`; nothing scans a PNG, and nothing can.
+
+**Do not re-record these as a side effect of an unrelated change.** Approving a
+baseline asserts the screen is right, and re-recording all of them in one pass
+would bless four phases of UI nobody has looked at. It wants its own commit, with
+each new image actually reviewed. The instruction two paragraphs above — "never
+to make a red run green" — is exactly the rule that applies here, and it points
+at reviewing the drift rather than at hiding it.
 
 Baselines live in `visual.spec.ts-snapshots/` and are **platform-specific** —
 Playwright suffixes them with the OS (`-win32`, `-linux`). The committed set was

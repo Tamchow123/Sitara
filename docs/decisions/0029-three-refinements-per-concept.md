@@ -103,6 +103,82 @@ not from a version list the result endpoint does not carry.
   rather than image editing, the original image's bytes never sent anywhere,
   seed reuse documented as a continuity aid only.
 
+### The comparison view stops being a farewell screen
+
+While the budget was one, the comparison view was the last screen of the flow:
+two finished renders, side by side, with nothing left to decide. `ResultImage`
+took `designId`/`versionId` as OPTIONAL props whose doc comment said the
+comparison view omitted them because it "shows two renders read-only", and so
+neither card offered Annotate or Send to account.
+
+That description was never accurate — the full-size signed-URL anchor sits above
+that gate and each card's brief carries Copy and Download — and chaining makes
+it actively wrong. The comparison view is now where a customer stands *between*
+rounds, and the concept she is looking at is the one she wants to mark up or send
+to herself. Both cards therefore carry both actions, each addressed to its own
+version, and the two ids are REQUIRED so the omission is not expressible.
+
+Three consequences follow from putting two of everything on one screen:
+
+- **The accepted-exposure sentence is stated once**, not once per control. ADR
+  0021's disclosure is a statement about what sending does; printed twice it
+  reads as two different exposures, and printed under one of two identical
+  controls it reads as applying to that one alone. A screen with ONE image keeps
+  it inside `ResultImage`, in the same branch as the button it describes, so it
+  never prints while the image is pending, errored or expired and no send control
+  exists. A screen with TWO cannot decide it there: nominating a card would drop
+  the sentence entirely whenever THAT card's image failed and its sibling's did
+  not, leaving a Send button with nothing said about what sending does. So the
+  comparison screen passes `showSendDisclosure={false}` to both cards and renders
+  the sentence itself, asking the exported `hasDeliverableImage` of each card the
+  same question those branches answer.
+- **The two briefs need disjoint DOM ids.** `BriefSection` wires each id into
+  `aria-controls` and `aria-labelledby`, so two briefs minting the same ids send
+  an assistive technology following either reference to whichever copy comes
+  first in the document — the other concept's card. `DesignBrief` therefore takes
+  a required `idPrefix`; the single-brief result screen passes `"brief"`, so the
+  ids there are exactly what they have always been.
+- **Only one send dialog may be open at a time.** `ModalDialog` contains a Tab
+  cycle behind a scrim, which a screen reader's browse mode walks straight past;
+  opening the second dialog on top of the first leaves the second's focus restore
+  pointing at an element inside the first. A small coordinator lends the claim to
+  one control at a time and renders the other disabled with its reason, which
+  takes it out of the browse-mode action set as well as the tab order. The
+  thorough fix — a portal plus `inert` on the rest of the document — is
+  deliberately deferred: `inert` is unimplemented in jsdom, so no component test
+  could prove it, and portalling out of the RTL container would silently stop the
+  existing `axeViolations(container)` assertions from auditing the dialog at all.
+  Screens with a single send control render no coordinator and are unchanged,
+  because the coordinator's default is permissive rather than absent.
+
+Both action sets also carry a visually-hidden version qualifier. A screen
+reader's rotor is a flat list of links and buttons and does not show the
+`<article>` that groups them, so two bare "Annotate"s name the same thing twice;
+nothing changes for a sighted reader, who has the card heading above them.
+
+The previous card is no longer labelled "Original concept": after round two the
+version being compared against is itself a refinement, so "Previous concept" is
+the only label true in every round. The same wording on the generation-progress
+back-link and in the refinement panel's caveat is corrected separately.
+
+**A sizing note for whoever first enables email delivery.** Three chained rounds
+means a design can reach four versions, each with a plain and an annotated render,
+each sendable `ACCOUNT_EMAIL_MAX_SENDS_PER_RENDER` (3) times — 24 possible messages
+for one concept, against `ACCOUNT_EMAIL_SEND_LIMIT_PER_HOUR` 10 and `_PER_DAY` 30.
+Nothing here relaxes any of those, and none of them is relaxed elsewhere either:
+this is recorded because the hourly ceiling is now reachable by ordinary use rather
+than only by abuse, and that is a capacity decision for the operator to take
+deliberately when `ACCOUNT_EMAIL_DELIVERY_ENABLED` is first turned on, rather than
+discover from a customer being refused.
+
+None of this touches what is sent anywhere. `ACCOUNT_EMAIL_DELIVERY_ENABLED`
+remains default-false, the recipient remains `request.user.email` read
+server-side with no client-supplied address accepted in any field, the send body
+remains the single filename, and the per-render lifetime cap is unchanged and
+still counted per `(design_version, kind)` — so a second card's control spends
+that version's own allowance and not the one beside it. Removing the download
+link remains a UX decision and not a privacy control.
+
 ### Known debt: a half-finished refinement still strands the design
 
 A refinement whose text stage succeeded and whose **image** stage then failed

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { VersionComparison } from "./VersionComparison";
@@ -9,6 +9,13 @@ import { axeViolations } from "@/test-utils/axe";
 const mocks = vi.hoisted(() => ({
   fetchDesignResult: vi.fn(),
   fetchDesignImageUrls: vi.fn(),
+  // Both cards now carry a Send to account control, so the send client is
+  // reached from this suite. Stubbed rather than left to the real module: an
+  // unstubbed `fetchRenderSendState` would go to the transport, and the
+  // allowance sentence and the naming prompt would both be asserted against
+  // whatever a failed read leaves behind — which is to say, vacuously.
+  fetchRenderSendState: vi.fn(),
+  sendRenderToAccount: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async () => {
@@ -17,8 +24,16 @@ vi.mock("@/lib/api", async () => {
     ...actual,
     fetchDesignResult: mocks.fetchDesignResult,
     fetchDesignImageUrls: mocks.fetchDesignImageUrls,
+    fetchRenderSendState: mocks.fetchRenderSendState,
+    sendRenderToAccount: mocks.sendRenderToAccount,
   };
 });
+
+// Signed in by default. `useAuth`'s context default is an anonymous user, so
+// without this every send control on this screen would render its signed-out
+// branch and every assertion about the real one would pass by never reaching it.
+const auth = vi.hoisted(() => ({ user: null as unknown }));
+vi.mock("@/lib/auth", () => ({ useAuth: () => auth }));
 
 function result(overrides: Partial<DesignResultType> = {}): DesignResultType {
   return {
@@ -97,7 +112,13 @@ function images(overrides: Partial<DesignImages> = {}): DesignImages {
   };
 }
 
-function renderComparison(refinedOverrides: Partial<DesignResultType> = {}) {
+function renderComparison(
+  refinedOverrides: Partial<DesignResultType> = {},
+  // The refined SIDE, not its result: the disclosure's placement depends on
+  // whether each card's image is deliverable, so a test has to be able to fail
+  // one card's image without touching the other's.
+  sideOverrides: Partial<Omit<Parameters<typeof VersionComparison>[0]["refined"], "result">> = {},
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const refined = refinedResult(refinedOverrides);
   const utils = render(
@@ -113,6 +134,7 @@ function renderComparison(refinedOverrides: Partial<DesignResultType> = {}) {
           imagesFetching: false,
           imagesError: null,
           onRetryImages: vi.fn(),
+          ...sideOverrides,
         }}
       />
     </QueryClientProvider>,
@@ -124,6 +146,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   sessionStorage.clear();
+  auth.user = { id: "u1", email: "stylist@example.com" };
+  mocks.fetchRenderSendState.mockResolvedValue({
+    used: 0,
+    limit: 3,
+    suggestedFilename: "Ivory lehenga",
+  });
+  mocks.sendRenderToAccount.mockResolvedValue({ ok: true });
 });
 
 afterEach(() => {
@@ -137,7 +166,7 @@ describe("VersionComparison", () => {
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison();
     expect(mocks.fetchDesignResult).toHaveBeenCalledWith("d1", "v1");
-    expect(await screen.findByRole("heading", { name: /original concept/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /previous concept/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /refined concept/i })).toBeInTheDocument();
   });
 
@@ -153,7 +182,7 @@ describe("VersionComparison", () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison();
-    await screen.findByRole("heading", { name: /original concept/i });
+    await screen.findByRole("heading", { name: /previous concept/i });
     const summaries = screen.getAllByText(/view complete brief/i);
     expect(summaries).toHaveLength(2);
     // Both details/summary controls actually expose the underlying brief.
@@ -167,7 +196,7 @@ describe("VersionComparison", () => {
     // Wait for BOTH cards to be mounted before reading order — the original
     // side loads asynchronously, so a premature query could otherwise catch
     // a transient single-card DOM.
-    await screen.findByRole("heading", { name: /original concept/i });
+    await screen.findByRole("heading", { name: /previous concept/i });
     await screen.findByRole("heading", { name: /refined concept/i });
     // DesignBrief also renders its own h3s (e.g. "Interpretation notes")
     // inside each card's collapsed detailed brief — scope to the card's own
@@ -178,7 +207,7 @@ describe("VersionComparison", () => {
     // just generated rather than the one they replaced.
     const headings = screen.getAllByRole("heading", { level: 2, name: /— version \d/ });
     expect(headings[0]).toHaveTextContent(/refined concept/i);
-    expect(headings[1]).toHaveTextContent(/original concept/i);
+    expect(headings[1]).toHaveTextContent(/previous concept/i);
     expect(headings[0]).toHaveTextContent(/current/i);
     expect(screen.getByRole("heading", { name: /previous design/i })).toBeInTheDocument();
   });
@@ -187,7 +216,7 @@ describe("VersionComparison", () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result({ is_demo: true }) });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison({ is_demo: false });
-    await screen.findByRole("heading", { name: /original concept/i });
+    await screen.findByRole("heading", { name: /previous concept/i });
     // Refined (live) leads; the original (demo) follows it.
     const headings = screen.getAllByRole("heading", { level: 2, name: /— version \d/ });
     expect(headings[0]).toHaveTextContent(/live/i);
@@ -204,7 +233,7 @@ describe("VersionComparison", () => {
         refinement: { change_type: "dupatta_or_saree_drape", demo_asset_unchanged: false },
       },
     });
-    await screen.findByRole("heading", { name: /original concept/i });
+    await screen.findByRole("heading", { name: /previous concept/i });
     const disclosure = container.querySelector(".comparison-disclosure");
     expect(disclosure?.textContent).toMatch(/requested change:\s*dupatta or saree drape/i);
   });
@@ -223,7 +252,7 @@ describe("VersionComparison", () => {
         refinement: { change_type: "styling_details", demo_asset_unchanged: false },
       },
     });
-    await screen.findByRole("heading", { name: /original concept/i });
+    await screen.findByRole("heading", { name: /previous concept/i });
     const disclosure = container.querySelector(".comparison-disclosure");
     expect(disclosure?.textContent).toMatch(/requested change:\s*styling details/i);
     expect(disclosure?.textContent).not.toMatch(/styling_details/);
@@ -233,7 +262,7 @@ describe("VersionComparison", () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const { container } = renderComparison();
-    await screen.findByRole("heading", { name: /original concept/i });
+    await screen.findByRole("heading", { name: /previous concept/i });
     expect(container.innerHTML).not.toMatch(/refinement_request/i);
   });
 
@@ -255,7 +284,7 @@ describe("VersionComparison", () => {
       message: "Design images are temporarily unavailable.",
     });
     renderComparison();
-    await screen.findByRole("heading", { name: /original concept/i });
+    await screen.findByRole("heading", { name: /previous concept/i });
     // Version 1's image failed, but its brief (and version 2's) still show.
     expect(await screen.findByText(/temporarily unavailable/i, {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.getAllByText(/The original concept summary\./i).length).toBeGreaterThan(0);
@@ -286,7 +315,7 @@ describe("VersionComparison", () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     const { unmount, client } = renderComparison();
-    await screen.findByRole("heading", { name: /original concept/i });
+    await screen.findByRole("heading", { name: /previous concept/i });
     unmount();
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -299,18 +328,18 @@ describe("VersionComparison", () => {
     mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
     mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
     renderComparison();
-    await screen.findByRole("heading", { name: /original concept/i });
+    await screen.findByRole("heading", { name: /previous concept/i });
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
   });
 
-  it("shows a loading state for the original concept before it resolves", () => {
+  it("shows a loading state for the previous concept before it resolves", () => {
     mocks.fetchDesignResult.mockReturnValue(new Promise(() => {}));
     renderComparison();
-    expect(screen.getByText(/loading your original concept/i)).toBeInTheDocument();
+    expect(screen.getByText(/loading your previous concept/i)).toBeInTheDocument();
   });
 
-  it("shows a retryable error state if the original concept cannot be loaded", async () => {
+  it("shows a retryable error state if the previous concept cannot be loaded", async () => {
     mocks.fetchDesignResult.mockResolvedValue({
       ok: false,
       status: 503,
@@ -321,6 +350,203 @@ describe("VersionComparison", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/temporarily unavailable/i);
     expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+  });
+
+  describe("both concepts carry their own actions", () => {
+    // Until ADR 0029 a refinement was a one-off, and this screen was a farewell
+    // look at a finished pair — ResultImage gated Annotate and Send behind
+    // optional ids the comparison never passed, with a comment calling the two
+    // renders "read-only". It was not read-only then either, and now the screen
+    // is where a customer stands between rounds: the concept she is looking at
+    // has to be the one she can annotate and email.
+
+    it("offers Annotate and Send to account on BOTH cards, each pointing at its own version", async () => {
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      renderComparison();
+      // Wait for the PREVIOUS card's image, not just its heading: that card's
+      // image query is `enabled` only once its result query has succeeded, and
+      // the actions live inside ResultImage's ready branch. Waiting on the
+      // heading alone reads the DOM a tick early and finds one action set.
+      await screen.findByRole("img", { name: "Original image alt text." });
+
+      const annotate = screen.getAllByRole("link", { name: /annotate/i });
+      expect(annotate).toHaveLength(2);
+      expect(annotate.map((link) => link.getAttribute("href")).sort()).toEqual([
+        "/design/d1/result/v1/annotate",
+        "/design/d1/result/v2/annotate",
+      ]);
+      expect(screen.getAllByRole("button", { name: /send to account/i })).toHaveLength(2);
+    });
+
+    it("distinguishes the two sets by version, for a flat screen-reader list", async () => {
+      // A rotor lists links and buttons flat and does not show the <article>
+      // that groups them, so two bare "Annotate"s name the same thing twice.
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      renderComparison();
+      // Wait for the PREVIOUS card's image, not just its heading: that card's
+      // image query is `enabled` only once its result query has succeeded, and
+      // the actions live inside ResultImage's ready branch. Waiting on the
+      // heading alone reads the DOM a tick early and finds one action set.
+      await screen.findByRole("img", { name: "Original image alt text." });
+
+      expect(
+        screen.getByRole("link", { name: /annotate — refined concept, version 2/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: /annotate — previous concept, version 1/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /send to account — refined concept, version 2/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /send to account — previous concept, version 1/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("states the accepted exposure exactly once, however many send controls there are", async () => {
+      // ADR 0021's disclosure is a statement about what sending does, not a
+      // caption on a button. Printed twice it reads as two different exposures;
+      // printed under only one of two identical controls it reads as applying to
+      // that one alone.
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      renderComparison();
+      // Wait for the PREVIOUS card's image, not just its heading: that card's
+      // image query is `enabled` only once its result query has succeeded, and
+      // the actions live inside ResultImage's ready branch. Waiting on the
+      // heading alone reads the DOM a tick early and finds one action set.
+      await screen.findByRole("img", { name: "Original image alt text." });
+      expect(screen.getAllByText(/may keep a copy outside/i)).toHaveLength(1);
+    });
+
+    it("keeps the disclosure when the CURRENT card's image failed and the other's did not", async () => {
+      // The hole this closes: tying the sentence to one nominated card drops it
+      // altogether whenever THAT card's image fails, while the sibling card goes
+      // on offering Send with nothing said about what sending does. The screen
+      // asks both cards, so the sentence follows the controls rather than a card.
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      renderComparison(
+        {},
+        {
+          images: undefined,
+          imagesPending: false,
+          imagesError: new Error("image unavailable"),
+        },
+      );
+      await screen.findByRole("img", { name: "Original image alt text." });
+
+      // Exactly one send control — the refined card is showing its error state.
+      expect(screen.getAllByRole("button", { name: /send to account/i })).toHaveLength(1);
+      expect(screen.getAllByText(/may keep a copy outside/i)).toHaveLength(1);
+    });
+
+    it("says nothing about sending when neither card can offer it", async () => {
+      // The reason the sentence is not simply printed unconditionally: with no
+      // send control anywhere, an accepted-exposure statement describes nothing
+      // that is on the screen.
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({
+        ok: false,
+        status: 409,
+        code: "design_image_not_ready",
+        message: "not ready",
+      });
+      renderComparison(
+        {},
+        {
+          images: undefined,
+          imagesPending: false,
+          imagesError: new Error("image unavailable"),
+        },
+      );
+      // Wait for BOTH image queries to have RESOLVED — the refined card's error
+      // branch and the previous card's — before asserting an absence. Waiting on
+      // the heading instead would let every assertion below pass simply because
+      // nothing had rendered yet, which is the same hollow shape as asserting a
+      // send control is missing one tick before it mounts.
+      // The generous timeout is not decoration: the previous card's image query
+      // is configured `retry: 1`, so it only reaches its terminal error state
+      // after that retry, and the default 1s window expires first.
+      await waitFor(
+        () => {
+          expect(screen.getAllByRole("alert").length).toBeGreaterThanOrEqual(2);
+        },
+        { timeout: 5000 },
+      );
+      expect(screen.queryByRole("button", { name: /send to account/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /annotate/i })).not.toBeInTheDocument();
+      expect(screen.queryByText(/may keep a copy outside/i)).not.toBeInTheDocument();
+    });
+
+    it("gives the two briefs disjoint DOM ids", async () => {
+      // BriefSection wires each id into aria-controls and aria-labelledby. Two
+      // briefs minting the same ids means an assistive technology following
+      // either reference lands on whichever copy is first in the document —
+      // which is the other concept's card.
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      const { container } = renderComparison();
+      await screen.findByRole("heading", { name: /previous concept/i });
+
+      const ids = Array.from(container.querySelectorAll("[id]")).map((el) => el.id);
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(ids).toEqual(expect.arrayContaining(["brief-refined-garment-heading"]));
+      expect(ids).toEqual(expect.arrayContaining(["brief-previous-garment-heading"]));
+    });
+
+    it("lends the send dialog to one card at a time, and gives the other its reason", async () => {
+      // ModalDialog's containment is a Tab cycle plus a scrim: browse mode walks
+      // past both and can open the second dialog on top of the first, whose focus
+      // restore then targets an element inside it. A disabled control is out of
+      // the browse-mode action set as well as the tab order.
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      renderComparison();
+      // Wait for the PREVIOUS card's image, not just its heading: that card's
+      // image query is `enabled` only once its result query has succeeded, and
+      // the actions live inside ResultImage's ready branch. Waiting on the
+      // heading alone reads the DOM a tick early and finds one action set.
+      await screen.findByRole("img", { name: "Original image alt text." });
+
+      const refinedSend = screen.getByRole("button", {
+        name: /send to account — refined concept, version 2/i,
+      });
+      const previousSend = screen.getByRole("button", {
+        name: /send to account — previous concept, version 1/i,
+      });
+      expect(previousSend).toBeEnabled();
+
+      await act(async () => {
+        refinedSend.click();
+      });
+
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      expect(previousSend).toBeDisabled();
+      expect(screen.getByText(/finish or close the other email first/i)).toBeInTheDocument();
+
+      await act(async () => {
+        screen.getByRole("button", { name: /^cancel$/i }).click();
+      });
+      expect(screen.getByRole("button", {
+        name: /send to account — previous concept, version 1/i,
+      })).toBeEnabled();
+    });
+
+    it("calls the version's own render-send state, not the page's", async () => {
+      mocks.fetchDesignResult.mockResolvedValue({ ok: true, result: result() });
+      mocks.fetchDesignImageUrls.mockResolvedValue({ ok: true, images: images() });
+      renderComparison();
+      // Wait for the PREVIOUS card's image, not just its heading: that card's
+      // image query is `enabled` only once its result query has succeeded, and
+      // the actions live inside ResultImage's ready branch. Waiting on the
+      // heading alone reads the DOM a tick early and finds one action set.
+      await screen.findByRole("img", { name: "Original image alt text." });
+      expect(mocks.fetchRenderSendState).toHaveBeenCalledWith("d1", "v2", "plain");
+      expect(mocks.fetchRenderSendState).toHaveBeenCalledWith("d1", "v1", "plain");
+    });
   });
 
   describe("accessibility", () => {

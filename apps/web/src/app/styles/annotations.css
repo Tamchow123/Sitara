@@ -916,6 +916,15 @@
   color: var(--color-neutral-800);
 }
 
+/* Inside a comparison card the send row has roughly half the width it has beside
+   the concept screen's render, and it carries a button plus a sentence. Wrapping
+   is the whole fix: without it the allowance text is pushed out of the card
+   rather than onto its own line. */
+.version-card .annotation-send,
+.version-card .annotation-send-disabled {
+  flex-wrap: wrap;
+}
+
 /* --- The name-this-file prompt (Phase 21) -----------------------------
    The prompt reuses the shared `.field` / `.input` / `.field-hint` /
    `.field-error` primitives from base.css rather than growing a parallel set of
